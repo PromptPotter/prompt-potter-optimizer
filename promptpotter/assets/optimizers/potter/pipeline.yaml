@@ -16,6 +16,14 @@ available_models:
   - openai/gpt-oss-120b:nitro
   - anthropic/claude-haiku-5.5
   - z-ai/glm-5.3-flash
+# The knobs a setup screen leads with, in order; presentation alone, outside the treatment.
+main:
+  - l1_generate.n_variants
+  - l1_generate.recombine
+  - mating.offspring
+  - adaptive_queue.sp_budget_round
+  - pobb.epsilon
+  - escalation.escalation_ladder
 nodes:
   # Run init's, both: the pools `l1_generate` draws from, seeded once before round 0's critique
   # reads them. The block pool leads with what earlier runs on this answer space earned.

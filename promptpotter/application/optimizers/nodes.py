@@ -26,12 +26,14 @@ from typing import (
 
 from pydantic import Field
 
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.arms import ArmSlot, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import DemoPool
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
@@ -62,7 +64,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Access, Pool
+    from promptpotter.domain.pool import Access, Pool, PoolEntry
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
@@ -725,13 +727,17 @@ class Survivor(NodeMember, Protocol):
     ) -> Sequence[OptSearchPoint]: ...
 
 
+def admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumption]:
+    """The one admission rule: what a run's chain and its cell's matcher (`matchers.py::matcher_of`) let a block presume."""
+    ranking = {Presumption.RANKING} if schema.emits_ranking else set()
+    return frozenset(ranking) | (frozenset() if matcher is None else MATCHERS[matcher].admits)
+
+
 class MintFacts(NamedTuple):
     """What a pool is refused against before a mint, and nothing at load knows."""
 
     demo: Sequence[Sample]
-    schema: PipelineSchema
-    # The cell's matcher, as `matchers.py::matcher_of` reads the per-sample formula.
-    matcher: str | None
+    admits: frozenset[Presumption]
 
 
 @runtime_checkable
@@ -741,16 +747,16 @@ class Initializer(NodeMember, Protocol):
     @property
     def pool(self) -> type[Pool]: ...
 
-    def starting_content(self, selected: SelectedOptimizer) -> object:
-        """What it seeds from beside the run's own data, which ``Treatment.source`` hashes."""
+    def starting_content(
+        self, selected: SelectedOptimizer, admits: frozenset[Presumption]
+    ) -> object:
+        """What it can seed from beside the run's own data, which ``Treatment.source`` hashes: only what ``active`` keeps of what *admits* lets in."""
         ...
 
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
 
-    def held(
-        self, selected: SelectedOptimizer, mint: MintFacts | None
-    ) -> list[tuple[str, tuple[str, ...]]]:
-        """The ``(id, group)`` entries an ``active`` path may name: at load with no *mint*, every one any run admits."""
+    def held(self, selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
+        """The entries an ``active`` path may name: at load with no *mint*, every one any run admits."""
         ...
 
     def refusal(

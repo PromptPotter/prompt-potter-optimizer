@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import type { DraftPatch, NodePrompt, StartPrompt } from "@/lib/api";
+import type { DraftPatch, NodePrompt, OptimizerNodePrompt } from "@/lib/api";
 import { useSelection, type SelectedNode } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
 import type { NodeBlock } from "@/lib/api/types";
@@ -30,11 +30,8 @@ interface NodeAuthoring {
 }
 
 // The optimizer's own prompt, as the one prompt node it is.
-function startPrompts(id: string, origin: StartPrompt | null): Record<string, NodePrompt> {
-  if (!origin) return {};
-  const fields: Record<string, string> = {};
-  for (const [k, v] of Object.entries(origin.fields)) if (typeof v === "string") fields[k] = v;
-  return { [id]: { fields, shots: [] } };
+function startPrompts(id: string, origin: OptimizerNodePrompt | null): Record<string, NodePrompt> {
+  return origin ? { [id]: { fields: origin.fields, shots: [] } } : {};
 }
 
 interface Props {
@@ -90,7 +87,8 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   } = useRoundNodes();
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
 
-  const origin = optimizer?.start_prompts[id] ?? null;
+  // Under the viewed config, its field edits laid on: what this node runs, not the bare template.
+  const origin = (isOptimizer ? cv.optimizerSetup?.prompts[id] : undefined) ?? null;
 
   const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
   const program = isOptimizer
@@ -205,7 +203,7 @@ function OptimizerProgram({
 }: {
   id: string;
   node: Parameters<typeof NodeSurface>[0]["node"];
-  origin: StartPrompt | null;
+  origin: OptimizerNodePrompt | null;
   schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
 }) {

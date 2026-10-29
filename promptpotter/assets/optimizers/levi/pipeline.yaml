@@ -24,6 +24,11 @@ available_models:
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
+# The knobs a setup screen leads with, in order; presentation alone, outside the treatment.
+main:
+  - proxy_css.size
+  - map_elites.centroids
+  - levi_refine.n_inspirations
 nodes:
   # The refinement route (§3.2): most of the calls; max_tokens 16,384 (App. B, Table 5). The paper
   # states no decoding temperature; 1.0 is OpenRouter's default, which it billed through (App. C).

@@ -57,7 +57,7 @@ One stable signal every measurement carries: **`fitness`** — continuous, formu
 The layout (`dataset.yaml` with `source:` / `pipeline:` / `campaign:` / `panel:`, `task.md`, `origin.yaml`, `README.md`) and the definition chain it is laid over are owned by [`promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md). What v1 promises:
 
 - **`pipeline`** is the wire shape of [`node-standard.md`](node-standard.md) plus an operator overlay; `available_models` is the check-in's model MENU and the fallback bound on `model` for a node declaring no `optimizer.param_allowed_values.model` — that per-node list is the PERMITTED set.
-- **`campaign`** is `domain/campaign_config.py::CampaignConfig` (`extra="forbid"`: an unknown key raises at boot). Its `optimization` knobs are a mechanism, not a key/default table: each is an `Annotated[T, Knob(scope, *estimands)]` field with a description — the bench's on `OptimizationConfig`, an optimizer's on its member's knob model — walked by `application/knobs.py`; read defaults off the fields and the manifest. An optimizer node's provider / model / temperature / `reasoning_effort` / `max_tokens` is its manifest's per-node config, moved by `optimization.nodes.{node}.config`.
+- **`campaign`** is `domain/campaign_config.py::CampaignConfig` (`extra="forbid"`: an unknown key raises at boot). Its `optimization` knobs are a mechanism, not a key/default table: each is an `Annotated[T, Knob(scope, *estimands)]` field with a description — the bench's on `OptimizationConfig`, an optimizer's on its member's knob model — walked by `application/knobs.py`; read defaults off the fields and the manifest. An optimizer node's provider / model / temperature / `reasoning_effort` / `max_tokens`, and each field of its optimizer prompt, is its manifest's per-node config, moved by `optimization.nodes.{node}.config`.
 - **`judges`** maps a scoring term to a registered LLM-as-judge (`{term: {name, stages: [{role, model, provider, temperature}]}}`), banked as a per-sample observation the formula reads by term KEY; **its models are inherited from nothing**. Third-party judges ride the `promptpotter.judges` entry-point group — [`judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md).
 - **`origin.yaml`** fields must be ones the node declares (`application/datasets/prompts.py::declared_origin_prompts` refuses the rest); **`task.md`** front matter is the committed framing (`application/bench/task_context.py::commit_task_framing`).
 
@@ -90,7 +90,7 @@ is read. The generated `resolved_schemas.json` beside each is deliberately not o
 seam is a file, never a directory.
 
 **`$PROMPTPOTTER_HOME/block_packs/{name}/pack.json` is stable** (`config/paths.py::block_packs_root`):
-a block pack the `block_pool` node's `packs` knob may name. None ships; a pack is installed by
+a block pack the `block_pool` node's `packs` knob may name, shaped `domain/prompt_block.py::BlockPack`. None ships; a pack is installed by
 placing or linking its directory there, so where its content is kept is the operator's.
 
 The derived `assets/webapp/` tree is staged by

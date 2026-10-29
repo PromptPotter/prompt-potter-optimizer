@@ -8024,10 +8024,36 @@
         "title": "KindSpend",
         "type": "object"
       },
+      "KnobRef": {
+        "additionalProperties": false,
+        "description": "One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`.",
+        "properties": {
+          "knob": {
+            "description": "The knob's name under `nodes.{node}.config`",
+            "title": "Knob",
+            "type": "string"
+          },
+          "node": {
+            "description": "The manifest node that owns the knob",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "knob"
+        ],
+        "title": "KnobRef",
+        "type": "object"
+      },
       "KnobRow": {
         "additionalProperties": false,
-        "description": "One knob of one optimizer node, as a settings surface offers it.",
+        "description": "One knob of one optimizer node, as every surface offers it: its only served row.",
         "properties": {
+          "declared": {
+            "description": "The value the manifest declares — a campaign's floor",
+            "title": "Declared"
+          },
           "description": {
             "description": "What the knob does — its field description",
             "title": "Description",
@@ -8086,6 +8112,14 @@
             "description": "The least legal value, itself legal; null when none",
             "title": "Minimum"
           },
+          "movable_by": {
+            "description": "The agents that may move it within a run, as a config row's `movable_by` reads; `optimizer` where another member steers it, empty where only the operator does",
+            "items": {
+              "$ref": "#/components/schemas/MovableAgent"
+            },
+            "title": "Movable By",
+            "type": "array"
+          },
           "nullable": {
             "description": "Whether null is a legal value (an opt-in knob, off)",
             "title": "Nullable",
@@ -8120,7 +8154,7 @@
             "type": "string"
           },
           "value": {
-            "description": "The value the manifest declares — a campaign's floor",
+            "description": "The value this config runs, the manifest's under its overlays",
             "title": "Value"
           }
         },
@@ -8134,30 +8168,11 @@
           "exclusive_minimum",
           "maximum",
           "exclusive_maximum",
-          "value"
+          "declared",
+          "value",
+          "movable_by"
         ],
         "title": "KnobRow",
-        "type": "object"
-      },
-      "KnobSwitch": {
-        "additionalProperties": false,
-        "properties": {
-          "knob": {
-            "description": "That knob, under `nodes.{node}.config`",
-            "title": "Knob",
-            "type": "string"
-          },
-          "node": {
-            "description": "The node whose knob sets a reader's access",
-            "title": "Node",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "knob"
-        ],
-        "title": "KnobSwitch",
         "type": "object"
       },
       "LensShift": {
@@ -8215,6 +8230,85 @@
           "unchanged"
         ],
         "title": "LensShift",
+        "type": "object"
+      },
+      "LibraryResponse": {
+        "additionalProperties": false,
+        "description": "Every snippet the installed block packs hold, one library for target and optimizer prompts alike.",
+        "properties": {
+          "parts": {
+            "description": "The closed set `suits` draws from, in `PROMPT_FIELDS` order",
+            "items": {
+              "$ref": "#/components/schemas/PromptPart"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "snippets": {
+            "description": "By pack name, then each pack's own order",
+            "items": {
+              "$ref": "#/components/schemas/LibrarySnippet"
+            },
+            "title": "Snippets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parts",
+          "snippets"
+        ],
+        "title": "LibraryResponse",
+        "type": "object"
+      },
+      "LibrarySnippet": {
+        "additionalProperties": false,
+        "description": "One snippet of one installed pack, as a library surface lists it.",
+        "properties": {
+          "id": {
+            "description": "Its content id, the suffix of each pool entry `{part}.{id}` it expands into; one text in two packs is two rows under one id",
+            "title": "Id",
+            "type": "string"
+          },
+          "pack": {
+            "description": "The installed pack holding it, as a `packs` knob names it",
+            "title": "Pack",
+            "type": "string"
+          },
+          "source": {
+            "description": "Its cited work's arXiv id, or `authored`",
+            "title": "Source",
+            "type": "string"
+          },
+          "suits": {
+            "description": "The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part is allowed and shown as such",
+            "items": {
+              "$ref": "#/components/schemas/PromptPart"
+            },
+            "title": "Suits",
+            "type": "array"
+          },
+          "tags": {
+            "description": "Free labels for search alone; nothing else reads them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "suits",
+          "tags",
+          "source",
+          "pack"
+        ],
+        "title": "LibrarySnippet",
         "type": "object"
       },
       "LifecycleFilter": {
@@ -10702,37 +10796,6 @@
         "title": "OptimizerFact",
         "type": "object"
       },
-      "OptimizerKnobsResponse": {
-        "additionalProperties": false,
-        "description": "Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`.",
-        "properties": {
-          "nodes": {
-            "description": "Every node taking a knob, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/NodeKnobs"
-            },
-            "title": "Nodes",
-            "type": "array"
-          },
-          "optimizer": {
-            "description": "The manifest name, as `optimization.optimizer` names it",
-            "title": "Optimizer",
-            "type": "string"
-          },
-          "version": {
-            "description": "The manifest's own version",
-            "title": "Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "optimizer",
-          "version",
-          "nodes"
-        ],
-        "title": "OptimizerKnobsResponse",
-        "type": "object"
-      },
       "OptimizerLimit": {
         "additionalProperties": false,
         "description": "One knob an optimizer declares as bounding its run, which a fork may reconcile.",
@@ -10775,9 +10838,49 @@
         "title": "OptimizerLimit",
         "type": "object"
       },
+      "OptimizerNodePrompt": {
+        "additionalProperties": false,
+        "description": "The prompt an optimizer node runs under a config, before any L4 override.",
+        "properties": {
+          "edited": {
+            "description": "The fields this config sets over the template, each written to `optimization.nodes.{node}.config.{field}`",
+            "items": {
+              "type": "string"
+            },
+            "title": "Edited",
+            "type": "array"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Every prompt field by name, its edits laid on",
+            "title": "Fields",
+            "type": "object"
+          },
+          "version": {
+            "description": "The `prompt_version` the node's config names",
+            "title": "Version",
+            "type": "string"
+          },
+          "versions_declared": {
+            "description": "How many versions the manifest declares for the node's prompt family — a surface showing this one says so where there are more",
+            "title": "Versions Declared",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fields",
+          "edited",
+          "version",
+          "versions_declared"
+        ],
+        "title": "OptimizerNodePrompt",
+        "type": "object"
+      },
       "OptimizerPipelineResponse": {
         "additionalProperties": false,
-        "description": "What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw\nmanifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``.",
+        "description": "An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`.",
         "properties": {
           "measurement_node": {
             "anyOf": [
@@ -10809,7 +10912,7 @@
               },
               "type": "array"
             },
-            "description": "Per-node typed config rows, so the node detail renders the optimizer's own knobs through the canonical config element rather than a chip and a JSON dump",
+            "description": "Per-node typed config rows of what is no member's knob — an llm node's call config and prompt fields; a knob's one row is `OptimizerSetup.knobs`",
             "title": "Node Config Schema",
             "type": "object"
           },
@@ -10831,16 +10934,8 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeReach"
             },
-            "description": "Where the search reaches per node, summed off the rows above rather than in the browser — the same reading a campaign pipeline serves",
+            "description": "Where the search reaches per node, summed off every param it carries — the rows above and its knobs — rather than in the browser, the same reading a campaign pipeline serves",
             "title": "Reach",
-            "type": "object"
-          },
-          "start_prompts": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/StartPrompt"
-            },
-            "description": "The prompt each node STARTS from, by node, as the run resolves it off the node's `prompt_family`/`prompt_version` — the floor under a searchpoint carrying no evolved delta for that node. A node declaring no prompt has no entry.",
-            "title": "Start Prompts",
             "type": "object"
           },
           "view": {
@@ -10861,8 +10956,7 @@
           "node_config_schema",
           "node_output_schema",
           "model_capabilities",
-          "reach",
-          "start_prompts"
+          "reach"
         ],
         "title": "OptimizerPipelineResponse",
         "type": "object"
@@ -10902,13 +10996,20 @@
             "type": "integer"
           },
           "knobs": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
+            "description": "Every member taking a knob, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/NodeKnobs"
             },
-            "description": "Every member's knob values, the manifest's under the config's overlays",
             "title": "Knobs",
-            "type": "object"
+            "type": "array"
+          },
+          "main": {
+            "description": "The knobs a setup surface leads with, in order",
+            "items": {
+              "$ref": "#/components/schemas/KnobRef"
+            },
+            "title": "Main",
+            "type": "array"
           },
           "pools": {
             "description": "What the members draw from",
@@ -10917,6 +11018,14 @@
             },
             "title": "Pools",
             "type": "array"
+          },
+          "prompts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OptimizerNodePrompt"
+            },
+            "description": "By node, each node running a prompt; a node naming no `prompt_family` has no entry",
+            "title": "Prompts",
+            "type": "object"
           },
           "proposers": {
             "description": "The nodes making each round's arms, in walk order",
@@ -10928,7 +11037,9 @@
           }
         },
         "required": [
+          "main",
           "knobs",
+          "prompts",
           "arms_per_round",
           "proposers",
           "pools"
@@ -11901,9 +12012,10 @@
       },
       "PoolDraw": {
         "additionalProperties": false,
+        "description": "The nodes that read a pool under one knob: one knob, one access, however many readers.",
         "properties": {
           "access": {
-            "description": "How it draws under this config: `off` not at all, `open` a window to suggest from, `closed` an entry's id only",
+            "description": "How they draw under this config: `off` not at all, `open` a window to suggest from, `closed` an entry's id only",
             "enum": [
               "off",
               "open",
@@ -11912,22 +12024,64 @@
             "title": "Access",
             "type": "string"
           },
-          "node": {
-            "description": "A node drawing from the pool, in walk order",
-            "title": "Node",
-            "type": "string"
+          "nodes": {
+            "description": "Every node reading the pool as this knob sets it, in walk order; potter's critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what L1 sees",
+            "items": {
+              "type": "string"
+            },
+            "title": "Nodes",
+            "type": "array"
           },
           "switch": {
-            "$ref": "#/components/schemas/KnobSwitch",
+            "$ref": "#/components/schemas/KnobRef",
             "description": "The knob that sets `access`"
           }
         },
         "required": [
-          "node",
+          "switch",
           "access",
-          "switch"
+          "nodes"
         ],
         "title": "PoolDraw",
+        "type": "object"
+      },
+      "PoolOffer": {
+        "additionalProperties": false,
+        "description": "One path an initializer's `active` knob may name, with what it keeps.",
+        "properties": {
+          "entries": {
+            "description": "How many entries the path keeps",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "`all` is `*`, `group` a leading run of an entry's group, `entry` one entry by id",
+            "enum": [
+              "all",
+              "group",
+              "entry"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "What the path reads as: a group's last segment, an entry's text cut short",
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "description": "The value to write into `active`",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "label",
+          "entries"
+        ],
+        "title": "PoolOffer",
         "type": "object"
       },
       "PoolRow": {
@@ -11954,12 +12108,12 @@
             "type": "string"
           },
           "offered": {
-            "additionalProperties": {
-              "type": "integer"
+            "description": "Every path `active` may name — `*` first, each leading run of an entry's group before what it holds, each entry id — with what it reads as and the entries it keeps; a demo pool's are the split its Start draws, none before that split is known",
+            "items": {
+              "$ref": "#/components/schemas/PoolOffer"
             },
-            "description": "Every path `active` may name — `*`, each leading run of an entry's group, each entry id — with the entries it keeps; a demo pool's are the split its Start draws",
             "title": "Offered",
-            "type": "object"
+            "type": "array"
           },
           "pool": {
             "description": "The pool's state kind, e.g. `block_pool`",
@@ -12247,6 +12401,19 @@
         ],
         "title": "ProjectionEnvelope",
         "type": "object"
+      },
+      "PromptPart": {
+        "description": "A prompt field a snippet suits, one name for a target and an optimizer prompt alike: a drop elsewhere is shown, never refused.",
+        "enum": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
+        "title": "PromptPart",
+        "type": "string"
       },
       "Proposed": {
         "additionalProperties": false,
@@ -14892,34 +15059,6 @@
           "hop"
         ],
         "title": "StartCheckinResponse",
-        "type": "object"
-      },
-      "StartPrompt": {
-        "additionalProperties": false,
-        "properties": {
-          "fields": {
-            "additionalProperties": true,
-            "description": "The prompt body, by decomposition field",
-            "title": "Fields",
-            "type": "object"
-          },
-          "version": {
-            "description": "The `prompt_version` the node's config names",
-            "title": "Version",
-            "type": "string"
-          },
-          "versions_declared": {
-            "description": "How many versions the manifest declares for the node's prompt family — a surface showing this one says so where there are more",
-            "title": "Versions Declared",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "fields",
-          "version",
-          "versions_declared"
-        ],
-        "title": "StartPrompt",
         "type": "object"
       },
       "StartRunPayload": {
@@ -20708,6 +20847,38 @@
         ]
       }
     },
+    "/api/v1/library": {
+      "get": {
+        "description": "Every snippet the installed block packs hold, for a target or an optimizer prompt alike.",
+        "operationId": "get_library_api_v1_library_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Library",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
     "/api/v1/machine-status": {
       "get": {
         "description": "Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see.",
@@ -20813,49 +20984,6 @@
           }
         },
         "summary": "Get Optimizers",
-        "tags": [
-          "Optimizer"
-        ]
-      }
-    },
-    "/api/v1/optimizers/{name}/knobs": {
-      "get": {
-        "description": "Every knob the manifest's nodes take, each with its type, closed options, bounds and declared value.\n\n404 when no such optimizer is registered.",
-        "operationId": "get_optimizer_knobs_api_v1_optimizers__name__knobs_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OptimizerKnobsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Get Optimizer Knobs",
         "tags": [
           "Optimizer"
         ]

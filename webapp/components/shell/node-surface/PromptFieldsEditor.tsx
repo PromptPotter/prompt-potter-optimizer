@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import type { DraftPatch, NodePrompt } from "@/lib/api";
 import { cx } from "@/lib/cx";
-import { promptField } from "@/lib/prompt-fields";
+import { promptField, promptFieldsPatch, withSnippet } from "@/lib/prompt-fields";
+import type { NodeScope } from "@/lib/SelectionContext";
+import { endSnippetDrag, useDraggedSnippet } from "@/lib/state/snippet-drag";
+import { Term } from "@/components/ui";
 import { LockButton } from "./NodeConfigEditor";
 
 function asStrings(keys: readonly string[], value: Record<string, string>): Record<string, string> {
@@ -14,18 +17,23 @@ function asStrings(keys: readonly string[], value: Record<string, string>): Reco
 
 // One prompt node's loci. `fields` is the roster the node declares: its served `prompt` rows.
 export function PromptFieldsEditor({
+  scope,
   node,
   prompts,
   fields: keys,
+  edited,
   onApply,
   readOnly = false,
   compact = false,
   locks,
   onLock,
 }: {
+  scope: NodeScope;
   node: string;
   prompts: Record<string, NodePrompt>;
   fields: readonly string[];
+  // The fields this config sets over the optimizer's template; absent for a target prompt.
+  edited?: readonly string[] | undefined;
   onApply: ((patch: DraftPatch) => void) | undefined;
   locks: Record<string, boolean>;
   onLock: ((field: string, locked: boolean) => void) | undefined;
@@ -44,22 +52,28 @@ export function PromptFieldsEditor({
     setSentFp(fingerprint);
     setDraft(asStrings(keys, value));
   }
+  const dragged = useDraggedSnippet();
+  const droppable = !readOnly && onApply != null && dragged !== null;
 
   const setField = (key: string, v: string) => setDraft((prev) => ({ ...prev, [key]: v }));
 
   // Never re-sends a sent value: each patch is a CommandRecord on the draft's ledger.
-  const commit = () => {
+  const commit = (next: Record<string, string>) => {
     if (readOnly || !onApply) return;
-    const draftFp = JSON.stringify(asStrings(keys, draft));
-    if (draftFp === sentFp) return;
-    setSentFp(draftFp);
-    // The whole map, every other node as it stands: the patch REPLACES the draft's `origin_prompts`.
-    const next: Record<string, Record<string, string>> = {};
-    for (const [name, p] of Object.entries(prompts)) next[name] = p.fields;
-    next[node] = Object.fromEntries(
-      Object.entries(asStrings(keys, draft)).filter(([, v]) => v.trim() !== ""),
-    );
-    onApply({ origin_prompts: next });
+    const nextFp = JSON.stringify(asStrings(keys, next));
+    if (nextFp === sentFp) return;
+    setSentFp(nextFp);
+    onApply(promptFieldsPatch(scope, node, prompts, asStrings(keys, next)));
+  };
+
+  // A drop is an edit committed at once: the field takes the snippet after its own text.
+  const drop = (key: string) => (e: DragEvent<HTMLTextAreaElement>) => {
+    if (!droppable) return;
+    e.preventDefault();
+    const next = { ...draft, [key]: withSnippet(draft[key] ?? "", dragged.text) };
+    setDraft(next);
+    commit(next);
+    endSnippetDrag();
   };
 
   const fewShot = own?.shots.length ?? 0;
@@ -69,17 +83,26 @@ export function PromptFieldsEditor({
   return (
     <section className={cx("prompt-editor", compact && "is-compact")}>
       <span className="prompt-editor-title">
-        {readOnly ? "Prompt, as banked" : "Starting prompt"}
+        {readOnly ? "Prompt, as banked" : scope === "optimizer" ? "Optimizer prompt" : "Starting prompt"}
         {Object.keys(prompts).length > 1 ? <code className="opt-detail-id">{node}</code> : null}
       </span>
       <div className="prompt-editor-grid">
         {shown.map((f) => {
           const locked = locks[f.key];
+          const suited = dragged?.suits.some((part) => part === f.key) === true;
           return (
             // A div, not a label: the lock beside the name must not join the box's accessible name.
             <div key={f.key} className="prompt-field">
               <span className="prompt-field-label">
                 {f.label}
+                {edited?.includes(f.key) ? (
+                  <Term
+                    className="prompt-field-edited"
+                    content={`This config sets ${f.label.toLowerCase()} over the template, as nodes.${node}.config.${f.key}.`}
+                  >
+                    edited
+                  </Term>
+                ) : null}
                 {onLock && locked !== undefined ? (
                   <LockButton
                     locked={locked}
@@ -89,7 +112,10 @@ export function PromptFieldsEditor({
                 ) : null}
               </span>
               <textarea
-                className="prompt-field-input"
+                className={cx(
+                  "prompt-field-input",
+                  droppable && (suited ? "is-suited" : "is-unsuited"),
+                )}
                 aria-label={f.label}
                 rows={compact ? 2 : (f.rows ?? 2)}
                 value={draft[f.key] ?? ""}
@@ -97,7 +123,13 @@ export function PromptFieldsEditor({
                 readOnly={readOnly}
                 disabled={readOnly}
                 onChange={(e) => setField(f.key, e.target.value)}
-                onBlur={commit}
+                onBlur={() => commit(draft)}
+                onDragOver={(e) => {
+                  if (!droppable) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDrop={drop(f.key)}
               />
             </div>
           );

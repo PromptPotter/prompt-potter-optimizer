@@ -1205,6 +1205,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     "name": name,
                     "version": "v0",
                     "available_models": capo["available_models"],
+                    "main": [],
                     "nodes": nodes,
                     "pipelines": {
                         "run_init": init,

@@ -2168,14 +2168,80 @@ export interface ManifestNodeOverlay {
 
 /** What the selected optimizer runs under a config, derived once for check-in and campaign. */
 export interface OptimizerSetup {
-  /** Every member's knob values, the manifest's under the config's overlays */
-  knobs: Record<string, Record<string, unknown>>;
+  /** The knobs a setup surface leads with, in order */
+  main: KnobRef[];
+  /** Every member taking a knob, in declared order */
+  knobs: NodeKnobs[];
+  /** By node, each node running a prompt; a node naming no `prompt_family` has no
+   * entry */
+  prompts: Record<string, OptimizerNodePrompt>;
   /** Arms each round tests */
   arms_per_round: number;
   /** The nodes making each round's arms, in walk order */
   proposers: string[];
   /** What the members draw from */
   pools: PoolRow[];
+}
+
+/** One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`. */
+export interface KnobRef {
+  /** The manifest node that owns the knob */
+  node: string;
+  /** The knob's name under `nodes.{node}.config` */
+  knob: string;
+}
+
+export interface NodeKnobs {
+  /** The manifest node that owns these knobs */
+  node: string;
+  /** The node's type: sampler | eliminator | selector | … */
+  kind: string;
+  /** Its knobs, in declared order */
+  knobs: KnobRow[];
+}
+
+/** One knob of one optimizer node, as every surface offers it: its only served row. */
+export interface KnobRow {
+  /** The knob's name under `nodes.{node}.config` */
+  key: string;
+  /** What the knob does — its field description */
+  description: string;
+  /** JSON Schema type the value takes */
+  type: 'boolean' | 'integer' | 'number' | 'string' | 'array' | 'object';
+  /** The closed set a string knob takes, in declared order; null when open */
+  options: string[] | null;
+  /** Whether null is a legal value (an opt-in knob, off) */
+  nullable: boolean;
+  /** The least legal value, itself legal; null when none */
+  minimum: number | null;
+  /** A bound every legal value lies strictly above; null when none */
+  exclusive_minimum: number | null;
+  /** The greatest legal value, itself legal; null when none */
+  maximum: number | null;
+  /** A bound every legal value lies strictly below; null when none */
+  exclusive_maximum: number | null;
+  /** The value the manifest declares — a campaign's floor */
+  declared: unknown;
+  /** The value this config runs, the manifest's under its overlays */
+  value: unknown;
+  /** The agents that may move it within a run, as a config row's `movable_by`
+   * reads; `optimizer` where another member steers it, empty where only the
+   * operator does */
+  movable_by: ('proposer' | 'optimizer')[];
+}
+
+/** The prompt an optimizer node runs under a config, before any L4 override. */
+export interface OptimizerNodePrompt {
+  /** Every prompt field by name, its edits laid on */
+  fields: Record<string, string>;
+  /** The fields this config sets over the template, each written to
+   * `optimization.nodes.{node}.config.{field}` */
+  edited: string[];
+  /** The `prompt_version` the node's config names */
+  version: string;
+  /** How many versions the manifest declares for the node's prompt family — a
+   * surface showing this one says so where there are more */
+  versions_declared: number;
 }
 
 export interface PoolRow {
@@ -2187,28 +2253,38 @@ export interface PoolRow {
   initializer: string;
   /** The initializer's `active` paths: the entries in play */
   active: string[];
-  /** Every path `active` may name — `*`, each leading run of an entry's group, each
-   * entry id — with the entries it keeps; a demo pool's are the split its
-   * Start draws */
-  offered: Record<string, number>;
+  /** Every path `active` may name — `*` first, each leading run of an entry's group
+   * before what it holds, each entry id — with what it reads as and the
+   * entries it keeps; a demo pool's are the split its Start draws, none
+   * before that split is known */
+  offered: PoolOffer[];
   drawn_by: PoolDraw[];
 }
 
-export interface PoolDraw {
-  /** A node drawing from the pool, in walk order */
-  node: string;
-  /** How it draws under this config: `off` not at all, `open` a window to suggest
-   * from, `closed` an entry's id only */
-  access: 'off' | 'open' | 'closed';
-  /** The knob that sets `access` */
-  switch: KnobSwitch;
+/** One path an initializer's `active` knob may name, with what it keeps. */
+export interface PoolOffer {
+  /** The value to write into `active` */
+  path: string;
+  /** `all` is `*`, `group` a leading run of an entry's group, `entry` one entry by
+   * id */
+  kind: 'all' | 'group' | 'entry';
+  /** What the path reads as: a group's last segment, an entry's text cut short */
+  label: string;
+  /** How many entries the path keeps */
+  entries: number;
 }
 
-export interface KnobSwitch {
-  /** The node whose knob sets a reader's access */
-  node: string;
-  /** That knob, under `nodes.{node}.config` */
-  knob: string;
+/** The nodes that read a pool under one knob: one knob, one access, however many readers. */
+export interface PoolDraw {
+  /** The knob that sets `access` */
+  switch: KnobRef;
+  /** How they draw under this config: `off` not at all, `open` a window to suggest
+   * from, `closed` an entry's id only */
+  access: 'off' | 'open' | 'closed';
+  /** Every node reading the pool as this knob sets it, in walk order; potter's
+   * critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what
+   * L1 sees */
+  nodes: string[];
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
@@ -2684,7 +2760,7 @@ export interface MachineNotice {
   detail: string;
 }
 
-/** What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw */
+/** An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`. */
 export interface OptimizerPipelineResponse {
   /** The graph topology — the same shape a campaign pipeline serves */
   view: PipelineView | null;
@@ -2692,33 +2768,18 @@ export interface OptimizerPipelineResponse {
    * nests under this graph, as each `nests[].node` names it per campaign.
    * Null where the manifest declares no measurement node. */
   measurement_node: string | null;
-  /** Per-node typed config rows, so the node detail renders the optimizer's own
-   * knobs through the canonical config element rather than a chip and a JSON
-   * dump */
+  /** Per-node typed config rows of what is no member's knob — an llm node's call
+   * config and prompt fields; a knob's one row is `OptimizerSetup.knobs` */
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   /** Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs
    * it accepts and what a round costs are the facts every other node's rows
    * need too */
   model_capabilities: Record<string, Record<string, ModelCapability>>;
-  /** Where the search reaches per node, summed off the rows above rather than in
-   * the browser — the same reading a campaign pipeline serves */
+  /** Where the search reaches per node, summed off every param it carries — the
+   * rows above and its knobs — rather than in the browser, the same reading a
+   * campaign pipeline serves */
   reach: Record<string, NodeReach>;
-  /** The prompt each node STARTS from, by node, as the run resolves it off the
-   * node's `prompt_family`/`prompt_version` — the floor under a searchpoint
-   * carrying no evolved delta for that node. A node declaring no prompt has
-   * no entry. */
-  start_prompts: Record<string, StartPrompt>;
-}
-
-export interface StartPrompt {
-  /** The prompt body, by decomposition field */
-  fields: Record<string, unknown>;
-  /** The `prompt_version` the node's config names */
-  version: string;
-  /** How many versions the manifest declares for the node's prompt family — a
-   * surface showing this one says so where there are more */
-  versions_declared: number;
 }
 
 /** The optimizers this install can run, the default first: one per manifest the registry holds. */
@@ -2743,47 +2804,29 @@ export interface OptimizerEntry {
   origin: string | null;
 }
 
-/** Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`. */
-export interface OptimizerKnobsResponse {
-  /** The manifest name, as `optimization.optimizer` names it */
-  optimizer: string;
-  /** The manifest's own version */
-  version: string;
-  /** Every node taking a knob, in declared order */
-  nodes: NodeKnobs[];
+/** Every snippet the installed block packs hold, one library for target and optimizer prompts alike. */
+export interface LibraryResponse {
+  /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
+  parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** By pack name, then each pack's own order */
+  snippets: LibrarySnippet[];
 }
 
-export interface NodeKnobs {
-  /** The manifest node that owns these knobs */
-  node: string;
-  /** The node's type: sampler | eliminator | selector | … */
-  kind: string;
-  /** Its knobs, in declared order */
-  knobs: KnobRow[];
-}
-
-/** One knob of one optimizer node, as a settings surface offers it. */
-export interface KnobRow {
-  /** The knob's name under `nodes.{node}.config` */
-  key: string;
-  /** What the knob does — its field description */
-  description: string;
-  /** JSON Schema type the value takes */
-  type: 'boolean' | 'integer' | 'number' | 'string' | 'array' | 'object';
-  /** The closed set a string knob takes, in declared order; null when open */
-  options: string[] | null;
-  /** Whether null is a legal value (an opt-in knob, off) */
-  nullable: boolean;
-  /** The least legal value, itself legal; null when none */
-  minimum: number | null;
-  /** A bound every legal value lies strictly above; null when none */
-  exclusive_minimum: number | null;
-  /** The greatest legal value, itself legal; null when none */
-  maximum: number | null;
-  /** A bound every legal value lies strictly below; null when none */
-  exclusive_maximum: number | null;
-  /** The value the manifest declares — a campaign's floor */
-  value: unknown;
+/** One snippet of one installed pack, as a library surface lists it. */
+export interface LibrarySnippet {
+  /** Its content id, the suffix of each pool entry `{part}.{id}` it expands into;
+   * one text in two packs is two rows under one id */
+  id: string;
+  text: string;
+  /** The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part
+   * is allowed and shown as such */
+  suits: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** Free labels for search alone; nothing else reads them */
+  tags: string[];
+  /** Its cited work's arXiv id, or `authored` */
+  source: string;
+  /** The installed pack holding it, as a `packs` knob names it */
+  pack: string;
 }
 
 /** Every campaign in one store, root-major and newest first. */

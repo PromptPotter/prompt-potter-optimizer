@@ -244,6 +244,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         />
       ) : null}
 
+      {/* The backbone leads, open: its knobs and prompts frame every step after it. */}
+      <SetupStep title="Optimizer" answer={draft.optimization_overrides.optimizer} open>
+        <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
+      </SetupStep>
+
       <SetupStep
         title="Data"
         answer={`${draft.slug} · ${draft.n_samples.toLocaleString()} rows · ${columns}`}
@@ -282,10 +287,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             busy={flow.busy}
           />
         </PipelineSetupSection>
-      </SetupStep>
-
-      <SetupStep title="Optimizer" answer={draft.optimization_overrides.optimizer} open={false}>
-        <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
       </SetupStep>
 
       <SetupStep title="Run bounds" answer={boundsLabel(launch, draft.optimization_overrides.budget)} open={gapped.has("run")}>

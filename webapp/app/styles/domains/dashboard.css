@@ -131,6 +131,14 @@
 .mech-knob-input,.mech-row-head select{flex:0 0 auto;font-size:var(--text-sm)}
 .mech-knob-input{width:min(9rem,100%);text-align:right}
 .mech-knob-json{width:min(16rem,100%);text-align:left;font-family:var(--font-mono);resize:vertical}
+.mech-row-node{margin-left:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.mech-all{display:flex;flex-direction:column;gap:var(--space-12)}
+.mech-all > summary{cursor:pointer;font-size:var(--text-sm);font-weight:600;color:var(--color-text-secondary);padding:var(--space-4) 0}
+.mech-all > summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+.mech-all > .mech-group:first-of-type{padding-top:var(--space-12);border-top:0.5px solid var(--color-border)}
+.mech-offer small{margin-left:var(--space-4);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.mech-offer.is-group{font-weight:600}
+.mech-offer.is-entry{font-style:italic}
 
 .cmap{display:flex;flex-direction:column;gap:var(--space-12)}
 .cmap-summary{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.6;color:var(--color-text-secondary)}

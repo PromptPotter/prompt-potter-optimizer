@@ -22,6 +22,10 @@ available_models:
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
+# The knobs a setup screen leads with, in order; presentation alone, outside the treatment.
+main:
+  - minibatch.size
+  - minibatch.pareto_size
 nodes:
   # b = 3 (App. E.4). The paper's D_train splits into D_feedback and D_pareto (Alg. 1 line 1) and
   # states each as a row count per benchmark (App. E.1). NOT the paper's: 50, the count itself —

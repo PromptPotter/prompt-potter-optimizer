@@ -2,30 +2,22 @@
 
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
-  optimizerKnobsRead,
   optimizerRosterRead,
   type KnobRow,
   type ManifestNodeOverlay,
-  type OptimizerKnobsResponse,
   type OptimizerRoster,
   type OptimizerSetup,
+  type PoolOffer,
   type PoolRow,
 } from "@/lib/api";
 import { knobRange, knobText, parseKnob } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
-import {
-  Badge,
-  Button,
-  Chip,
-  ChipGroup,
-  CommitInput,
-  Empty,
-  Loading,
-  ReadState,
-  Switch,
-} from "@/components/ui";
+import { Badge, Button, Chip, ChipGroup, CommitInput, Empty, Loading, Switch } from "@/components/ui";
+import { cx } from "@/lib/cx";
 import { fmtValue } from "@/lib/format";
+
+type OnChange = ((patch: Record<string, ManifestNodeOverlay>) => void) | undefined;
 
 export function NodeKnobsPanel({
   onChange,
@@ -36,7 +28,6 @@ export function NodeKnobsPanel({
   const editable = onChange != null;
   const cv = useConnector();
   const { campaignId } = useWorkspace();
-  const knobsRead = useRead(cv.optimizer ? optimizerKnobsRead(cv.optimizer) : null);
   const rosterRead = useRead(optimizerRosterRead());
   const setup = cv.optimizerSetup;
 
@@ -46,45 +37,44 @@ export function NodeKnobsPanel({
   if (cv.schema.status === "error") {
     return <Empty className="mech-empty">Could not load the optimizer&apos;s knobs.</Empty>;
   }
-  const reading = <Loading className="mech-empty">Reading the optimizer&apos;s knobs…</Loading>;
+  if (setup === null) {
+    return <Loading className="mech-empty">Reading the optimizer&apos;s knobs…</Loading>;
+  }
   return (
-    <ReadState read={knobsRead} subject="the optimizer’s knobs" className="mech-empty" idle={reading}>
-      {(menu) =>
-        setup === null ? (
-          reading
-        ) : (
-          <KnobGroups
-            menu={menu}
-            setup={setup}
-            entry={readyData(rosterRead)?.optimizers.find((o) => o.name === menu.optimizer)}
-            onChange={onChange}
-          />
-        )
-      }
-    </ReadState>
+    <KnobGroups
+      optimizer={cv.optimizer}
+      setup={setup}
+      entry={readyData(rosterRead)?.optimizers.find((o) => o.name === cv.optimizer)}
+      onChange={onChange}
+    />
   );
 }
 
 function KnobGroups({
-  menu,
+  optimizer,
   setup,
   entry,
   onChange,
 }: {
-  menu: OptimizerKnobsResponse;
+  optimizer: string | null;
   setup: OptimizerSetup;
   entry: OptimizerRoster["optimizers"][number] | undefined;
-  onChange: ((patch: Record<string, ManifestNodeOverlay>) => void) | undefined;
+  onChange: OnChange;
 }) {
-  const editable = onChange != null;
-  const valueOf = (node: string, k: KnobRow): unknown => setup.knobs[node]?.[k.key];
   const declared = entry?.paper ? "Paper" : "Default";
+  const isMain = (node: string, key: string) =>
+    setup.main.some((ref) => ref.node === node && ref.knob === key);
+  // Served in `main`'s order; the server refuses a manifest whose `main` names no member's knob.
+  const main = setup.main.flatMap((ref) => {
+    const row = setup.knobs.find((g) => g.node === ref.node)?.knobs.find((k) => k.key === ref.knob);
+    return row ? [{ node: ref.node, knob: row }] : [];
+  });
+  const rest = setup.knobs
+    .map((g) => ({ ...g, knobs: g.knobs.filter((k) => !isMain(g.node, k.key)) }))
+    .filter((g) => g.knobs.length > 0);
 
-  const set = (node: string, knob: KnobRow, next: unknown) =>
-    onChange!({ [node]: { config: { [knob.key]: next } } });
-
-  if (menu.nodes.length === 0) {
-    return <Empty className="mech-empty">{menu.optimizer} declares no knobs.</Empty>;
+  if (setup.knobs.length === 0) {
+    return <Empty className="mech-empty">{optimizer ?? "This optimizer"} declares no knobs.</Empty>;
   }
   return (
     <div className="mech-groups">
@@ -93,6 +83,23 @@ function KnobGroups({
           Every default below is the configuration of {entry.paper}. Change one and this run
           departs from the paper.
         </p>
+      ) : null}
+      {main.length > 0 ? (
+        <section className="mech-group">
+          <h3 className="mech-card-title">Main knobs</h3>
+          <ul className="mech-list">
+            {main.map(({ node, knob }) => (
+              <KnobItem
+                key={`${node}.${knob.key}`}
+                node={node}
+                knob={knob}
+                declaredLabel={declared}
+                showNode
+                onChange={onChange}
+              />
+            ))}
+          </ul>
+        </section>
       ) : null}
       <div className="mech-pools">
         <section className="mech-pools-col">
@@ -113,95 +120,142 @@ function KnobGroups({
           ) : (
             <ul className="mech-list">
               {setup.pools.map((pool) => (
-                <li key={pool.pool} className="mech-row">
-                  <div className="mech-row-head">
-                    <span className="mech-row-label">{pool.pool}</span>
-                    <Badge>{fmtValue(pool.active)}</Badge>
-                  </div>
-                  {onChange ? (
-                    <PoolPicker
-                      pool={pool}
-                      onActive={(active) => onChange({ [pool.initializer]: { config: { active } } })}
-                    />
-                  ) : null}
-                  <ul className="mech-pool-readers">
-                    {pool.drawn_by.map((d) => (
-                      <li key={d.node} className="mech-row-head">
-                        <span>{d.node}</span>
-                        <Badge>{d.access}</Badge>
-                        <span className="mech-row-desc">
-                          {d.switch.node}.{d.switch.knob}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
+                <PoolItem key={pool.pool} pool={pool} onChange={onChange} />
               ))}
             </ul>
           )}
         </section>
       </div>
-      {menu.nodes.map((group) => (
-        <section key={group.node} className="mech-group">
-          <h3 className="mech-card-title">{group.node}</h3>
-          <p className="mech-group-desc">{group.kind}</p>
-          <ul className="mech-list">
-            {group.knobs.map((k) => {
-              const value = valueOf(group.node, k);
-              const changed = JSON.stringify(value) !== JSON.stringify(k.value);
-              return (
-                <li key={k.key} className="mech-row">
-                  <div className="mech-row-head">
-                    <span className="mech-row-label">{k.key}</span>
-                    {editable ? (
-                      <KnobControl knob={k} value={value} onSet={(v) => set(group.node, k, v)} />
-                    ) : (
-                      <Badge tone={value === true ? "success" : "default"}>{fmtValue(value)}</Badge>
-                    )}
-                  </div>
-                  <p className="mech-row-desc">{k.description}</p>
-                  <p className="mech-row-default">
-                    {declared} {fmtValue(k.value)}
-                    {knobRange(k) ? ` · range ${knobRange(k)}` : ""}
-                    {changed ? " · changed" : ""}
-                    {editable && changed ? (
-                      <Button variant="ghost" onClick={() => set(group.node, k, k.value)}>
-                        Reset
-                      </Button>
-                    ) : null}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
+      {rest.length > 0 ? (
+        <details className="mech-all">
+          <summary>All knobs</summary>
+          {rest.map((group) => (
+            <section key={group.node} className="mech-group">
+              <h3 className="mech-card-title">{group.node}</h3>
+              <p className="mech-group-desc">{group.kind}</p>
+              <ul className="mech-list">
+                {group.knobs.map((k) => (
+                  <KnobItem
+                    key={k.key}
+                    node={group.node}
+                    knob={k}
+                    declaredLabel={declared}
+                    onChange={onChange}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </details>
+      ) : null}
     </div>
   );
 }
 
-// A lit chip is a path in play; the last one stays lit, since a pool keeps at least one.
-function PoolPicker({ pool, onActive }: { pool: PoolRow; onActive: (active: string[]) => void }) {
-  const offered = Object.entries(pool.offered);
-  if (offered.length === 0) {
+function KnobItem({
+  node,
+  knob: k,
+  declaredLabel,
+  showNode = false,
+  onChange,
+}: {
+  node: string;
+  knob: KnobRow;
+  declaredLabel: string;
+  showNode?: boolean;
+  onChange: OnChange;
+}) {
+  const changed = JSON.stringify(k.value) !== JSON.stringify(k.declared);
+  const set = onChange ? (next: unknown) => onChange({ [node]: { config: { [k.key]: next } } }) : null;
+  return (
+    <li className="mech-row">
+      <div className="mech-row-head">
+        <span className="mech-row-label">
+          {k.key}
+          {showNode ? <code className="mech-row-node">{node}</code> : null}
+        </span>
+        {set ? (
+          <KnobControl knob={k} value={k.value} onSet={set} />
+        ) : (
+          <Badge tone={k.value === true ? "success" : "default"}>{fmtValue(k.value)}</Badge>
+        )}
+      </div>
+      <p className="mech-row-desc">{k.description}</p>
+      <p className="mech-row-default">
+        {declaredLabel} {fmtValue(k.declared)}
+        {knobRange(k) ? ` · range ${knobRange(k)}` : ""}
+        {changed ? " · changed" : ""}
+        {set && changed ? (
+          <Button variant="ghost" onClick={() => set(k.declared)}>
+            Reset
+          </Button>
+        ) : null}
+      </p>
+    </li>
+  );
+}
+
+function PoolItem({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) {
+  return (
+    <li className="mech-row">
+      <div className="mech-row-head">
+        <span className="mech-row-label">{pool.pool}</span>
+        <Badge>{pool.source}</Badge>
+      </div>
+      <PoolPicker
+        pool={pool}
+        onActive={
+          onChange ? (active) => onChange({ [pool.initializer]: { config: { active } } }) : undefined
+        }
+      />
+      <ul className="mech-pool-readers">
+        {pool.drawn_by.map((d) => (
+          <li key={`${d.switch.node}.${d.switch.knob}`} className="mech-row-head">
+            <span>{d.nodes.join(", ")}</span>
+            <Badge>{d.access}</Badge>
+            <code className="mech-row-desc">
+              {d.switch.node}.{d.switch.knob}
+            </code>
+          </li>
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+function offerText(o: PoolOffer): string {
+  return o.kind === "entry" ? "entry" : `${o.kind} · ${o.entries}`;
+}
+
+// A lit chip is a path in play, lit from the served `active`; the last one stays lit, since a pool keeps at least one.
+function PoolPicker({
+  pool,
+  onActive,
+}: {
+  pool: PoolRow;
+  onActive: ((active: string[]) => void) | undefined;
+}) {
+  if (pool.offered.length === 0) {
     return <p className="mech-row-desc">Its entries are drawn when the run starts.</p>;
   }
   const toggle = (path: string) =>
-    onActive(
+    onActive?.(
       pool.active.includes(path) ? pool.active.filter((p) => p !== path) : [...pool.active, path],
     );
   return (
     <ChipGroup label={`${pool.pool} entries in play`}>
-      {offered.map(([path, entries]) => {
-        const on = pool.active.includes(path);
+      {pool.offered.map((o) => {
+        const on = pool.active.includes(o.path);
         return (
           <Chip
-            key={path}
+            key={o.path}
             on={on}
-            disabled={on && pool.active.length === 1}
-            onClick={() => toggle(path)}
+            disabled={!onActive || (on && pool.active.length === 1)}
+            onClick={() => toggle(o.path)}
           >
-            {path} · {entries}
+            <span className={cx("mech-offer", o.kind === "group" && "is-group", o.kind === "entry" && "is-entry")}>
+              {o.label} <small>{offerText(o)}</small>
+            </span>
           </Chip>
         );
       })}

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
-from promptpotter.application.pipeline_resolve import defaults_drift
+from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.ingress import run_spend_view
@@ -170,7 +170,12 @@ def declare_run_wiring(
             run_limits=RunLimits(
                 budget=campaign_config.optimization.budget, optimizer=list(selected.limits)
             ),
-            defaults_drift=defaults_drift(campaign, running=selected.treatment()),
+            defaults_drift=defaults_drift(
+                campaign,
+                running=selected.treatment(
+                    campaign_admits(campaign_config, session.pipeline_schema)
+                ),
+            ),
         )
     )
 

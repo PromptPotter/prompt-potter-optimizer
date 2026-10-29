@@ -29,7 +29,7 @@ from promptpotter.config.paths import (
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.domain.l4 import proxies
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.pool import Access
+    from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.scoring import CellSheet
@@ -101,6 +102,8 @@ class PipelineManifest(FrozenModel):
     available_models: list[str]
     nodes: dict[str, ManifestNode]
     pipelines: dict[str, list[str]]
+    # `node.knob` refs a setup surface leads with, in order; presentation, so no treatment reads it.
+    main: list[str]
     # Whether `initial_population` is a round of its own or heads round 1 (`RoundPlan.walk`).
     initial_population_walks: Literal["alone", "before_default"] | None = None
     resolved_prompts: dict[str, OptimizerPromptTemplate] = Field(default_factory=dict)
@@ -129,6 +132,8 @@ class ManifestSwitch(FrozenModel):
     paper: str | None = None
     extends: str
     swap: dict[str, ManifestSwap]
+    # Its own, never what it extends: a swapped node takes its knobs with it.
+    main: list[str]
 
 
 @functools.lru_cache(maxsize=16)
@@ -369,10 +374,14 @@ class SelectedOptimizer:
         return dict(self.node(name).current_config)
 
     def call_config(self, name: str) -> dict[str, Any]:
-        """Less the member's knobs: a knob's edit is the diff classifier's to scope, never a prompt hash's."""
+        """Less the member's knobs and its prompt-field edits: a knob is the diff classifier's to scope, an edit ``running_prompt``'s."""
         table = optimizers.NODE_MEMBERS.table
         knobs = table[name].knobs.model_fields if name in table else {}
-        return {k: v for k, v in self.node_config(name).items() if k not in knobs}
+        return {
+            k: v
+            for k, v in self.node_config(name).items()
+            if k not in knobs and k not in PROMPT_FIELDS
+        }
 
     def file_config(self, name: str) -> dict[str, Any]:
         self.node(name)
@@ -552,12 +561,15 @@ class SelectedOptimizer:
             cfg = {**cfg, "model": override.model}
             if override.provider:
                 cfg["provider"] = override.provider
-        body = prompt_body(self.manifest, cfg)
-        fields = override.prompt_fields
+        prompt = (
+            None
+            if prompt_key(cfg) is None
+            else running_prompt(node, self.node_config(node), self.manifest)
+        )
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return stable_hash(
             [
-                {**body, **fields} if body is not None and fields else body,
+                None if prompt is None else prompt.model_dump(exclude_unset=True),
                 override.schema_field_names,
                 _resolved_levers(node, declared_node_override(node)),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
@@ -565,13 +577,13 @@ class SelectedOptimizer:
             ]
         )
 
-    def treatment(self) -> Treatment:
-        """Under the bound L4 edit too: two inner cells under two arms are two treatments."""
+    def treatment(self, admits: frozenset[Presumption]) -> Treatment:
+        """Under the bound L4 edit too: two inner cells under two arms are two treatments; *admits* is the run's admission (`nodes.py::admits`)."""
         return Treatment(
             optimizer=self.name,
             version=self.version,
             prompt_hashes=self.prompt_hashes(),
-            # Less its prose and `version`, which `Treatment` carries on its own.
+            # Less its prose, its `main` listing and `version`, which `Treatment` holds on its own.
             manifest=stable_hash(
                 [
                     self.manifest.laid_over(self.overlay).model_dump(
@@ -580,6 +592,7 @@ class SelectedOptimizer:
                             "resolved_prompts": True,
                             "version": True,
                             "paper": True,
+                            "main": True,
                             "nodes": {"__all__": {"description"}},
                         },
                     ),
@@ -590,7 +603,7 @@ class SelectedOptimizer:
             source=stable_hash(
                 [
                     source_digest(self.members, proxies),
-                    {i.name: i.starting_content(self) for i in self.plan.initializers},
+                    {i.name: i.starting_content(self, admits) for i in self.plan.initializers},
                 ]
             ),
         )
@@ -607,35 +620,34 @@ def _resolved_key(family: object, version: object) -> str | None:
     return f"{family}/{version}" if version is not None else str(family)
 
 
-def _resolved_prompt(
-    manifest: PipelineManifest, config: Mapping[str, Any]
-) -> OptimizerPromptTemplate | None:
-    key = _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
-    return manifest.resolved_prompts.get(key) if key else None
+def prompt_key(config: Mapping[str, Any]) -> str | None:
+    """The `resolved_prompts` key a node's config names; ``None`` where it runs no prompt."""
+    return _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
 
 
-def prompt_body(manifest: PipelineManifest, config: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The fields as authored, never their defaults: a prompt hash reads only what the file says."""
-    held = _resolved_prompt(manifest, config)
-    return None if held is None else held.model_dump(exclude_unset=True)
+def prompt_edits(config: Mapping[str, Any]) -> dict[str, Any]:
+    """The prompt fields a config sets over its template, `optimization.nodes.{node}.config.{field}`."""
+    return {f: config[f] for f in PROMPT_FIELDS if f in config}
 
 
-def optimizer_prompt(
+def node_prompt(
     node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    template = _resolved_prompt(manifest, config)
-    if template is None:
+    """The template under the config's field edits, before any L4 override; fields set only where authored or edited."""
+    key = prompt_key(config)
+    if key is None or key not in manifest.resolved_prompts:
         raise KeyError(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
             f"(check nodes.{node}.config.prompt_family/version)."
         )
-    return template
+    return manifest.resolved_prompts[key].model_copy(update=prompt_edits(config))
 
 
 def running_prompt(
     node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    template = optimizer_prompt(node, config, manifest)
+    """The one text *node* runs, which its prompt hash reads: template, then config edits, then L4's bound override, which wins over both."""
+    template = node_prompt(node, config, manifest)
     if fields := resolve_node_override(node).prompt_fields:
         template = template.model_copy(update=fields)
     return template
@@ -648,16 +660,34 @@ _CALL_CONFIG_KEYS: frozenset[str] = (
 )
 
 
+def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
+    for ref in selected.manifest.main:
+        node, _, knob = ref.partition(".")
+        held = (
+            node in selected.member_nodes
+            and knob in optimizers.NODE_MEMBERS.get(node).knobs.model_fields
+        )
+        if not held:
+            raise ValueError(
+                f"optimizer {selected.name!r} leads with {ref!r} in `main`, which is no "
+                "`node.knob` of a member it walks."
+            )
+
+
 def _refuse_unknown_llm_keys(selected: SelectedOptimizer) -> None:
     table = optimizers.NODE_MEMBERS.table
     for node in selected.llm_nodes:
+        config = selected.node_config(node)
         knobs = table[node].knobs.model_fields if node in table else {}
-        if unknown := sorted(set(selected.node_config(node)) - _CALL_CONFIG_KEYS - set(knobs)):
+        prompt = set(PROMPT_FIELDS) if prompt_key(config) is not None else set()
+        if unknown := sorted(set(config) - _CALL_CONFIG_KEYS - set(knobs) - prompt):
             raise ValueError(
                 f"optimizer {selected.name!r} node {node!r} names {unknown} in its config, which "
-                f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}) nor one of its knobs "
-                f"({sorted(knobs)})."
+                f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}), one of its knobs "
+                f"({sorted(knobs)}) nor, on a node running a prompt, a prompt field "
+                f"({list(PROMPT_FIELDS)})."
             )
+        OptimizerPromptTemplate.model_validate(prompt_edits(config))
     for target, keys in selected.steered_axes.items():
         if unheld := sorted(keys - set(selected.node_config(target))):
             raise ValueError(
@@ -737,6 +767,7 @@ def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
             "paper": authored.paper,
             "nodes": nodes,
             "pipelines": pipelines,
+            "main": authored.main,
             "resolved_prompts": prompts,
         }
     )
@@ -780,6 +811,7 @@ def _select(
             or declared_node.name in optimizers.NODE_MEMBERS.table
         ):
             selected.knobs(declared_node.name)
+    _refuse_unknown_main(selected)
     _refuse_unknown_llm_keys(selected)
     if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))

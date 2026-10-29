@@ -90,6 +90,7 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import BlockPool, DemoPool
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.results import CycleResult, Election, RoundResult
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import (
@@ -549,7 +550,7 @@ def minted_campaign(
         created_at=fields.pop("created_at", ""),
         root_cycle_id=hop.cycle_id,
         root_content_hash=fields.pop("root_content_hash", "origin"),
-        treatment=select_optimizer(config.optimization).treatment(),
+        treatment=select_optimizer(config.optimization).treatment(frozenset(Presumption)),
         declaration=declare_run(
             config,
             purpose=purpose,
@@ -656,10 +657,11 @@ def inner_cells(*optimizers: str) -> InnerCells:
     specs: dict[str, InnerTaskSpec] = {}
     for name in optimizers:
         selected = resolve_optimizer(name, {}, gate="off")
-        by_dataset[f"{name}ds"] = InnerCell({}, None, selected, selected.treatment().digest)
+        treatment = selected.treatment(frozenset(Presumption)).digest
+        by_dataset[f"{name}ds"] = InnerCell({}, None, selected, treatment)
         specs[name] = InnerTaskSpec(
             inner_dataset=f"{name}ds",
-            optimizer_treatment=selected.treatment().digest,
+            optimizer_treatment=treatment,
             run_seed=0,
             n_samples=1,
             n_samples_bench=1,

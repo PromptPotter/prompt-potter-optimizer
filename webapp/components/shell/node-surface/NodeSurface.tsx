@@ -127,6 +127,7 @@ export function NodeSurface({
       {promptNodes.map(([name, params]) => (
         <PromptFieldsEditor
           key={name}
+          scope="target"
           node={name}
           prompts={point.origin_prompts}
           fields={params.map((p) => p.key)}

@@ -9,9 +9,12 @@ import enum
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
+from pydantic import Field
+
 from promptpotter.domain.optimizer_state import StateSlice
+from promptpotter.domain.prompt_block import snippet_id
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -37,7 +40,7 @@ class PoolSource(enum.StrEnum):
 @shapes_optimizer_prompt
 def entry_id(field: str, text: str) -> str:
     """A block's id is its content: an edited text is a new entry, never the old id re-pointed."""
-    return f"{field}.{stable_hash(text, length=10)}"
+    return f"{field}.{snippet_id(text)}"
 
 
 class PoolEntry(FrozenModel):
@@ -47,6 +50,51 @@ class PoolEntry(FrozenModel):
     text: str
 
 
+OfferKind = Literal["all", "group", "entry"]
+
+_LABEL_CHARS = 72
+
+
+class PoolOffer(FrozenModel):
+    """One path an initializer's `active` knob may name, with what it keeps."""
+
+    path: str = Field(description="The value to write into `active`")
+    kind: OfferKind = Field(
+        description="`all` is `*`, `group` a leading run of an entry's group, `entry` one entry by id"
+    )
+    label: str = Field(
+        description="What the path reads as: a group's last segment, an entry's text cut short"
+    )
+    entries: int = Field(description="How many entries the path keeps")
+
+
+def offers(entries: Sequence[PoolEntry]) -> list[PoolOffer]:
+    """``*``, then each group run under its parent in first-seen order, each entry under its group; none over none."""
+    if not entries:
+        return []
+    out = [PoolOffer(path="*", kind="all", label="All entries", entries=len(entries))]
+    runs: dict[tuple[str, ...], list[PoolEntry]] = {}
+    for entry in entries:
+        for depth in range(1, len(entry.group) + 1):
+            runs.setdefault(entry.group[:depth], []).append(entry)
+    placed: set[tuple[str, ...]] = set()
+    for entry in entries:
+        for depth in range(1, len(entry.group) + 1):
+            run = entry.group[:depth]
+            if run not in placed:
+                placed.add(run)
+                out.append(
+                    PoolOffer(
+                        path="/".join(run), kind="group", label=run[-1], entries=len(runs[run])
+                    )
+                )
+        text = " ".join(entry.text.split())
+        label = text if len(text) <= _LABEL_CHARS else text[: _LABEL_CHARS - 1] + "…"
+        out.append(PoolOffer(path=entry.id, kind="entry", label=label, entries=1))
+    return out
+
+
+@shapes_optimizer_prompt
 def _in_play(path: str, entry: str, group: Sequence[str]) -> bool:
     if path in ("*", entry):
         return True
@@ -54,18 +102,10 @@ def _in_play(path: str, entry: str, group: Sequence[str]) -> bool:
     return parts == tuple(group[: len(parts)])
 
 
+@shapes_optimizer_prompt
 def kept(paths: Sequence[str], entries: Iterable[tuple[str, Sequence[str]]]) -> tuple[str, ...]:
     """The ``(id, group)`` entries some path keeps — ``*``, the id, or a leading run of its group — in source order."""
     return tuple(i for i, group in entries if any(_in_play(p, i, group) for p in paths))
-
-
-def offered(entries: Iterable[tuple[str, Sequence[str]]]) -> dict[str, int]:
-    """Every path an ``active`` list may name over *entries* — ``*``, each leading run of a group, each id — with the entries it keeps; none over none."""
-    counts: dict[str, int] = {}
-    for i, group in entries:
-        for path in ("*", *("/".join(group[:n]) for n in range(1, len(group) + 1)), i):
-            counts[path] = counts.get(path, 0) + 1
-    return counts
 
 
 def unnamed(paths: Sequence[str], entries: Iterable[tuple[str, Sequence[str]]]) -> list[str]:

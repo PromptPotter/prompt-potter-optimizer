@@ -11,6 +11,8 @@ available_models:
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
+# No member walks here, so no knob leads.
+main: []
 nodes:
   checkin:
     type: llm

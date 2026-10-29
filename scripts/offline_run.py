@@ -69,6 +69,7 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.command_kinds import SkipSearchpointPayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import MAX_AUTO_REBASES, CycleSeed
@@ -1059,7 +1060,8 @@ def digests() -> dict[str, str]:
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
     for name in sorted(optimizers.MANIFESTS.table):
-        out[f"treatment:{name}"] = resolve_optimizer(name, {}, gate="off").treatment().digest
+        selected = resolve_optimizer(name, {}, gate="off")
+        out[f"treatment:{name}"] = selected.treatment(frozenset(Presumption)).digest
     return out
 
 

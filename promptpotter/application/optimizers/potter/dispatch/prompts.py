@@ -9,7 +9,7 @@ from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     checkin_manifest,
     llm_node_manifest,
-    optimizer_prompt,
+    node_prompt,
     running_prompt,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
@@ -30,10 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
-    """Override-free, off *inner*'s manifest file unless the bench's check-in declares *name*."""
+    """L4-override-free: the bench's check-in where it declares *name*, else *inner*'s under its overlay's edits."""
     checkin = checkin_manifest()
-    manifest = checkin.manifest if checkin.schema.get_node(name) is not None else inner.manifest
-    return optimizer_prompt(name, manifest.nodes[name].config, manifest)
+    if (held := checkin.schema.get_node(name)) is not None:
+        return node_prompt(name, held.current_config, checkin.manifest)
+    return node_prompt(name, inner.node_config(name), inner.manifest)
 
 
 def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | None:

@@ -135,6 +135,15 @@ acting.
 
 ## Open — multi-arc
 
+- **One text in two packs is two library rows under one id** (`application/library.py`): the id is
+  content-addressed, the row is per pack, so a drop keyed by id cannot say which pack's provenance it
+  carries. Action: a snippet's identity is (pack, id), or packs dedupe on install. **Re-test:** two
+  packs sharing a text serve distinct row keys.
+- **No check holds `§ Name` to a heading.** `docs/CLAUDE.md` requires each `§` reference to match
+  exactly one heading in the linked file; `variation-and-pools.md` pointed at a section of
+  `domain/CLAUDE.md` that never existed, and every gate was green. Action: a `doc-claims` pass
+  resolving each `[...](path) § X`. **Re-test:** a dangling `§` fails the gate.
+
 - **The crowning bar tests nothing a result can quote.** `application/scoring/selection.py::elect_round_winner`
   admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
   past round 0 as a promotion; at panel width `exact_p_floor(6) = 0.031`, Holm across three arms 0.094, so
@@ -279,15 +288,33 @@ word's `git grep -c` for that sense is 0.
   `DemoPool` draws on `L1GenerateKnobs` for every hub member, so the check-in shows `l1_critique`,
   `l2_context` and `l3_plan` "open · l1_generate.block_access". Either each reader owns its access or
   the pool is read once by the hub; the served row must say which.
-- **The check-in's optimizer graph ignores the draft's overlay**: `resolve_pipeline_for_optimizer` and
-  `optimizer_knobs` resolve the manifest with `{}`.
-- **Two doors into "the text an optimizer node runs"**: L4's contextvar (`binding_prompt_overrides`) and
-  the manifest's `resolved_prompts`, with no one resolver; `running_prompt` reads the config and ignores
-  its fields.
+- **The check-in's optimizer graph ignores the draft's overlay**: `resolve_pipeline_for_optimizer`
+  resolves the manifest with `{}`.
+- **Rename candidates, not yet picked** (one word, two senses each):
+  `evidence/head_to_head.py::HeadToHead.swapped` / `swapped_in` beside the manifest `swap`;
+  `application/library.py::library` beside `candidate_library` (rides the `candidate_library` →
+  `answer_terms` rename); `domain/pool.py::PoolOffer` / `offered` beside
+  `datasets/startability.py::offered`.
 - **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and `KnobRow` serves neither
   scope nor estimand.
-- **The check-in lists a demo pool as raw sample-key hashes** (50 chips of `a9123c5c…· 1`): an id with no
-  content preview gives the operator nothing to pick by.
+- **The check-in lists a demo pool as raw sample-key hashes** (chips like `a9123c5c…· 1`): an id with
+  no content preview gives the operator nothing to pick by.
+- **Seen building the setup screen**:
+  - One app-wide `SelectionContext.node` serves the target and the optimizer graphs, and
+    `PipelineSetupInner`'s auto-select races the optimizer graph for it: a global standing in for a keyed
+    subject.
+  - `OptimizerSetupInner` reads the optimizer from the draft and from `useConnector().optimizer`, which
+    are one value through two doors.
+  - `NodeDetail` shows an optimizer prompt read-only through `NodeSurface`, whose `PromptFieldsEditor`
+    is labelled `scope="target"` (`NodeSurface.tsx`), while the setup step edits it. Make `NodeDetail`
+    the one editor.
+  - An edited optimizer-prompt field cannot be reset: `OptimizerNodePrompt` serves no template text and
+    `campaign_config._merge_dicts` keeps a null as a value.
+  - `LibrarySnippet` serves no `presumes`, so the library cannot show that a snippet the chain refuses
+    never enters a pool.
+  - Smaller: `title=` used as teaching prose in `NodeDetail` and `OptimizerCard`;
+    `CheckinLoadingWindow` keeps its own `setInterval` outside `lib/cadence`; `.setup-step` is styled in
+    `chat.css`.
 - **No gate check runs `scripts/offline_run.py`**, so a commit that breaks every offline leg passes
   the gate (3e3b1bb62 did). Its legs also rest on fake-data draws keyed by the whole node config
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a

@@ -28,8 +28,8 @@ async function optimizerStep(page: Page) {
     .locator(".ingest-picklist-group", { hasText: "Open check-ins" })
     .getByRole("button", { name: new RegExp(`^${draft!.slug}\\b`) })
     .click({ timeout: 60_000 });
-  // `summary` because `getByText` also hits the `<details>` body.
-  await page.locator("summary", { hasText: "Optimizer" }).click();
+  // The optimizer step leads the check-in and starts open; a knob outside `main` sits under All knobs.
+  await page.locator("summary", { hasText: "All knobs" }).click();
 }
 
 test.afterAll(async ({ request }) => {
@@ -45,8 +45,10 @@ test.describe("the check-in's pools and recombination host", () => {
     // None ships, so the walk installs one where `config/paths.py::block_pack_path` resolves it.
     const dir = path.join(COLD_HOME, "block_packs", PACK);
     fs.mkdirSync(dir, { recursive: true });
-    const block = (text: string) => ({
+    const snippet = (text: string) => ({
       text,
+      suits: ["instruction"],
+      tags: [],
       provenance: {
         kind: "authored",
         author: "e2e",
@@ -60,7 +62,7 @@ test.describe("the check-in's pools and recombination host", () => {
       path.join(dir, "pack.json"),
       JSON.stringify({
         works: {},
-        prompt_fields: { instruction: [block("Answer briefly."), block("Show your steps.")] },
+        snippets: [snippet("Answer briefly."), snippet("Show your steps.")],
       }),
     );
 
@@ -100,7 +102,8 @@ test.describe("the check-in's pools and recombination host", () => {
       .toBeFalsy();
     expect(packed.status, `installing ${PACK} on the draft: ${packed.body}`).toBeLessThan(300);
     const pool = (await served(request)).optimizer_setup.pools.find((p) => p.pool === "block_pool");
-    expect(pool?.offered["instruction/authored"], "the pack's two blocks are not offered").toBe(2);
+    const authored = pool?.offered.find((o) => o.path === "instruction/authored");
+    expect(authored?.entries, "the pack's two snippets are not offered").toBe(2);
   });
 
   test("the browser switches the host and narrows the pool, and the draft reads both back", async ({
@@ -109,18 +112,19 @@ test.describe("the check-in's pools and recombination host", () => {
   }) => {
     test.setTimeout(300_000);
     const before = (await served(request)).optimizer_setup.pools.find((p) => p.pool === "block_pool")!;
-    const entry = Object.keys(before.offered).find((p) => p.startsWith("instruction."))!;
+    const offer = before.offered.find((o) => o.kind === "entry" && o.path.startsWith("instruction."))!;
+    const entry = offer.path;
+    const chip = { name: new RegExp(`^${offer.label.replace(".", "\\.")} `) };
+    const all = { name: /^All entries / };
 
     await optimizerStep(page);
     await page.getByRole("combobox", { name: "recombination_host" }).selectOption("l2_context");
     const pool = page.getByRole("group", { name: "block_pool entries in play" });
-    await pool.getByRole("button", { name: new RegExp(`^${entry.replace(".", "\\.")} `) }).click();
+    await pool.getByRole("button", chip).click();
     // Lit from the served draft, so this waits on the write landing before `*` comes off.
-    await expect(
-      pool.getByRole("button", { name: new RegExp(`^${entry.replace(".", "\\.")} `) }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await pool.getByRole("button", { name: /^\* / }).click();
-    await expect(pool.getByRole("button", { name: /^\* / })).toHaveAttribute("aria-pressed", "false");
+    await expect(pool.getByRole("button", chip)).toHaveAttribute("aria-pressed", "true");
+    await pool.getByRole("button", all).click();
+    await expect(pool.getByRole("button", all)).toHaveAttribute("aria-pressed", "false");
 
     const nodes = (await served(request)).optimization_overrides.nodes as Record<
       string,
@@ -132,9 +136,7 @@ test.describe("the check-in's pools and recombination host", () => {
     await optimizerStep(page);
     await expect(page.getByRole("combobox", { name: "recombination_host" })).toHaveValue("l2_context");
     await expect(
-      page
-        .getByRole("group", { name: "block_pool entries in play" })
-        .getByRole("button", { name: new RegExp(`^${entry.replace(".", "\\.")} `) }),
+      page.getByRole("group", { name: "block_pool entries in play" }).getByRole("button", chip),
     ).toHaveAttribute("aria-pressed", "true");
   });
 });

@@ -486,7 +486,9 @@ describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
     exclusive_minimum: null,
     maximum: null,
     exclusive_maximum: null,
+    declared: 10,
     value: 10,
+    movable_by: [],
     ...over,
   });
 

@@ -11,7 +11,7 @@ from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_decisions,
 )
-from promptpotter.application.pipeline_resolve import defaults_drift
+from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
@@ -150,10 +150,8 @@ async def _replay_line(
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         # The declaration never moves; the defaults it is a delta over can, under the same name.
-        drifted = (
-            campaign is not None
-            and defaults_drift(campaign, running=cycle.optimizer.treatment()) is not None
-        )
+        running = cycle.optimizer.treatment(campaign_admits(cycle.config, session.pipeline_schema))
+        drifted = campaign is not None and defaults_drift(campaign, running=running) is not None
         if not optimizer_mismatches and stale is None and not drifted:
             return None
 

@@ -24,7 +24,7 @@ and survival are members registered once and named by any manifest, so "does rec
 |---|---|---|
 | **arm** | an individual a round measures | `domain/optimizer_state.py::OptimizerState.population` — the "active pool", never called a pool |
 | **pool** | a named set of entries of ONE kind that nodes draw from and declared writers add to | `domain/pool.py::Pool` (`BlockPool`, `DemoPool`); never "sample pool" |
-| **entry kind** | `individual` · `block` · `shot` | `block` = `domain/prompt_block.py::PromptBlock`; "allele" is not used |
+| **entry kind** | `individual` · `block` · `shot` | a `block` is a pack's `domain/prompt_block.py::Snippet` drawn into one part it `suits`; "allele" is not used |
 | **locus** | one separately inheritable part: a `Locus(node, key)` — an open prompt field, a node's shots, an open config param | `domain/opt_search_point.py::OptSearchPoint.loci` |
 | **variation node** | a proposer node turning parents and pool entries into arms | `IndividualLineage.variations`; never bare "operator" — the operator is the human |
 | **novelty** / **recombination** | can emit a value no pool held / emits only values its inputs held | new |
@@ -80,9 +80,6 @@ never rank.
 
 ## The pool contract
 
-**A pool's shape, sources, access and banking** — owned by
-[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Other surfaces.
-
 - **The campaign's measured individuals are a pool read, never a banked one** (`node_context.py::Lineage.measured`):
   every individual a closed round concluded, losers included, so a resume holds the pool its banked rounds
   name by holding them. A writer adding an individual is the arm gate's seat, whose arm a round measures.
@@ -110,9 +107,11 @@ node and the selector.
 **One served shape, drawn at three moments** — class tag, pool roster, grouping and nesting are served, never
 derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED).
 
-- **Check-in**: the mix (counts and total) and the pools, each with its active subset and its drawing nodes
-  grouped by class with their knobs and access. **A pool picks by path**: each path `PoolRow.offered` names
-  (`*`, a leading run of a group, an entry id, with the entries it keeps) is one chip, lit while `active`
+- **Check-in**: `pipeline_resolve.py::OptimizerSetup` — the manifest's `main` knobs first, each knob's
+  declared value beside its value under the draft, each node's optimizer prompt under the draft (a field
+  edit is one more knob), the mix, and the pools, each with its active subset and its drawing knobs with
+  their access. **A pool picks by path**: each `PoolRow.offered` path (`*`, a leading run of a group, an
+  entry id, each with what it reads as and the entries it keeps) is one chip, lit while `active`
   holds it; the last lit chip stays lit. The offer is the initializer's `held`, the set its refusal checks,
   over the split the Start will draw (`pipeline_resolve.py::_draft_mint`), so `demo_pool` offers its keys
   once the draft's bank is held. **Selecting never
@@ -120,6 +119,7 @@ derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.m
   each round, so a large selection costs no context. Every control writes
   `optimization_overrides.nodes.{node}.config.{knob}` through `edit-draft-campaign`
   ([`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § No ad-hoc mutating routes).
+  The installed snippets, by part and tag, are `GET /library` (`application/library.py`).
 - **Live**: each arm shows its variation node, parents and entries; each pool its size, draw and additions.
   **The lineage is one main descent, a declared donor, then gene links**: an arm hangs from its main as last
   measured before it (`CandidateFacts.descends_from`); its donor links from wherever in time it was

@@ -19,6 +19,7 @@ from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
+    campaign_admits,
     configure_and_apply_pipeline,
     defaults_drift,
     mint_facts,
@@ -74,8 +75,10 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
+    from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.treatment import Treatment
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -120,6 +123,8 @@ class CyclePlan:
     framing: TaskDecomposition
     # The one selection the mint hashes into `Campaign.treatment` and declares its wiring under.
     optimizer: SelectedOptimizer
+    # What the cycle's chain and scorer admit, which its pools draw and `treatment` hashes.
+    admits: frozenset[Presumption]
     partition: BankPartition
     # The draw every later read of the cycle restores, written by the seam that mints it.
     drawn: PartitionRecord
@@ -142,6 +147,10 @@ class CyclePlan:
     @property
     def cycle_id(self) -> str:
         return root_cycle_id_of(self.origin_hash, self.declaration)
+
+    @property
+    def treatment(self) -> Treatment:
+        return self.optimizer.treatment(self.admits)
 
 
 @dataclass(frozen=True)
@@ -199,8 +208,9 @@ def resolve_cycle_plan(
         root_seed = campaigns.read_cycle_seed(campaign.root_hop)
         origin_override = (root_seed.origin_prompts or None) if root_seed else None
         runs_under = campaigns.read_cycle_seed(hop)
+    runs = apply_cycle_seed(campaign_config, runs_under)
     partition = refuse_unrunnable(
-        apply_cycle_seed(campaign_config, runs_under),
+        runs,
         dataset,
         pipeline_params,
         configured.pipeline_schema,
@@ -223,6 +233,7 @@ def resolve_cycle_plan(
         ),
         framing=campaign_framing(session.store, campaign_config, session.dataset),
         optimizer=select_optimizer(campaign_config.optimization),
+        admits=campaign_admits(runs, configured.pipeline_schema),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
         drawn=partition.record(dataset_hash=session.bank.dataset_hash),
@@ -295,7 +306,7 @@ def refuse_drifted_resume(session: Session, campaign: Campaign, dataset: Sequenc
     raise ConfigDriftError(
         campaign,
         current_hash=plan.origin_hash,
-        drift=defaults_drift(campaign, running=plan.optimizer.treatment()),
+        drift=defaults_drift(campaign, running=plan.treatment),
         capabilities_moved=_capabilities_moved(
             session.store.campaigns.read_resolved_run(campaign.root_hop).model_capabilities,
             plan.session.pipeline_schema.model_capabilities,
@@ -387,7 +398,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
             created_at=now,
             root_cycle_id=hop.cycle_id,
             root_content_hash=plan.origin_hash,
-            treatment=plan.optimizer.treatment(),
+            treatment=plan.treatment,
             declaration=declaration,
             backend_id=session.backend_id,
             backend_url=session.backend_client.base_url,

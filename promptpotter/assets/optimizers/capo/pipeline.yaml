@@ -18,6 +18,12 @@ available_models:
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
+# The knobs a setup screen leads with, in order; presentation alone, outside the treatment.
+main:
+  - blocks.block_size
+  - mating.offspring
+  - paired_t.alpha
+  - capo_init.length_penalty
 nodes:
   # Run init's: the demo rows `capo_init` and `few_shot` draw shots from, the whole partition.
   demo_pool:

@@ -2,6 +2,9 @@ name: example
 version: v1.0
 available_models:
   - openai/gpt-oss-20b:nitro
+main:
+  - example_draw.size
+  - propose.variants
 nodes:
   example_draw:
     type: sampler
