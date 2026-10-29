@@ -51,7 +51,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.nodes import (
         Adapter,
         Controller,
@@ -67,14 +66,12 @@ if TYPE_CHECKING:
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.campaign_config import ArmGateMode
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.pool import Access
     from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.scoring import CellSheet
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 shapes_optimizer_prompt(__name__)
 
@@ -506,25 +503,6 @@ class SelectedOptimizer:
     def refuse_origin(self, origin_results: CellSheet) -> None:
         for member in self.members:
             member.refuse_origin(origin_results)
-
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        out: dict[int, dict[str, str]] = {}
-        for member in self.members:
-            for round_num, packages in member.round_packages(cycle, rounds).items():
-                out.setdefault(round_num, {}).update(packages)
-        return out
-
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
-        rounds: list[RoundResult],
-        drifted: list[int],
-    ) -> list[RoundResult]:
-        for member in self.members:
-            rounds = await member.rederive(campaign_store, hop, cycle, rounds, drifted)
-        return rounds
 
     def review(
         self,

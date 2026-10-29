@@ -89,14 +89,6 @@ acting.
 
 ### The member backbone
 
-- **A repair reads the cycle past `sees`.** `round_packages` and `rederive` are handed the `Cycle` and a
-  `CampaignStore`: `potter/resume.py::_seat_on` builds its own `RoundContext` off the session ledger, and
-  `rederive_critiques` restates the round itself. Action: the bench seats one `NodeContext` per repaired
-  round and restates onto the branch hop: a member answers `round_packages(ctx)` and `rederive(ctx)`
-  for that one round, and gepa's and levi's `rows_read_packages` read `Lineage.rounds`. It moves the
-  repair path's package fingerprints, which decide EQUIVALENT vs SUPERSEDE, a path the offline run
-  does not walk and no test reaches, so its proof is a repair-fork test first.
-  **Re-test:** `git grep -c "RoundContext(" -- promptpotter/application/optimizers` is 0.
 - **A round role is ordered three times**: `optimizer_manifest.py::_round_plan` admits each role by
   its position against the gateway and selector, `::_walk` places every role for the closure check,
   and `runner/round.py::execute_round` calls them. A static order cannot derive from calls, so one

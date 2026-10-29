@@ -56,7 +56,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     fork_edge,
     mint_operator_fork,
 )
-from promptpotter.application.bench.resume_and_fork.repair import apply_correction
+from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_reads import open_family_ray
@@ -1653,7 +1653,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 RoundProposedRecord(round=2, consumed="", proposals=[], submitted=False)
             )
         set_cycle(cycle, line=line)
-        before = cycle.optimizer.round_packages(cycle, line)
+        before = round_packages(cycle, line)
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             with (

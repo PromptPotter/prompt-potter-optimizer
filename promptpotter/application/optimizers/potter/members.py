@@ -31,7 +31,9 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     BUNDLE_DRAWS,
     BUNDLE_READS,
     BUNDLE_SEES,
+    build_bundle,
     fingerprinted_modules,
+    node_packages,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -98,12 +100,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     Recombination,
 )
-from promptpotter.application.optimizers.potter.resume import (
-    ELECTION_REPLAYERS,
-    RACE_REPLAYERS,
-    rederive_critiques,
-    round_packages,
-)
+from promptpotter.application.optimizers.potter.resume import ELECTION_REPLAYERS, RACE_REPLAYERS
 from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
@@ -123,7 +120,6 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -141,7 +137,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.paired_reading import ArmKey
@@ -150,7 +145,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
 logger = logging.getLogger(__name__)
@@ -357,19 +351,14 @@ class L1Critique(LayoutNode, nodes.Adapter):
     ) -> list[OptimizerFact]:
         return critique_facts(round_result)
 
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        """Every layout node's: one bundle feeds them all."""
-        return round_packages(cycle, rounds)
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
+        """Every layout node's: one bundle feeds them all, and it carries the trajectory up to *ctx*'s round."""
+        return node_packages(build_bundle(ctx, ctx.slice(Ladder)))
 
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
-        rounds: list[RoundResult],
-        drifted: list[int],
-    ) -> list[RoundResult]:
-        return await rederive_critiques(campaign_store, hop, cycle, rounds, drifted)
+    async def rederive(self, ctx: NodeContext) -> tuple[StatePart, ...]:
+        if ctx.recall(Critique, ctx.round_num).readout is None:
+            return ()
+        return (await distil_critique(ctx),)
 
     async def adapt(self, ctx: NodeContext) -> None:
         ctx.emit(await distil_critique(ctx))
