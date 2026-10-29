@@ -7,6 +7,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.admission import open_spend_book
 from promptpotter.application.jobs.quota import move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.origin import (
     CampaignOrigin,
     establish_campaign_origin,
@@ -76,7 +77,13 @@ async def prepare_run(
         dataset=dataset,
         langfuse_session_id=langfuse_session_id,
     )
-    declare_run_wiring(session, campaign_config, cb.ledger, tracing=observers.tracing)
+    declare_run_wiring(
+        session,
+        campaign_config,
+        cb.ledger,
+        selected=bound_optimizer(),
+        tracing=observers.tracing,
+    )
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
     move_campaign_money(
         budget.standing,

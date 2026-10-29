@@ -8,7 +8,7 @@ from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, restored_partition
-from promptpotter.domain.campaign import Optimize, Purpose
+from promptpotter.domain.campaign import Compare, Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
@@ -25,6 +25,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 if TYPE_CHECKING:
     from promptpotter.application.scoring.evaluators import Evaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.run_records import ComparisonExit
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -102,6 +103,8 @@ class Session:
     pipeline_schema: PipelineSchema
     # The only copy of the live backend's declaration; `init_cycle` records it. Empty offline.
     pipeline_declaration: dict[str, Any] = field(default_factory=dict)
+    # What the backend reported at init; `None` where its connector checks none or it answered none.
+    backend_revision: str | None = None
     # The label's bank at init; a bound cycle's is the one it drew, never re-cut.
     bank: Bank = field(default_factory=lambda: Bank.of(()))
     # Ranked beside the bank's ground truths; empty where a connector owns the panel.
@@ -126,6 +129,20 @@ class Session:
     @property
     def tenant_root(self) -> str:
         return str(self.store.base_dir)
+
+    def record_resolved_run(self) -> None:
+        self.store.campaigns.write_resolved_run(
+            self.hop,
+            declaration=self.pipeline_declaration,
+            experiment=self.backend_client.workload.experiment,
+            model_capabilities=self.pipeline_schema.model_capabilities,
+            backend_revision=self.backend_revision,
+        )
+
+    def leave_comparison(self, act: ComparisonExit, *, on: CycleHop) -> None:
+        """decisions.md § 0009: the act is admitted; on an arm it is the event its guard reads."""
+        if isinstance(self.purpose, Compare):
+            self.store.campaigns.record_left_comparison(on, act=act)
 
     def record_intervention(self, kind: str) -> None:
         """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""

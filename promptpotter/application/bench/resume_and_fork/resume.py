@@ -15,7 +15,7 @@ from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_records import ForkTrigger
+from promptpotter.domain.run_records import ComparisonExit, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 
@@ -150,7 +150,10 @@ async def _replay_line(
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         # The declaration never moves; the defaults it is a delta over can, under the same name.
-        drifted = campaign is not None and defaults_drift(campaign) is not None
+        drifted = (
+            campaign is not None
+            and defaults_drift(campaign, running=cycle.optimizer.treatment()) is not None
+        )
         if not optimizer_mismatches and stale is None and not drifted:
             return None
 
@@ -178,6 +181,12 @@ async def _replay_line(
                 reason=f"resume_divergence:{div.kind}",
                 issued_by=SYSTEM_PRINCIPAL,
             )
+            if not self_inflicted:
+                # The operator's flag ran the line past a divergence it halts on.
+                session.leave_comparison(
+                    ComparisonExit.FORK_ON_DIVERGENCE,
+                    on=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
+                )
             if div.round_num == 0:
                 cycle.reopen_origin()
             else:

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -133,6 +133,8 @@ def _assert_overlay_preserved(
 class Cycle:
     session: Session
     config: CampaignConfig
+    # The launch's one selection (`binding_optimizer`): a manifest edit lands at the next launch.
+    optimizer: SelectedOptimizer
     slices: SliceMap
     difficulty: DifficultyView
     # By round, what each round not yet closed has produced, which its close banks (`close_state`).
@@ -161,12 +163,12 @@ class Cycle:
         framing: TaskDecomposition,
         session: Session,
         config: CampaignConfig,
+        optimizer: SelectedOptimizer,
     ) -> Cycle:
         schema = session.pipeline_schema
         origin_sheet = origin.rows
-        selected = select_optimizer(config.optimization)
-        selected.refuse_origin(origin_sheet)
-        slices = SliceMap(selected.slices)
+        optimizer.refuse_origin(origin_sheet)
+        slices = SliceMap(optimizer.slices)
         sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)
         # Hashed here because the parent advances with every round's head.
@@ -183,12 +185,13 @@ class Cycle:
             },
             ruler=difficulty.stamp,
             optimizer_state=None,
-            elects_on=selected.elects_on,
+            elects_on=optimizer.elects_on,
             schema=schema,
         )
         return cls(
             session=session,
             config=config,
+            optimizer=optimizer,
             slices=slices,
             difficulty=difficulty,
             rounds=[origin_round],
@@ -198,10 +201,6 @@ class Cycle:
     @property
     def origin_round(self) -> RoundResult:
         return self.rounds[0]
-
-    @property
-    def optimizer(self) -> SelectedOptimizer:
-        return select_optimizer(self.config.optimization)
 
     @property
     def selection(self) -> RoundResult:

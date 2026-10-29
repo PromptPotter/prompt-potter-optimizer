@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.config.settings import settings
@@ -51,7 +51,7 @@ def init_enter(
 ) -> InitEnterView:
     schema = session.pipeline_schema
     opt = config.optimization
-    selected = select_optimizer(opt)
+    selected = bound_optimizer()
 
     ctx.patience = opt.convergence_patience
     origin_pp = session.pipeline_params or schema.to_pipeline_params()

@@ -13,7 +13,7 @@ from promptpotter.application.initialization.loop_start import (
     scope_memory,
 )
 from promptpotter.application.initialization.session import LaunchClock, Session
-from promptpotter.application.optimizer_manifest import binding_optimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import binding_optimizer, bound_optimizer
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
@@ -320,14 +320,14 @@ async def run_optimization(
         raise RuntimeError("run_optimization runs a minted cycle: bind its session first")
     session.state.clock = LaunchClock.now()
     try:
-        selected = select_optimizer(campaign_config.optimization)
-        if mode.diag and selected.plan.controller is None:
-            raise PayloadInvalidError(
-                f"--diag shows what an optimizer's controller does at a round boundary, and "
-                f"{selected.name} declares no controller node"
-            )
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
         with at_round(0), binding_optimizer(campaign_config.optimization):
+            selected = bound_optimizer()
+            if mode.diag and selected.plan.controller is None:
+                raise PayloadInvalidError(
+                    f"--diag shows what an optimizer's controller does at a round boundary, and "
+                    f"{selected.name} declares no controller node"
+                )
             scope_memory(session)
             partition = cycle_partition(session, dataset, campaign_config)
             dataset = list(partition.search)

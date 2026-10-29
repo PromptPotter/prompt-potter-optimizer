@@ -30,6 +30,7 @@ ProjectionKind = Literal[
     "launch_claim",
     "launch_clock",
     "launch_released",
+    "left_comparison",
     "llm_call_progress",
     "llm_call",
     "llm_call_start",

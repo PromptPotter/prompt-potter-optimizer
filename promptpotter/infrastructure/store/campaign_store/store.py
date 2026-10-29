@@ -24,9 +24,11 @@ from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
+from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     BankedSubject,
+    ComparisonExit,
     CycleFinal,
     CycleFinalRecord,
     CycleMintedRecord,
@@ -40,6 +42,7 @@ from promptpotter.domain.run_records import (
     InterventionRecord,
     LaunchClaimRecord,
     LaunchReleasedRecord,
+    LeftComparisonRecord,
     ResolvedRunRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
@@ -74,6 +77,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_last,
     scan_launch_claim,
     scan_ledger_metered,
+    scan_left_comparison,
     scan_resolved_run,
     scan_standing_rounds,
 )
@@ -513,6 +517,12 @@ class CampaignStore:
     def record_intervention(self, hop: CycleHop, *, kind: str) -> None:
         self._append(hop, InterventionRecord(kind=kind))
 
+    def record_left_comparison(self, hop: CycleHop, *, act: ComparisonExit) -> None:
+        self._append(hop, LeftComparisonRecord(act=act))
+
+    def left_comparison(self, hop: CycleHop) -> list[ComparisonExit]:
+        return scan_left_comparison(self._chain(hop))
+
     def record_spawned(self, hop: CycleHop, spawned_by: SpawnedBy) -> None:
         self._append(hop, SpawnedRecord(spawned_by=spawned_by))
 
@@ -741,10 +751,14 @@ class CampaignStore:
         *,
         declaration: dict[str, Any],
         experiment: Mapping[str, Any] | None,
+        model_capabilities: CapabilityMenu,
+        backend_revision: str | None,
     ) -> None:
+        """Appended whenever this launch resolves other than the chain holds, a moved panel included."""
         doc = None if experiment is None else dict(experiment)
         held = self.read_resolved_run(hop)
-        if doc is not None and held.experiment is not None and held.experiment != doc:
+        panel_moved = doc is not None and held.experiment is not None and held.experiment != doc
+        if panel_moved:
             logger.warning(
                 "%s resolves a DIFFERENT panel than the one cycle %s measured — the landed roster "
                 "stands and this run's rows are not comparable to the earlier ones. Pin the "
@@ -752,9 +766,23 @@ class CampaignStore:
                 hop.campaign_id,
                 held.experiment_cycle_id,
             )
-        landed = held.then(ResolvedRun(declaration, doc))
-        if (landed.declaration, landed.experiment) != (held.declaration, held.experiment):
-            self._append(hop, ResolvedRunRecord(declaration=declaration, experiment=doc))
+        resolved = ResolvedRun(
+            declaration,
+            doc,
+            model_capabilities=model_capabilities,
+            backend_revision=backend_revision,
+        )
+        landed = held.then(resolved)
+        if panel_moved or landed != held:
+            self._append(
+                hop,
+                ResolvedRunRecord(
+                    declaration=declaration,
+                    experiment=doc,
+                    model_capabilities=model_capabilities,
+                    backend_revision=backend_revision,
+                ),
+            )
 
     def read_resolved_run(self, hop: CycleHop) -> ResolvedRun:
         return scan_resolved_run(self._chain(hop))

@@ -3296,7 +3296,7 @@
       },
       "ChangeRunLimitsPayload": {
         "additionalProperties": false,
-        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance, so read the armed value off the dashboard.",
+        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance; the command's ack on the cycle's ledger carries the ceiling it armed.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget"
@@ -12151,6 +12151,7 @@
               "launch_claim",
               "launch_clock",
               "launch_released",
+              "left_comparison",
               "llm_call_progress",
               "llm_call",
               "llm_call_start",

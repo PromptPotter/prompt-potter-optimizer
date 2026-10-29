@@ -16,7 +16,7 @@ from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
 from promptpotter.application.jobs.quota import on_free_tier, paid_call
 from promptpotter.application.knobs import bench_defaults_pin
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -56,7 +56,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
-from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.dataset_access import (
@@ -74,7 +73,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores
@@ -119,7 +118,8 @@ class CyclePlan:
     origin: OptSearchPoint
     # What the origin's render splices in, which a mint's check-in may commit after the refusals.
     framing: TaskDecomposition
-    treatment: Treatment
+    # The one selection the mint hashes into `Campaign.treatment` and declares its wiring under.
+    optimizer: SelectedOptimizer
     partition: BankPartition
     # The draw every later read of the cycle restores, written by the seam that mints it.
     drawn: PartitionRecord
@@ -132,7 +132,12 @@ class CyclePlan:
     def origin_hash(self) -> str:
         """The origin's content — merged params, framing, the search rows: what two declarations on one origin share."""
         points = PointContext(schema=self.schema, framing=self.framing, demo=self.partition.demo)
-        return origin_content_hash(self.origin, points, list(self.partition.search))
+        return origin_content_hash(
+            self.origin,
+            points,
+            list(self.partition.search),
+            candidate_library=self.session.candidate_library,
+        )
 
     @property
     def cycle_id(self) -> str:
@@ -217,7 +222,7 @@ def resolve_cycle_plan(
             schema=schema,
         ),
         framing=campaign_framing(session.store, campaign_config, session.dataset),
-        treatment=select_optimizer(campaign_config.optimization).treatment(),
+        optimizer=select_optimizer(campaign_config.optimization),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
         drawn=partition.record(dataset_hash=session.bank.dataset_hash),
@@ -230,13 +235,26 @@ class ConfigDriftError(ConflictError):
     code = "config_drift"
 
     def __init__(
-        self, campaign: Campaign, *, current_hash: str, drift: DefaultsDrift | None
+        self,
+        campaign: Campaign,
+        *,
+        current_hash: str,
+        drift: DefaultsDrift | None,
+        capabilities_moved: list[str],
     ) -> None:
         self.dataset_name = campaign.dataset_name
-        cause = (
-            f"what its declaration is a delta over moved since the mint ({', '.join(drift.moved())})"
-            if drift is not None
-            else "the dataset, its origin prompts or its framing changed, not its declaration"
+        causes: list[str] = []
+        if drift is not None:
+            moved = ", ".join(drift.moved())
+            causes.append(f"what its declaration is a delta over moved since the mint ({moved})")
+        if capabilities_moved:
+            causes.append(
+                f"the model capability snapshot moved for {', '.join(capabilities_moved)}, "
+                "so a reasoning floor laid into the origin may have moved"
+            )
+        cause = "; ".join(causes) or (
+            "the dataset, its origin prompts, its candidate library or its framing changed, "
+            "not its declaration"
         )
         super().__init__(
             f"campaign {campaign.campaign_id} no longer resolves to the origin it was minted on "
@@ -248,27 +266,41 @@ class ConfigDriftError(ConflictError):
                 "stored_hash": campaign.root_content_hash,
                 "current_hash": current_hash,
                 "defaults_pin_moved": drift is not None,
+                "capabilities_moved": capabilities_moved,
             },
         )
 
 
+def _capabilities_moved(recorded: CapabilityMenu, running: CapabilityMenu) -> list[str]:
+    """``provider/model`` whose answered capability moved; an empty *recorded* menu names none."""
+    if not recorded:
+        return []
+    return sorted(
+        f"{provider}/{model}"
+        for provider in {*recorded, *running}
+        for model in {*recorded.get(provider, {}), *running.get(provider, {})}
+        if recorded.get(provider, {}).get(model) != running.get(provider, {}).get(model)
+    )
+
+
 def refuse_drifted_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> None:
-    """*session* is bound to the cycle the resume runs."""
+    """*session* is bound to the cycle the resume runs; its refusals are that cycle's."""
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
-    hop = session.hop
+    if plan.seed is not None and plan.seed.pipeline_overlay:
+        # A steering seed is its cycle's declared delta: the root's own content is what is checked.
+        root = session.bound(campaign.root_hop, purpose=session.purpose)
+        plan = resolve_cycle_plan(root, campaign.declaration, dataset)
     if campaign.root_content_hash == plan.origin_hash:
         return
-    # A seed that steers the pipeline declared its own values at the cut, so it runs under them.
-    if plan.seed is not None and plan.seed.pipeline_overlay:
-        logger.info(
-            "resume %s/%s: origin hash moved %s -> %s under a steering seed — resuming in place",
-            hop.campaign_id,
-            hop.cycle_id,
-            campaign.root_content_hash,
-            plan.origin_hash,
-        )
-        return
-    raise ConfigDriftError(campaign, current_hash=plan.origin_hash, drift=defaults_drift(campaign))
+    raise ConfigDriftError(
+        campaign,
+        current_hash=plan.origin_hash,
+        drift=defaults_drift(campaign, running=plan.optimizer.treatment()),
+        capabilities_moved=_capabilities_moved(
+            session.store.campaigns.read_resolved_run(campaign.root_hop).model_capabilities,
+            plan.session.pipeline_schema.model_capabilities,
+        ),
+    )
 
 
 def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
@@ -355,7 +387,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
             created_at=now,
             root_cycle_id=hop.cycle_id,
             root_content_hash=plan.origin_hash,
-            treatment=plan.treatment,
+            treatment=plan.optimizer.treatment(),
             declaration=declaration,
             backend_id=session.backend_id,
             backend_url=session.backend_client.base_url,
@@ -366,8 +398,10 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     )
     _write_plan(session.store, hop, plan.drawn, plan.seed)
     session = session.bound(hop, purpose=declaration.purpose)
+    # What the origin hash was taken under, so a resume that no longer hashes alike names why.
+    session.record_resolved_run()
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-    declare_run_wiring(session, campaign_config, ledger, tracing=None)
+    declare_run_wiring(session, campaign_config, ledger, selected=plan.optimizer, tracing=None)
     campaigns.mint_cycle(hop)
     save_active_pointer(session.store.base_dir, hop)
     # So `dashboard.json` stands from the mint on, through the window before the loop starts.

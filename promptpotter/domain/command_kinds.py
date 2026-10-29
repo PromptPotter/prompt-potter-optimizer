@@ -349,14 +349,14 @@ class CleanupEmptyCyclesPayload(CyclePayload, kind=CommandKind.CLEANUP_EMPTY_CYC
 class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.CHANGE_RUN_LIMITS):
     """Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or
     round-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the
-    account allowance, so read the armed value off the dashboard."""
+    account allowance; the command's ack on the cycle's ledger carries the ceiling it armed."""
 
     inner_refusal: ClassVar[str | None] = (
         "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
     )
     follow_up: ClassVar[str] = (
-        "It is clamped against your account allowance, so read the armed value back from the "
-        "dashboard; `resume` picks it up."
+        "It is clamped against your account allowance; the command's ack carries the ceiling it "
+        "armed, and `resume` picks it up."
     )
 
     # An axis it does not name stays as it stands; a named null lifts it.

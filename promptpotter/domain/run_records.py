@@ -32,7 +32,11 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import (
+    CapabilityMenu,
+    ManifestNodeOverlay,
+    NodeSearchNarrowing,
+)
 from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
@@ -968,6 +972,10 @@ class ResolvedRunRecord(FrozenModel):
     declaration: dict[str, Any]
     # The roster a connector only NAMES can move under its name; the one every round measured stands.
     experiment: dict[str, Any] | None
+    # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
+    model_capabilities: CapabilityMenu = Field(default_factory=dict)
+    # `None` where the connector checks no revision or the backend reported none.
+    backend_revision: str | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1108,6 +1116,22 @@ class InterventionRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class ComparisonExit(enum.StrEnum):
+    """A launch act that runs an arm off the comparison its head-to-head declared."""
+
+    REWIND = "rewind"
+    FORK_ON_DIVERGENCE = "fork_on_divergence"
+    NO_DIVERGENCE_CHECK = "no_divergence_check"
+
+
+class LeftComparisonRecord(FrozenModel):
+    """Appended on an arm's cycle as the act runs: from it on, the arm's line reads uncontrolled."""
+
+    record_type: Literal["left_comparison"] = "left_comparison"
+    act: ComparisonExit
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class LaunchClaimRecord(FrozenModel):
     """Stands only while its process lives: ``claimant_lock`` is the OS lock that process holds."""
 
@@ -1156,6 +1180,7 @@ CycleRecord = Annotated[
     | LaunchClaimRecord
     | LaunchClockRecord
     | LaunchReleasedRecord
+    | LeftComparisonRecord
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord

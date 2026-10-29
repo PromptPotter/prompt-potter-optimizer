@@ -72,6 +72,7 @@ from promptpotter.application.optimizer_manifest import (
     binding_optimizer,
     binding_prompt_overrides,
     resolve_optimizer,
+    select_optimizer,
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
@@ -154,6 +155,7 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
     ManifestNodeOverlay,
+    ModelCapability,
     NodeConfigParam,
     NodeKind,
     NodePromptInfo,
@@ -962,7 +964,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     for hop, rungs in ((steered.root_hop, ["low", "high"]), (fork, ["low", "high", "xhigh"])):
         stores.campaigns.mint_cycle(hop)
-        stores.campaigns.write_resolved_run(hop, declaration=declaring(rungs), experiment=None)
+        stores.campaigns.write_resolved_run(
+            hop,
+            declaration=declaring(rungs),
+            experiment=None,
+            model_capabilities={},
+            backend_revision=None,
+        )
     fork_seed = parse_cycle_seed(
         ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
         resolve_campaign_config(stores, steered, None),
@@ -1140,20 +1148,25 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stale = held_campaign.model_copy(
         update={"declaration": declared.model_copy(update={"bench_defaults_pin": "older"})}
     )
-    drift = defaults_drift(stale)
+    running = select_optimizer(effective_config(declared).optimization)
+    drift = defaults_drift(stale, running=running.treatment())
     assert drift is not None and drift.moved() == ["bench"], (
         "a moved bench defaults pin drifted nothing, or blamed another part"
     )
     for on_disk, served_drift in ((stale, drift), (held_campaign, None)):
         write_json(manifest_path, on_disk.model_dump(mode="json"))
-        declare_run_wiring(opened, effective_config(declared), wired_ledger, tracing=None)
+        declare_run_wiring(
+            opened, effective_config(declared), wired_ledger, selected=running, tracing=None
+        )
         served = fold_at(root_cut)
         assert served is not None and served.defaults_drift == served_drift, (
             "a launch past moved bench defaults served no drift, or one on its own served one"
         )
     # The optimizer's defaults are its whole treatment: a part moved under one declaration is named.
     reshipped = held_campaign.treatment.model_copy(update={"manifest": "older"})
-    reshipped_drift = defaults_drift(held_campaign.model_copy(update={"treatment": reshipped}))
+    reshipped_drift = defaults_drift(
+        held_campaign.model_copy(update={"treatment": reshipped}), running=running.treatment()
+    )
     assert reshipped_drift is not None and reshipped_drift.moved() == ["manifest"], (
         "an optimizer whose manifest moved under one declaration drifted nothing, or blamed "
         "another part"
@@ -1168,6 +1181,40 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # A resume over an edited bank never runs on an origin other than its rounds stand on.
     with pytest.raises(ConfigDriftError):
         refuse_drifted_resume(recut, held_campaign, rows_30[:-1])
+    # The candidates a ranker reads beside the bank's answers are origin content too.
+    with pytest.raises(ConfigDriftError):
+        refuse_drifted_resume(
+            replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
+        )
+    # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
+    steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
+    stores.campaigns.mint_cycle(steered_hop)
+    partition = stores.campaigns.read_bank_partition(held_campaign.root_hop)
+    assert partition is not None, "the held campaign banked no partition"
+    stores.campaigns.write_bank_partition(steered_hop, partition)
+    stores.campaigns.write_cycle_seed(
+        steered_hop, CycleSeed(pipeline_overlay={"solve": {"temperature": 0.3}})
+    )
+    steered_fork = opened.bound(steered_hop, purpose=Optimize())
+    refuse_drifted_resume(steered_fork, held_campaign, rows_30)
+    with pytest.raises(ConfigDriftError):
+        refuse_drifted_resume(steered_fork, held_campaign, rows_30[:-1])
+    # The capability menu the origin hashed under is on record: a moved one is the cause named.
+    floored = ModelCapability(
+        model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
+    )
+    stores.campaigns.write_resolved_run(
+        held_campaign.root_hop,
+        declaration={},
+        experiment=None,
+        model_capabilities={"": {"m": floored}},
+        backend_revision=None,
+    )
+    with pytest.raises(ConfigDriftError) as refused:
+        refuse_drifted_resume(recut, held_campaign, rows_30[:-1])
+    assert refused.value.details["capabilities_moved"] == ["/m"], (
+        "a resume past a moved capability snapshot blamed only the dataset"
+    )
 
     # Answering in TEXT sends no contract to answer INTO.
     text_pipeline = read_dataset_pipeline(_DATASETS / "justlogic" / "d234")
@@ -1328,8 +1375,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"persona": "x"}, "ghost": {"rubric": "x"}},
         changes_description="off roster",
     )
-    refused = author_arm(reflected_on, origin, stray)
-    assert len(refused.validation_failures) == 2, "an arm writing off the roster was measured"
+    off_roster = author_arm(reflected_on, origin, stray)
+    assert len(off_roster.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = resolve_optimizer("capo", {}, gate="off")
     assert optimizers.unfit_pipeline(capo, two) is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"

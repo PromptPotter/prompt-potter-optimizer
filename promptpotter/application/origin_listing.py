@@ -10,6 +10,7 @@ from promptpotter.application.datasets.authored import load_dataset_campaign_con
 from promptpotter.application.datasets.loaders import resolve_bank
 from promptpotter.application.datasets.prompts import has_dataset_prompts
 from promptpotter.application.datasets.startability import dataset_reading, offered
+from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
@@ -75,7 +76,12 @@ def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | Non
         points = PointContext(
             schema=schema, framing=campaign_framing(stores, cfg, dataset), demo=partition.demo
         )
-        return origin_content_hash(opt_sp, points, list(partition.search))
+        return origin_content_hash(
+            opt_sp,
+            points,
+            list(partition.search),
+            candidate_library=read_candidate_library_file(dataset_dir),
+        )
     except (
         OSError,
         ValueError,

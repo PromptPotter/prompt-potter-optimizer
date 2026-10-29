@@ -112,8 +112,10 @@ class Applier[R]:
     @staticmethod
     def silent(
         run: Callable[[], Awaitable[object]] | Callable[[], object],
+        *,
+        effect_fn: Callable[[], dict[str, Any]] | None = None,
     ) -> Applier[object]:
-        return Applier(run, _no_body)
+        return Applier(run, _no_body, effect_fn=effect_fn)
 
     @staticmethod
     def for_loop(refusal: str) -> Applier[object]:

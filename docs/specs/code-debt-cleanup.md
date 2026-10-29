@@ -11,24 +11,21 @@ acting.
 **Rides with:** any pass in the file named.
 
 - **Inputs that change a run but leave no event** (audit 2026-10-29, `decisions.md` § 0009's last
-  bullets). Worst first:
-  - **The optimizer manifest is live mid-run**: `bench/cycle.py::Cycle.optimizer` re-selects on every
-    read, and `optimizer_manifest.py::_read_manifest` is keyed on mtime, so an edit to `pipeline.yaml`
-    changes the next `round.py` / `node_context.py` read with no record while `llm_node_manifest` reads
-    the bound one: one round can run two treatments under the mint's `Treatment`. Root: the cycle
-    binds its `SelectedOptimizer` once; an edit is an event at a round boundary or the next launch's.
-  - **`candidate_library.txt`** is read every launch (`initialization/wiring.py::_session_bank`), neither
-    hashed nor recorded.
-  - **A steered fork waives drift**: once a seed carries a `pipeline_overlay`,
-    `jobs/mint.py::refuse_drifted_resume` admits any later dataset drift with a `logger.info`.
-  - **The capability snapshot moves the L1 menu between legs** silently; its effort floors trip the
-    drift refusal under the wrong cause ("dataset changed").
-  - **`change-run-limits` records the request, never the clamped ceiling** (`quota.hold_budget_change`),
-    and the job file's money is read live; it is not refused on an arm either.
-  - **A changed connector panel or backend revision is a log line** (`store.py::write_resolved_run`,
-    `wiring._verify_connector_revision`); a pricing refresh moves where an arm's spend stop falls.
-  - **Arm doors unguarded**: `start_run` / `step_cycle` never call `refused_on_an_arm`, so an in-place
-    `--from` rewind, `fork_on_divergence` and `no_divergence_check` act on an arm.
+  bullets). Left:
+  - **INIT selects the optimizer apart from the launch's binding**: `jobs/mint.py::refuse_unrunnable`'s
+    pool refusals and INIT's preflight call `select_optimizer` on the mtime-keyed manifest cache, so a
+    `pipeline.yaml` edit during INIT is read by them and not by `bound_optimizer()`.
+  - **A running job's allotment share is read live** from the job registry; only the armed ceiling
+    lands, on `change-run-limits`'s ack effect.
+  - **`ResolvedRunRecord.model_capabilities` / `backend_revision` have no served reader** beyond
+    `refuse_drifted_resume`'s capability cause.
+  - **An arm's fork, `submit_arms` and skip are refused** (`refused_on_an_arm`) while a rewind,
+    `fork_on_divergence` and `no_divergence_check` are admitted as a `LeftComparisonRecord`: one door
+    shape per act is `decisions.md` § 0009's open proposal.
+  - **The new `ResolvedRunRecord` fields default so today's ledgers read** (data kept through
+    2026-10-30): make them required with the wipe.
+  - **`CommandAckRecord.effect` is an untyped `dict[str, Any]`**, now carrying the armed ceiling.
+  - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
   **Re-test:** each input either hashed into the declaration or written as a record.
 
 - **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without

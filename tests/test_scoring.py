@@ -230,6 +230,7 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.run_records import (
     CommandAckRecord,
+    ComparisonExit,
     PhaseRecord,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -3515,9 +3516,12 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "levi": ("levi", 13),
         "waiting": ("capo", 14),
         "capped": ("capo", 15),
+        "rewound": ("capo", 16),
     }
     for h2h_id, arms, verdict, guards in (
         ("real4", ("potter", "capo"), True, ["controlled"] * 2),
+        # An arm a launch rewound in place stays admitted, and leaves the comparison as that event.
+        ("real4", ("potter", "rewound"), True, ["controlled", "uncontrolled"]),
         ("real4", ("potter", "capo", "gepa", "levi"), True, ["controlled"] * 3 + ["uncontrolled"]),
         (
             "real6",
@@ -3546,6 +3550,12 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         if "capped" in arms:
             capped = f"capo_capped_{h2h_id}"
             h2h_stores.campaigns.update_campaign(capped, standing_budget=Budget(usd=1.0))
+        if "rewound" in arms:
+            rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
+            assert rewound is not None
+            h2h_stores.campaigns.record_left_comparison(
+                h2h_stores.campaigns.line_holder(rewound.root_hop), act=ComparisonExit.REWIND
+            )
         h2h = subject_evidence(h2h_stores, arm_subjects).head_to_head
         assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case
         assert [r.guard.state.value for r in h2h.rows] == guards, (

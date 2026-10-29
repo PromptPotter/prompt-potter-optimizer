@@ -485,11 +485,13 @@ def seat(
         ledger=ledger,
         dataset_name=dataset_name,
     )
+    selected = select_optimizer(config.optimization)
     if origin is None:
         seated = Cycle(
             session=session,
             config=config,
-            slices=SliceMap(select_optimizer(config.optimization).slices),
+            optimizer=selected,
+            slices=SliceMap(selected.slices),
             difficulty=DifficultyView.open(session, config, origin="origin"),
             framing=framing,
         )
@@ -508,6 +510,7 @@ def seat(
             framing=framing,
             session=session,
             config=config,
+            optimizer=selected,
         )
     return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
 

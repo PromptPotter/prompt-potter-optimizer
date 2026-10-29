@@ -11,6 +11,8 @@ from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from promptpotter.domain.arms import PointContext
     from promptpotter.domain.campaign import RunDeclaration
     from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -22,9 +24,15 @@ def mint_campaign_id(dataset_name: str) -> str:
     return f"{prefix}__{secrets.token_hex(3)}"
 
 
-def origin_content_hash(origin: OptSearchPoint, points: PointContext, dataset: list[Sample]) -> str:
+def origin_content_hash(
+    origin: OptSearchPoint,
+    points: PointContext,
+    dataset: list[Sample],
+    *,
+    candidate_library: Collection[str],
+) -> str:
     """Config-AWARE, as the measurement key is: a connector-config edit yields a DISTINCT origin."""
-    return points.job(origin).content_hash(dataset)[:12]
+    return points.job(origin).content_hash(dataset, candidate_library=candidate_library)[:12]
 
 
 def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:

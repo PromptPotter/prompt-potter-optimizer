@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
@@ -75,6 +75,7 @@ UNREPORTED_KINDS: frozenset[str] = frozenset(
         "launch_claim",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "launch_clock",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "launch_released",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "left_comparison",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "resolved_run",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "scoring_locked",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "spawned",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
@@ -144,20 +145,15 @@ def declare_run_stop(
     ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))
 
 
-def run_limits_from(config: CampaignConfig) -> RunLimits:
-    opt = config.optimization
-    return RunLimits(budget=opt.budget, optimizer=list(select_optimizer(opt).limits))
-
-
 def declare_run_wiring(
     session: Session,
     campaign_config: CampaignConfig,
     ledger: CycleEventLog,
     *,
+    selected: SelectedOptimizer,
     tracing: TracingProjection | None,
 ) -> None:
     """The one writer of ``RunWiringRecord``; a mint passes no *tracing* — no launch has opened one."""
-    selected = select_optimizer(campaign_config.optimization)
     campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
     assert campaign is not None, "a run is wired on a campaign its session is bound to"
     ledger.append(
@@ -171,8 +167,10 @@ def declare_run_wiring(
             langfuse_trace_url=None
             if tracing is None
             else langfuse_trace_url(tracing.langfuse_trace_id()),
-            run_limits=run_limits_from(campaign_config),
-            defaults_drift=defaults_drift(campaign),
+            run_limits=RunLimits(
+                budget=campaign_config.optimization.budget, optimizer=list(selected.limits)
+            ),
+            defaults_drift=defaults_drift(campaign, running=selected.treatment()),
         )
     )
 
@@ -255,7 +253,11 @@ def build_run_observers(
         release_cycle(forked_from.cycle_dir)
         # A fork's config is already admitted; a first build waits for `prepare_run` to settle it.
         declare_run_wiring(
-            session, campaign_config, observers.callbacks.ledger, tracing=observers.tracing
+            session,
+            campaign_config,
+            observers.callbacks.ledger,
+            selected=bound_optimizer(),
+            tracing=observers.tracing,
         )
     return observers
 

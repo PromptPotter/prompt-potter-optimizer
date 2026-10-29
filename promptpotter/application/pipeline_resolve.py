@@ -124,6 +124,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.treatment import Treatment
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -707,16 +708,13 @@ def _locked(stores: Stores, hop: CycleHop, config: CampaignConfig) -> CampaignCo
     return config if locked == config.scoring else config.model_copy(update={"scoring": locked})
 
 
-def defaults_drift(campaign: Campaign) -> DefaultsDrift | None:
+def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
     """The one answer to whether what the declaration is a delta over moved since its mint."""
     declared = DefaultsPin(
         bench=campaign.declaration.bench_defaults_pin, treatment=campaign.treatment
     )
-    optimization = effective_config(campaign.declaration).optimization
-    running = DefaultsPin(
-        bench=bench_defaults_pin(), treatment=select_optimizer(optimization).treatment()
-    )
-    return None if running == declared else DefaultsDrift(declared=declared, running=running)
+    now = DefaultsPin(bench=bench_defaults_pin(), treatment=running)
+    return None if now == declared else DefaultsDrift(declared=declared, running=now)
 
 
 def resolve_campaign_config(

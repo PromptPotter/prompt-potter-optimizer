@@ -323,18 +323,21 @@ def _budgeted(budget: Budget) -> CampaignConfig:
     return config.model_copy(update={"optimization": optimization})
 
 
-def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> None:
+def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> Budget:
+    """The ceiling the change armed, as its ack's effect states it."""
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
-    campaign = minted_campaign(hop)
+    applier = change_run_limits(DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop))
 
     async def apply() -> None:
-        ran = change_run_limits(DispatchedToCycle(dispatcher, payload, campaign, hop)).run()
+        ran = applier.run()
         assert inspect.isawaitable(ran)
         await ran
 
     asyncio.run(apply())
+    assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
+    return Budget.model_validate(applier.effect_fn()["armed"])
 
 
 # 1. What a call costs
@@ -1503,7 +1506,10 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     control = RunControl(book=moved_book)
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
     dispatcher = CommandDispatcher(built_stores, registry)
-    _change_run_limits(dispatcher, moved, Budget(usd=0.50))
+    armed = _change_run_limits(dispatcher, moved, Budget(usd=0.50))
+    assert armed.usd == pytest.approx(0.50), (
+        "the trace holds no ceiling a replay could stop the run at"
+    )
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, (
         "a USD raise lifted the token ceiling"
     )
@@ -2797,7 +2803,10 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a money ceiling landed on one cycle, not the campaign every cycle shares"
     )
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
-    _change_run_limits(dispatcher, hop, Budget(usd=None))
+    armed = _change_run_limits(dispatcher, hop, Budget(usd=None))
+    assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
+        "the ack's ceiling is not what a stop fires at: the campaign's money and the cycle's own"
+    )
     lifted, held = metered.campaigns.load_campaign("camp-3"), registry.get(job.job_id)
     assert lifted is not None and lifted.standing_budget == Budget(usd=None, tokens=1_000), (
         "an uncapped campaign ceiling was stored as the account's headroom"

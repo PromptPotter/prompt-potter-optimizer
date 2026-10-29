@@ -257,9 +257,16 @@ def dataset_hash(dataset: Iterable[Any]) -> str:
     return stable_hash({"rows": [row.banked() for row in dataset]}, length=ADDRESS_HEX)
 
 
-def content_hash(dataset: Iterable[Any], pipeline_params: dict[str, Any] | None = None) -> str:
+def content_hash(
+    dataset: Iterable[Any],
+    pipeline_params: dict[str, Any] | None,
+    *,
+    candidate_library: Iterable[str],
+) -> str:
     """Each node's rendered ``prompt`` rides its config, so *pipeline_params* covers every prompt."""
     blob_dict: dict[str, Any] = {"dataset": dataset_hash(dataset)}
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
+    if library := sorted(set(candidate_library)):
+        blob_dict["candidate_library"] = library
     return stable_hash(blob_dict, length=ADDRESS_HEX)
