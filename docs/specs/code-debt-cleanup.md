@@ -1,7 +1,7 @@
 # Code-Debt Cleanup — Backlog
 
-**Only work that is blocked or multi-arc.** Anything one edit closes is fixed in the pass that
-found it; never the root of a patch just shipped (root `CLAUDE.md` `<root-fix>`). An item ships by
+**Only work that is blocked or multi-arc** — including every shape a pass noticed off its task (root
+`CLAUDE.md` `<situational-awareness>`). Anything one edit closes is fixed in the pass that found it; never the root of a patch just shipped (root `CLAUDE.md` `<root-fix>`). An item ships by
 being deleted. Each entry: `file::symbol` — the defect — the action — **Rides with:** the work that
 reaches it — **Re-test:** the command or question that says it still stands. Run the re-test before
 acting.
@@ -10,26 +10,87 @@ acting.
 
 **Rides with:** any pass in the file named.
 
+- **Inputs that change a run but leave no event** (audit 2026-10-29, `decisions.md` § 0009's last
+  bullets). Worst first:
+  - **The optimizer manifest is live mid-run**: `bench/cycle.py::Cycle.optimizer` re-selects on every
+    read, and `optimizer_manifest.py::_read_manifest` is keyed on mtime, so an edit to `pipeline.yaml`
+    changes the next `round.py` / `node_context.py` read with no record while `llm_node_manifest` reads
+    the bound one: one round can run two treatments under the mint's `Treatment`. Root: the cycle
+    binds its `SelectedOptimizer` once; an edit is an event at a round boundary or the next launch's.
+  - **`candidate_library.txt`** is read every launch (`initialization/wiring.py::_session_bank`), neither
+    hashed nor recorded.
+  - **A steered fork waives drift**: once a seed carries a `pipeline_overlay`,
+    `jobs/mint.py::refuse_drifted_resume` admits any later dataset drift with a `logger.info`.
+  - **The capability snapshot moves the L1 menu between legs** silently; its effort floors trip the
+    drift refusal under the wrong cause ("dataset changed").
+  - **`change-run-limits` records the request, never the clamped ceiling** (`quota.hold_budget_change`),
+    and the job file's money is read live; it is not refused on an arm either.
+  - **A changed connector panel or backend revision is a log line** (`store.py::write_resolved_run`,
+    `wiring._verify_connector_revision`); a pricing refresh moves where an arm's spend stop falls.
+  - **Arm doors unguarded**: `start_run` / `step_cycle` never call `refused_on_an_arm`, so an in-place
+    `--from` rewind, `fork_on_divergence` and `no_divergence_check` act on an arm.
+  **Re-test:** each input either hashed into the declaration or written as a record.
+
 - **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without
   `comparable_to` (`escalation/state.py::_improved`, `views/render/phase.py`); hand-rolled `<table>`
   beside `ui/DataTable` in `components/compare/`, `shell/SpendBuckets`, `ingest/DatasetPreview`; a
   hand-rolled dialog in `shell/sidebar/SidebarFilterPopover`. Action: route each through its owner.
   **Re-test:** `gate.py --only doc-claims`.
+- **The chat thread has no subject.** `webapp/lib/chat/thread.ts::ThreadProvider` is one in-memory list for
+  the whole app and `lib/ingest-flow.tsx::IngestFlowProvider` one check-in beside whatever is viewed;
+  `components/chat/ChatPane.tsx` concatenates both with the viewed cycle's live feed and run card, held
+  apart only by a `composing` flag that the modal door (`ingest/IngestPane.tsx`) never sets. A run ending
+  while a check-in is open files its ending into the check-in (seen 2026-10-29). Action: the viewed
+  address is the conversation — a draft is an address beside a cycle path, `+ New campaign` navigates to
+  one, the pane renders that subject's thread; `composing`, the modal door and the global list go.
+  **Re-test:** open a check-in while another run ends; the check-in shows nothing of that run.
+- **The origin listing logs an ERROR on every read for a one-prompt-field dataset.**
+  `application/origin_listing.py::prospective_origin_id` raises "the campaign's framing splices into the one
+  prompt node declaring `problem_description`, and this pipeline's chain has 0" for `hotpotqa-closedbook`,
+  whose campaigns run. Action: the listing and the mint derive the origin one way. **Re-test:** `GET /origins`
+  with hotpotqa-closedbook on disk logs nothing.
+- **A taken head-to-head id reads as a config conflict.** Reusing an old id fails with "declares another
+  bench_defaults_pin", and no verb lists the declared ids (found by globbing `head_to_heads/`). Action: the
+  refusal names when and under what the id was declared; `cycles` lists head-to-heads. **Re-test:** reuse an
+  old id; the message says it is taken.
+- **A trace sink can break silently.** Langfuse 4 removed `update_trace`, `graceful` logged it, and every run
+  traced nothing. Action: a sink that fails on campaign start is served as a run warning, never only logged.
+  **Re-test:** break the sink; the readout shows it.
 
 ## NEXT ARC
 
 **Rides with:** the next arc's first builder wave.
 
+### The webapp's vanilla pass (audit 2026-10-29, counts are grep counts)
+
+**Rides with:** roadmap § Variation and pools item 10, which rebuilds the setup screen on these.
+
+- **Read/command states are hand-rolled per panel**: `status === "failed"` branched in 12 components,
+  failures rendered under 17 wrappers (`ErrorNote`, `AccountFailure`, `run-ctl-err`, …), 16 empty-state
+  classes, 73 `-err|-error|-failure|-empty|-note` selectors. Canonical: one `ui/` `ReadState` over
+  `useRead`'s union and one `FailureLine`. **Re-test:** one failure wrapper.
+- **Formatting bypasses `lib/format.ts`**: 12 inline `.toFixed(`, 7 inline `* 100`, `"—"` written 70 times
+  in 32 files, and name-keyed twins (`fmtPct0/1`, `fmtTheta`, `fmtFitness`, `fmtNum`, `fmtSigned`) beside
+  the unit-keyed `fmtMetricValue`. Canonical: unit-keyed only. **Re-test:** `"—"` in one file.
+- **Wording authored in the browser**: 15 client label tables (`NODE_KINDS`, `PROMPT_FIELD_LABEL` and
+  `PromptFieldsEditor::FIELD_META` over one field set, `SampleTrajectory::MINI_CELL_CLASS` vs
+  `TrajectorySeriesView::CELL_CLASS` naming one `SampleMovement` two ways, …), sentences written twice
+  (the `QuotaStatus` narration in `AccountSpend` and `AccountUsageTab`), 5 good/bad tone vocabularies.
+  Canonical: served label constants, one tone. **Re-test:** each table served or deleted.
+- **Cadence and size literals**: 12 poll intervals in 11 files (`LIVE_EVIDENCE_MS` declared twice), chart
+  `height: 140` ×3 beside `--chart-h`, 8 `promptpotter.*` storage keys in 7 files with the `BOOL`
+  serializer copied 4×, the seed-once latch hand-built 4×. **Re-test:** one cadence module, one key registry.
+- **`lib/` and `shell/` cluster by accident**: `lib/` flat with 36 files and 4 state mechanisms; 17
+  contexts in 4 naming styles, 3 outside `lib/`; `shell/` (chrome) holds 6 surfaces; hard samples and
+  compare each spread over 5–6 folders; 7 hand `<table>`s (tracked `_KNOWN_FALSE`).
+- **Adapters over a flat served shape**: `shell/remote/useRemoteModel.ts` folds 8 flat `lookahead_*`
+  fields `served_dashboard.py` should serve as one sub-object; `useCandidatesModel.ts` joins 10 sources;
+  `.facts.` opened at 92 sites; `isLive` re-derived at 4 (`SteerForkPanel` via `phaseWalks`).
+- **Several doors into one state**: candidate selection minted at 3 sites, the sample set written from 3
+  surfaces, `TrendChart.onOpen` exists so a caller can `openView`, `FileTree::onSelect` drilled 3 levels.
+
 ### The member backbone
 
-In this order; each cuts the sites the next adding a member touches.
-
-- **One pool kind.** `domain/pool.py::BlockPool` and `DemoPool` hold entries two ways, so every
-  reader branches on the kind. Action: one `Pool` of `PoolEntry`, `Pool.drawn(demo)` for the split.
-  **Re-test:** `git grep -c "isinstance(.*DemoPool" -- promptpotter` is 0.
-- **A consult is bound to its knob kind.** Each member reads `selected.knobs_of(self.name, K)`
-  beside its own `knobs: ClassVar[K]`, so the call restates both. Action: `selected.knobs(member)`
-  typed by the member's class var. **Re-test:** `git grep -c "knobs_of(self.name" -- promptpotter` is 0.
 - **One walk model.** `optimizer_manifest.py::_walk` and `round.py::propose_population` each order
   the round's members; `opening`, `round_packages` and `rederive` read state past `sees`. Action:
   `RoundPlan.steps(gate)` the one order, every read through `sees`. **Re-test:** one of the two walks
@@ -165,6 +226,19 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
+- **One node's knob gates four nodes' pool access**: `potter/dispatch/facade.py` declares `BlockPool` and
+  `DemoPool` draws on `L1GenerateKnobs` for every hub member, so the check-in shows `l1_critique`,
+  `l2_context` and `l3_plan` "open · l1_generate.block_access". Either each reader owns its access or
+  the pool is read once by the hub; the served row must say which.
+- **The check-in's optimizer graph ignores the draft's overlay**: `resolve_pipeline_for_optimizer` and
+  `optimizer_knobs` resolve the manifest with `{}`.
+- **Two doors into "the text an optimizer node runs"**: L4's contextvar (`binding_prompt_overrides`) and
+  the manifest's `resolved_prompts`, with no one resolver; `running_prompt` reads the config and ignores
+  its fields.
+- **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and `KnobRow` serves neither
+  scope nor estimand.
+- **The check-in lists a demo pool as raw sample-key hashes** (50 chips of `a9123c5c…· 1`): an id with no
+  content preview gives the operator nothing to pick by.
 
 ## Bypasses — held for one holistic pass
 

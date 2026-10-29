@@ -159,6 +159,16 @@ shows it informative.
    boundary, replayed on resume.
 9. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
 
+10. **The setup screen leads with the backbone, and the library feeds the optimizer prompts too**
+    (operator, 2026-10-29): the check-in opens on the optimizer choice (potter, capo, capo-pobb,
+    gepa, levi), then that backbone's main knobs. Outside L4, the operator drags a library snippet into
+    an optimizer node's prompt field. Each snippet carries several tags naming the prompt parts it
+    suits (role, answer format, …), so a misplaced drop is visible but allowed. Decided: one library
+    serves target and optimizer prompts; tags are a served closed set (drop hints) plus free tags
+    (search only); the setup screen and the drag ship as one arc. Proposal, not decided: tags
+    replacing today's single `BlockPack.prompt_fields` key, a drop written as the overlay L4 already
+    writes.
+
 Stages 7, 8 and 9 share no seam.
 
 ## Probe rounds
