@@ -22,16 +22,18 @@ from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
 from promptpotter.application.datasets.tabular_ingest import IngestError
+from promptpotter.application.jobs.launcher.head_to_head import MintedHeadToHead
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
 from promptpotter.domain.command_kinds import (
     EditDraftCampaignPayload,
     MintCampaignPayload,
+    MintHeadToHeadPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.phases import StopOutcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
@@ -215,19 +217,6 @@ async def _hold_checkin(
     return held
 
 
-def _purpose_request(raw: str | None) -> Purpose:
-    if raw is None:
-        return Optimize()
-    head_to_head_id, sep, arm_key = raw.partition(":")
-    if not sep:
-        raise SystemExit(f"ERROR: --arm takes HEAD_TO_HEAD:KEY, got {raw!r}")
-    return Compare(
-        arm=PayloadInvalidError.validating(
-            Arm, {"head_to_head_id": head_to_head_id, "arm_key": arm_key}
-        )
-    )
-
-
 def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
     declared = None
     if args.config:
@@ -240,7 +229,6 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             "(`new justlogic/d234`) or via `--dataset-name <name>`.\n\n" + no_dataset_hint(stores)
         )
     knobs = _set_knobs(_sets_of(args))
-    purpose = _purpose_request(args.arm)
     task_text = (
         Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
     )
@@ -250,7 +238,6 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
         {
             "dataset_name": dataset_name,
             "optimization": knobs or None,
-            "purpose": purpose,
             "diag": args.diag,
             "campaign_config": declared,
             "task_text": task_text,
@@ -269,8 +256,6 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
         stores = open_stores(args)
         return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
-    if args.arm is not None:
-        raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
     sets = _sets_of(args)
     patch = _sets_to_patch(sets) if sets else None
     stores = open_stores(args)
@@ -286,6 +271,17 @@ async def _new(args: argparse.Namespace) -> CommandResult:
 
 
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
+    outcome = await _dispatch_mint(stores, mint, inline)
+    if isinstance(outcome, CommandResult):
+        return outcome
+    held = held_run(outcome)
+    _checkin_line("campaign", f"minted {held.session.campaign_id}")
+    return await _run_origin(held, diag=mint.diag)
+
+
+async def _dispatch_mint(
+    stores: Stores, mint: MintCampaignPayload | MintHeadToHeadPayload, inline: Inline
+) -> Any:
     try:
         outcome = await CommandDispatcher(stores, inline=inline).dispatch(CommandCall(mint))
     except BackendUnreachableError as exc:
@@ -296,9 +292,69 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
         ) from None
     except PotterError as exc:
         raise SystemExit(f"ERROR: {exc}") from None
-    held = held_run(outcome.result)
-    _checkin_line("campaign", f"minted {held.session.campaign_id}")
-    return await _run_origin(held, diag=mint.diag)
+    return outcome.result
+
+
+def _arm_request(raw: str) -> dict[str, Any]:
+    head, *sets = raw.split(",")
+    arm_key, sep, optimizer = head.partition("=")
+    if not (sep and optimizer.strip()):
+        raise SystemExit(f"ERROR: --arm takes KEY=OPTIMIZER[,FIELD=VALUE…], got {raw!r}")
+    return {
+        "arm_key": arm_key.strip(),
+        "optimization": {**_set_knobs(sets), "optimizer": optimizer.strip()},
+    }
+
+
+def cmd_head_to_head(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
+    prepare_launch()
+    return _head_to_head(args)
+
+
+async def _head_to_head(args: argparse.Namespace) -> CommandResult:
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
+    mint = PayloadInvalidError.validating(
+        MintHeadToHeadPayload,
+        {
+            "dataset_name": args.dataset,
+            "head_to_head": {
+                "head_to_head_id": args.head_to_head_id,
+                "arms": [_arm_request(raw) for raw in args.arms],
+                "budget": budget_from_args(args),
+            },
+        },
+    )
+    minted = await _dispatch_mint(stores, mint, inline_launch(args))
+    if isinstance(minted, CommandResult):
+        return minted
+    assert isinstance(minted, MintedHeadToHead)
+    for arm_key, campaign in minted.arms:
+        _checkin_line(f"arm {arm_key}", f"minted {campaign.campaign_id}")
+    # Each arm runs to its stop before the next launches; a pause or a failure leaves the rest minted.
+    result: CommandResult | None = None
+    ran: set[str] = set()
+    try:
+        async for arm_key, launched in minted.launches():
+            result = await _run_origin(held_run(launched), diag=False)
+            ran.add(arm_key)
+            if result.outcome in {StopOutcome.PAUSED, StopOutcome.FAILED}:
+                break
+    except PotterError as exc:
+        raise SystemExit(f"ERROR: {exc}\n\n{_unrun(minted, ran)}") from None
+    assert result is not None
+    if unrun := _unrun(minted, ran):
+        logger.info(unrun)
+    return result
+
+
+def _unrun(minted: MintedHeadToHead, ran: set[str]) -> str:
+    left = [(k, c.campaign_id) for k, c in minted.arms if k not in ran]
+    if not left:
+        return ""
+    return "Arms minted, not run — each resumes on its own:\n" + "\n".join(
+        f"  {k}: python -m promptpotter resume --campaign {campaign_id}" for k, campaign_id in left
+    )
 
 
 async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:

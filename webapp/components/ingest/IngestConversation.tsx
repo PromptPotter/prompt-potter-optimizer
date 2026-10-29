@@ -27,6 +27,13 @@ import { ComposerTools } from "./ComposerTools";
 import { SetupStep } from "./SetupStep";
 import { PipelineSetupSection, pipelineLabel } from "./PipelineSetupSection";
 import { OptimizerSetupSection } from "./OptimizerSetupSection";
+import {
+  HeadToHeadSetupSection,
+  NO_HEAD_TO_HEAD,
+  headToHeadLabel,
+  startOptions,
+  type HeadToHeadDraft,
+} from "./HeadToHeadSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
@@ -186,10 +193,12 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const blockersId = useId();
   // The schema's `writeOnly` subtree, already in `StartCheckinOptions` shape.
   const [launch, setLaunch] = useState<StartCheckinOptions>({});
+  const [h2h, setH2h] = useState<HeadToHeadDraft>(NO_HEAD_TO_HEAD);
   const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
   const [seededFor, setSeededFor] = useState<string | null>(null);
   if (served && served.draft_id !== seededFor) {
     setSeededFor(served.draft_id);
+    setH2h(NO_HEAD_TO_HEAD);
     // Per step: a step's key is no patch path, so its fields commit from their own root.
     const stepSchemas = Object.values((served.setup_schema as FieldSchema).properties ?? {});
     setLaunch(
@@ -290,6 +299,10 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         ) : null}
       </SetupStep>
 
+      <SetupStep title="Head-to-head" answer={headToHeadLabel(h2h)} open={false}>
+        <HeadToHeadSetupSection value={h2h} onChange={setH2h} />
+      </SetupStep>
+
       {/* A disabled button carries no tooltip on touch, so the reason must be text on the page. */}
       {blocked ? (
         <ul id={blockersId}>
@@ -313,7 +326,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         className="chat-cta-btn"
         disabled={blocked || flow.busy}
         aria-describedby={blocked ? blockersId : undefined}
-        onClick={() => flow.startFromReady(launch)}
+        onClick={() => flow.startFromReady(startOptions(launch, h2h))}
       >
         {flow.busy ? "Starting…" : flow.saving ? "Saving…" : "Start campaign"}
       </button>

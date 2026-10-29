@@ -11,12 +11,15 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.jobs.launcher.admission import embedded_share, probe_backend
+from promptpotter.application.jobs.launcher.head_to_head import refuse_minting_arms
 from promptpotter.application.jobs.mint import (
+    arm_declarations,
     declare,
     fresh_campaign_id,
     mint_framed_cycle,
     resolve_resume,
 )
+from promptpotter.application.jobs.mint import mint_head_to_head as mint_declared_arms
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
@@ -27,7 +30,7 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.campaign import Compare, Optimize, Purpose
+from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.command_kinds import (
     CompactArchivePayload,
@@ -48,6 +51,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.command_kinds import HeadToHeadRequest
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.run_mode import RunMode
@@ -59,6 +63,7 @@ if TYPE_CHECKING:
 __all__ = [
     "compact_archive",
     "grade_bench",
+    "mint_head_to_head",
     "open_session",
     "reindex_measurement_archive",
     "run_campaign",
@@ -146,6 +151,21 @@ async def compact_archive(
     return report
 
 
+async def mint_head_to_head(
+    session: Session, campaign_config: CampaignConfig, head_to_head: HeadToHeadRequest
+) -> list[Session]:
+    """Every arm minted on *session*'s dataset, in the order *head_to_head* names them, each bound
+    to its root cycle for ``run_campaign``. Raises ``ConflictError`` before any arm is written where
+    the arms differ on anything but their optimization, or one leaves its head-to-head's record."""
+    refuse_minting_arms(
+        session.store, JobRegistry.attach(session.store.jobs_dir), len(head_to_head.arms)
+    )
+    minted = await mint_declared_arms(
+        session, arm_declarations(session, campaign_config, head_to_head), session.bank.samples
+    )
+    return [arm.session for arm in minted]
+
+
 async def run_campaign(
     session: Session,
     campaign_config: CampaignConfig | None = None,
@@ -155,17 +175,17 @@ async def run_campaign(
     budget: Budget,
     step_rounds: int | None = None,
     mode: RunMode,
-    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
 ) -> tuple[Session, CycleResult]:
     """Answers the session bound to the cycle the run ended on. Blocks under ``origin_gate: strict``
-    until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
+    until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does.
+    An arm of ``mint_head_to_head`` runs here as a resume: its declaration is already on disk."""
     declaration = None
     resumed: SelectedOptimizer | None = None
     if session.campaign_id:
-        if campaign_config is not None or isinstance(purpose, Compare):
+        if campaign_config is not None:
             raise PayloadInvalidError(
                 f"{session.hop.cycle_id} resumes under its campaign's declaration: pass no "
-                "config and no arm to resume it",
+                "config to resume it",
                 code="resume_declared",
             )
         campaign = session.store.campaigns.load_campaign(session.campaign_id)
@@ -179,7 +199,7 @@ async def run_campaign(
             raise PayloadInvalidError(
                 "a mint declares its campaign: pass the config to run", code="mint_undeclared"
             )
-        declaration = declare(session, campaign_config, purpose=purpose)
+        declaration = declare(session, campaign_config, purpose=Optimize())
         campaign_config = effective_config(declaration)
     # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
     async with embedded_share(

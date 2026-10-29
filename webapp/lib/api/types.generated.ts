@@ -3762,11 +3762,28 @@ export interface OriginResolution {
   degraded_cause: string | null;
 }
 
-/** What a Start answers: the job holding its slot, and the cycle it minted. */
+/** What a Start answers: the job holding its slot, and the cycle it minted — of a head-to-head, */
 export interface StartCheckinResponse {
   job_id: string;
   /** Null while the job is queued: the campaign is minted once it holds a slot. */
   hop: CycleHop | null;
+  /** Every arm, where the Start declared a head-to-head. */
+  head_to_head: HeadToHeadStarted | null;
+}
+
+/** Every arm of one act minted and launched, in the order the act named them. */
+export interface HeadToHeadStarted {
+  head_to_head_id: string;
+  arms: ArmStarted[];
+}
+
+export interface ArmStarted {
+  arm_key: string;
+  /** The arm's root cycle, minted before its launch was asked. */
+  hop: CycleHop;
+  job_id: string;
+  /** Waiting for a machine slot; it starts by itself. */
+  queued: boolean;
 }
 
 /** What a pass did, or would do. */
@@ -4063,9 +4080,6 @@ export interface MintCampaignPayload {
   /** Laid over the dataset's own `optimization` before the mint freezes it; only
    * the fields sent move anything */
   optimization: OptimizationOverrides | null;
-  /** `compare` mints a controlled arm of its head-to-head, declared by its first
-   * arm; an arm off the declared instrument or budget is refused 409 */
-  purpose: Optimize | Compare;
   /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
    * the other run-mode fields are `start-run`'s alone. */
   diag: boolean;
@@ -4321,6 +4335,31 @@ export interface LivesConfig {
   cap: number;
 }
 
+/** Mint every arm of a head-to-head on one dataset in one act — each refused against the */
+export interface MintHeadToHeadPayload {
+  dataset_name: string;
+  head_to_head: HeadToHeadRequest;
+}
+
+/** A head-to-head of N arms as one declaration: every arm declares the dataset's origin and */
+export interface HeadToHeadRequest {
+  head_to_head_id: string;
+  /** An id already declared takes these as further arms, each refused 409 off its
+   * record. */
+  arms: ArmRequest[];
+  /** Declared by every arm and bound per arm: each campaign spends up to it on its
+   * own book. An axis left out is the dataset's. */
+  budget: Budget;
+}
+
+/** One arm of a head-to-head as asked: its key, and the optimizer it runs with that */
+export interface ArmRequest {
+  arm_key: string;
+  /** Laid over the shared declaration; only the fields sent move anything, and
+   * never `budget`, which is the head-to-head's. */
+  optimization: OptimizationOverrides;
+}
+
 /** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */
 export interface OriginGateDecisionPayload {
   /** The full id: a prefix is the terminal's to resolve, before it builds a
@@ -4391,6 +4430,10 @@ export interface StartCheckinPayload {
   budget: Budget;
   /** Run the diagnostic shape. */
   diag: boolean;
+  /** Mint the draft as these arms of one head-to-head, its origin every arm's, each
+   * launched in turn. `budget` and `diag` then name nothing: an arm runs its
+   * head-to-head's budget and shape. */
+  head_to_head: HeadToHeadRequest | null;
 }
 
 /** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
@@ -4478,7 +4521,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "mint-head-to-head" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -4501,6 +4544,7 @@ export interface CommandPayloads {
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
   "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
+  "mint-head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "origin-gate-decision": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
   "pause-cycle": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
@@ -4531,6 +4575,7 @@ export interface CommandResponses {
   "fork-cycle": CommandAcceptedBody;
   "grade-bench": CommandAcceptedBody;
   "mint-campaign": CommandAcceptedBody;
+  "mint-head-to-head": HeadToHeadStarted;
   "origin-gate-decision": CommandAcceptedBody;
   "pause-cycle": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;

@@ -58,7 +58,7 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
         if isinstance(campaign, HierarchyCampaign)
         for course in campaign.children
     ]
-    # Each arm campaign's `new --arm` address: the head-to-head ids already taken.
+    # Each arm campaign's `head-to-head` id and key: the head-to-head ids already taken.
     arms = [
         f"  {tag.value}  {campaign.address}"
         for campaign in listing.entries

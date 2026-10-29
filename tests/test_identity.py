@@ -61,8 +61,9 @@ from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    arm_declarations,
     declare,
-    mint_framed_cycle,
+    mint_head_to_head,
     resolve_cycle_plan,
     resolve_resume,
 )
@@ -121,7 +122,14 @@ from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
-from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
+from promptpotter.domain.campaign import (
+    Arm,
+    Campaign,
+    Compare,
+    DeterminismClamp,
+    Optimize,
+    RunDeclaration,
+)
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -130,7 +138,9 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.command_kinds import (
+    ArmRequest,
     ForkSeed,
+    HeadToHeadRequest,
     StartCheckinPayload,
     SubmittedArm,
 )
@@ -1147,15 +1157,35 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
 
-    def minted(declaration: RunDeclaration, campaign_id: str) -> object:
-        return asyncio.run(
-            mint_framed_cycle(arming, declaration, rows_30, campaign_id=campaign_id, task_text=None)
-        )
+    def mint_arms(declarations: list[RunDeclaration]) -> list[Campaign]:
+        minted = asyncio.run(mint_head_to_head(arming, declarations, rows_30))
+        return [cast("Campaign", stores.campaigns.load_campaign(m.campaign_id)) for m in minted]
 
-    minted(armed, "decl__0000h1")
-    # An arm declared over other bench defaults never joins its head-to-head.
+    def written() -> int:
+        return len(stores.campaigns.list_campaigns("decl"))
+
+    before = written()
+    # A head-to-head mints whole or not at all: an arm over other bench defaults refuses every arm.
     with pytest.raises(ConflictError):
-        minted(twin.model_copy(update={"bench_defaults_pin": "moved"}), "decl__0000h2")
+        mint_arms([armed, twin.model_copy(update={"bench_defaults_pin": "moved"})])
+    assert written() == before and stores.campaigns.load_head_to_head("h") is None, (
+        "a refused head-to-head left an arm minted, or its record declared"
+    )
+    shared = Budget(usd=2.0, rounds=2)
+    request = HeadToHeadRequest(
+        head_to_head_id="h",
+        arms=[ArmRequest(arm_key="a"), ArmRequest(arm_key="b")],
+        budget=shared,
+    )
+    arms = mint_arms(arm_declarations(arming, door, request))
+    assert [(c.declaration.purpose, c.declaration.budget) for c in arms] == [
+        (Compare(arm=Arm(head_to_head_id="h", arm_key=k)), shared) for k in ("a", "b")
+    ], "an arm of one act left its head-to-head, or another budget than the one bound per arm"
+    assert len({c.root_content_hash for c in arms}) == 1, "the arms of one act read two origins"
+    # A key already minted refuses the whole act again, before any arm beside it is written.
+    with pytest.raises(ConflictError):
+        mint_arms(arm_declarations(arming, door, request))
+    assert written() == before + 2, "a taken key's act minted an arm"
     # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
     # campaign minted on that declaration resolves to.
     panel = InnerTasks(

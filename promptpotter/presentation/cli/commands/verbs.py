@@ -111,13 +111,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "`--set column.query=input`, applied before the resolver runs.",
             ),
             Arg(
-                "--arm",
-                default=None,
-                metavar="HEAD_TO_HEAD:KEY",
-                help="Mint as a controlled arm of a head-to-head, declared by its first arm off that "
-                "arm's instrument and budget; a later arm on any other is refused.",
-            ),
-            Arg(
                 "--diag",
                 dest="diag",
                 action="store_true",
@@ -134,6 +127,30 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 metavar="ACC",
                 help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66). The "
                 "campaign's own knob, so `--set halt_at_accuracy=ACC` spelled short.",
+            ),
+            NO_WAIT,
+            *BUDGET_AXES,
+        ),
+    ),
+    Verb(
+        "head-to-head",
+        "new:cmd_head_to_head",
+        help="Mint every arm of a controlled head-to-head on one dataset NAME in one act — "
+        "refused whole, before any arm is written, when the arms differ on anything but their "
+        "optimization — then run the arms in turn. The arms share the head-to-head id, the "
+        "origin and one budget, bound per arm. A pause or failure leaves the later arms minted; "
+        "each resumes by `resume --campaign`.",
+        args=(
+            Arg("dataset", help="A committed dataset's name, as `new <name>` takes it."),
+            Arg("head_to_head_id", help="The head-to-head's id; a taken id joins its record."),
+            Arg(
+                "--arm",
+                dest="arms",
+                action="append",
+                required=True,
+                metavar="KEY=OPTIMIZER[,FIELD=VALUE…]",
+                help="Repeatable, one per arm: its key, its optimizer, and any `--set` knob of "
+                "`new` but `budget.<axis>`, e.g. `--arm capo=capo,nodes.capo/1.max_tokens=900`.",
             ),
             NO_WAIT,
             *BUDGET_AXES,
@@ -600,7 +617,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "cycles:cmd_cycles",
         help="Every cycle of every campaign you own that loads, with its run state (`run_phase`) — derived at each read and written to "
         "no file, so this is where a terminal reads which runs are live, then each head-to-head arm "
-        "as its `--arm` address. Read-only, zero spend.",
+        "as its `head-to-head` id and key. Read-only, zero spend.",
         args=(
             Arg("--campaign", default="", help="Only this campaign's cycles."),
             Arg("--attached", action="store_true", help="Only cycles a producer process holds."),

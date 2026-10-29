@@ -14,6 +14,7 @@ from promptpotter.application.commands.origin_resolving import (
 )
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
+from promptpotter.application.jobs.launcher.head_to_head import MintedHeadToHead
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
@@ -22,6 +23,8 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     CompactArchivePayload,
     EditDraftCampaignPayload,
+    HeadToHeadStarted,
+    MintHeadToHeadPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
@@ -57,10 +60,29 @@ async def start_checkin(
 
     An incomplete origin answers 422 and the draft stays open.
     """
-    launched = await dispatch_start_checkin(
+    started = await dispatch_start_checkin(
         stores, CommandCall(payload, key), job_registry=job_registry
     )
-    return StartCheckinResponse(job_id=launched.job.job_id, hop=launched.hop)
+    if isinstance(started, HeadToHeadStarted):
+        first = started.arms[0]
+        return StartCheckinResponse(job_id=first.job_id, hop=first.hop, head_to_head=started)
+    return StartCheckinResponse(job_id=started.job.job_id, hop=started.hop, head_to_head=None)
+
+
+@commands_router.post(f"/{CommandKind.MINT_HEAD_TO_HEAD}", response_model=HeadToHeadStarted)
+async def mint_head_to_head(
+    job_registry: JobRegistryDep,
+    stores: StoresDep,
+    payload: MintHeadToHeadPayload,
+    key: IdempotencyKeyDep,
+) -> HeadToHeadStarted:
+    """Mint every arm, then launch each detached, or queued for a slot. A launch refused after the
+    mint names the arms it left unrun under `details.unlaunched_arms`; each resumes by `start-run`."""
+    outcome = await CommandDispatcher(stores, job_registry=job_registry).dispatch(
+        CommandCall(payload, key)
+    )
+    minted: MintedHeadToHead = outcome.result
+    return await minted.started()
 
 
 @commands_router.post(f"/{CommandKind.COMPACT_ARCHIVE}", response_model=ArchiveReport)

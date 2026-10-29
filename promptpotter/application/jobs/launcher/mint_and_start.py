@@ -33,7 +33,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.domain.campaign import Campaign, Purpose
+from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.spend import Budget
@@ -78,7 +78,6 @@ class FreshMint:
     dataset: ResolvedDataset
     budget: Budget
     optimization: Mapping[str, Any]
-    purpose: Purpose
     declared: CampaignConfig | None
     task_text: str | None
 
@@ -150,7 +149,7 @@ async def hold_fresh_mint(
 
         minted = await mint_framed_cycle(
             session,
-            declare(session, request.campaign_config(stores), purpose=request.purpose),
+            declare(session, request.campaign_config(stores), purpose=Optimize()),
             session.bank.samples,
             campaign_id=fresh_campaign_id(session),
             task_text=request.task_text,

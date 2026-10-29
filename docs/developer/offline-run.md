@@ -43,8 +43,9 @@ green optimizer under the same arguments prints `unchanged since green` for it; 
 or pass `--against` to rerun all. A default-argument green by hand is the gate's green too.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
-§ The controlled comparison): two workspaces, each running one head-to-head's arms (`--optimizer`,
-potter and capo by default), one after a foreign campaign on the dataset — the one layout putting
+§ The controlled comparison): two workspaces, each minting one head-to-head's arms (`--optimizer`,
+potter and capo by default) in one act, as the `head-to-head` verb does (`mint/` holds what the act
+sent), then running each, one after a foreign campaign on the dataset — the one layout putting
 several optimizers' campaigns in ONE workspace, for the webapp's Compare tab. It fails unless a
 skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory holds only
 runs it filed, and every election read its head-to-head's freeze plus its own lines; whether the
@@ -106,7 +107,8 @@ diff base/<optimizer>/decisions.json after/<optimizer>/decisions.json
 ```
 
 Requests differing while decisions match is a rendering change; decisions differing is a
-behaviour change. Two runs of one tree are byte identical, so any diff is the change's.
+behaviour change. Two runs of one tree are byte identical, so any diff is the change's — but for
+the `--controlled` potter arm beside its foreign campaign ([`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md)).
 `--digests` prints the L4 identity digests (estimator source, each optimizer's treatment), which
 a change that should not re-key an inner cell leaves equal.
 

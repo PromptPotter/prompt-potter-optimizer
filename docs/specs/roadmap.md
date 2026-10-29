@@ -20,8 +20,8 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
 3. **The optimizer climbs** (§ Optimizer tuning — the standing board): L1 quality (answer_format is
    never edited, a held leader is never re-scored); early stop when C1.1 clearly beats C0; Δ per time,
    per candidate and per $ served in chat. Paid: the board's path, steps (1)–(4).
-4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
-   partition; third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
+4. **The preprint's evidence (M14).** Code: `bbeh` re-ingested with a wider bench partition;
+   third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
 5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A2 host
    coupon + BYO keys; A3 anonymous preview.
@@ -79,8 +79,7 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    `optimizer ∈ {potter, capo, levi, gepa}`, calls held equal, 3 seeds; paired per-cell differences,
    clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
    the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
-   re-ingested with a bench partition wider than 100 rows; an N-arm mint verb over
-   `application/jobs/mint.py::_join_head_to_head`.
+   re-ingested with a bench partition wider than 100 rows. The arms are one `head-to-head` act.
    Price it in dollars and wall clock before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
    budget-matched Pareto comparison reviewers ask for first.

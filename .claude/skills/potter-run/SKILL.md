@@ -72,8 +72,8 @@ Who launches is the autonomy mode's call. Never block a foreground shell on a ca
 `promptpotter-self` is the exception, owned by `/potter-self` § Live-run supervision.
 
 Verbs and flags: [`persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) and
-`--help`. Here: `new <name>` (`--set optimizer=<name>`; `--arm <h2h>:<key>` mints a head-to-head arm),
-`new <file>` (raw ingest), `resume` (the happy path, no flags), `pause` (the HALT; a queued launch
+`--help`. Here: `new <name>` (`--set optimizer=<name>`), `head-to-head <name> <id> --arm
+<key>=<optimizer> …` (every arm in one act, run in turn), `new <file>` (raw ingest), `resume` (the happy path, no flags), `pause` (the HALT; a queued launch
 takes `cancel-queued <job_id>`), `set-limits`, `submit-arms`, `bench`, `verify`, `evidence`.
 `compact-archive purge-cold --apply` destroys paid spend — always asked for. A dataset's defaults are
 `{dataset}/dataset.yaml::campaign`, never guessed; `new` overwrites the tenant pointer.

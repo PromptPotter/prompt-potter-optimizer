@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import Field
 
+from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
 from promptpotter.application.datasets.loaders import cut_bank
 from promptpotter.application.datasets.startability import upload_source
@@ -24,9 +25,12 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     MintedCycle,
+    arm_declarations,
+    arm_plans,
     declare,
     fresh_campaign_id,
     mint,
+    mint_arms,
     refuse_unrunnable,
     relabel_minted,
     resolve_cycle_plan,
@@ -36,6 +40,7 @@ from promptpotter.application.jobs.registry import UNRESOLVED_HOP
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
 from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.command_kinds import HeadToHeadStarted
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
@@ -47,16 +52,21 @@ from promptpotter.infrastructure.store.stores import Stores
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import Job, JobRegistry
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.command_kinds import HeadToHeadRequest
 
 logger = logging.getLogger(__name__)
 
 
 class StartCheckinResponse(StrictModel):
-    """What a Start answers: the job holding its slot, and the cycle it minted."""
+    """What a Start answers: the job holding its slot, and the cycle it minted — of a head-to-head,
+    its first arm's."""
 
     job_id: str
     hop: CycleHop | None = Field(
         description="Null while the job is queued: the campaign is minted once it holds a slot."
+    )
+    head_to_head: HeadToHeadStarted | None = Field(
+        description="Every arm, where the Start declared a head-to-head."
     )
 
 
@@ -97,22 +107,40 @@ class CheckinStart:
         return draft_config(stores, owned_draft(stores, self.claim.draft_id))
 
 
-def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict[str, Any]) -> None:
+def _refuse_unrunnable_upload(
+    stores: Stores,
+    draft: DraftCampaign,
+    source: dict[str, Any],
+    head_to_head: HeadToHeadRequest | None,
+) -> None:
     """Before the dataset lands, so a refused Start takes no slug and its retry is a Start like the first."""
     params, _rows, schema = draft_pipeline(stores, draft)
     config = draft_config(stores, draft)
-    refuse_unrunnable(
-        config,
-        select_optimizer(config.optimization),
-        cut_bank(stores, source),
-        params,
-        schema,
-        free=on_free_tier(stores),
-        shelf=stores.block_packs,
+    configs = (
+        [config]
+        if head_to_head is None
+        else [
+            with_optimization(config, head_to_head.declared_optimization(arm))
+            for arm in head_to_head.arms
+        ]
     )
+    bank = cut_bank(stores, source)
+    for each in configs:
+        refuse_unrunnable(
+            each,
+            select_optimizer(each.optimization),
+            bank,
+            params,
+            schema,
+            free=on_free_tier(stores),
+            shelf=stores.block_packs,
+        )
 
 
-async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
+async def commit_checkin(
+    stores: Stores, draft_id: str, head_to_head: HeadToHeadRequest | None
+) -> list[MintedCycle]:
+    """One campaign, or every arm of *head_to_head*: the draft's origin is each arm's."""
     draft = start_ready_draft(stores, draft_id)
     dataset_name = draft.dataset_name
     canonical = draft.source_dataset
@@ -125,7 +153,7 @@ async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
         if upload is None:
             raise LaunchError(f"draft {draft.draft_id} names no upload to commit")
         source = upload_source(draft, upload)
-        _refuse_unrunnable_upload(stores, draft, source)
+        _refuse_unrunnable_upload(stores, draft, source, head_to_head)
         commit_upload_definition(stores, draft, source=source)
         origin_override = None
     else:
@@ -144,19 +172,25 @@ async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
     campaign_config = draft_config(
         stores, draft, session_chain=[n.name for n in session.pipeline_schema.nodes]
     )
-    plan = resolve_cycle_plan(
-        session,
-        declare(session, campaign_config, purpose=Optimize()),
-        session.bank.samples,
-        origin_override=origin_override,
-    )
     ledger = stores.drafts.ledger(draft.draft_id)
-    minted = mint(
-        plan,
-        campaign_id=fresh_campaign_id(session),
-        billed=ledger if ledger.is_file() else None,
-    )
-    relabel_minted(minted.session)
+    billed = ledger if ledger.is_file() else None
+    if head_to_head is None:
+        plan = resolve_cycle_plan(
+            session,
+            declare(session, campaign_config, purpose=Optimize()),
+            session.bank.samples,
+            origin_override=origin_override,
+        )
+        minted = [mint(plan, campaign_id=fresh_campaign_id(session), billed=billed)]
+    else:
+        plans = arm_plans(
+            session,
+            arm_declarations(session, campaign_config, head_to_head),
+            session.bank.samples,
+            origin_override=origin_override,
+        )
+        minted = mint_arms(plans, billed=billed)
+    relabel_minted(minted[0].session)
     stores.drafts.close(draft.draft_id)
     return minted
 
@@ -168,7 +202,7 @@ async def hold_checkin_start(
     hop: CycleHop | None = None
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        minted = await _commit_checkin(stores, request.claim.draft_id)
+        (minted,) = await commit_checkin(stores, request.claim.draft_id, None)
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
         job_registry.update_target(job.job_id, hop=hop)
         claim_cycle(stores, job_registry, job, hop)

@@ -8,7 +8,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 **The default operating context is the cloud team-online deployment (tier 3)**, not local-secure (tier 2): [`deploy-linux/`](deploy-linux/) — Cloudflare tunnel, open OIDC signup, a per-account spend ceiling.
 
-**Every run OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled `--arm` reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run** ([`docs/decisions.md`](docs/decisions.md) § 0009).
+**Every run OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled `head-to-head` arm reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run** ([`docs/decisions.md`](docs/decisions.md) § 0009).
 
 **Origin = campaign root = C0** (for a fork, the point it branches from). An *individual/candidate* is a configuration (`OptSearchPoint`); its **parent** is what it was mutated from — each arm's `reference_id`.
 

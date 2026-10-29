@@ -86,7 +86,8 @@ Three values, three functions; none folds into another.
 #### The controlled comparison — one declaration every mechanism reads
 
 An ordinary campaign uses everything that helps; one minted as an **arm** of a declared
-head-to-head (`RunDeclaration.purpose` is `Compare`) is **controlled**, and every mechanism that
+head-to-head (`RunDeclaration.purpose` is `Compare`, every arm minted in one act by
+`application/jobs/mint.py::mint_head_to_head`) is **controlled**, and every mechanism that
 reads past the declaration asks that predicate alone — owned by [`decisions.md`](decisions.md)
 § 0009. The head-to-head (`domain/campaign.py::HeadToHeadRecord`) pins one `SharedPart`, so every
 arm is graded on one bench set under one budget. What controlled switches, one site each: the

@@ -109,12 +109,8 @@ def check_launch_quotas(
 ) -> None:
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, not this one."""
     # A fresh mint, a check-in's Start included, names no cycle yet.
-    rate_limited = not spends_the_hosts_own_key(stores) and hop == UNRESOLVED_HOP
-    if rate_limited and not _consume_launch_token(f"launch:{user.user_id}"):
-        raise QuotaExceededError(
-            code="rate_limited",
-            message="Too many campaign launches; slow down and retry shortly.",
-        )
+    if hop == UNRESOLVED_HOP:
+        refuse_fresh_campaigns(user=user, stores=stores, job_registry=job_registry, campaigns=1)
 
     # A queued launch counts, or an account queues without bound and the drain order can starve.
     # A scoring pass does not: the limit is on campaigns, and a pass that finds no slot is refused.
@@ -129,17 +125,30 @@ def check_launch_quotas(
             ),
         )
 
-    if rate_limited:
-        today = job_registry.list_launched_today(user_id=user.user_id)
-        if len(today) >= user.max_campaigns_per_day:
-            raise QuotaExceededError(
-                code="quota_exceeded",
-                message=(
-                    f"Daily campaigns ceiling reached "
-                    f"({len(today)}/{user.max_campaigns_per_day} today); "
-                    f"resets at UTC midnight."
-                ),
-            )
+
+def refuse_fresh_campaigns(
+    *, user: User, stores: Stores, job_registry: JobRegistry, campaigns: int
+) -> None:
+    """The rate and daily ceilings on minting: a head-to-head mints its *campaigns* arms in one act,
+    and each arm's launch then names its cycle, so it is counted here, whole, before any is written."""
+    if spends_the_hosts_own_key(stores):
+        return
+    if not _consume_launch_token(f"launch:{user.user_id}"):
+        raise QuotaExceededError(
+            code="rate_limited",
+            message="Too many campaign launches; slow down and retry shortly.",
+        )
+    today = len(job_registry.list_launched_today(user_id=user.user_id))
+    if today + campaigns > user.max_campaigns_per_day:
+        minting = "" if campaigns == 1 else f"; this head-to-head mints {campaigns}"
+        raise QuotaExceededError(
+            code="quota_exceeded",
+            message=(
+                f"Daily campaigns ceiling reached "
+                f"({today}/{user.max_campaigns_per_day} today{minting}); "
+                f"resets at UTC midnight."
+            ),
+        )
 
 
 def overrun(ceilings: Budget, spent: UserSpend) -> Budget:

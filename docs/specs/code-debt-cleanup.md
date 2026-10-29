@@ -214,13 +214,35 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   against the arm's other rows.
 - **An arm refused at run init keeps its key, and its config can no longer be changed.**
   `preflight.py::refuse_arm_below_round` advises "size the round down with the optimizer's own
-  knobs", but a node knob is fixed at mint. `new --arm <h2h>:<key>` on that key is refused ("is
-  campaign … already"), so the operator mints under a second key and the head-to-head keeps a dead
+  knobs", but a node knob is fixed at mint. `head-to-head <name> <h2h> --arm <key>=…` on that key is
+  refused (`arm_taken`), so the operator mints under a second key and the head-to-head keeps a dead
   arm that never searched. Seen on h2h-7: capo `__bca431` was refused at its $0.03 cap; `capo-b5`
   `__530ab2` was minted with `max_blocks=5`. Also seen there: `set-limits --max-usd 0.20` on
   `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
   re-mintable under its own key, or should the refusal run before the mint so no key is taken?
   **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
+- **A head-to-head's arms launch after all are minted, so a launch refused past the mint leaves its
+  arm minted and unrun** (`application/jobs/launcher/head_to_head.py::MintedHeadToHead.launches`,
+  naming them in `details.unlaunched_arms`; the terminal prints each one's `resume`). A refusal the
+  mint cannot foresee (a slot, a ceiling reached meanwhile) has no other home without a reservation
+  per arm. Open: reserve N slots up front, or serve an unrun arm as such. **Rides with:** the entry
+  above. **Re-test:** a `head-to-head --no-wait` on a busy box.
+- **The rate and daily-campaign checks key on `hop == UNRESOLVED_HOP`**
+  (`application/jobs/quota.py::check_launch_quotas`) — a flag standing in for "this launch mints",
+  so a mint that resolves its hop first (the head-to-head's arms) counts itself by hand
+  (`refuse_fresh_campaigns(campaigns=N)`). Action: a `LaunchRequest` declares the campaigns it
+  mints. **Rides with:** the next change to `launcher/launch.py::LaunchRequest`. **Re-test:**
+  `grep -n "UNRESOLVED_HOP" promptpotter/application/jobs/quota.py`.
+- **The controlled offline leg's potter arm beside the foreign campaign is not byte-stable**: two runs
+  of one tree differ in which cells are `cached` (`backend_cells`, `bought`), fitness and every election
+  equal; the bare leg and capo are stable. Open: an archive read ordered by something a run mints
+  (a campaign id). **Rides with:** any change to `archive_queries.py::ArmOf`. **Re-test:** two
+  `offline_run.py --controlled` homes, `cmp controlled/arm-potter/decisions.json`.
+- **An origin's `changes_description` carries the install's absolute path** ("Origin from
+  /…/datasets/justlogic/d234/origin.yaml"), so the same definition reads differently per checkout and
+  an offline run `--against` another tree's home reports gepa and levi `MOVED`. Action: name the
+  dataset, not the file. **Rides with:** any change to the origin's arm text. **Re-test:**
+  `grep -rn "Origin from" promptpotter/`.
 - **CAPO's race ends after its first block whenever offspring equal the cut.** The fixed blocks follow
   the paper (App. C.4), but with 4 offspring and μ 10 every h2h-7 round cut 4 on block 1 and stopped.
   The population was then judged only on those 30 cells: the crown held C1.7 (36.7% there, 27.5% on

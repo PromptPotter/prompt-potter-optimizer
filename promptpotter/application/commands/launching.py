@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
@@ -16,11 +16,18 @@ from promptpotter.application.commands.dispatcher import (
     DispatchedToDraft,
     refused_on_an_arm,
 )
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, start_ready_draft
+from promptpotter.application.jobs.launcher.head_to_head import (
+    CheckinHeadToHead,
+    MintedHeadToHead,
+    checkin_head_to_head,
+    mint_dataset_head_to_head,
+)
 from promptpotter.application.jobs.launcher.launch import (
     Admitted,
     Inline,
@@ -59,7 +66,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import (
         ForkCyclePayload,
         ForkSeed,
+        HeadToHeadStarted,
         MintCampaignPayload,
+        MintHeadToHeadPayload,
         StartCheckinPayload,
         StartRunPayload,
         StepCyclePayload,
@@ -229,7 +238,6 @@ def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object
             dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
             budget=payload.budget,
             optimization=payload.optimization_sent,
-            purpose=payload.purpose,
             declared=payload.campaign_config,
             task_text=payload.task_text,
         )
@@ -246,9 +254,41 @@ def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object
     return Applier.silent(_apply_mint)
 
 
-def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier[Admitted]:
+def mint_head_to_head(dispatched: Dispatched[MintHeadToHeadPayload]) -> Applier[MintedHeadToHead]:
+    """Applied once every arm is minted; the caller then drives ``launches``, one arm at a time."""
+    dispatcher, payload = dispatched.dispatcher, dispatched.payload
+    stores = dispatcher.stores
+
+    async def _apply_mint() -> MintedHeadToHead:
+        dataset = offered_dataset(stores, payload.dataset_name)
+        return await mint_dataset_head_to_head(
+            dataset,
+            load_dataset_campaign_config(dataset.directory),
+            payload.head_to_head,
+            stores=stores,
+            job_registry=dispatcher.job_registry,
+            inline=dispatcher.inline,
+        )
+
+    # A retry under its key mints nothing twice: every arm key is taken by then, refused 409.
+    return Applier[MintedHeadToHead](_apply_mint, replay=None)
+
+
+def start_checkin(
+    dispatched: DispatchedToDraft[StartCheckinPayload],
+) -> Applier[Admitted] | Applier[CheckinHeadToHead]:
     dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
     stores = dispatcher.stores
+    if (head_to_head := start.head_to_head) is not None:
+
+        def _declare_arms() -> CheckinHeadToHead:
+            try:
+                return checkin_head_to_head(stores, dispatcher.job_registry, claim, head_to_head)
+            except BaseException:
+                claim.release()
+                raise
+
+        return Applier[CheckinHeadToHead](_declare_arms, replay=None, ack="accepted")
 
     def _admit() -> Admitted:
         # The claim rides the admitted job to the end of its hold; a refusal before it ends it here.
@@ -278,8 +318,16 @@ async def dispatch_start_checkin(
     *,
     job_registry: JobRegistry | None = None,
     inline: Inline | None = None,
-) -> Launched:
-    """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
+) -> Launched | HeadToHeadStarted:
+    """Acked at admission, before the mint moves the draft's ledger into the root cycle. A
+    head-to-head's arms launch as a server launches them, so a terminal Start declares none."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
     outcome = await dispatcher.dispatch(call)
-    return await cast(Admitted, outcome.result).launched()
+    match outcome.result:
+        case Admitted() as admitted:
+            return await admitted.launched()
+        case CheckinHeadToHead() as arms:
+            assert inline is None, "a terminal Start declares no head-to-head"
+            return await (await arms.minted()).started()
+        case other:
+            raise AssertionError(f"a Start answers its admission, not {other!r}")

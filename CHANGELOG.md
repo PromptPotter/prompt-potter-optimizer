@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Pools.** One `Pool` slice (`BlockPool`, `DemoPool`) any manifest seeds and reads under `off | open | closed`, banked whole; `EarnedLibrary` / `EarnedBlocks` go. (83d049d60, c4a803b3a)
 - `discard-draft` verb. (8f1a0e13e)
+- **`head-to-head <name> <id> --arm <key>=<optimizer>[,FIELD=VALUE…] …`** mints every arm of a head-to-head in one act, refused whole before any arm is written, one budget bound per arm; also `POST /commands/mint-head-to-head`, `embedded_run.mint_head_to_head` and `start-checkin`'s `head_to_head`.
 - `export --tier chat|report|notebook|deploy|package`: five served readings of a cycle, the same at `GET …/cycles/{id}/export` and on the candidates card; `export.json` carries a PROV-O `lineage`.
 
 ### Changed
@@ -17,6 +18,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING — an individual is `{prompts: {node: NodePrompt}, pipeline_params, lineage}`**; each prompt node declares its fields, shots are sample keys; `PromptTemplate` is deleted. (f0625b8b8)
 - **BREAKING — a dataset is its content.** `dataset_hash` hashes the banked rows, the archive keys on `sample_key`, served `sample_id` is `position`; `replace-dataset` is deleted; `StopReason.max_rounds` is `rounds_budget`. (86fe03da0)
 - **BREAKING — `RunDeclaration.purpose`** (`Optimize | Compare(arm)`) replaces `arm`. (2d17020ad)
+- **BREAKING — an arm mints only with its head-to-head**: `new --arm`, `mint-campaign`'s `purpose` and `run_campaign(purpose=)` are deleted.
 - **BREAKING — arms are keyed by content `ArmKey`**; `Candidate*Record`, `ScoredCandidate`, `CandidateProposal` and `CycleResult`'s level lists are deleted, `RoundClosedRecord` carries the `level_series`. (609b060d6)
 - **BREAKING — one tenant δ ruler**: the `RulerRecord` ledger record is deleted. (6a6901b40)
 - **BREAKING — the control-plane specs are generated** (`docs/specs/openapi.generated.json`, `events-asyncapi.generated.json`): the hand-written `api-openapi.yaml` / `events-asyncapi.yaml` are deleted; an invalid payload answers `422 request_invalid`; CLI `step-cycle --step-rounds`, `submit-arms --arms`. (731e31328)

@@ -167,6 +167,8 @@ For a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclude_nod
 
 `new <name>` mints from `promptpotter/assets/datasets/<name>/`. `new <file>` ingests a CSV into a check-in draft, runs the origin check-in, and Starts it once the readiness gate passes; a surviving gap prints its questions and exits non-zero — nothing is minted on a guessed default (`--set` and re-run). **The flag set is `presentation/cli/commands/verbs.py`.** The second Ctrl+C force-quits; a sent call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`).
 
+`head-to-head <name> <id> --arm <key>=<optimizer>[,FIELD=VALUE…] …` mints every arm of one head-to-head in one act (`application/jobs/mint.py::mint_head_to_head`): each arm is refused against the others and the head-to-head's record before any is written, the rate and daily ceilings count every arm, and the budget flags are the one budget each arm declares and spends on its own book. Each arm is then a campaign like any other, `head_to_heads/{id}.json` beside them, launched in turn: the terminal runs one to its stop before the next, a server launches all; a pause, failure or refused launch leaves the later arms minted, each resumed by `resume --campaign`. The same act is `POST /commands/mint-head-to-head`, `embedded_run.py::mint_head_to_head`, and a check-in's Start carrying `head_to_head`. `evidence` reads its arms as it reads any head-to-head.
+
 ## Will a config change re-score? — the measurement cache
 
 1. **The measurement key includes the connector config, model included** — `node_configs` (overlay-merged `pipeline_params`) plus the sample's content (`Sample.key`), never its dataset or position. A change at node *N* re-measures every sample whose pipeline ran past *N*.

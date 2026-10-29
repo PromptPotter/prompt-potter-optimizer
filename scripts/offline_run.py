@@ -50,7 +50,12 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.draft_campaign import split_overlay
 from promptpotter.application.datasets.loaders import definition_source
-from promptpotter.application.embedded_run import grade_bench, open_session, run_campaign
+from promptpotter.application.embedded_run import (
+    grade_bench,
+    mint_head_to_head,
+    open_session,
+    run_campaign,
+)
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
@@ -66,13 +71,14 @@ from promptpotter.config.paths import default_projects_root, install_datasets_ro
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
-from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
+from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
 )
-from promptpotter.domain.command_kinds import SkipSearchpointPayload
+from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest, SkipSearchpointPayload
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
@@ -561,17 +567,17 @@ async def run_one(
     rounds: int,
     rows: int,
     out: Path | None = None,
-    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
+    minted: CycleHop | None = None,
     framing: bool = True,
     pause_after: int | None = None,
     bench_trigger: BenchTrigger = "at_end",
     diverge: bool = False,
     crossover: str | None = None,
 ) -> tuple[Path, str]:
-    """The archive is the workspace's, never *out*'s: campaigns in one process share it."""
+    """The archive is the workspace's, never *out*'s: campaigns in one process share it. A
+    *minted* arm runs its root cycle as a resume does, its declaration already on disk."""
     out = workspace if out is None else out
     (out / "requests").mkdir(parents=True)
-    arm = purpose.arm if isinstance(purpose, Compare) else None
     config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, crossover=crossover)
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
@@ -583,17 +589,20 @@ async def run_one(
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
-    session = await open_session(DATASET, stores=stores)
     session, result = await run_campaign(
-        session,
-        config,
+        await (
+            open_session(DATASET, stores=stores)
+            if minted is None
+            else rebound_session(stores, minted)
+        ),
+        config if minted is None else None,
         readout_sink=print,
         budget=Budget(),
         step_rounds=pause_after,
         mode=RunMode(),
-        purpose=purpose,
     )
     await session.backend_client.aclose()
+    arm = session.purpose.arm if isinstance(session.purpose, Compare) else None
     if pause_after is not None:
         if result.stop_reason != StopReason.PAUSED:
             raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
@@ -760,6 +769,43 @@ def interrupted(
     return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"
 
 
+async def mint_arms(
+    workspace: Path, arm_names: list[str], rounds: int, rows: int
+) -> list[CycleHop]:
+    """Every arm in one act, as `head-to-head` mints them; the framing it pays for once is `mint/`'s."""
+    configs = [campaign_config(name, rounds, bench_trigger="at_end") for name in arm_names]
+    samples = synthetic_rows(rows)
+    (workspace / "mint" / "requests").mkdir(parents=True)
+    llm = ByCallIdentity(workspace / "mint" / "requests", text_templates(configs[0]))
+    install_network(Router(FakeLLM(llm), FakeBackend(samples)))
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    stand_in_fetch(stores, samples)
+    session = await open_session(DATASET, stores=stores)
+    shared = configs[0].model_copy(
+        update={"optimization": configs[0].optimization.model_copy(update={"nodes": {}})}
+    )
+    request = HeadToHeadRequest(
+        head_to_head_id="h2h",
+        arms=[
+            ArmRequest(
+                arm_key=name,
+                optimization=OptimizationOverrides.model_validate(
+                    {
+                        "optimizer": name,
+                        "nodes": config.optimization.model_dump(mode="json")["nodes"],
+                    }
+                ),
+            )
+            for name, config in zip(arm_names, configs, strict=True)
+        ],
+        budget=configs[0].optimization.budget,
+    )
+    try:
+        return [arm.hop for arm in await mint_head_to_head(session, shared, request)]
+    finally:
+        await session.backend_client.aclose()
+
+
 async def run_controlled(
     workspace: Path, arm_names: list[str], *, rounds: int, rows: int, foreign: bool
 ) -> None:
@@ -770,14 +816,11 @@ async def run_controlled(
         )
         subjects.append(cid)
     arms = {}
-    for name in arm_names:
+    for name, hop in zip(
+        arm_names, await mint_arms(workspace, arm_names, rounds, rows), strict=True
+    ):
         cycle, cid = await run_one(
-            name,
-            workspace,
-            rounds=rounds,
-            rows=rows,
-            out=workspace / f"arm-{name}",
-            purpose=Compare(arm=Arm(head_to_head_id="h2h", arm_key=name)),
+            name, workspace, rounds=rounds, rows=rows, out=workspace / f"arm-{name}", minted=hop
         )
         arms[name] = (cycle, cid)
         subjects.append(cid)
