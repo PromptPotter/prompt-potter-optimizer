@@ -57,6 +57,14 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
         for campaign in listing.entries
         for course in campaign.children
     ]
+    # Each arm campaign's `new --arm` address: the head-to-head ids already taken.
+    arms = [
+        f"  {tag.value}  {campaign.address}"
+        for campaign in listing.entries
+        if (tag := campaign.tag("arm")) is not None
+    ]
+    if arms:
+        lines += ["", "head-to-head arms:", *arms]
     return CommandResult(
         data=listing.model_dump(mode="json"),
         human="\n".join(lines) or "No cycles match.",

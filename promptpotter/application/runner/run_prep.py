@@ -29,6 +29,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -72,11 +73,12 @@ async def prepare_run(
     )
     session.state.held = budget
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
-    observers.tracing.start(
+    for failure in observers.tracing.start(
         config_snapshot=campaign_config.model_dump(mode="json"),
         dataset=dataset,
         langfuse_session_id=langfuse_session_id,
-    )
+    ):
+        emit_round_warning(kind="trace_sink_failed", message=failure)
     declare_run_wiring(
         session,
         campaign_config,

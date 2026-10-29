@@ -41,18 +41,6 @@ acting.
   address is the conversation — a draft is an address beside a cycle path, `+ New campaign` navigates to
   one, the pane renders that subject's thread; `composing`, the modal door and the global list go.
   **Re-test:** open a check-in while another run ends; the check-in shows nothing of that run.
-- **The origin listing logs an ERROR on every read for a one-prompt-field dataset.**
-  `application/origin_listing.py::prospective_origin_id` raises "the campaign's framing splices into the one
-  prompt node declaring `problem_description`, and this pipeline's chain has 0" for `hotpotqa-closedbook`,
-  whose campaigns run. Action: the listing and the mint derive the origin one way. **Re-test:** `GET /origins`
-  with hotpotqa-closedbook on disk logs nothing.
-- **A taken head-to-head id reads as a config conflict.** Reusing an old id fails with "declares another
-  bench_defaults_pin", and no verb lists the declared ids (found by globbing `head_to_heads/`). Action: the
-  refusal names when and under what the id was declared; `cycles` lists head-to-heads. **Re-test:** reuse an
-  old id; the message says it is taken.
-- **A trace sink can break silently.** Langfuse 4 removed `update_trace`, `graceful` logged it, and every run
-  traced nothing. Action: a sink that fails on campaign start is served as a run warning, never only logged.
-  **Re-test:** break the sink; the readout shows it.
 
 ## NEXT ARC
 

@@ -192,16 +192,13 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pickDataset = (entry: DatasetIndexEntry) =>
     void draftFrom(entry.name, `Use dataset “${entry.title || entry.name}”`);
 
-  // A prepared origin IS its dataset's current config, so the dataset-draft path reproduces it.
   const openOrigin = async (entry: OriginEntry) => {
     if (busy) return;
     echo(`Reuse origin “${entry.label || entry.dataset_name}”`);
     setPhase({ stage: "uploading" });
     let draft: DraftCampaignWire;
     try {
-      draft = entry.prepared
-        ? await postDraftFromDataset(entry.dataset_name)
-        : await postDraftFromOrigin(entry.origin_id);
+      draft = await postDraftFromOrigin(entry.origin_id);
     } catch (e) {
       setPhase({ stage: "idle" });
       sayError(e);

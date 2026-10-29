@@ -44,24 +44,33 @@ class LangfuseLogger:
             and settings.LANGFUSE_PUBLIC_KEY.get_secret_value()
         )
         self.client = None
+        # Why a CONFIGURED Langfuse traces nothing; a run serves it as a warning, never only a log.
+        self.failure: str | None = None
         self._trace_metadata: dict[str, Any] = {}
         self._open_observations: dict[str, Any] = {}
         self._rate_limit_until: float = 0.0
 
         if self.enabled and not installed(Extra.OBSERVABILITY):
-            logger.warning(
-                "Langfuse disabled: the observability extra is not installed — %s",
-                install_hint(Extra.OBSERVABILITY),
+            self.failure = (
+                "Langfuse is configured but the observability extra is not installed "
+                f"({install_hint(Extra.OBSERVABILITY)}), so this run traces nothing to it"
             )
+            logger.warning(self.failure)
             self.enabled = False
         if self.enabled:
             from langfuse import Langfuse
 
-            with graceful("Failed to initialize Langfuse"):
+            try:
                 self.client = Langfuse(
                     public_key=settings.LANGFUSE_PUBLIC_KEY.get_secret_value(),
                     secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
                     host=settings.LANGFUSE_HOST,
+                )
+            except Exception as exc:
+                logger.exception("Failed to initialize Langfuse")
+                self.failure = (
+                    f"Langfuse failed to initialize ({type(exc).__name__}: {exc}), so this run "
+                    "traces nothing to it"
                 )
             self.enabled = self.client is not None
 

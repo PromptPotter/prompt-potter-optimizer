@@ -11093,9 +11093,9 @@
       },
       "OriginEntry": {
         "additionalProperties": false,
+        "description": "A MINTED origin, its id the mint's hash; a dataset no campaign ran is a `DatasetIndexEntry`.",
         "properties": {
           "created_at": {
-            "default": "",
             "description": "ISO 8601 — earliest campaign on this origin",
             "title": "Created At",
             "type": "string"
@@ -11112,8 +11112,7 @@
             "type": "string"
           },
           "n_campaigns": {
-            "default": 0,
-            "description": "Active campaigns minted from this origin (0 = prepared, not yet run)",
+            "description": "Active campaigns minted from this origin",
             "title": "N Campaigns",
             "type": "integer"
           },
@@ -11142,20 +11141,16 @@
             "title": "Origin Accuracy"
           },
           "origin_id": {
-            "description": "Origin content identity — a campaign's root_content_hash (or the dataset's prospective origin hash for a prepared origin)",
+            "description": "Origin content identity — its campaigns' root_content_hash",
             "title": "Origin Id",
             "type": "string"
-          },
-          "prepared": {
-            "default": false,
-            "description": "True = a ready dataset config with no campaign yet",
-            "title": "Prepared",
-            "type": "boolean"
           }
         },
         "required": [
           "origin_id",
-          "dataset_name"
+          "dataset_name",
+          "n_campaigns",
+          "created_at"
         ],
         "title": "OriginEntry",
         "type": "object"
@@ -20991,7 +20986,7 @@
     },
     "/api/v1/origins": {
       "get": {
-        "description": "Every runnable origin in the caller's tenant: prepared datasets with no campaign yet, then campaign-backed ones, newest first.\n\nTenant-scoped, not owner-filtered.",
+        "description": "Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is `GET /datasets`'.\n\nTenant-scoped, not owner-filtered.",
         "operationId": "get_origins_api_v1_origins_get",
         "responses": {
           "200": {

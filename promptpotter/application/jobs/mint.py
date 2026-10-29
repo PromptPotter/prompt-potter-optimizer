@@ -314,14 +314,28 @@ def refuse_drifted_resume(session: Session, campaign: Campaign, dataset: Sequenc
     )
 
 
+def _differs_line(name: str, declared: object, running: object) -> str:
+    """A scalar names both values; a structured part (budget, loop, environment) names itself."""
+    if isinstance(declared, str | int | None) and isinstance(running, str | int | None):
+        return f"{name} (declared {declared}, this arm {running})"
+    return name
+
+
 def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
     campaigns = session.store.campaigns
     shared = plan.declaration.shared_part()
-    declared = campaigns.load_head_to_head(request.head_to_head_id)
+    h2h_id = request.head_to_head_id
+    declared = campaigns.load_head_to_head(h2h_id)
+    arms = {
+        purpose.arm.arm_key: other.campaign_id
+        for other in campaigns.list_campaigns(lifecycle="all")
+        if isinstance(purpose := other.declaration.purpose, Compare)
+        and purpose.arm.head_to_head_id == h2h_id
+    }
     if declared is None:
         campaigns.declare_head_to_head(
             HeadToHeadRecord(
-                head_to_head_id=request.head_to_head_id,
+                head_to_head_id=h2h_id,
                 created_at=utcnow_iso(),
                 origin=plan.origin_hash,
                 shared=shared,
@@ -338,20 +352,30 @@ def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
         if declared.origin != plan.origin_hash:
             differs.append("origin")
         if differs:
-            raise ConflictError(
-                f"head-to-head {request.head_to_head_id} declares another "
-                f"{', '.join(differs)}: this arm would not be graded on its bench set",
-                code="arm_off_bench_set",
-                details={"differs_on": differs},
+            running = {**shared.model_dump(mode="json"), "origin": plan.origin_hash}
+            stood = {**declared.shared.model_dump(mode="json"), "origin": declared.origin}
+            held = (
+                ", ".join(f"{key}={cid}" for key, cid in sorted(arms.items()))
+                if arms
+                else "no campaign left"
             )
-    taken = [
-        other.campaign_id
-        for other in campaigns.list_campaigns(lifecycle="all")
-        if other.declaration.purpose == Compare(arm=request)
-    ]
-    if taken:
+            raise ConflictError(
+                f"head-to-head id {h2h_id} is taken: declared {declared.created_at} on origin "
+                f"{declared.origin} (arms: {held}). This arm differs on "
+                f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it "
+                "would not be graded on that bench set. Name a new head-to-head id "
+                "(`cycles` lists the taken ones), or declare this arm alike.",
+                code="arm_off_bench_set",
+                details={
+                    "differs_on": differs,
+                    "declared_at": declared.created_at,
+                    "declared_origin": declared.origin,
+                    "arms": arms,
+                },
+            )
+    if (taken := arms.get(request.arm_key)) is not None:
         raise ConflictError(
-            f"arm {request.arm_key} of {request.head_to_head_id} is campaign {taken[0]} already",
+            f"arm {request.arm_key} of {h2h_id} is campaign {taken} already",
             code="arm_taken",
         )
 

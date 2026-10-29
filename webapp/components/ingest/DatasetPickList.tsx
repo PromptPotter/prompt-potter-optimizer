@@ -34,7 +34,6 @@ export function DatasetPickList({
   }
 
   const originMeta = (o: OriginEntry): string => {
-    if (o.n_campaigns === 0) return "prepared";
     const acc = o.origin_accuracy == null ? "" : ` · ${fmtUnit("rate", o.origin_accuracy)}`;
     return `${o.n_campaigns} campaign${o.n_campaigns === 1 ? "" : "s"}${acc}`;
   };

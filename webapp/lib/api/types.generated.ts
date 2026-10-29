@@ -3626,9 +3626,9 @@ export interface OriginListResponse {
   total: number;
 }
 
+/** A MINTED origin, its id the mint's hash; a dataset no campaign ran is a `DatasetIndexEntry`. */
 export interface OriginEntry {
-  /** Origin content identity — a campaign's root_content_hash (or the dataset's
-   * prospective origin hash for a prepared origin) */
+  /** Origin content identity — its campaigns' root_content_hash */
   origin_id: string;
   /** Dataset this origin starts from */
   dataset_name: string;
@@ -3636,12 +3636,10 @@ export interface OriginEntry {
   label: string;
   /** Dataset sample count; ``null`` if unmaterialized */
   n_samples: number | null;
-  /** Active campaigns minted from this origin (0 = prepared, not yet run) */
+  /** Active campaigns minted from this origin */
   n_campaigns: number;
   /** The origin's C0 score, as the root cycle's standing round 0 closed */
   origin_accuracy: number | null;
-  /** True = a ready dataset config with no campaign yet */
-  prepared: boolean;
   /** ISO 8601 — earliest campaign on this origin */
   created_at: string;
 }

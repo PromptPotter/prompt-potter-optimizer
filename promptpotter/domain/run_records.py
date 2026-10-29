@@ -705,11 +705,13 @@ RoundWarningKind = Literal[
     # A declared child no node could make: `mating`'s pool under two, a `locus_crossover` pair on
     # under two loci, or an `l1_generate` recombination naming no two pool entries.
     "offspring_dropped",
+    # A configured trace sink that failed to open at the run's start: the run traces nothing to it.
+    "trace_sink_failed",
 ]
 
 
 class RoundWarningRecord(FrozenModel):
-    """A mid-round SELF-HEAL the run continued past; never re-add a kind with no emitter."""
+    """A SELF-HEAL the run continued past, mid-round or at its start; never re-add a kind with no emitter."""
 
     record_type: Literal["round_warning"] = "round_warning"
     kind: RoundWarningKind

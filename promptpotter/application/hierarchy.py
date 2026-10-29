@@ -312,8 +312,15 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
     if is_self_optimization(campaign.connector):
         tags.append(HierarchyTag(kind="self_optimization", value="l4", label="L4"))
     if isinstance(purpose := campaign.declaration.purpose, Compare):
-        key = purpose.arm.arm_key
-        tags.append(HierarchyTag(kind="arm", value=key, label=f"arm {key}"))
+        arm = purpose.arm
+        # The value is `new --arm`'s own address, so a taken head-to-head id is read off the listing.
+        tags.append(
+            HierarchyTag(
+                kind="arm",
+                value=f"{arm.head_to_head_id}:{arm.arm_key}",
+                label=f"arm {arm.arm_key} of {arm.head_to_head_id}",
+            )
+        )
     return tags
 
 

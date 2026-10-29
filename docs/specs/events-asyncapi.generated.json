@@ -7095,7 +7095,7 @@
       },
       "RoundWarningRecord": {
         "additionalProperties": false,
-        "description": "A mid-round SELF-HEAL the run continued past; never re-add a kind with no emitter.",
+        "description": "A SELF-HEAL the run continued past, mid-round or at its start; never re-add a kind with no emitter.",
         "properties": {
           "detail": {
             "additionalProperties": true,
@@ -7114,7 +7114,8 @@
               "adapter_output_unavailable",
               "critique_cluster_dropped",
               "round_not_advanced",
-              "offspring_dropped"
+              "offspring_dropped",
+              "trace_sink_failed"
             ],
             "title": "Kind",
             "type": "string"
