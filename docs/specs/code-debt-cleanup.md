@@ -231,6 +231,23 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
   re-mintable under its own key, or should the refusal run before the mint so no key is taken?
   **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
+- **CAPO's race ends after its first block whenever offspring equal the cut.** The fixed blocks follow
+  the paper (App. C.4), but with 4 offspring and μ 10 every h2h-7 round cut 4 on block 1 and stopped.
+  The population was then judged only on those 30 cells: the crown held C1.7 (36.7% there, 27.5% on
+  the origin panel), and the selection benched 0.110 against the origin's 0.140. `max_blocks` was inert.
+  Open: is this the paper's behaviour at these sizes, or does our eliminator stop where the paper races
+  on? **Re-test:** the per-round "Blocks raced" fact on a CAPO run with offspring < μ.
+- **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
+  malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
+  or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
+  kept the old `Authored` shape. Action: refuse the pack, serve the rest.
+- **The library's duplicate-text check is written twice**: `application/library.py::bank_snippet` (a
+  no-op) and `infrastructure/store/account_packs.py::bank_into_account_pack` (under the lock).
+  `SnippetLibrary`'s empty copy still says "installed".
+- **A cross's arity is declared nowhere**: `crossable` unpacks exactly two parents. `donated_loci` is
+  derived by verbatim equality with the donor, not recorded on the lineage, so an LLM edit that lands on
+  the donor's value reads as donated. The capo offline bench turns on one seed: lift +0.700 or none
+  after a draw-order change, so the fixture cannot tell a mating-law change from a reshuffle.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
@@ -325,10 +342,6 @@ word's `git grep -c` for that sense is 0.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
   - `LibrarySource` fakes "authored" as a cited work with no author or year.
   - `ui/MenuCheck` takes a `title=` prop; filter buttons are ~28px, under the 44px touch target.
-- **A live `set-limits` raise is not served**: `hotpotqa-closedbook__55f765`'s `dashboard.json::run_limits.budget.usd`
-  stayed 0.025 after `set-limits --max-usd 0.20` during the run, while the runner spent past it and kept
-  going — the armed ceiling and the served one are two states. **Re-test:** raise mid-run; the served
-  budget moves with the runner's.
 - **Seen framing snippets in a prompt**:
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module);
