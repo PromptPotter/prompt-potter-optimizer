@@ -239,7 +239,7 @@ iid panel's best arm went unchosen). `AdaptiveQueue.draw` (`optimizers/potter/me
 search split less the parent's crowning cells and, once the ruler is warm, shuffles each stratum on
 the round's seeded `Replay.rng` (a resume redraws the same cells). `elimination_n_min` ruler
 cells lead the shuffle — the cells a warm θ is read on (`rasch.py::theta_cells`), which PoBB's gates
-and the coverage floor count. `adaptive_queue_mechanism.py::covered_prefix` fronts one cell per
+and the coverage floor count. `promptpotter/application/intelligence/adaptive_queue_mechanism.py::covered_prefix` fronts one cell per
 `source_pin` level. Where the parent misses is the round ORDER's business, never the draw's.
 
 **Warm-gated.** `per_round_resubset` (default `True`): while δ is cold the subset stays the
