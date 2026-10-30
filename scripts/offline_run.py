@@ -357,7 +357,6 @@ class ByCallIdentity:
             obj.pop("fork_proposal", None)
             if self.rebasing:
                 obj["fork_proposal"] = {"reason": f"L2 fire {call}: rewind past the stall."}
-            obj.pop("terminate_proposal", None)
         elif node.startswith("L3Plan"):
             obj["plan"] = (
                 f"Replan {call}: L1 rewrites the instruction to track negation explicitly."
@@ -365,7 +364,6 @@ class ByCallIdentity:
             obj["note"] = f"l3 note {call}"
             obj["rationale"] = f"L2 stalled twice (replan {call})"
             obj.pop("fork_proposal", None)
-            obj.pop("terminate_proposal", None)
         return obj
 
     def _variant_edit(

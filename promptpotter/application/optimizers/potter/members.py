@@ -49,7 +49,9 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1GenerateOutput,
     L2ContextOutput,
     L2RecombiningOutput,
+    L2TerminatingOutput,
     L3PlanOutput,
+    L3TerminatingOutput,
     build_l2_response_model,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
@@ -387,7 +389,9 @@ class L2Context(LayoutNode):
 
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
         return build_l2_response_model(
-            bundle.silent_l1_panels, bundle.recombination_offer(self.name)
+            bundle.silent_l1_panels,
+            bundle.recombination_offer(self.name),
+            terminating=bundle.terminate_offer is not None,
         )
 
     def parse(self, ctx: NodeContext, raw: L2ContextOutput) -> TransitionResult:
@@ -438,7 +442,9 @@ class L2Context(LayoutNode):
             l1_layout_refused=layout_refused,
             l2_guard_breaches=layout_outcomes,
             fork_proposal=raw.fork_proposal,
-            terminate_proposal=raw.terminate_proposal,
+            terminate_proposal=(
+                raw.terminate_proposal if isinstance(raw, L2TerminatingOutput) else None
+            ),
             recombinations=[
                 Recombination.model_validate(spec.model_dump())
                 for spec in named[: ctx.knobs(L1GenerateKnobs).recombine]
@@ -516,8 +522,8 @@ class L3Plan(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    def reply_model(self, _bundle: InjectionBundle) -> type[BaseModel]:
-        return L3PlanOutput
+    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
+        return L3PlanOutput if bundle.terminate_offer is None else L3TerminatingOutput
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
         rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
@@ -534,7 +540,9 @@ class L3Plan(LayoutNode):
             l3_note=raw.note,
             l3_guard_breaches=failures,
             fork_proposal=raw.fork_proposal,
-            terminate_proposal=raw.terminate_proposal,
+            terminate_proposal=(
+                raw.terminate_proposal if isinstance(raw, L3TerminatingOutput) else None
+            ),
         )
 
     def land(self, ctx: NodeContext, result: TransitionResult) -> None:

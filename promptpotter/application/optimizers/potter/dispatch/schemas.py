@@ -280,11 +280,20 @@ class L2ContextOutput(OptimizerResponseModel):
         ),
     )
     fork_proposal: ForkProposal | None = None
-    terminate_proposal: TerminateProposal | None = None
 
 
 class L2RecombiningOutput(L2ContextOutput):
     recombinations: list[L1Recombination] = Field(default_factory=list)
+
+
+# The reply carries `terminate_proposal` only where `InjectionBundle.terminate_offer` names a
+# starved node: a model volunteers any field its schema carries, and an honored stop aborts.
+class L2TerminatingOutput(L2ContextOutput):
+    terminate_proposal: TerminateProposal | None = None
+
+
+class L2RecombiningTerminatingOutput(L2RecombiningOutput, L2TerminatingOutput):
+    pass
 
 
 def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
@@ -319,9 +328,17 @@ def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
 
 @functools.lru_cache(maxsize=4)
 def build_l2_response_model(
-    withheld: frozenset[str], recombination: RecombinationOffer | None = None
+    withheld: frozenset[str],
+    recombination: RecombinationOffer | None = None,
+    terminating: bool = False,
 ) -> type[L2ContextOutput]:
     """``None`` *recombination* offers no slot."""
+    base: type[L2ContextOutput] = {
+        (False, False): L2ContextOutput,
+        (True, False): L2RecombiningOutput,
+        (False, True): L2TerminatingOutput,
+        (True, True): L2RecombiningTerminatingOutput,
+    }[recombination is not None, terminating]
     fields: dict[str, Any] = {}
     if withheld:
         schema = layout_json_schema(
@@ -336,10 +353,9 @@ def build_l2_response_model(
             Annotated[list[L1Recombination], WithJsonSchema(recombinations_schema(recombination))],
             Field(default_factory=list),
         )
-        return create_model("L2ContextOutput", __base__=L2RecombiningOutput, **fields)
     if not fields:
-        return L2ContextOutput
-    return create_model("L2ContextOutput", __base__=L2ContextOutput, **fields)
+        return base
+    return create_model("L2ContextOutput", __base__=base, **fields)
 
 
 class L3PlanOutput(OptimizerResponseModel):
@@ -357,6 +373,9 @@ class L3PlanOutput(OptimizerResponseModel):
         default="", max_length=125
     )
     fork_proposal: ForkProposal | None = None
+
+
+class L3TerminatingOutput(L3PlanOutput):
     terminate_proposal: TerminateProposal | None = None
 
 

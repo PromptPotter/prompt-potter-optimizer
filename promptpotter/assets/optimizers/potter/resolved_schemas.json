@@ -242,8 +242,7 @@
       "l1_layout",
       "l1_overrides",
       "rationale",
-      "fork_proposal",
-      "terminate_proposal"
+      "fork_proposal"
     ],
     "json_schema": {
       "name": "l2_context",
@@ -268,20 +267,6 @@
               }
             },
             "title": "ForkProposal",
-            "type": "object"
-          },
-          "TerminateProposal": {
-            "additionalProperties": false,
-            "properties": {
-              "reason": {
-                "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
-                "title": "Reason",
-                "type": "string"
-              }
-            },
-            "title": "TerminateProposal",
             "type": "object"
           }
         },
@@ -349,17 +334,6 @@
               }
             ],
             "default": null
-          },
-          "terminate_proposal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/TerminateProposal"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           }
         },
         "title": "L2ContextOutput",
@@ -372,8 +346,7 @@
       "plan",
       "note",
       "rationale",
-      "fork_proposal",
-      "terminate_proposal"
+      "fork_proposal"
     ],
     "json_schema": {
       "name": "l3_plan",
@@ -398,20 +371,6 @@
               }
             },
             "title": "ForkProposal",
-            "type": "object"
-          },
-          "TerminateProposal": {
-            "additionalProperties": false,
-            "properties": {
-              "reason": {
-                "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
-                "title": "Reason",
-                "type": "string"
-              }
-            },
-            "title": "TerminateProposal",
             "type": "object"
           }
         },
@@ -439,17 +398,6 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/ForkProposal"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "terminate_proposal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/TerminateProposal"
               },
               {
                 "type": "null"

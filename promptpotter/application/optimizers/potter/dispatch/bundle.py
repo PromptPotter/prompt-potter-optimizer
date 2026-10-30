@@ -14,6 +14,7 @@ from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
 from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
@@ -253,6 +254,13 @@ class InjectionBundle:
             tuple(p.id for p in self.recombination_pool),
             tuple(locus.name for locus in self.recombination_loci),
         )
+
+    @property
+    def terminate_offer(self) -> str | None:
+        """The evidence-starved node a stop must name; ``None`` withdraws the directive and the field."""
+        if not self.terminate_capability:
+            return None
+        return evidence_starved_node(self.digest.node_failure_rates)
 
     @property
     def offers_shots(self) -> bool:

@@ -24,7 +24,6 @@ from promptpotter.application.optimizers.potter.escalation.state import Explorat
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
-from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_records import MAX_AUTO_REBASES
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
@@ -300,15 +299,12 @@ def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
     return [Item(_REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else ""))]
 
 
+# Offered only where the round measured a backend fault (`InjectionBundle.terminate_offer`): a layer
+# shown it on a healthy round reads rows a prompt edit did not move as a broken backend, and aborts.
 _TERMINATE_CAPABILITY_TEXT = (
-    'TERMINATE PROPOSAL — terminate_proposal = {"reason": "<what the operator must fix>"} halts '
-    "the cycle; only for a backend fault no prompt move recovers, never a hard task or a "
-    "healthy stall. Default omit."
-)
-
-_TERMINATE_STARVED_TEXT = (
-    " THIS ROUND IT APPLIES: '{node}' failed on ~all {unit} (quota or rate limit), so every "
-    "failure cluster is cascade noise from it — terminate now, naming that node."
+    'TERMINATE PROPOSAL — terminate_proposal = {{"reason": "<what the operator must fix>"}} halts '
+    "the cycle. THIS ROUND IT APPLIES: '{node}' failed on ~all {unit} (quota or rate limit), so "
+    "every failure cluster is cascade noise from it — terminate now, naming that node."
 )
 
 
@@ -319,16 +315,8 @@ _TERMINATE_STARVED_TEXT = (
     citable=False,
 )
 def _r_terminate_capability(b: InjectionBundle) -> list[Item]:
-    if not b.terminate_capability:
+    if (starved := b.terminate_offer) is None:
         return []
-    starved = evidence_starved_node(b.digest.node_failure_rates)
     return [
-        Item(
-            _TERMINATE_CAPABILITY_TEXT
-            + (
-                _TERMINATE_STARVED_TEXT.format(node=starved, unit=unit_plural(b.measured_unit))
-                if starved
-                else ""
-            )
-        )
+        Item(_TERMINATE_CAPABILITY_TEXT.format(node=starved, unit=unit_plural(b.measured_unit)))
     ]
