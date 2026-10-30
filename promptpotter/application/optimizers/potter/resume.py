@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
     PairedGrade,
@@ -13,7 +12,7 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
+from promptpotter.domain.scoring import NO_CELLS
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.resume_and_fork.replayers import (
@@ -42,7 +41,7 @@ def _replay_round_winner(
         pooled(ArmKey(str(inputs_ref["parent"]))),
         coverage_floor,
         ctx.ruler,
-        epsilon=float(inputs_ref["epsilon"]),
+        admission=float(inputs_ref["admission"]),
     )
     return winner
 
@@ -68,11 +67,6 @@ def _pobb_replay_snapshot(
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """Dispatches on the gate the PRODUCER named: a collapse cut holds no posterior, so ε would test it against a bar nobody set."""
-    if inputs_ref.get("gate") == EliminationGate.COLLAPSED:
-        # Re-asked: a labelless round reads `fitness`, so a formula that now solves every cell retires the cut.
-        rows = ctx.round_data.rows(ArmKey(str(inputs_ref["arm"]))).cells
-        return is_answer_collapsed(rows[: int(inputs_ref["queries_scored"])])
     p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if p_best is None:
         return False

@@ -12,7 +12,9 @@ from promptpotter.application.intelligence.rasch import (
     theta_cells,
     theta_lift_over_parent,
 )
-from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell
+from promptpotter.domain.origin_panel import election_rows
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradedCell
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
@@ -23,7 +25,6 @@ from promptpotter.shared.statistics import (
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradeColumn
@@ -77,17 +78,21 @@ def cells_read(
 
 
 def crowning_cells(rounds: Sequence[RoundResult], parent: str) -> frozenset[str]:
-    """The cells *parent* won its race on: its rows there are the max over k noisy arms, so a race
-    drawn onto them replays the luck that crowned it. An ancestor's are the parent's own measurements,
-    and a lone arm was never picked over one."""
-    return frozenset(
-        cell.key
-        for rr in rounds
-        if (election := rr.election) is not None
-        and election.selected == parent
-        and election.electable > 1
-        for cell in rr.rows(election.selected)
-    )
+    """The cells *parent*'s admission was won on — its discordant wins over the bar, on the rows that
+    election read: a race drawn onto them replays the luck that crowned it. A tie reads as any draw."""
+    crowned: set[str] = set()
+    for at, rr in enumerate(rounds):
+        election = rr.election
+        if election is None or election.selected != parent or election.reference is None:
+            continue
+        bar = election.reference.arm
+        skip = crowning_cells(rounds[:at], bar)
+        own, against = (
+            paired_grades(election_rows(rr.rows(key), rr.overlap_results.get(key, NO_CELLS), skip))
+            for key in (ArmKey(parent), bar)
+        )
+        crowned.update(c for c, g in own.items() if c in against and g.verdict > against[c].verdict)
+    return frozenset(crowned)
 
 
 def readable_lifts(
@@ -116,11 +121,11 @@ def elect_round_winner(
     coverage_floor: int,
     ruler: DeltaRuler | None,
     *,
-    epsilon: float,
+    admission: float,
 ) -> tuple[ArmKey | None, RoundAbilities]:
-    """ADMISSION is raw θ above the parent's by more than a fit resolves AND the posterior PoBB
-    cuts on, bounded by the discordant cells, past ``1 − ε``: promoted only where the PARENT would
-    be cut against the arm. The RANK is the unbounded ``P(θ_cand > θ_parent)``."""
+    """ADMISSION is raw θ above the parent's by more than a fit resolves AND ``P(θ_cand >
+    θ_parent)``, bounded by the discordant cells, past *admission*. The RANK is the unbounded
+    posterior."""
 
     abilities = candidate_abilities(
         {key: rows[key] for key in keys if key in rows},
@@ -144,8 +149,7 @@ def elect_round_winner(
             continue
         # The bar is read off no cell that crowned the parent: `election_rows` leaves out `crowning_cells`.
         p_better = p_exceeds(abilities.theta[key], abilities.theta_se[key], *abilities.bar[key])
-        # One discordant cell supports 0.75 whatever θ reads: a lift the pairs cannot carry.
-        if _capped(p_better, sign_posterior(wins, losses)) <= 1.0 - epsilon:
+        if _capped(p_better, sign_posterior(wins, losses)) <= admission:
             continue
         rank = (p_better, abilities.cells[key])
         if rank > best_rank:

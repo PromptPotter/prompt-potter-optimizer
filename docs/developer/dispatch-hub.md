@@ -54,7 +54,7 @@ Two corollaries are easy to miss: input length is a quality tax and not only a b
 - **Panels family** (`injections/panels.py`) — each one's ordering and caps live at its `@signal`; here only what each is FOR:
   - `escalation_panel` — L1 stall depth + `exploration_budget`; gates the `stall_exploration` citation.
   - `evidence_health` — per-node failure rates: an evidence-starved enricher is an upstream fault no param mutation fixes.
-  - `answer_distribution` — the collapse detector (accuracy cannot tell reasoning from one repeated label); it renders the rule, `domain/scoring.py::enumerable_truth_labels` owns it, shared with the θ gate and PoBB.
+  - `answer_distribution` — the collapse detector (accuracy cannot tell reasoning from one repeated label); it renders the rule, `domain/scoring.py::enumerable_truth_labels` owns it, shared with the election's collapse refusal.
   - `failing_samples` — a current miss as ONE row, easiest-first on the locked δ ruler; once clustered, only the rows the clusters span, so the generator reads no id whose row it cannot see. Never a tally by label: a cluster is a mechanism and a tally shows none.
   - `sample_transcripts` — the whole trace; a looping one (`dispatch/bundle.py::LOOP_NOVELTY`) shows head and tail only.
   - `inner_narratives` — each row as its PAIRED difference from the origin on the same seed.

@@ -736,7 +736,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             NodeContext(racing, optimizers.NODE_MEMBERS.get("pobb")),
             Panel(cells=ten, order=ten, block_size=len(ten)),
             lambda _sp, _sample, _prior_id: None,  # type: ignore[arg-type, return-value]
-            measured_unit="sample",
         )
 
     walked = sheet(

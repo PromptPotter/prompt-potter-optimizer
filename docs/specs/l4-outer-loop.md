@@ -53,7 +53,7 @@ nothing; it is null, with `series_reason`, wherever that series differences noth
   and a replayed cell bills zero.
 - **Deliberately absent:** a peak reading (it changes the estimand), `rounds_to_N` or any declared target (it
   asserts the benchmark's room up front). Quality events act once, structurally: an all-empty cycle goes to
-  `floor_reason`, a collapsed arm is dropped from the election and eliminated at PoBB.
+  `floor_reason`, a collapsed arm is dropped from the election.
 - **One estimator per subtraction.** Two estimators on the two ends of one difference make the anchor's
   shrinkage move with the arm — a bias. `DifficultyView.level_series` reads θ_C0 and every later level in one fit
   on one stamp; the residual anchor wander is measured and not worth buying out.

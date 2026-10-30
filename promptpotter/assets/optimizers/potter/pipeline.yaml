@@ -116,7 +116,8 @@ nodes:
   # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
   theta_election:
     type: selector
-    config: {}
+    config:
+      admission: 0.85
   l1_critique:
     type: llm
     optimizer: *node_menus

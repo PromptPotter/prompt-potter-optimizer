@@ -4990,7 +4990,6 @@ export const SCORE_LENS_LABELS: Record<string, string> = {
 export const ABORT_LENS_LABELS: Record<string, string> = {
   'abort:epsilon_off': 'No ε-elimination',
   'abort:lock_in_off': 'No lock-in',
-  'abort:collapsed_off': 'No collapse cut',
   'abort:all_off': 'No early abort',
 };
 

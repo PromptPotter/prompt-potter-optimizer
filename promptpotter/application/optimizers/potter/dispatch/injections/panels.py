@@ -40,11 +40,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
-from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
-from promptpotter.domain.arms import Concluded, Cut, Measured, arm_elimination
+from promptpotter.domain.arms import Concluded, Cut, Measured
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
@@ -995,9 +994,6 @@ def _candidate_fate(cand: Concluded, fold: ScoreSummary | None, unit: MeasuredUn
     if kind == "broken":
         return f"{cut} — BROKEN: its measurements kept failing; charged to this candidate"
     if kind == "eliminated":
-        elimination = arm_elimination(cand)
-        if elimination is not None and elimination.context.get("gate") == EliminationGate.COLLAPSED:
-            return f"{cut} — answered ONE label to every {unit}; a VERDICT on this idea, not a stopped measurement"
         return f"{cut} — P(best) fell below ε; measurement stopped, NOT a verdict"
     if kind == "skipped":
         return "skipped mid-run by the operator"

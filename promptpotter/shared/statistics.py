@@ -192,6 +192,7 @@ def discordant_counts(candidate: Sequence[float], prior: Sequence[float]) -> tup
     return wins, losses
 
 
+@shapes_optimizer_prompt
 def sign_posterior(wins: int, losses: int) -> float:
     if wins + losses == 0:
         return 0.5

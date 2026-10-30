@@ -32,6 +32,7 @@ from factories import (
     billed_call,
     close_round,
     delta_ruler,
+    election_knobs,
     filed,
     filed_under,
     jumping_clock,
@@ -103,9 +104,9 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     l3_fired,
     observe,
 )
-from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, EscalationLadder
 from promptpotter.application.optimizers.potter.members import L1Generate
-from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
+from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.records import (
     L1Readout,
     L2Memory,
@@ -213,6 +214,7 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     PairedReading,
     ReadingState,
+    RoundArm,
 )
 from promptpotter.domain.phase_views import BenchGradedView
 from promptpotter.domain.phases import (
@@ -248,6 +250,7 @@ from promptpotter.domain.scoring import (
     UngradedCellError,
     WalkedCell,
     anchored_criterion_dials,
+    is_answer_collapsed,
     turn_scalars,
 )
 from promptpotter.domain.search_point import TaskDecomposition
@@ -920,7 +923,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 ) -> None:
     # The election reads θ on one δ ruler: easy cells {0..19} sit low, hard {20..39} high.
     ruler = delta_ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
-    eps = pobb_knobs().epsilon
+    admission = election_knobs().admission
+    with pytest.raises(ValidationError):
+        ElectionKnobs(admission=0.70)  # one discordant cell supports 0.75: it would promote
     weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
     able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
     by_id = {
@@ -934,7 +939,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         sheet(measurement(i, float(i < 20)) for i in range(40)),
         4,
         ruler,
-        epsilon=eps,
+        admission=admission,
     )
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
@@ -944,9 +949,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     )
     one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
     parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))
-    assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, epsilon=eps)[0] is (
-        None
-    ), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
+    assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, admission=admission)[
+        0
+    ] is (None), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
 
     # A thin arm cannot win on a margin inside its own noise; `coverage_floor` IS PoBB's `n_min`.
     flat = delta_ruler(dict.fromkeys(range(28), 0.0))
@@ -960,17 +965,19 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     assert p["deep"] > p["shallow"], "so it demonstrated less"
     deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
     thin_arms = {deep_key: deep, shallow_key: shallow}
-    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, epsilon=eps)[0] == (
-        "deep"
-    ), "a thin arm won"
-    assert elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat, epsilon=eps)[
+    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, admission=admission)[
         0
-    ] == ("shallow"), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
+    ] == ("deep"), "a thin arm won"
+    assert elect_round_winner(
+        [shallow_key], {shallow_key: shallow}, half, 6, flat, admission=admission
+    )[0] == ("shallow"), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
     behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
     behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
     assert behind_lift is not None and behind_lift > 0.0
     assert (
-        elect_round_winner([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, epsilon=eps)[0]
+        elect_round_winner(
+            [ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, admission=admission
+        )[0]
         is None
     ), "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
     swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
@@ -981,32 +988,30 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             sheet(measurement(i, float(i < 20)) for i in range(40)),
             4,
             ruler,
-            epsilon=eps,
+            admission=admission,
         )[0]
         is None
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
     longer, terse_parent = _charged_by_length()
     level = delta_ruler(dict.fromkeys(range(34), 0.0))
     assert elect_round_winner(
-        [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, epsilon=eps
+        [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, admission=admission
     )[0] == ("l"), "a cost term's tie-break was counted as a verdict lost"
 
-    # The bar is what the parent can do, not the draw that crowned it: no later race reads those cells.
-    crowned_on = sheet(measurements([1.0] * 4, range(30, 34)))
-
-    def won(electable: int) -> RoundResult:
-        return round_result(
-            1,
-            selected="c0",
-            voted={"electable": electable},
-            cells={ArmKey("c0"): crowned_on},
-        )
-
-    assert crowning_cells([won(2), round_result(2, improved=False)], "c0") == {
-        cell.key for cell in crowned_on
-    }, "a parent's cells stay out of every race it judges, a HELD round's included"
-    assert not crowning_cells([won(2)], "c1"), "an ancestor's are its child's own measurements"
-    assert not crowning_cells([won(1)], "c0"), "a LONE arm was never picked over another"
+    # The bar is what the parent can do, not the luck that crowned it: no later race reads those cells.
+    crowned_on = sheet(measurements([1.0] * 4 + [0.0], range(30, 35)))
+    bar_rows = sheet(measurements([0.0, 0.0, 1.0, 1.0, 0.0], range(30, 35)))
+    won = round_result(
+        1,
+        selected="c0",
+        voted={"electable": 1, "reference": RoundArm(round=0, arm=PARENT)},
+        cells={ArmKey("c0"): crowned_on, PARENT: bar_rows},
+    )
+    assert crowning_cells([won, round_result(2, improved=False)], "c0") == {
+        crowned_on.cells[0].key,
+        crowned_on.cells[1].key,
+    }, "a crowned pick's discordant wins stay out of every race it judges, a lone arm's included"
+    assert not crowning_cells([won], "c1"), "an ancestor's are its child's own measurements"
 
     # A held round leads on the arm nearest the bar admission reads, over the readable arms.
     twenty = sheet(measurements([1.0] * 20 + [0.0] * 8))
@@ -1016,7 +1021,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
-    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, epsilon=eps)
+    held_id, held_abilities = elect_round_winner(
+        list(arms), arms, twenty, 6, flat, admission=admission
+    )
     reads = readable_lifts(list(arms), 6, held_abilities)
     assert held_id is None, "no arm cleared the bar"
     assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
@@ -1897,8 +1904,8 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     charged.check(longer.cells)
     assert standings[-1].p_best > 0.5, "a cost term's tie-breaks pinned p_best at a coin"
 
-    # The collapse gate reads the answer, not the labels: a verifier proves an answer wrong by an
-    # unsolved cell, and alike-and-all-solved is NOT collapsed.
+    # The election's collapse refusal reads the answer, not the labels: a verifier proves an answer
+    # wrong by an unsolved cell, and alike-and-all-solved is NOT collapsed.
     def answered(fitness: list[float], **over: Any) -> list[GradedCell]:
         return [
             GradedCell.from_wire(
@@ -1913,20 +1920,19 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
             for i, f in enumerate(fitness)
         ]
 
-    def collapse(rows: list[GradedCell]) -> Any:
-        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent).check(rows)
-
-    signal = collapse(answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
-    assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED, (
-        "a constant answerer must be cut at n_min with no labels to read"
+    constant = answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+    unpaired_check = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent)
+    assert unpaired_check.check(constant) is None, (
+        "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
     )
-    assert collapse(answered([1.0] * 6)) is None, (
+    assert is_answer_collapsed(constant), "a constant answerer is refused with no labels to read"
+    assert not is_answer_collapsed(answered([1.0] * 6)), (
         "one answer that solves every cell is not a collapse"
     )
-    assert collapse(answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT")) is None, (
-        "an agent that wrote no answer file answered nothing, which is not one answer"
-    )
-    assert collapse(answered([0.0] * 6, error_category=ErrorCategory.PIPELINE)) is None, (
+    assert not is_answer_collapsed(
+        answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT")
+    ), "an agent that wrote no answer file answered nothing, which is not one answer"
+    assert not is_answer_collapsed(answered([0.0] * 6, error_category=ErrorCategory.PIPELINE)), (
         "a backend that broke on every cell is not a verdict on the idea"
     )
     labelled = [
@@ -1940,23 +1946,23 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
         )
         for i in range(6)
     ]
-    signal = collapse(labelled)
-    assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED
+    assert is_answer_collapsed(labelled)
     reasoned = [
         GradedCell.from_wire(
             {**cell.wire(), "predicted": f"step {i}: **Uncertain**", "span": "Uncertain"}
         )
         for i, cell in enumerate(labelled)
     ]
-    signal = collapse(reasoned)
-    assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED, (
+    assert is_answer_collapsed(reasoned), (
         "two replies reasoning apart to one graded answer were counted as two answers"
     )
     spanless = [
         GradedCell.from_wire({**cell.wire(), "span": "" if i == 5 else "Uncertain"})
         for i, cell in enumerate(labelled)
     ]
-    assert collapse(spanless) is None, "a reply with no graded span was counted as the answer"
+    assert not is_answer_collapsed(spanless), (
+        "a reply with no graded span was counted as the answer"
+    )
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
     def uncharged(*values: float) -> list[PairedGrade]:

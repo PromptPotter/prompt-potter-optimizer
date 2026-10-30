@@ -19,7 +19,7 @@ from promptpotter.application.initialization.session import LaunchState, ScorerS
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
-from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
     L1Readout,
@@ -677,6 +677,12 @@ def inner_cells(*optimizers: str) -> InnerCells:
 def pobb_knobs(**bend: Any) -> PoBBKnobs:
     shipped = cast("PoBBKnobs", resolve_optimizer("potter", {}, gate="off").knobs("pobb"))
     return shipped.model_copy(update=bend)
+
+
+def election_knobs() -> ElectionKnobs:
+    return cast(
+        "ElectionKnobs", resolve_optimizer("potter", {}, gate="off").knobs("theta_election")
+    )
 
 
 def degradation_health(

@@ -14,7 +14,6 @@ from promptpotter.application.bench.node_context import (
     Progress,
     Replay,
     Ruler,
-    Target,
 )
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
@@ -78,6 +77,7 @@ from promptpotter.application.optimizers.potter.generation_only import run_gener
 from promptpotter.application.optimizers.potter.knobs import (
     AdaptiveQueueKnobs,
     CellStrata,
+    ElectionKnobs,
     EscalationKnobs,
     L1GenerateKnobs,
     PoBBKnobs,
@@ -288,7 +288,7 @@ class PoBB(nodes.Eliminator):
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Lineage, Frontier, Ruler, Bounds, Target, Progress, Replay}
+        {Lineage, Frontier, Ruler, Bounds, Progress, Replay}
     )
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
@@ -305,15 +305,14 @@ class PoBB(nodes.Eliminator):
         )
 
     def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> PoBBRace:
-        return PoBBRace(ctx, panel, catch_up, measured_unit=ctx.read(Target).measured_unit)
+        return PoBBRace(ctx, panel, catch_up)
 
 
 class ThetaElection(nodes.Selector):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
+    knobs: ClassVar[type[StrictModel]] = ElectionKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
-    # Admission mirrors the stopping rule: one ε says when the parent is futile against an arm.
-    consults: ClassVar[frozenset[type]] = frozenset({PoBB})
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
     replayers: ClassVar[Mapping[str, Replayer]] = ELECTION_REPLAYERS

@@ -143,8 +143,8 @@ async def measure_population(
             *(
                 (LineStep(arm_name(key, arm, ctx.round_num), arm.individual), rows[key])
                 for key, arm in arms.items()
-                # The floor's own count, so every arm the election can read sits the panel.
-                if len(measured_cells(rows[key])) >= coverage_floor
+                # A stopped arm buys no cell after its stop: the election reads it on its draw.
+                if len(measured_cells(rows[key])) >= coverage_floor and not walked_short(arm)
             ),
             (
                 LineStep(arm_name(parent.key, parent.state, ctx.round_num), parent.individual),

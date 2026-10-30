@@ -96,7 +96,7 @@ Checked in severity order (`ruler.py::theta_caveat`):
 - **Disjoint datasets** (`disjoint_scopes`). Each `RulerScope` is its own scale; a lift paired on
   shared cells still holds.
 - **The 0% floor** (`floor_pinned`, per arm). An all-miss arm pins θ to a constant whatever it saw,
-  so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which PoBB cuts): an
+  so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which the election refuses): an
   arm can answer differently every time and be wrong every time.
 - **A flat ruler** (`flat_ruler`). The ruler's own δ span is below `BAND_COLLAPSE_LOGITS`, so θ is
   accuracy plus a constant. What an all-zeros fit looks like; checked before `collapsed_band`,
@@ -122,7 +122,8 @@ Checked in severity order (`ruler.py::theta_caveat`):
   (`origin_panel.py::origin_panel` — per dataset, the cells the origin answered, every member topped up onto them once). Fixed, because a
   set re-chosen from what the line shared contracted as it grew. It is a rate, needing no ruler —
   readable when θ's scale has collapsed. The panel's rows also feed the election (draw and panel
-  pooled, less the parent's crowning cells: `::election_rows`; mid-round cuts stay on the draw), so
+  pooled, less the parent's crowning cells: `::election_rows`; an arm the eliminator stopped stays
+  on its draw), so
   it is a REUSED set and the overlap reading is optimistic for every pick: **the unbiased headline
   is the bench.** Round files, `log.md`, `review.md`, the round-close line and the candidates
   chart's `overlap` series all render this one reading.
