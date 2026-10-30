@@ -67,7 +67,6 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.initialization import loop_start
-from promptpotter.application.maintenance import restamp
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
@@ -160,7 +159,6 @@ from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import probe_lock, rewrite_lines, take_lock
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
-    ArchiveFile,
     MeasurementArchive,
     ReplayFeed,
     config_key,
@@ -567,66 +565,6 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert bench_reads(built_stores, bank=recut, sample_keys=frozenset({q2.key})) == 1, (
         "a holdout read under the bank before a re-cut was not counted on the re-cut"
     )
-
-    # A re-stamp walks every file the archive writes.
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(built_stores.projects_root.parent))
-    # A re-stamp prunes a record against the union arm it IS: read as the first arm, a walked
-    # arm lost its `sp_hash`, and the rewritten ledger refused its cycle to every reader.
-    kept: list[ArmRecord] = []
-
-    def _retired_key(lines: list[str]) -> tuple[list[str], None]:
-        records = [json.loads(line) for line in lines]
-        arm = next(rec for rec in records if rec["record_type"] == "arm")
-        arm["state"] |= {
-            "state": "measuring",
-            "sp_hash": "h",
-            "resolved_params": {},
-            "expected_samples": 2,
-        }
-        kept.append(ArmRecord.model_validate(arm))
-        arm["retired_key"] = 1
-        return [json.dumps(rec) + "\n" for rec in records], None
-
-    arm_ledger = campaigns.ledger(arm_root)
-    rewrite_lines(arm_ledger, _retired_key)
-    assert restamp.check_readable()["ledgers_refused"] == 1, (
-        "guard: a retired key refuses its cycle"
-    )
-    restamp.compact_cycle_ledgers(apply=True)
-    assert restamp.check_readable()["ledgers_refused"] == 0, "the re-stamp left a refused cycle"
-    assert [r for _, r in CycleEventLog(arm_ledger).iter() if isinstance(r, ArmRecord)][
-        :1
-    ] == kept, "a re-stamp deleted a key the reader of that record still needs"
-    assert restamp.check_readable()["archive_refused"] == 0, (
-        "a file this journey's writers left is one no re-stamp walker reads"
-    )
-    # A row its model refuses after pruning cannot be keyed: it goes with the configuration and
-    # index row it alone described.
-    refused: Configs = [("llm_only", {"model": "R"})]
-    filed(archive, [archive_row("q_refused", predicted="p")], filed_under(refused, "refused"))
-    refused_key = config_key(refused)
-    refused_cells = archive.cell_path(refused_key)
-    refused_cells.write_text(
-        "".join(
-            json.dumps({k: v for k, v in json.loads(line).items() if k != "dataset_hash"}) + "\n"
-            for line in archive.detail_lines(refused_key)
-        ),
-        encoding="utf-8",
-    )
-    # A file no archive kind names is removed, its emptied folders with it.
-    unnamed = archive.base_dir / MEASUREMENTS_DIR / "unnamed" / "nested" / "rows.jsonl"
-    unnamed.parent.mkdir(parents=True)
-    unnamed.write_text(fold_row("x").model_dump_json() + "\n", encoding="utf-8")
-    assert restamp.check_readable()["archive_refused"] == 2, "guard: each unkeyable file refuses"
-    paid = {ref: archive.answer(ref) for ref in refs}
-    restamp.restamp_measurement_archives(apply=True)
-    assert not unnamed.parent.parent.exists(), "a file no archive kind names survived the re-stamp"
-    assert (
-        not archive.path(ArchiveFile.CONFIG, refused_key).exists() and not refused_cells.exists()
-    ), "an unkeyable answer, or the configuration it alone described, survived the re-stamp"
-    assert refused_key not in {e.config_key for e in archive.list_all()}
-    assert restamp.check_readable()["archive_refused"] == 0, "the re-stamp left a refused file"
-    assert {ref: archive.answer(ref) for ref in refs} == paid, "a re-stamp lost a paid answer"
 
 
 # 3. Replayed decisions, and forks

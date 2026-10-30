@@ -55,7 +55,7 @@ class StatePart(FrozenModel):
 
     @staticmethod
     def of_kind(kind: str) -> type[StatePart]:
-        """The ONE dispatch by kind: validation and `restamp.py`'s pruning both read a banked part through it."""
+        """The ONE dispatch by kind: every read of a banked part goes through it."""
         if (held := StatePart._registered.get(kind)) is None:
             raise UnregisteredStatePartError(
                 f"no optimizer state kind is registered as {kind!r} (known: "
@@ -82,7 +82,7 @@ class RoundOutput(StatePart, kind=None):
 
 
 class UnregisteredStatePartError(RuntimeError):
-    """Not a ``ValueError`` on purpose: a ledger reader skips a line that fails validation."""
+    """Not a ``ValueError`` on purpose: ``ledger_record`` would refuse the line as unreadable, hiding the missing package."""
 
 
 class Critique(RoundOutput, kind="critique"):

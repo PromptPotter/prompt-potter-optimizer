@@ -77,7 +77,7 @@ from promptpotter.domain.run_records import (
     SampleScoredRecord,
     SampleStartedRecord,
 )
-from promptpotter.domain.spend import TokenAccount, prefix_reading
+from promptpotter.domain.spend import prefix_reading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
@@ -316,21 +316,21 @@ class ReadoutProjection(Projection):
         duration_s = payload.get("duration_s")
         if duration_s is None and started is not None:
             duration_s = max(0.0, (time.time() * 1000 - started) / 1000.0)
-        usage = TokenAccount.from_payload(payload.get("usage"))
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         bits: list[str] = [node_label]
         if isinstance(duration_s, (int, float)):
             bits.append(f"{duration_s:.1f}s")
-        if usage.total > 0:
-            bits.append(f"{usage.total} tok")
-        if usage.reasoning > 0 and usage.output > 0:
-            bits.append(f"{usage.reasoning / usage.output:.0%} reasoning")
-        prefix = prefix_reading(usage.cache_share(replayed=cached), replayed=cached)
-        if prefix.state == "unreported":
-            bits.append("prefix not reported")
-        elif prefix.share is not None:
-            bits.append(f"{prefix.share:.0%} prefix cached")
+        if (usage := record.usage) is not None:
+            if usage.total > 0:
+                bits.append(f"{usage.total} tok")
+            if usage.reasoning > 0 and usage.output > 0:
+                bits.append(f"{usage.reasoning / usage.output:.0%} reasoning")
+            prefix = prefix_reading(usage.cache_share(replayed=cached), replayed=cached)
+            if prefix.state == "unreported":
+                bits.append("prefix not reported")
+            elif prefix.share is not None:
+                bits.append(f"{prefix.share:.0%} prefix cached")
         # "replayed", not "cached": OUR archive served it; `cached` names the provider-side discount above.
         if cached:
             bits.append("replayed")

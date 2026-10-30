@@ -65,9 +65,6 @@ class PinnedCell(FrozenModel):
 # The tier stops at dataset: samples differ per dataset, so a workspace scope would mean nothing.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
-# A reader takes a `hard_samples.json` of any other version as not written.
-HARD_SAMPLES_VERSION = 9
-
 
 class SampleDifficulty(StrictModel):
     """Every number is null outside ``linked``; ``pick_score`` also where the scope holds no frontier ability."""
@@ -109,7 +106,6 @@ class HardSamples(StrictModel):
     """``hard_samples.json``, and the same view folded per request over an archive; it fits nothing.
     Every sample is its ``Sample.key``; ``positions`` places each at its row in the dataset served."""
 
-    schema_version: int
     cycle_id: str | None
     generated_at: str
     ruler: RulerStanding

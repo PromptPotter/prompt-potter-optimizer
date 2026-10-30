@@ -11,7 +11,6 @@ from pydantic import (
     GetJsonSchemaHandler,
     PrivateAttr,
     SerializerFunctionWrapHandler,
-    ValidationError,
     field_validator,
     model_serializer,
 )
@@ -118,16 +117,6 @@ class TokenAccount(FrozenModel):
         if not accounts:
             return None
         return reduce(operator.add, accounts)
-
-    @classmethod
-    def from_payload(cls, usage: object) -> TokenAccount:
-        """Unreadable degrades to an EMPTY account: a resume REPLAYS the ledger, so a record renders, never raises."""
-        if not isinstance(usage, Mapping):
-            return cls()
-        try:
-            return cls.model_validate(usage)
-        except ValidationError:
-            return cls()
 
     def cache_share(self, *, replayed: bool) -> float | None:
         """``None`` where unanswerable, a replay included (its counts are the banked row's); ``0.0`` is a MEASUREMENT."""

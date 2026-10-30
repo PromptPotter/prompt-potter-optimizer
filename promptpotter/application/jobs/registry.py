@@ -26,7 +26,7 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.store.io import read_json, write_json
+from promptpotter.infrastructure.store.io import read_json, unlink_robust, write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 
@@ -100,7 +100,7 @@ JobHolder = Annotated[
 
 @dataclass(frozen=False)
 class Job:
-    """Outlives its release: the daily launch quota counts it."""
+    """Outlives its release to the end of its UTC day: the daily launch quota counts it."""
 
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
@@ -164,6 +164,9 @@ class Job:
     def released(self) -> bool:
         return self.released_at is not None
 
+    def launched_on(self, day: str) -> bool:
+        return self.created_at.startswith(day)
+
     @property
     def queued(self) -> bool:
         return not self.released and self.stage is RunPhase.QUEUED
@@ -182,7 +185,7 @@ _JOB = TypeAdapter(Job)
 
 
 class JobRegistry:
-    """No process sweeps another's jobs: one is cleared only by proving its producer gone."""
+    """No process reaps another's live job without proving its producer gone."""
 
     @classmethod
     def attach(cls, jobs_dir: Path) -> JobRegistry:
@@ -380,6 +383,8 @@ class JobRegistry:
         return _JOB.validate_python(raw)
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
+        """A released job launched before today is deleted here: every reader past a release counts today's."""
+        today = utcnow_iso()[:10]
         out: list[Job] = []
         for path in self._dir.glob("*.json"):
             try:
@@ -387,6 +392,9 @@ class JobRegistry:
             except (OSError, JSONDecodeError):
                 continue
             job = _JOB.validate_python(raw)
+            if job.released and not job.launched_on(today):
+                unlink_robust(path)
+                continue
             if user_id is not None and job.user_id != user_id:
                 continue
             out.append(job)
@@ -474,7 +482,7 @@ class JobRegistry:
         return [
             j
             for j in self.list_all(user_id=user_id)
-            if j.created_at.startswith(today) and isinstance(j.holder, CampaignLaunch)
+            if j.launched_on(today) and isinstance(j.holder, CampaignLaunch)
         ]
 
     def queued_drafts(self, *, user_id: str) -> frozenset[str]:

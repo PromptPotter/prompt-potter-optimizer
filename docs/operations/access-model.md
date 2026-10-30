@@ -155,8 +155,8 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   is the way around this section. `oidc.py::resolve_access_state` (served as
   `MeResponse.access_state`) answers `blocked` only for a revoked email.
 - **Who is exempt from free-tier metering is one definition with two readings** —
-  `identity/migration.py::_is_host`, read off a live identity (`quota.py::spends_the_hosts_own_key`)
-  or a directory walk (`migration.py::is_host_tenant_dir`). Merging the two detectors would let an
+  `identity/default_claim.py::_is_host`, read off a live identity (`quota.py::spends_the_hosts_own_key`)
+  or a directory walk (`default_claim.py::is_host_tenant_dir`). Merging the two detectors would let an
   identity that omits an issuer resolve as the operator.
 - **Who may claim the box is DECLARED, never inferred** — `auth.py::_is_declared_host_admin` reads
   `Settings.HOST_ADMIN_EMAIL`, and `HOST_ADMIN_ISSUER` where set, since two wired providers could

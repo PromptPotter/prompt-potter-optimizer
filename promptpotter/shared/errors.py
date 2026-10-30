@@ -256,8 +256,7 @@ class StoredConfigInvalidError(PotterError):
 
     def __init__(self, *, path: str, reason: str) -> None:
         super().__init__(
-            f"{path} is no longer readable by this build: {reason}. "
-            "`python -m promptpotter restamp --apply` rewrites it.",
+            f"{path} is no longer readable by this build: {reason}. Fix the file.",
             details={"path": path, "reason": reason},
         )
 

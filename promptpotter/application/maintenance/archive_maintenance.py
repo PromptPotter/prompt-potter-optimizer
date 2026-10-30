@@ -12,7 +12,7 @@ from pydantic import Field, computed_field
 
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.migration import is_host
+from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (

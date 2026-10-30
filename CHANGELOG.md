@@ -35,7 +35,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Every paid pass scores at most 150 rows and stops on the one pause** — round, origin, bench, verify, noise-floor; a definition or request asking for more is refused (ADR-0010).
 - **An election pools the round's draw with each arm's origin-panel cells**, promotes only where PoBB would cut the parent, and a round draws blind of the leader's θ.
 - **BREAKING — block libraries are packs the operator installs** under `block_packs/`; core ships none and `config/prompt_variants.json` is deleted.
-- **BREAKING — a ledger line no model accepts refuses its cycle** to every reader of its kind; `restamp` lists each refused cycle.
+- **BREAKING — a ledger line no model accepts refuses its cycle** to every reader of its kind.
+- **BREAKING — no migration: a shape change wipes run data.** The `restamp` verb is deleted and `update.sh` no longer runs it or fails a deploy on an unreadable campaign; a released job's file is deleted by the job registry once its day ends; hard samples, prompt exports and ledger `llm_call` usage read strictly.
 - **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), the `round_standing` record (carried by `round_closed`), and the `optimizer_state` record (a `round_restated` statement, which a repair's re-bank writes too).
 
 ## [0.8.17] — 2026-10-15

@@ -33,7 +33,7 @@ from promptpotter.domain.spend import (
     bill_is_floor,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.migration import is_host
+from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,

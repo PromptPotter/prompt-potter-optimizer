@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
-from promptpotter.infrastructure.identity import blocklist, migration
+from promptpotter.infrastructure.identity import blocklist, default_claim
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
     list_grants,
@@ -220,7 +220,7 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
 
 
 def registered_user_id() -> str | None:
-    return migration.registered_user_id(default_identity_paths().default_claim_marker)
+    return default_claim.registered_user_id(default_identity_paths().default_claim_marker)
 
 
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:

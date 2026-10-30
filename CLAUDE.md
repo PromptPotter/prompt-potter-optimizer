@@ -37,7 +37,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 ## STOP — no backward compatibility, ever
 
-Zero released versions, zero data worth keeping. **The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers on-disk shape**: design the right shape, then wipe or migrate the data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
+Zero released versions, zero data worth keeping. **The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers on-disk shape**: design the right shape, then wipe the data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
 
 **Names are distinct and self-describing.** Grep for collisions; a second word for something the repo already names is a deletion, not a synonym; a name that stopped describing its contents is renamed with its doc and `CLAUDE.md` row in the same commit.
 

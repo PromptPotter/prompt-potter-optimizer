@@ -297,7 +297,6 @@ def _call_record(
             "max_tokens": call.merged.get("max_tokens"),
         },
         "response": _ledger_response_payload(response),
-        "usage": response.usage.model_dump(),
         "model": response.model,
         "duration_s": duration_s,
         "finish_reason": response.finish_reason,
@@ -317,6 +316,7 @@ def _call_record(
         round=call.context.round_num,
         candidate_idx=call.context.candidate_idx,
         call_id=call.call_id,
+        usage=response.usage,
         payload=payload,
     )
 

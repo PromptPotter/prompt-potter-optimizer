@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from promptpotter.domain.activity import ActivityFeed
+from promptpotter.domain.activity import ActivityFeed, ActivityRecord
 from promptpotter.domain.projection_envelope import (
     RECORD_KINDS,
     ProjectionEnvelope,
@@ -17,6 +17,16 @@ from promptpotter.infrastructure.store.read_model import (
     ledger_record,
     line_dict,
 )
+
+
+def _bearing_line(
+    raw: bytes,
+) -> tuple[ProjectionKind, dict[str, Any], ActivityRecord | None] | None:
+    rec = line_dict(raw)
+    kind = rec.get("record_type")
+    if not isinstance(kind, str) or kind not in RECORD_KINDS:
+        return None
+    return cast(ProjectionKind, kind), rec, bearing_record(kind, rec)
 
 
 class CycleLedgerTail:
@@ -83,15 +93,13 @@ class CycleLedgerTail:
 
     def _read(self, raw: bytes) -> tuple[ProjectionKind, dict[str, Any]] | None:
         offset = self._feed.at_offset = self._line_index
-        rec = ledger_record(line_dict, raw, ledger=self._ledger_path, offset=offset)
-        if rec is None:
+        read = ledger_record(_bearing_line, raw, ledger=self._ledger_path, offset=offset)
+        if read is None:
             return None
-        kind = rec.get("record_type")
-        if not isinstance(kind, str) or kind not in RECORD_KINDS:
-            return None
-        if (record := bearing_record(kind, rec)) is not None:
+        kind, rec, record = read
+        if record is not None:
             feed_fold(self._feed, record, ledger=self._ledger_path, offset=offset)
-        return cast(ProjectionKind, kind), rec
+        return kind, rec
 
     def _to_envelope(self, raw: bytes) -> ProjectionEnvelope | None:
         if (read := self._read(raw)) is None:

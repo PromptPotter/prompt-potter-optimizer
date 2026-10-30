@@ -8,13 +8,12 @@ from typing import TYPE_CHECKING
 from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
 from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.domain.cells import (
-    HARD_SAMPLES_VERSION,
     HardSampleCell,
     HardSamples,
     SampleDifficulty,
 )
 from promptpotter.domain.ruler import RulerStanding
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -77,7 +76,6 @@ def build_hard_samples(
     held = sorted({*carried, *measured}, key=slots.__getitem__)
     key_at = {slots[key]: key for key in measured}
     return HardSamples(
-        schema_version=HARD_SAMPLES_VERSION,
         cycle_id=cycle_id,
         generated_at=utcnow_iso(),
         ruler=standing,
@@ -120,7 +118,5 @@ def rank_hard_samples(
 
 
 def read_hard_samples(path: Path) -> HardSamples | None:
-    held = read_json_tolerant(path)
-    if not held or held.get("schema_version") != HARD_SAMPLES_VERSION:
-        return None
-    return HardSamples.model_validate(held)
+    held = read_json_optional(path)
+    return None if held is None else HardSamples.model_validate(held)

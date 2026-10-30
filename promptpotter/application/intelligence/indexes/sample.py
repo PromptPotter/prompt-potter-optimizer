@@ -282,8 +282,7 @@ class SampleIndex:
                 if unscored is not None:
                     logger.warning(
                         "sample refresh: configuration %r is unscoreable under the active "
-                        "formula — skipping it (it predates the current observation "
-                        "vocabulary). %s",
+                        "formula — skipping it (it lacks a term the formula names). %s",
                         key,
                         unscored,
                     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, get_args
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.domain.activity import ActivityRecord, ActivityState
 from promptpotter.domain.run_records import CycleRecord
@@ -90,13 +90,10 @@ _ACTIVITY_ADAPTER: TypeAdapter[ActivityRecord] = TypeAdapter(
 
 
 def bearing_record(kind: str, rec: dict[str, Any]) -> ActivityRecord | None:
-    """``None`` for a kind that never renders, and for a line no arm accepts (``CycleEventLog.iter``'s skip)."""
+    """``None`` for a kind that never renders; a line no arm accepts raises ``ValidationError``."""
     if kind in NON_ACTIVITY_KINDS:
         return None
-    try:
-        return _ACTIVITY_ADAPTER.validate_python(rec)
-    except ValidationError:
-        return None
+    return _ACTIVITY_ADAPTER.validate_python(rec)
 
 
 class ProjectionEnvelope(FrozenModel):

@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import ConfigDict, Field, RootModel, TypeAdapter, field_validator, model_validator
+from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmState, Proposal, Proposed
@@ -45,6 +45,7 @@ from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
+    TokenAccount,
     TokenUsageKind,
     bill_or_rate_usd,
     cycle_axes_only,
@@ -604,6 +605,7 @@ class LLMCallRecord(FrozenModel):
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
+    usage: TokenAccount | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -678,34 +680,41 @@ class CommandRecord(FrozenModel):
 class NoEffect(FrozenModel):
     """An ack whose command names no effect beyond having happened."""
 
+    kind: Literal["none"] = "none"
+
 
 class PausedEffect(FrozenModel):
     """``pause-cycle``, taken by the loop."""
 
+    kind: Literal["paused"] = "paused"
     run_phase: Literal[RunPhase.PAUSED]
 
 
 class SkippedEffect(FrozenModel):
     """``skip-sample``, taken by the loop."""
 
+    kind: Literal["skipped"] = "skipped"
     skipped: int
 
 
 class GateDecidedEffect(FrozenModel):
     """``origin-gate-decision``, taken by the loop."""
 
+    kind: Literal["gate_decided"] = "gate_decided"
     decision: GateDecision
 
 
 class ArmsTakenEffect(FrozenModel):
     """``submit-arms``: how many arms the round banked."""
 
+    kind: Literal["arms_taken"] = "arms_taken"
     arms: int
 
 
 class LookaheadTakenEffect(FrozenModel):
     """``set-sample-lookahead``, spent by the round that took it."""
 
+    kind: Literal["lookahead_taken"] = "lookahead_taken"
     cells: int
     auto: bool
 
@@ -713,18 +722,18 @@ class LookaheadTakenEffect(FrozenModel):
 class ArmedCeilingEffect(FrozenModel):
     """``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands."""
 
+    kind: Literal["armed_ceiling"] = "armed_ceiling"
     armed: Budget
 
 
-class OriginEditedEffect(RootModel[dict[str, dict[Literal["from", "to"], Any]]]):
+class OriginEditedEffect(FrozenModel):
     """A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new."""
 
-    model_config = ConfigDict(frozen=True)
-    root: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
+    kind: Literal["origin_edited"] = "origin_edited"
+    moved: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
 
 
-# Told apart by their fields, so an ack written before any tag still reads as its kind.
-CommandEffect = (
+CommandEffect = Annotated[
     NoEffect
     | PausedEffect
     | SkippedEffect
@@ -732,8 +741,9 @@ CommandEffect = (
     | ArmsTakenEffect
     | LookaheadTakenEffect
     | ArmedCeilingEffect
-    | OriginEditedEffect
-)
+    | OriginEditedEffect,
+    Field(discriminator="kind"),
+]
 
 
 class CommandAckRecord(FrozenModel):

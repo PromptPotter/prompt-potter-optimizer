@@ -339,16 +339,6 @@ class MeasurementArchive:
     def keys(self, kind: ArchiveFile) -> list[str]:
         return sorted(key for key, _ in self._named(kind))
 
-    def unwalked(self) -> list[Path]:
-        """Every file here no `keys` names, at any depth; `store/io.py`'s dot-named locks and temp files aside."""
-        named = {self.path(kind, key) for kind in ArchiveFile for key in self.keys(kind)}
-        return sorted(
-            path
-            for top, _, names in os.walk(self._store_dir())
-            for name in names
-            if name[0] != "." and (path := Path(top) / name) not in named
-        )
-
     def _index_path(self) -> Path:
         return self.path(ArchiveFile.INDEX)
 

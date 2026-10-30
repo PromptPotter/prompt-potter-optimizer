@@ -23,8 +23,11 @@ from promptpotter.config.settings import TERMS_VERSION, settings
 from promptpotter.domain.run_records import Device, device_of
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
+from promptpotter.infrastructure.identity.default_claim import (
+    maybe_claim_default,
+    registered_user_id,
+)
 from promptpotter.infrastructure.identity.google import ProviderIdentity
-from promptpotter.infrastructure.identity.migration import maybe_claim_default, registered_user_id
 from promptpotter.infrastructure.identity.provider_config import (
     SUPPORTED_PROVIDERS,
     CodeExchangeError,

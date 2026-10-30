@@ -15,7 +15,7 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.migration import is_host
+from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.shared.identity import IdentityContext, acting_principal
 
 _WHAT_DOC = (

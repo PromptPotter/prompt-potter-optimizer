@@ -8,7 +8,7 @@ from typing import NamedTuple
 from promptpotter.application.jobs.quota import lifetime_ceilings
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.spend import Budget, UserSpend
-from promptpotter.infrastructure.identity.migration import is_host_tenant_dir
+from promptpotter.infrastructure.identity.default_claim import is_host_tenant_dir
 from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.user_store import Torn, User, read_accounts

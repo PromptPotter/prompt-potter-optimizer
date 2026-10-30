@@ -913,6 +913,12 @@
         "properties": {
           "armed": {
             "$ref": "#/components/schemas/Budget"
+          },
+          "kind": {
+            "const": "armed_ceiling",
+            "default": "armed_ceiling",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -928,6 +934,12 @@
           "arms": {
             "title": "Arms",
             "type": "integer"
+          },
+          "kind": {
+            "const": "arms_taken",
+            "default": "arms_taken",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -1933,7 +1945,20 @@
             "type": "string"
           },
           "effect": {
-            "anyOf": [
+            "discriminator": {
+              "mapping": {
+                "armed_ceiling": "#/components/schemas/ArmedCeilingEffect",
+                "arms_taken": "#/components/schemas/ArmsTakenEffect",
+                "gate_decided": "#/components/schemas/GateDecidedEffect",
+                "lookahead_taken": "#/components/schemas/LookaheadTakenEffect",
+                "none": "#/components/schemas/NoEffect",
+                "origin_edited": "#/components/schemas/OriginEditedEffect",
+                "paused": "#/components/schemas/PausedEffect",
+                "skipped": "#/components/schemas/SkippedEffect"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/NoEffect"
               },
@@ -3718,6 +3743,12 @@
             ],
             "title": "Decision",
             "type": "string"
+          },
+          "kind": {
+            "const": "gate_decided",
+            "default": "gate_decided",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -4134,6 +4165,17 @@
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -4548,6 +4590,12 @@
           "cells": {
             "title": "Cells",
             "type": "integer"
+          },
+          "kind": {
+            "const": "lookahead_taken",
+            "default": "lookahead_taken",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -5119,7 +5167,14 @@
       "NoEffect": {
         "additionalProperties": false,
         "description": "An ack whose command names no effect beyond having happened.",
-        "properties": {},
+        "properties": {
+          "kind": {
+            "const": "none",
+            "default": "none",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
         "title": "NoEffect",
         "type": "object"
       },
@@ -5450,18 +5505,34 @@
         "type": "object"
       },
       "OriginEditedEffect": {
-        "additionalProperties": {
-          "additionalProperties": true,
-          "propertyNames": {
-            "enum": [
-              "from",
-              "to"
-            ]
-          },
-          "type": "object"
-        },
+        "additionalProperties": false,
         "description": "A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new.",
-        "minProperties": 1,
+        "properties": {
+          "kind": {
+            "const": "origin_edited",
+            "default": "origin_edited",
+            "title": "Kind",
+            "type": "string"
+          },
+          "moved": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "propertyNames": {
+                "enum": [
+                  "from",
+                  "to"
+                ]
+              },
+              "type": "object"
+            },
+            "minProperties": 1,
+            "title": "Moved",
+            "type": "object"
+          }
+        },
+        "required": [
+          "moved"
+        ],
         "title": "OriginEditedEffect",
         "type": "object"
       },
@@ -5847,6 +5918,12 @@
         "additionalProperties": false,
         "description": "``pause-cycle``, taken by the loop.",
         "properties": {
+          "kind": {
+            "const": "paused",
+            "default": "paused",
+            "title": "Kind",
+            "type": "string"
+          },
           "run_phase": {
             "const": "paused",
             "title": "Run Phase",
@@ -8262,6 +8339,12 @@
         "additionalProperties": false,
         "description": "``skip-sample``, taken by the loop.",
         "properties": {
+          "kind": {
+            "const": "skipped",
+            "default": "skipped",
+            "title": "Kind",
+            "type": "string"
+          },
           "skipped": {
             "title": "Skipped",
             "type": "integer"

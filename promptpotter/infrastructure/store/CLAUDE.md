@@ -55,8 +55,7 @@ election stamps them.
 `compact` is reversible; only `purge-cold` needs attribution, and only it is irreversible.
 
 **Every archive path is built from `measurement_archive.py::ArchiveFile`, keyed by a content address, never a
-name** — a new kind is a member, and `application/maintenance/restamp.py::_ARCHIVE_WALKS` refuses to import
-without its walker; a file no kind names is removed by the re-stamp. <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 --> A dataset name in any other tenant path
+name**. <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 --> A dataset name in any other tenant path
 is one segment, `layout.py::dataset_id_prefix`.
 
 ## Dataset content has two tiers, and only one is writable

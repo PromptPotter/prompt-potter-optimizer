@@ -114,12 +114,12 @@ acting.
   carries no meaning. Action: one ink. **Re-test:** read `FreqChart.tsx::colors`.
 - **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
-- **A running server keeps serving a ledger refusal after the ledger is rewritten**: `/hierarchy`
-  answered `ledger_unreadable` for a cycle that `restamp` read whole, until restart. Action: key a
-  refusal on the file's identity (size + mtime) like the fold it guards. **Re-test:** migrate a
-  refused ledger under a live server; the next read answers 200.
-- **A live producer started on older code writes shapes the landed code refuses**, and reads
-  shapes a migration wrote: landing a ledger shape change while any run writes breaks both sides.
+- **A running server keeps serving a ledger refusal after the ledger is replaced**: `/hierarchy`
+  answered `ledger_unreadable` for a cycle whose ledger was rewritten whole, until restart. Action: key a
+  refusal on the file's identity (size + mtime) like the fold it guards. **Re-test:** delete a refused
+  campaign and re-mint the same content under a live server; the next read answers 200.
+- **A live producer started on older code writes shapes the landed code refuses**: landing a ledger
+  shape change while any run writes breaks it.
   Action: a run records its code revision and the landing refuses while a producer of an older one
   holds a cycle. **Re-test:** `machine-status` before a shape-moving landing.
 - **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
@@ -337,11 +337,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
   or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
   kept the old `Authored` shape. Action: refuse the pack, serve the rest.
-- **A pack's on-disk shape moved with nothing to migrate it.** `Authored.version: int` and a required
-  `supersedes` landed with the packs commit. The account's `starter` pack still held git-sha versions,
-  so `GET /library` returned 500 until it was migrated by hand (2026-10-29). `gate.py`'s `restamp` check
-  guards ledger records only. Action: packs ride the same shape-moved check, or `restamp` migrates them.
-  The live box holds packs too. **Re-test:** change a field of `Authored` and see the gate name the packs.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
   `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
   hands it down.
@@ -545,6 +540,18 @@ word's `git grep -c` for that sense is 0.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
+- **Seen removing the migrations** (2026-10-30):
+  - `standing_rounds` reads past a ledger line carrying an undeclared key; every other reader in
+    `test_archive.py`'s stranded-close journey refuses it (its `resume` reader is red at 77c3b96b2).
+    Also red there: `test_spend.py`'s compaction step, an index keeping its old rows after a
+    shorter file is swapped in.
+  - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
+  - `identity/default_claim.py::_rewrite_campaign_ownership` writes `campaign.json` beside
+    `CampaignStore.update_campaign`, and logs an unreadable manifest instead of refusing.
+  - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
+  - `family_ray_queries.py::_RayTail` gets a line no activity arm accepts as a `feed_fold` log, not a
+    `LedgerUnreadableError`: `LineIndex` validates JSON only. Both tails skip an unknown
+    `record_type` silently.
 
 ## Bypasses — held for one holistic pass
 
