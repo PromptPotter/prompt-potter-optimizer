@@ -12,16 +12,13 @@ from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import MemberCoupling
     from promptpotter.domain.campaign import RunDeclaration
-
-shapes_optimizer_prompt(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,11 +104,6 @@ def member_knob_count() -> int:
     return sum(
         len(_walk(m.knobs, _node_prefix(n))) for n, m in optimizers.NODE_MEMBERS.table.items()
     )
-
-
-def _table(config: CampaignConfig) -> dict[tuple[str, ...], KnobDecl]:
-    bench = {p: d for p, d in KNOBS.items() if p != _NODES_PATH}
-    return {**bench, **_node_decls(select_optimizer(config.optimization))}
 
 
 def _models_in(annotation: object) -> Iterator[type[BaseModel]]:
@@ -315,15 +307,15 @@ def _at(data: Any, path: tuple[str, ...]) -> Any:
     return cur
 
 
-def resolve_knob_states(config: CampaignConfig) -> list[KnobState]:
+def resolve_knob_states(config: CampaignConfig, selected: SelectedOptimizer) -> list[KnobState]:
     """``value`` is ``None`` where an opt-in submodel is off, not merely unset."""
-    selected = select_optimizer(config.optimization)
     dumped = config.model_dump(mode="json")
     authored = config.model_dump(mode="json", exclude_defaults=True)
     nodes = {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
     dumped["optimization"]["nodes"] = {n: {"config": v} for n, v in nodes.items()}
     states: list[KnobState] = []
-    for path, decl in _table(config).items():
+    bench = {p: d for p, d in KNOBS.items() if p != _NODES_PATH}
+    for path, decl in {**bench, **_node_decls(selected)}.items():
         value = _at(dumped, path)
         set_by_operator = _at(authored, path) is not _MISSING
         if path[: len(_NODES_PATH)] == _NODES_PATH:

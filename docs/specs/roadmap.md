@@ -21,7 +21,7 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
    never edited, a held leader is never re-scored); early stop when C1.1 clearly beats C0; Δ per time,
    per candidate and per $ served in chat. Paid: the board's path, steps (1)–(4).
 4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
-   partition; third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
+   partition. Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
 5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A2 host
    coupon + BYO keys; A3 anonymous preview.
@@ -84,9 +84,6 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    Price it in dollars and wall clock before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
    budget-matched Pareto comparison reviewers ask for first.
-7. **Third-party reachability**: a scratch-venv example package with one entry point and one
-   proposing node. *Closes when* `optimizer: example` runs a round whose arms carry
-   `source="example:propose"` with zero edits inside this tree.
 
 ### Members the presets need
 

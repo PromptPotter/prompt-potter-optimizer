@@ -16,6 +16,7 @@ from promptpotter.domain.pool import (
     DemoPool,
     Pool,
     PoolEntry,
+    PoolSource,
     entry_id,
     kept,
     unnamed,
@@ -63,6 +64,12 @@ class _PoolInitializer(nodes.Initializer):
     def active(self, selected: SelectedOptimizer) -> list[str]:
         return selected.knobs_of(self.name, PoolKnobs).active
 
+    def packs(self, selected: SelectedOptimizer) -> list[str] | None:
+        # A library's pool names its packs, so its knobs must be `BlockPoolKnobs`.
+        if self.pool.source is not PoolSource.LIBRARY:
+            return None
+        return list(selected.knobs_of(self.name, BlockPoolKnobs).packs)
+
 
 class BlockPoolInitializer(_PoolInitializer):
     name: ClassVar[str] = BlockPool.kind
@@ -82,10 +89,10 @@ class BlockPoolInitializer(_PoolInitializer):
         ]
 
     def held(self, selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
-        packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
         # At load no account is known, so no pack entry is.
         if mint is None:
             return []
+        packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
         return list(mint.shelf.entries(packs, admits=mint.admits).values())
 
     def refusal(

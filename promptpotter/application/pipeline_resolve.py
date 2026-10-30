@@ -1035,9 +1035,8 @@ def _pool_fills(
 def _pack_offers(
     selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
 ) -> list[PackOffer]:
-    if initializer.pool.source is not PoolSource.LIBRARY or mint is None:
+    if (named := initializer.packs(selected)) is None or mint is None:
         return []
-    named: list[str] = selected.knobs(initializer.name).model_dump(mode="json")["packs"]
     return [
         PackOffer(
             name=name,

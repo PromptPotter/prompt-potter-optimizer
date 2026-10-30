@@ -13,6 +13,7 @@ nodes:
   propose:
     type: llm
     description: Rephrases the parent's instruction.
+    makes: rephrasings
     config:
       prompt_family: propose
       prompt_version: 1

@@ -332,16 +332,25 @@ RUN_INIT = "run_init"
 
 
 class RoundRole(Enum):
-    """The ONE order a round's members run in, each role by the node kinds it admits: ``_round_plan`` admits a `default` walk in it, ``runner/round.py::execute_round`` walks it."""
+    """The order a `default` walk lists its roles in, each by the node kinds it ``admits``: ``optimizer_manifest.py::_round_plan`` places a node by position, so one kind serves two roles."""
 
-    SAMPLER = frozenset({NodeKind.SAMPLER})
-    PROPOSER = frozenset({NodeKind.LLM, NodeKind.ALGORITHM})
+    admits: frozenset[NodeKind]
+
+    # Valued by position, so two roles admitting one kind set stay two roles.
+    def __new__(cls, *kinds: NodeKind) -> RoundRole:
+        role = object.__new__(cls)
+        role._value_ = len(cls.__members__)
+        role.admits = frozenset(kinds)
+        return role
+
+    SAMPLER = (NodeKind.SAMPLER,)
+    PROPOSER = (NodeKind.LLM, NodeKind.ALGORITHM)
     # The gateway's walk, raced by the eliminator.
-    MEASUREMENT = frozenset({NodeKind.ELIMINATOR, NodeKind.GATEWAY})
-    SELECTOR = frozenset({NodeKind.SELECTOR})
-    SURVIVOR = frozenset({NodeKind.ALGORITHM})
-    ADAPTER = frozenset({NodeKind.LLM})
-    CONTROLLER = frozenset({NodeKind.CONTROLLER})
+    MEASUREMENT = (NodeKind.ELIMINATOR, NodeKind.GATEWAY)
+    SELECTOR = (NodeKind.SELECTOR,)
+    SURVIVOR = (NodeKind.ALGORITHM,)
+    ADAPTER = (NodeKind.LLM,)
+    CONTROLLER = (NodeKind.CONTROLLER,)
 
 
 @dataclass(frozen=True)
@@ -768,6 +777,10 @@ class Initializer(NodeMember, Protocol):
         ...
 
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
+
+    def packs(self, selected: SelectedOptimizer) -> list[str] | None:
+        """The block packs its pool draws from, in draw order; ``None`` where it draws from no shelf."""
+        ...
 
     def held(self, selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
         """The entries an ``active`` path may name: at load with no *mint*, every one any run admits."""
