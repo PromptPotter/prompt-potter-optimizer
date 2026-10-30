@@ -11,6 +11,7 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_inner_steer_is_legal,
     l1_prompt_field_not_gutted,
     l1_prompt_fields_open,
+    l1_prose_within_ceiling,
 )
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
@@ -56,6 +57,7 @@ def parse_population(
                     inner_nodes=() if inner_cells is None else inner_cells.owners,
                 ),
                 *l1_inner_layout_applies(pipeline_overlay),
+                *l1_prose_within_ceiling(pipeline_overlay, schema=schema, inner_cells=inner_cells),
                 *l1_prompt_field_not_gutted(
                     pipeline_overlay,
                     inner_cells=inner_cells,

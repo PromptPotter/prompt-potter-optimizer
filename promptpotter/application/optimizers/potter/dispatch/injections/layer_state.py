@@ -28,6 +28,8 @@ from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from promptpotter.domain.optimizer_state import CritiqueReadout
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -178,30 +180,33 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
 CLUSTER_IDS_SHOWN = 12
 
 
-def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> frozenset[str]:
-    out: set[str] = set()
+def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, ...]:
+    """The one axis vocabulary: the critique names from it, and its panel keeps only what it names."""
+    out: list[str] = []
     for node in schema.prompt_nodes():
-        out.update(Locus(node.name, f).name for f in node.open_prompt_fields)
+        out.extend(Locus(node.name, f).name for f in node.open_prompt_fields)
         if offers_shots:
-            out.add(Locus(node.name, SHOTS_KEY).name)
+            out.append(Locus(node.name, SHOTS_KEY).name)
     for node in schema.nodes:
-        if node.name:
-            out.add(node.name)
-        for pk in node.param_keys:
-            out.add(pk)
-            if node.name:
-                out.add(f"{node.name}.{pk}")
-    return frozenset(out)
+        out.extend(f"{node.name}.{pk}" if node.name else pk for pk in sorted(node.param_keys))
+    return tuple(dict.fromkeys(out))
 
 
-def _priority_fix_axis(priority_fix: str) -> str:
-    head, sep, _ = priority_fix.partition(":")
-    axis = head.strip()
-    return axis if sep and axis.isidentifier() else ""
+@signal(
+    "critique_axes",
+    kind=InjectionKind.DIRECTIVE,
+    char_cap=None,
+    citable=False,
+)
+def _r_critique_axes(b: InjectionBundle) -> list[Item]:
+    schema = b.pipeline_schema
+    if schema is None:
+        return []
+    return [Item(", ".join(critique_axes(schema, offers_shots=b.offers_shots)))]
 
 
 def format_l1_critique_for_prompt(
-    critique: CritiqueReadout | None, axes: frozenset[str] | None = None
+    critique: CritiqueReadout | None, axes: Collection[str] | None = None
 ) -> str:
     if not critique:
         return ""
@@ -211,7 +216,9 @@ def format_l1_critique_for_prompt(
         parts.append(f"Fix: {pf}")
     sa = list(critique.get("suggested_axes") or [])
     # The steer's own axis leads its menu, so `Fix:` and `Axes:` never name different things.
-    if lead := _priority_fix_axis(pf):
+    head, colon, _ = pf.partition(":")
+    lead = head.strip()
+    if colon and all(part.isidentifier() for part in lead.split(".")):
         sa = [lead, *(a for a in sa if a != lead)]
     if axes is not None:
         sa = [a for a in sa if a in axes]
@@ -236,8 +243,8 @@ def format_l1_critique_for_prompt(
 @signal(
     "critique",
     kind=InjectionKind.TRACE,
-    # Above the distiller's whole quota: 3 clusters (label 60c, `CLUSTER_IDS_SHOWN` ids, claim 240c) + priority_fix 320c + axes.
-    char_cap=2000,
+    # Above the distiller's whole quota: 3 clusters (label 60c, `CLUSTER_IDS_SHOWN` ids, claim 320c) + priority_fix 320c + axes.
+    char_cap=2400,
     citable=True,
 )
 def _r_critique(b: InjectionBundle) -> list[Item]:

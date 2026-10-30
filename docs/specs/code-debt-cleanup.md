@@ -281,6 +281,9 @@ acting.
   `_AXIS_MEMORY_LABEL_ORDER`, yet `digest` also builds `dead_queries`, `discriminating`, `bottleneck`,
   `failure_group_insights`, `volatile` and `improvement_attribution` each round. Action: delete each key
   no reader takes, or render it. **Re-test:** `git grep -n "digest.get\|\.digest(" -- promptpotter`.
+- **A critique cluster on unmarked rows is dropped into a log** (`l1/critique.py::spanning_clusters`), never
+  healed. Action: reject at the parse boundary with the marked roster in reach, so the repair rung heals it.
+  **Re-test:** a critique naming an unmarked row is re-asked, not thinned.
 - **The fastest hosts refuse the `l1_generate` schema**: Cerebras and Groq (`openai/gpt-oss-*`) answer 400 to
   `L1GenerateOutput`'s inlined JSON schema — Cerebras wants `properties` on every object, Groq strict mode wants
   every property `required` — so the cheapest fast silicon cannot run an optimizer node. This was found by

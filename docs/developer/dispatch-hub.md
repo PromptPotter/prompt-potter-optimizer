@@ -18,7 +18,7 @@ The hub is stateless. `injection_table()` (`dispatch/injections/registry.py`) is
 
 | where it is produced | the bound that judges it |
 |---|---|
-| an LLM optimizer output (`plan`, `critique`, an L2/L3 field) | `max_length` + a `_truncate*` validator on the response model (`dispatch/schemas.py`) — the parse boundary |
+| an LLM optimizer output (`plan`, `critique`, an L2/L3 field) | a `_truncate*` validator on the response model (`dispatch/schemas.py`) — the parse boundary, never a wire `maxLength` ([`structured-output.md`](../concepts/structured-output.md) § Enforcement is provider-dependent) |
 | operator-authored framing (`task_context`) | `TaskDecomposition.check_budget` at mint — per field **and** in total, so five legal fields cannot compose an illegal framing |
 | a derived/measurement view | its own `*_RENDER_CAP` top-K, which bounds rows rather than characters |
 
@@ -86,7 +86,7 @@ Two corollaries are easy to miss: input length is a quality tax and not only a b
 
 - **Entry points** — `render(name, bundle)` and `fill(template, bundle, *, node)`, both stateless; the layout is resolved inside from `node`, never passed in. `InjectionBundle` is the per-call frozen state built once via `build_bundle(cycle)` over the cycle's LAST round; the bench folds a round in (`Cycle.absorb_round`) before its adapters run, so `l1_critique` reads the round it distils like every other node.
 - **No optimizer prose token names an injection** — every surviving `{{token}}` in the shipped prompts is a caller extra, and every `problem_description` body is empty, so the template carries no per-ROUND value to void the stable prefix behind it.
-- **`L1_MANDATORY` is two kinds, and the second gets forgotten**: a field L1 cannot OPERATE without (parent prompt, plan, task framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND — `answer_distribution`, without which a collapse onto one label is invisible to the run collapsing, and `measurand` + `confounds`, without which the generator optimises a column it cannot name and reads a cold ruler as ability. Missing after a merged edit fires `l1_layout_missing_mandatory`, a guard breach routing to L3.
+- **`L1_MANDATORY` is two kinds, and the second gets forgotten**: a field L1 cannot OPERATE without (parent prompt, plan, task framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND — `answer_distribution`, without which a collapse onto one label is invisible to the run collapsing, and `measurand` + `confounds`, without which the generator optimises a column it cannot name and reads a cold ruler as ability, and `failing_samples`, without which `targets_rows` binds to rows L1 never read. Missing after a merged edit fires `l1_layout_missing_mandatory`, a guard breach routing to L3.
 
 ## L1 layout — L2's structural edit surface
 

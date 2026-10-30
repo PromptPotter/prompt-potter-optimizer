@@ -174,6 +174,16 @@ def _marks(text: str) -> list[int]:
     return list(dict.fromkeys(int(m) for m in _ROW_MARK.findall(text)))
 
 
+_AXIS_MENU = re.compile(r"EXACTLY one of: (.+)")
+_TASK_CONTEXT = "TASK CONTEXT:\n"
+
+
+def _axis_menu(prompt: str) -> list[str]:
+    menu = _AXIS_MENU.search(prompt)
+    assert menu is not None, "offline run: the critique prompt names no axis list"
+    return menu.group(1).split(". ", 1)[0].removesuffix(".").split(", ")
+
+
 def _variant(tag: str, rng: random.Random) -> str:
     return f"Variant {tag}: " + " ".join(rng.sample(WORDS, 18)) + "."
 
@@ -350,8 +360,11 @@ class ByCallIdentity:
                 }
                 for k in range(0, min(len(ids), 4), 2)
             ]
-            obj["priority_fix"] = f"instruction: track every negation explicitly (critique {call})"
-            obj["suggested_axes"] = ["instruction", "thinking_style"]
+            # Read off the prompt's axis list, as a model naming its axis verbatim would.
+            axes = _axis_menu(prompt)
+            lead = next((a for a in axes if a.endswith(".instruction")), axes[0])
+            obj["priority_fix"] = f"{lead}: track every negation explicitly (critique {call})"
+            obj["suggested_axes"] = axes[:2]
         elif node.startswith("L2Context"):
             obj["axis_targeted"] = "instruction"
             obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
@@ -378,10 +391,13 @@ class ByCallIdentity:
         v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
         grounding = filler.resolve(item["properties"]["evidence_grounding"])
         cited = filler.resolve(grounding["properties"]["field"])["enum"]
-        # A citation must quote the prompt; the offset is a function of the call, not the text.
-        start = draw("cite", generation, i) % max(len(prompt) - 60, 1)
+        # A citation quotes the panel it names: the framing, at an offset that is the call's, not the text's.
+        assert "task_context" in cited and _TASK_CONTEXT in prompt, (
+            "offline run: no framing to cite"
+        )
+        start = prompt.index(_TASK_CONTEXT) + len(_TASK_CONTEXT) + draw("cite", generation, i) % 20
         v["evidence_grounding"] = {
-            "field": cited[i % len(cited)],
+            "field": "task_context",
             "citation": prompt[start : start + 40],
         }
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.

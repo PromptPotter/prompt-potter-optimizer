@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
+from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
+    SCHEMA_DESCRIPTION_MAX_CHARS,
+)
+from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
+    STALL_EXPLORATION,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_layout_override,
@@ -14,6 +22,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
 from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
+    EvidenceGrounding,
     Locus,
     OptimizerPromptTemplate,
 )
@@ -57,6 +66,33 @@ def l1_prompt_fields_open(
         )
         for locus, value in prompt_edit.items()
         if locus.key not in open_by_node.get(locus.node, [])
+    ]
+
+
+_NOT_A_WORD_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _words(text: str) -> str:
+    return _NOT_A_WORD_RE.sub(" ", text.lower()).strip()
+
+
+def l1_citation_in_panel(
+    grounding: EvidenceGrounding | None, *, rendered: Mapping[str, str]
+) -> list[ValidationFailure]:
+    """Matched by its words in the panel it NAMES, each ellipsis-free part: a citation re-types a line and may elide."""
+    if grounding is None or grounding.field == STALL_EXPLORATION:
+        return []
+    panel = _words(rendered.get(grounding.field, ""))
+    parts = [words for part in re.split(r"[.]{3}|…", grounding.citation) if (words := _words(part))]
+    if parts and all(words in panel for words in parts):
+        return []
+    return [
+        ValidationFailure(
+            axis="evidence_grounding",
+            value=grounding.citation[:300],
+            allowed=[grounding.field],
+            reason="citation_not_in_panel",
+        )
     ]
 
 
@@ -277,6 +313,35 @@ def l1_prompt_field_not_gutted(
                     reason="guts_inherited_contract",
                 )
             )
+    return failures
+
+
+def l1_prose_within_ceiling(
+    overlay: Mapping[str, Any], *, schema: PipelineSchema, inner_cells: InnerCells | None
+) -> list[ValidationFailure]:
+    """The wire states each ceiling as prose: a host enforcing a ``maxLength`` cuts mid-sentence, unmarked."""
+    failures: list[ValidationFailure] = []
+    for node_name, node_params in overlay.items():
+        node = schema.get_node(node_name)
+        if node is None or not isinstance(node_params, dict):
+            continue
+        for param, value in node_params.items():
+            ceiling = (
+                SCHEMA_DESCRIPTION_MAX_CHARS
+                if param in node.description_keys
+                else None
+                if inner_cells is None
+                else OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
+            )
+            if ceiling is not None and isinstance(value, str) and len(value) > ceiling:
+                failures.append(
+                    ValidationFailure(
+                        axis=f"{node_name}.{param}",
+                        value=f"{len(value)} chars",
+                        allowed=[str(ceiling)],
+                        reason="over_ceiling",
+                    )
+                )
     return failures
 
 

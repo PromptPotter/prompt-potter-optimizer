@@ -28,6 +28,8 @@ L1_MANDATORY: frozenset[str] = frozenset(
         "demo_pool",
         # The one carrier of the ids `recombinations` names.
         "recombination_pool",
+        # The one carrier of the rows `targets_rows` names.
+        "failing_samples",
     }
 )
 
@@ -110,7 +112,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         discretionary_chars=7_500,
         extras=frozenset({"measurand", "detectable_move", "axis_memory"}),
         # The matched pair a cluster's rows come from, one silent where the other fires: a marked row always renders.
-        mandatory=frozenset({"diagnostics", "failing_samples", "inner_narratives"}),
+        # `mutation_memory` is the one carrier of the tried mechanisms a cluster must not restate.
+        mandatory=frozenset(
+            {"diagnostics", "failing_samples", "inner_narratives", "mutation_memory"}
+        ),
         floor=L1Layout(
             problem_description=[
                 "confounds",

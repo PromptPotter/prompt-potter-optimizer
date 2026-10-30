@@ -54,7 +54,7 @@ Some providers implement structured output as **constrained decoding** — a gra
 
 So the schema **teaches** more reliably than it **compels.** Where the grammar doesn't bind, the name, the position, and the prose are the entire mechanism — the opposite of the usual intuition.
 
-Two rules follow for every optimizer wire, each a decision rather than a measurement. **A cap the model must keep is stated as a number in the prompt**: one living only in `maxLength` binds nothing on a `strict: false` wire, and the parse boundary then cuts the answer silently. **A value the loop must be able to refuse is one a check can read off the prompt** — a panel name, a row id — never free text closed by a grafted enum: `VariantEvidenceGrounding.field` has its validator, and `L1Variant.targets_rows` is ids for the same reason.
+Two rules follow for every optimizer wire. **No prose field carries a `maxLength`**: where the host's grammar binds it even on a `strict: false` wire, every answer ends mid-sentence at the cap, unmarked. The prompt asks for the short form, and the parse boundary cuts past a cap with a visible mark (`schemas.py::_truncate_marked`) or rejects (`l1_strict.py::l1_prose_within_ceiling`). **A value the loop must be able to refuse is one a check can read off the prompt** — a panel name, a row id — never free text closed by a grafted enum: `VariantEvidenceGrounding.field` has its validator, and `L1Variant.targets_rows` is ids for the same reason.
 
 ## Extraction is a double seam — slot first, label second
 

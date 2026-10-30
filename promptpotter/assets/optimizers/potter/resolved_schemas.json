@@ -31,7 +31,6 @@
                 "type": "array"
               },
               "changes_description": {
-                "maxLength": 320,
                 "title": "Changes Description",
                 "type": "string"
               }
@@ -100,7 +99,6 @@
                 "type": "object"
               },
               "changes_description": {
-                "maxLength": 320,
                 "title": "Changes Description",
                 "type": "string"
               }
@@ -120,7 +118,6 @@
                 "type": "string"
               },
               "citation": {
-                "maxLength": 160,
                 "title": "Citation",
                 "type": "string"
               }
@@ -183,13 +180,11 @@
               },
               "mechanism": {
                 "description": "The ONE root cause, as a short label naming the cognitive move that fails.",
-                "maxLength": 60,
                 "title": "Mechanism",
                 "type": "string"
               },
               "claim": {
                 "description": "WHY these rows land wrong, in your own words: the step that breaks and what was said against the truth. General over the cluster, never one row's procedure.",
-                "maxLength": 240,
                 "title": "Claim",
                 "type": "string"
               }
@@ -215,14 +210,12 @@
             "type": "array"
           },
           "priority_fix": {
-            "default": "",
-            "description": "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before the colon, named VERBATIM from the vocabulary this node's prompt states. One you invent is dropped downstream and takes the steer's axis menu with it, so the next round reads a fix naming no lever it can pull.",
-            "maxLength": 320,
+            "description": "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before the colon, named VERBATIM from the axis list this node's prompt states. One you invent is dropped downstream and takes the steer's axis menu with it, so the next round reads a fix naming no lever it can pull.",
             "title": "Priority Fix",
             "type": "string"
           },
           "suggested_axes": {
-            "description": "≤4 short axis names. Each item ≤40 chars (downstream truncates).",
+            "description": "≤4 axis names from the same list.",
             "items": {
               "type": "string"
             },
@@ -231,6 +224,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "priority_fix"
+        ],
         "title": "L1CritiqueOutput",
         "type": "object"
       }
@@ -273,8 +269,7 @@
         "properties": {
           "axis_targeted": {
             "default": "",
-            "description": "The L1 axis the failure cluster routes to — a prompt field for a semantic failure, a param for a quantitative one. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
-            "maxLength": 30,
+            "description": "Where the failure cluster's fix lands in the TARGET prompt, as `<node>.<field>` for a semantic failure or a param for a quantitative one — even where it shares a name with an l1_layout slot. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
             "title": "Axis Targeted",
             "type": "string"
           },
@@ -324,7 +319,6 @@
           "rationale": {
             "default": "",
             "description": "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the named data point behind it — a sample id, a count, a yield number. Required on every fire, including one that pulls no lever; a lever with no diagnosis behind it cannot be told from a guess.",
-            "maxLength": 400,
             "title": "Rationale",
             "type": "string"
           },
@@ -381,19 +375,16 @@
         "properties": {
           "plan": {
             "description": "The strategy every later prompt reads until the next replan. Say what L2 and L1 should DO with the levers they hold — L2 moves which panels L1 sees and how wide it explores; L1 rewrites the target prompt's fields. A plan written in the solver's vocabulary instructs neither, and rides every downstream call regardless.",
-            "maxLength": 800,
             "title": "Plan",
             "type": "string"
           },
           "note": {
             "default": "",
-            "maxLength": 150,
             "title": "Note",
             "type": "string"
           },
           "rationale": {
             "default": "",
-            "maxLength": 125,
             "title": "Rationale",
             "type": "string"
           },

@@ -39,7 +39,7 @@ BASELINE = {
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 9,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
-    "injections": 31,
+    "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
     # transition written as a branch beside the tables was policy the count could not see.
     "escalation_rules": 12,

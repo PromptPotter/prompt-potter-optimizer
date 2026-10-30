@@ -28,6 +28,7 @@ from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.records import Ladder, Recombination
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_blocks_in_pool,
+    l1_citation_in_panel,
     l1_shots_in_demo_pool,
 )
 from promptpotter.application.optimizers.variation.members import crossable, most_donated
@@ -182,6 +183,8 @@ async def l1_generate(
             }
         )
         failures += l1_shots_in_demo_pool(v.shots, demo_ids=key_of.keys(), k_max=knobs.k_max)
+        grounding = _parse_evidence_grounding(v.evidence_grounding)
+        failures += l1_citation_in_panel(grounding, rendered=filled.rendered)
         population.append(
             children.child(
                 [opt_sp],
@@ -189,7 +192,7 @@ async def l1_generate(
                 failures=failures,
                 prompt_loci=prompt_loci,
                 changes_description=v.changes_description,
-                evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
+                evidence_grounding=grounding,
             )
         )
     lineage = ctx.read(Lineage)
