@@ -102,6 +102,21 @@ acting.
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
 - **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
   session. **Rides with:** that session landing.
+- **A file's identity is tested twice, by two rules**: `store/read_model.py::_LedgerTail._holds_last`
+  re-reads the last fed line, while `store/io.py::_swap` trusts `_FileMark.inode`. An inode
+  outlives its file, so a delete and re-mint between `_read_marked` and the swap passes that test,
+  and the rewrite keeps the new file's bytes past `mark.end` as a tail. Action: one identity check
+  in `io.py`, read by both. **Re-test:** `git grep -n "st_ino" -- promptpotter/infrastructure/store`.
+- **A landing waits on every live producer on another commit, whether or not the ledger shape
+  moved** (`jobs/machine_status.py::producers_behind`), so a busy box may never land. Action: key it
+  on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a landing
+  that moves no record shape refuses while a run is live.
+- **`producers_behind` is served, and no webapp surface reads it**: only the terminal words it.
+  Action: the usage tab's machine row says it. **Re-test:** `git grep -n "producers_behind" -- webapp/components`.
+- **`reset` still refuses when the spend bank's OWN record kinds reshape** (`TokenUsageRecord`,
+  `SpendHoldRecord`, `SpendTombstoneRecord`): the bank cannot read the money it would bank, so it
+  drops nothing, and the wipe is by hand. Action: decide whether such a reshape migrates the bank
+  first or banks nothing on purpose. **Re-test:** a reset over a ledger with a reshaped `token_usage` line.
 
 ### The member backbone
 
@@ -558,6 +573,13 @@ word's `git grep -c` for that sense is 0.
   junctions that a later recursive temp delete could follow. Action: the next `--push` sweeps stale
   `pp-push-*` (unlink, then `git worktree prune`). **Re-test:** kill a push mid-run, then run
   `--push` again and list `%TEMP%\pp-push-*`.
+- **`scripts/offline_run.py --controlled` crashes on main** (fd51d06 and after): the potter arm's
+  `_variant_edit` asserts `no framing to cite`, since the controlled leg's prompt holds no
+  `task_context`. Action: the leg declares the framing its fake proposer cites. **Re-test:**
+  `PROMPTPOTTER_HOME=<dir> python scripts/offline_run.py --controlled` exits 0.
+- **The controlled leg exercises no act on an arm**: its skip-refused probe went with the refusal
+  (`decisions.md` § 0009). Action: the leg skips on one arm and reads its `LeftComparisonRecord` and
+  the pair guard's `left_comparison`. **Rides with:** the crash above. **Re-test:** the leg prints an arm leaving.
 - **Seen bounding the perimeter** (2026-10-29):
   - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
     `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against
