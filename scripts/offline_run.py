@@ -110,7 +110,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -950,14 +949,10 @@ async def run_controlled(
     (workspace / "head_to_head.json").write_text(table.model_dump_json(indent=1), encoding="utf-8")
     print(
         f"head-to-head {table.guard.head_to_head_id}: scorer {ev.scorer_id}, differs_on "
-        f"{[d.value for d in table.guard.differs_on]}, pairs "
-        f"{[(*_pair_ends(p.reading), p.guard.state.value) for p in table.pairs]}, "
+        f"{[d.value for d in table.guard.differs_on]}, contrasts "
+        f"{[(c.a.optimizer, c.b.optimizer, c.guard.state.value) for c in table.contrasts]}, "
         f"guard {[(r.optimizer, r.guard.state.value) for r in table.rows]}"
     )
-
-
-def _pair_ends(pair: PairedReading) -> tuple[str, ...]:
-    return tuple(m.address.path[-1].campaign_id for m in (pair.a, pair.b) if m is not None)
 
 
 def _graded(bench: dict[str, Any] | None) -> bool:

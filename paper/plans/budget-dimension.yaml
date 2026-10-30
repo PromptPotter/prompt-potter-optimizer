@@ -1,0 +1,14 @@
+# The budget dimension (docs/specs/roadmap.md § The bench (M13), Order item 6): the comparability
+# arms at two more budget points. Its third point is comparability.yaml's `usd4`, minted under the
+# same id family (`bbeh-cmp-usd4`), so no point is bought twice.
+head_to_head_id: bbeh-cmp
+dataset_name: bbeh
+arms:
+  potter: {optimizer: potter}
+  capo: {optimizer: capo}
+  levi: {optimizer: levi}
+  gepa: {optimizer: gepa}
+replicates: 3
+budgets:
+  usd2: {usd: 2.0, rounds: null}
+  usd8: {usd: 8.0, rounds: null}

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Page } from "@playwright/test";
 import type { DraftCampaignWire } from "@/lib/api/types.generated";
+import { promptField } from "@/lib/prompt-fields";
 import { test, expect, open, command, datasetNames, drafts, passConsent, type Draft } from "../harness";
 import { COLD_HOME } from "../world";
 
@@ -131,14 +132,16 @@ test.describe("the check-in's pools and recombination host", () => {
     const all = { name: /^All entries / };
 
     await optimizerStep(page);
-    // The pool is drawn where it lands: its pack lit, and the candidate part it fills.
+    // The pool is drawn where it lands: its pack lit, and each candidate part the draft serves it filling.
     await expect(
       page.getByRole("group", { name: "Snippet packs" }).getByRole("button", { name: new RegExp(`^${PACK}\\b`) }),
     ).toHaveAttribute("aria-pressed", "true");
-    if (wire.schema_source !== "unreachable") {
-      await expect(
-        page.getByRole("list", { name: "Where snippets land" }).getByRole("listitem").filter({ hasText: "Instructions" }),
-      ).toContainText("2 snippets");
+    const lands = page.getByRole("list", { name: "Where snippets land" }).getByRole("listitem");
+    await expect(lands).toHaveCount(before.fills.length);
+    for (const fill of before.fills) {
+      await expect(lands.filter({ hasText: promptField(fill.part).label })).toContainText(
+        `${fill.entries} snippets`,
+      );
     }
     await page.getByRole("combobox", { name: "recombination_host" }).selectOption("l2_context");
     await page.locator("summary", { hasText: "Pick snippets" }).click();

@@ -1578,7 +1578,9 @@ export interface HeadToHead {
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
   verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
-  pairs: SelectionPair[];
+  /** The arm-by-arm matrix: every two treatments whose selections the bench graded,
+   * oldest arm as `a`. */
+  contrasts: ArmContrast[];
   ratio_reference: string | null;
   verdict_line: string;
   notes: string[];
@@ -1603,6 +1605,9 @@ export interface HeadToHeadRow {
   spend_metered: MeteredSpend | null;
   human_intervened: boolean;
   status: RunStatus;
+  /** The column the selection's electing round chose it on; null before a round
+   * selects. Quote an `ability` pick on θ unless its caveat is served. */
+  election: ElectionColumn | null;
   bench: BenchScore;
   bench_set: BenchSet | null;
   spend: SpendRollup | null;
@@ -1679,6 +1684,15 @@ export interface RunStatus {
   /** Null while the run has not stopped. */
   stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+}
+
+/** The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or */
+export interface ElectionColumn {
+  /** What the electing round's selector ranked on. */
+  elects_on: 'accuracy' | 'composite' | 'ability';
+  /** The pick's θ on its electing round. */
+  ability: ArmAbility | null;
+  reads_on: 'accuracy' | 'composite' | 'ability';
 }
 
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
@@ -1813,10 +1827,37 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** Two campaigns' selections paired on the bench rows both scored. */
-export interface SelectionPair {
-  reading: PairedReading;
+/** Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline */
+export interface ArmContrast {
+  a: ContrastArm;
+  b: ContrastArm;
   guard: PairGuard;
+  /** The paired per-row differences, by `Sample.key`: every figure below is read
+   * off them. */
+  differences: Record<string, number>;
+  /** Their mean, its Student-t interval and test over rows: an SE clustered by row,
+   * so one row's replicates never count as rows. `family.p_adjusted` is
+   * Holm's across the matrix. Null under two rows. */
+  lift: MeasuredLift | null;
+  /** Benjamini-Hochberg's q over `lift.family`: the false-discovery reading, served
+   * beside Holm's and never gating. Null where the contrast is in no family. */
+  q_value: number | null;
+  se_clustered: number | null;
+  /** The same mean's SE were every replicate pairing on every row independent: what
+   * clustering corrects. It equals `se_clustered` at one replicate a side. */
+  se_naive: number | null;
+  /** (`se_clustered` / `se_naive`)²: how far a replicate-blind reading overstates
+   * the evidence. */
+  design_effect: number | null;
+}
+
+/** One arm of the matrix: a treatment, and the campaigns that ran it — its replicates. */
+export interface ContrastArm {
+  optimizer: string;
+  treatment_digest: string;
+  /** The campaigns running this treatment whose selection the bench graded, oldest
+   * first: what each row's arm mean is taken over. */
+  replicates: string[];
 }
 
 /** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
@@ -2011,6 +2052,146 @@ export interface EditSpread {
   n_edits: number;
 }
 
+/** Every arm of every budget point, priced at what the archive says a cell of this bank costs. */
+export interface HeadToHeadPrice {
+  /** One per budget point: dispatched as `mint-head-to-head`, it mints the arms
+   * priced. */
+  heads: MintHeadToHeadPayload[];
+  dataset_hash: string;
+  search_rows: number;
+  bench_rows: number;
+  cell: CellPrice;
+  /** Null where no campaign here called it in a round: its arms' figures leave its
+   * own calls out. */
+  optimizers: Record<string, OptimizerRoundPrice | null>;
+  /** The connector's ceiling (`Connector.max_cells_in_flight`) `wall_clock_s` is
+   * read at. */
+  cells_in_flight: number;
+  arms: ArmPrice[];
+  usd: number;
+  /** Every arm minted after the last, in turn. */
+  wall_clock_s: number | null;
+  serial_s: number | null;
+}
+
+/** Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned, */
+export interface MintHeadToHeadPayload {
+  dataset_name: string;
+  head_to_head: HeadToHeadRequest;
+}
+
+/** Arms of one head-to-head asked in one act: all minted and admitted, or none. */
+export interface HeadToHeadRequest {
+  head_to_head_id: string;
+  /** An id already declared takes these as further arms, each held to its record. */
+  arms: ArmRequest[];
+  /** Every arm's own: each campaign spends up to it on its own book. An axis left
+   * out is the dataset's. */
+  budget: Budget;
+}
+
+/** One arm as asked: its key, and the optimizer it runs with that optimizer's knobs. */
+export interface ArmRequest {
+  arm_key: string;
+  /** Laid over the dataset's own `optimization`: `optimizer` is required, and
+   * `budget` and `halt_at_accuracy` are refused, since every arm runs the
+   * head-to-head's budget to its end. */
+  optimization: OptimizationOverrides;
+}
+
+/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
+export interface OptimizationOverrides {
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
+  /** The optimizer manifest this campaign runs — a directory under
+   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
+   * nothing selects it install-wide. */
+  optimizer: string;
+  /** This campaign's overlay on the selected manifest, keyed by node name —
+   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
+   * An optimizer's knobs, a paper's configuration and each llm node's
+   * ``config.model`` all ride here; each node validates its own knobs when
+   * the optimizer is selected. */
+  nodes: Record<string, ManifestNodeOverlay>;
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
+}
+
+/** One optimizer node's delta over its manifest's ``config``. */
+export interface ManifestNodeOverlay {
+  config: Record<string, unknown>;
+}
+
+/** What one cell of a bank cost on its models, as the archive measured it. */
+export interface CellPrice {
+  /** Mean USD over the archive's newest rows of this bank and models. */
+  usd: number;
+  /** Mean seconds producing one took (`MeasuredCell.cost_s`, which a replay keeps);
+   * null where no priced row carried a timing. */
+  seconds: number | null;
+  /** Archive rows the means are over. */
+  cells: number;
+}
+
+/** What one round of an optimizer's own calls cost, over its newest campaigns here, any */
+export interface OptimizerRoundPrice {
+  /** Mean optimizer USD incurred per round that called it. */
+  usd: number;
+  /** Mean optimizer call seconds per such round; calls sent together each count. */
+  seconds: number;
+  /** Rounds the means are over. */
+  rounds: number;
+  /** Campaigns those rounds ran in. */
+  campaigns: number;
+}
+
+export interface ArmPrice {
+  /** The budget point's head-to-head this arm joins. */
+  head_to_head_id: string;
+  arm_key: string;
+  optimizer: string;
+  /** Rounds closed after the origin: the point's `rounds`, or what its `usd` buys
+   * first. */
+  rounds: number;
+  /** Cells the search measures, the origin's included: the calls a budget-matched
+   * head-to-head holds equal, so arms of one point are compared on it. */
+  search_cells: number;
+  /** The origin's and the selection's held-out passes. */
+  bench_cells: number;
+  /** Search and bench at the measured cell price, plus the optimizer's measured
+   * round price for every round it opens. */
+  usd: number;
+  /** At `cells_in_flight`; null where no priced cell carried a timing. */
+  wall_clock_s: number | null;
+  /** One cell at a time, the look-ahead's default. */
+  serial_s: number | null;
+  /** What this arm's mint refuses (`spend_cap_below_round`): its budget closes no
+   * round. */
+  refused: string | null;
+}
+
 export interface FilesResponse {
   campaign_id: string;
   cycle_id: string;
@@ -2116,51 +2297,6 @@ export interface DraftCampaignWire {
    * wire's own field of that path. A `writeOnly` subtree is
    * `StartCheckinPayload`'s, sent with Start and stored nowhere. */
   setup_schema: Record<string, unknown>;
-}
-
-/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
-export interface OptimizationOverrides {
-  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
-   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
-   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
-  budget: Budget;
-  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
-   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
-   * only on its record's rule. */
-  halt_at_accuracy: number | null;
-  /** The optimizer manifest this campaign runs — a directory under
-   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
-   * nothing selects it install-wide. */
-  optimizer: string;
-  /** This campaign's overlay on the selected manifest, keyed by node name —
-   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
-  nodes: Record<string, ManifestNodeOverlay>;
-  /** Hold every round, before any arm is measured, until the operator answers with
-   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
-   * ``review``: the proposers run, their proposals are drafts, and the
-   * operator keeps any of them by index, adds arms of their own, or both.
-   * ``author``: no proposer runs and every arm is the operator's. An arm of
-   * theirs is an edit of the round's parent — prompt fields, a pipeline
-   * overlay — and is measured and elected like any other. The hold has no
-   * deadline; a pause ends it resumably, and a resume holds again unless an
-   * answer was already banked. */
-  arm_gate: 'off' | 'review' | 'author';
-}
-
-/** One optimizer node's delta over its manifest's ``config``. */
-export interface ManifestNodeOverlay {
-  config: Record<string, unknown>;
 }
 
 /** What the selected optimizer runs under a config, derived once for check-in and campaign. */
@@ -4334,31 +4470,6 @@ export interface LivesConfig {
   /** Bank ceiling — lives never exceed this no matter how long the improving streak
    * runs. */
   cap: number;
-}
-
-/** Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned, */
-export interface MintHeadToHeadPayload {
-  dataset_name: string;
-  head_to_head: HeadToHeadRequest;
-}
-
-/** Arms of one head-to-head asked in one act: all minted and admitted, or none. */
-export interface HeadToHeadRequest {
-  head_to_head_id: string;
-  /** An id already declared takes these as further arms, each held to its record. */
-  arms: ArmRequest[];
-  /** Every arm's own: each campaign spends up to it on its own book. An axis left
-   * out is the dataset's. */
-  budget: Budget;
-}
-
-/** One arm as asked: its key, and the optimizer it runs with that optimizer's knobs. */
-export interface ArmRequest {
-  arm_key: string;
-  /** Laid over the dataset's own `optimization`: `optimizer` is required, and
-   * `budget` and `halt_at_accuracy` are refused, since every arm runs the
-   * head-to-head's budget to its end. */
-  optimization: OptimizationOverrides;
 }
 
 /** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */

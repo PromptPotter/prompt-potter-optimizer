@@ -762,6 +762,100 @@
         "title": "ArmAbility",
         "type": "object"
       },
+      "ArmContrast": {
+        "additionalProperties": false,
+        "description": "Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline\ncolumn: per row, b's replicate mean less a's, and the row is the cluster.",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/ContrastArm"
+          },
+          "b": {
+            "$ref": "#/components/schemas/ContrastArm"
+          },
+          "design_effect": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "(`se_clustered` / `se_naive`)²: how far a replicate-blind reading overstates the evidence.",
+            "title": "Design Effect"
+          },
+          "differences": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The paired per-row differences, by `Sample.key`: every figure below is read off them.",
+            "title": "Differences",
+            "type": "object"
+          },
+          "guard": {
+            "$ref": "#/components/schemas/PairGuard"
+          },
+          "lift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredLift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Their mean, its Student-t interval and test over rows: an SE clustered by row, so one row's replicates never count as rows. `family.p_adjusted` is Holm's across the matrix. Null under two rows."
+          },
+          "q_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Benjamini-Hochberg's q over `lift.family`: the false-discovery reading, served beside Holm's and never gating. Null where the contrast is in no family.",
+            "title": "Q Value"
+          },
+          "se_clustered": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Se Clustered"
+          },
+          "se_naive": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same mean's SE were every replicate pairing on every row independent: what clustering corrects. It equals `se_clustered` at one replicate a side.",
+            "title": "Se Naive"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "guard",
+          "differences",
+          "lift",
+          "q_value",
+          "se_clustered",
+          "se_naive",
+          "design_effect"
+        ],
+        "title": "ArmContrast",
+        "type": "object"
+      },
       "ArmElection": {
         "additionalProperties": false,
         "description": "What one arm's round decided about it. Built by :meth:`of` alone.",
@@ -950,6 +1044,94 @@
           "cut"
         ],
         "title": "ArmPanel",
+        "type": "object"
+      },
+      "ArmPrice": {
+        "additionalProperties": false,
+        "properties": {
+          "arm_key": {
+            "title": "Arm Key",
+            "type": "string"
+          },
+          "bench_cells": {
+            "description": "The origin's and the selection's held-out passes.",
+            "title": "Bench Cells",
+            "type": "integer"
+          },
+          "head_to_head_id": {
+            "description": "The budget point's head-to-head this arm joins.",
+            "title": "Head To Head Id",
+            "type": "string"
+          },
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "refused": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this arm's mint refuses (`spend_cap_below_round`): its budget closes no round.",
+            "title": "Refused"
+          },
+          "rounds": {
+            "description": "Rounds closed after the origin: the point's `rounds`, or what its `usd` buys first.",
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "search_cells": {
+            "description": "Cells the search measures, the origin's included: the calls a budget-matched head-to-head holds equal, so arms of one point are compared on it.",
+            "title": "Search Cells",
+            "type": "integer"
+          },
+          "serial_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One cell at a time, the look-ahead's default.",
+            "title": "Serial S"
+          },
+          "usd": {
+            "description": "Search and bench at the measured cell price, plus the optimizer's measured round price for every round it opens.",
+            "title": "Usd",
+            "type": "number"
+          },
+          "wall_clock_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "At `cells_in_flight`; null where no priced cell carried a timing.",
+            "title": "Wall Clock S"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "arm_key",
+          "optimizer",
+          "rounds",
+          "search_cells",
+          "bench_cells",
+          "usd",
+          "wall_clock_s",
+          "serial_s",
+          "refused"
+        ],
+        "title": "ArmPrice",
         "type": "object"
       },
       "ArmReading": {
@@ -1164,7 +1346,7 @@
         "title": "ArmReplicate",
         "type": "object"
       },
-      "ArmRequest": {
+      "ArmRequest-Input": {
         "additionalProperties": false,
         "description": "One arm as asked: its key, and the optimizer it runs with that optimizer's knobs.",
         "properties": {
@@ -1185,6 +1367,12 @@
           "optimization"
         ],
         "title": "ArmRequest",
+        "type": "object"
+      },
+      "ArmRequest-Output": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/JsonValue"
+        },
         "type": "object"
       },
       "ArmSlot": {
@@ -3032,6 +3220,41 @@
         "title": "CellCandidate",
         "type": "object"
       },
+      "CellPrice": {
+        "additionalProperties": false,
+        "description": "What one cell of a bank cost on its models, as the archive measured it.",
+        "properties": {
+          "cells": {
+            "description": "Archive rows the means are over.",
+            "title": "Cells",
+            "type": "integer"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean seconds producing one took (`MeasuredCell.cost_s`, which a replay keeps); null where no priced row carried a timing.",
+            "title": "Seconds"
+          },
+          "usd": {
+            "description": "Mean USD over the archive's newest rows of this bank and models.",
+            "title": "Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "usd",
+          "seconds",
+          "cells"
+        ],
+        "title": "CellPrice",
+        "type": "object"
+      },
       "CellRow": {
         "additionalProperties": false,
         "description": "One cell as a table row — enough to scan, sort by the served order and open.",
@@ -3898,6 +4121,35 @@
           "email"
         ],
         "title": "ConnectedAccount",
+        "type": "object"
+      },
+      "ContrastArm": {
+        "additionalProperties": false,
+        "description": "One arm of the matrix: a treatment, and the campaigns that ran it — its replicates.",
+        "properties": {
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "replicates": {
+            "description": "The campaigns running this treatment whose selection the bench graded, oldest first: what each row's arm mean is taken over.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Replicates",
+            "type": "array"
+          },
+          "treatment_digest": {
+            "title": "Treatment Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimizer",
+          "treatment_digest",
+          "replicates"
+        ],
+        "title": "ContrastArm",
         "type": "object"
       },
       "CostAbsence": {
@@ -6008,6 +6260,49 @@
         "title": "Election",
         "type": "object"
       },
+      "ElectionColumn": {
+        "additionalProperties": false,
+        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\ncarries a caveat — there θ is not ability, and the election reads on accuracy.",
+        "properties": {
+          "ability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmAbility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pick's θ on its electing round."
+          },
+          "elects_on": {
+            "description": "What the electing round's selector ranked on.",
+            "enum": [
+              "accuracy",
+              "composite",
+              "ability"
+            ],
+            "title": "Elects On",
+            "type": "string"
+          },
+          "reads_on": {
+            "enum": [
+              "accuracy",
+              "composite",
+              "ability"
+            ],
+            "title": "Reads On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "elects_on",
+          "ability",
+          "reads_on"
+        ],
+        "title": "ElectionColumn",
+        "type": "object"
+      },
       "Eliminated": {
         "additionalProperties": false,
         "properties": {
@@ -7190,6 +7485,14 @@
         "additionalProperties": false,
         "description": "The campaigns' bench headlines side by side, and whether one bench set graded them all.",
         "properties": {
+          "contrasts": {
+            "description": "The arm-by-arm matrix: every two treatments whose selections the bench graded, oldest arm as `a`.",
+            "items": {
+              "$ref": "#/components/schemas/ArmContrast"
+            },
+            "title": "Contrasts",
+            "type": "array"
+          },
           "covers_selection": {
             "title": "Covers Selection",
             "type": "boolean"
@@ -7210,13 +7513,6 @@
               "type": "string"
             },
             "title": "Notes",
-            "type": "array"
-          },
-          "pairs": {
-            "items": {
-              "$ref": "#/components/schemas/SelectionPair"
-            },
-            "title": "Pairs",
             "type": "array"
           },
           "ratio_reference": {
@@ -7279,7 +7575,7 @@
           "headline",
           "verdict",
           "verdict_absent",
-          "pairs",
+          "contrasts",
           "ratio_reference",
           "verdict_line",
           "notes"
@@ -7287,14 +7583,211 @@
         "title": "HeadToHead",
         "type": "object"
       },
-      "HeadToHeadRequest": {
+      "HeadToHeadPlan": {
+        "additionalProperties": false,
+        "description": "A head-to-head declared before it is minted: each budget point is one `mint-head-to-head`\nof every arm × replicate, the budget being what its arms share.",
+        "properties": {
+          "arms": {
+            "description": "Each arm's optimizer and its knobs over the dataset's own, as `head-to-head --arm` lays them; never a budget.",
+            "minProperties": 2,
+            "patternProperties": {
+              "^[A-Za-z0-9_]+$": {
+                "$ref": "#/components/schemas/OptimizationOverrides"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 15,
+              "minLength": 1
+            },
+            "title": "Arms",
+            "type": "object"
+          },
+          "budgets": {
+            "description": "The budget points, each one head-to-head's `budget`.",
+            "minProperties": 1,
+            "patternProperties": {
+              "^[A-Za-z0-9_]+$": {
+                "$ref": "#/components/schemas/Budget"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 15,
+              "minLength": 1
+            },
+            "title": "Budgets",
+            "type": "object"
+          },
+          "dataset_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "head_to_head_id": {
+            "description": "Each budget point mints `{head_to_head_id}-{point}`.",
+            "maxLength": 48,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Head To Head Id",
+            "type": "string"
+          },
+          "replicates": {
+            "default": 1,
+            "description": "Campaigns per arm, keyed `{arm}-s{n}`: one treatment, so the head-to-head's matrix reads them as one arm's replicates.",
+            "maximum": 9.0,
+            "minimum": 1.0,
+            "title": "Replicates",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "dataset_name",
+          "arms",
+          "budgets"
+        ],
+        "title": "HeadToHeadPlan",
+        "type": "object"
+      },
+      "HeadToHeadPrice": {
+        "additionalProperties": false,
+        "description": "Every arm of every budget point, priced at what the archive says a cell of this bank costs.",
+        "properties": {
+          "arms": {
+            "items": {
+              "$ref": "#/components/schemas/ArmPrice"
+            },
+            "title": "Arms",
+            "type": "array"
+          },
+          "bench_rows": {
+            "title": "Bench Rows",
+            "type": "integer"
+          },
+          "cell": {
+            "$ref": "#/components/schemas/CellPrice"
+          },
+          "cells_in_flight": {
+            "description": "The connector's ceiling (`Connector.max_cells_in_flight`) `wall_clock_s` is read at.",
+            "title": "Cells In Flight",
+            "type": "integer"
+          },
+          "dataset_hash": {
+            "title": "Dataset Hash",
+            "type": "string"
+          },
+          "heads": {
+            "description": "One per budget point: dispatched as `mint-head-to-head`, it mints the arms priced.",
+            "items": {
+              "$ref": "#/components/schemas/MintHeadToHeadPayload-Output"
+            },
+            "title": "Heads",
+            "type": "array"
+          },
+          "optimizers": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OptimizerRoundPrice"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": "Null where no campaign here called it in a round: its arms' figures leave its own calls out.",
+            "title": "Optimizers",
+            "type": "object"
+          },
+          "search_rows": {
+            "title": "Search Rows",
+            "type": "integer"
+          },
+          "serial_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial S"
+          },
+          "usd": {
+            "title": "Usd",
+            "type": "number"
+          },
+          "wall_clock_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every arm minted after the last, in turn.",
+            "title": "Wall Clock S"
+          }
+        },
+        "required": [
+          "heads",
+          "dataset_hash",
+          "search_rows",
+          "bench_rows",
+          "cell",
+          "optimizers",
+          "cells_in_flight",
+          "arms",
+          "usd",
+          "wall_clock_s",
+          "serial_s"
+        ],
+        "title": "HeadToHeadPrice",
+        "type": "object"
+      },
+      "HeadToHeadRequest-Input": {
         "additionalProperties": false,
         "description": "Arms of one head-to-head asked in one act: all minted and admitted, or none.",
         "properties": {
           "arms": {
             "description": "An id already declared takes these as further arms, each held to its record.",
             "items": {
-              "$ref": "#/components/schemas/ArmRequest"
+              "$ref": "#/components/schemas/ArmRequest-Input"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Arms",
+            "type": "array"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Every arm's own: each campaign spends up to it on its own book. An axis left out is the dataset's."
+          },
+          "head_to_head_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Head To Head Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "arms"
+        ],
+        "title": "HeadToHeadRequest",
+        "type": "object"
+      },
+      "HeadToHeadRequest-Output": {
+        "additionalProperties": false,
+        "description": "Arms of one head-to-head asked in one act: all minted and admitted, or none.",
+        "properties": {
+          "arms": {
+            "description": "An id already declared takes these as further arms, each held to its record.",
+            "items": {
+              "$ref": "#/components/schemas/ArmRequest-Output"
             },
             "maxItems": 16,
             "minItems": 1,
@@ -7368,6 +7861,17 @@
                 "type": "null"
               }
             ]
+          },
+          "election": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ElectionColumn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The column the selection's electing round chose it on; null before a round selects. Quote an `ability` pick on θ unless its caveat is served."
           },
           "guard": {
             "$ref": "#/components/schemas/PairGuard"
@@ -7512,6 +8016,7 @@
           "spend_metered",
           "human_intervened",
           "status",
+          "election",
           "bench",
           "bench_set",
           "spend",
@@ -10125,7 +10630,7 @@
         "title": "MintCampaignPayload",
         "type": "object"
       },
-      "MintHeadToHeadPayload": {
+      "MintHeadToHeadPayload-Input": {
         "additionalProperties": false,
         "description": "Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,\npriced and admitted before any is minted, so a refused arm leaves none behind.",
         "properties": {
@@ -10136,7 +10641,28 @@
             "type": "string"
           },
           "head_to_head": {
-            "$ref": "#/components/schemas/HeadToHeadRequest"
+            "$ref": "#/components/schemas/HeadToHeadRequest-Input"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "head_to_head"
+        ],
+        "title": "MintHeadToHeadPayload",
+        "type": "object"
+      },
+      "MintHeadToHeadPayload-Output": {
+        "additionalProperties": false,
+        "description": "Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,\npriced and admitted before any is minted, so a refused arm leaves none behind.",
+        "properties": {
+          "dataset_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "head_to_head": {
+            "$ref": "#/components/schemas/HeadToHeadRequest-Output"
           }
         },
         "required": [
@@ -11305,6 +11831,40 @@
           "optimizers"
         ],
         "title": "OptimizerRoster",
+        "type": "object"
+      },
+      "OptimizerRoundPrice": {
+        "additionalProperties": false,
+        "description": "What one round of an optimizer's own calls cost, over its newest campaigns here, any\ntreatment of it.",
+        "properties": {
+          "campaigns": {
+            "description": "Campaigns those rounds ran in.",
+            "title": "Campaigns",
+            "type": "integer"
+          },
+          "rounds": {
+            "description": "Rounds the means are over.",
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "seconds": {
+            "description": "Mean optimizer call seconds per such round; calls sent together each count.",
+            "title": "Seconds",
+            "type": "number"
+          },
+          "usd": {
+            "description": "Mean optimizer USD incurred per round that called it.",
+            "title": "Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "usd",
+          "seconds",
+          "rounds",
+          "campaigns"
+        ],
+        "title": "OptimizerRoundPrice",
         "type": "object"
       },
       "OptimizerSetup": {
@@ -14198,24 +14758,6 @@
         "title": "ScoringPass",
         "type": "object"
       },
-      "SelectionPair": {
-        "additionalProperties": false,
-        "description": "Two campaigns' selections paired on the bench rows both scored.",
-        "properties": {
-          "guard": {
-            "$ref": "#/components/schemas/PairGuard"
-          },
-          "reading": {
-            "$ref": "#/components/schemas/PairedReading"
-          }
-        },
-        "required": [
-          "reading",
-          "guard"
-        ],
-        "title": "SelectionPair",
-        "type": "object"
-      },
       "SeriesReading": {
         "additionalProperties": false,
         "description": "A round's level as its series read it, under the one caveat that withholds it.",
@@ -15389,7 +15931,7 @@
           "head_to_head": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/HeadToHeadRequest"
+                "$ref": "#/components/schemas/HeadToHeadRequest-Input"
               },
               {
                 "type": "null"
@@ -19623,7 +20165,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MintHeadToHeadPayload"
+                "$ref": "#/components/schemas/MintHeadToHeadPayload-Input"
               }
             }
           },
@@ -21185,6 +21727,48 @@
           }
         },
         "summary": "Get Evidence",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/head-to-head/price": {
+      "post": {
+        "description": "What a head-to-head plan costs before any of it is minted, in dollars, calls and wall clock;\neach budget point carries the `mint-head-to-head` payload that mints its arms.\n\nA read despite the POST: no LLM call is made and nothing is minted.",
+        "operationId": "price_planned_head_to_head_api_v1_head_to_head_price_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeadToHeadPlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeadToHeadPrice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Price Planned Head To Head",
         "tags": [
           "Campaigns"
         ]

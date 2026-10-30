@@ -89,7 +89,7 @@ python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API + webapp at 
 
 **Print every operations command you invoke, verbatim, beside its result** (`python -m promptpotter …` and maintenance verbs; not `docker`/`curl`/`ls`). Showing it is not handing it over.
 
-The verbs are [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s. **The read verbs are the four whose answer is in no file**: `evidence`, `cycles`, `machine-status`, `trail`; every other read is opening the tree. **The file tree is the dashboard**: each run writes `cycles/{cycle_id}/readout.log` — read it instead of asking for console output.
+The verbs are [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s. **The read verbs are the ones whose answer is in no file**: `evidence`, `cycles`, `machine-status`, `trail`, `price-head-to-head`; every other read is opening the tree. **The file tree is the dashboard**: each run writes `cycles/{cycle_id}/readout.log` — read it instead of asking for console output.
 
 ## Conventions
 

@@ -53,7 +53,7 @@ the rest of Lane C.
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
-**M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
+**M14 (publication)** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
 zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
 ## The bench (M13)
@@ -78,10 +78,10 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    `optimizer ∈ {potter, capo, levi, gepa}`, calls held equal, 3 seeds; paired per-cell differences,
    clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
    the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
-   re-ingested with a bench partition wider than 100 rows. Price it in dollars and wall clock
-   before asking.
+   re-ingested with a bench partition wider than 100 rows. Declared as
+   `paper/plans/comparability.yaml`; price it with `price-head-to-head` before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
-   budget-matched Pareto comparison reviewers ask for first.
+   budget-matched Pareto comparison reviewers ask for first (`paper/plans/budget-dimension.yaml`).
 
 ### Members the presets need
 

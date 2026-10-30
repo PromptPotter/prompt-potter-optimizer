@@ -1,7 +1,5 @@
 import type { HeadToHead } from "@/lib/api";
 import { GuardBadge } from "./GuardBadge";
-import { PairedLift } from "@/components/shell/PairedLift";
-import { readPaired } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import {
   sideTone,
@@ -9,7 +7,6 @@ import {
   fmtPValue,
   fmtUnit,
   PLACEHOLDER,
-  shortId,
   verdictTone,
 } from "@/lib/format";
 import { DataTable, type Column } from "@/components/ui";
@@ -39,51 +36,44 @@ export function HeadToHeadVerdict({ h2h, scorerId }: { h2h: HeadToHead; scorerId
           ))}
         </ul>
       )}
-      {h2h.pairs.length > 0 && (
+      {h2h.contrasts.length > 0 && (
         <DataTable
-          columns={PAIR_COLUMNS}
-          rows={h2h.pairs}
-          getRowId={pairId}
-          ariaLabel={`Selections paired on the bench rows both scored, in ${h2h.headline}`}
+          columns={CONTRAST_COLUMNS}
+          rows={h2h.contrasts}
+          getRowId={contrastId}
+          ariaLabel={`The arm × arm matrix on the bench rows every replicate scored, in ${h2h.headline}`}
         />
       )}
     </div>
   );
 }
 
-type SelectionPair = HeadToHead["pairs"][number];
+type ArmContrast = HeadToHead["contrasts"][number];
+type ContrastArm = ArmContrast["a"];
 
-const pairCampaign = (m: SelectionPair["reading"]["a"]) =>
-  m?.address.path.at(-1)?.campaign_id ?? "";
-const pairId = (p: SelectionPair) =>
-  `${pairCampaign(p.reading.a)}>${pairCampaign(p.reading.b)}`;
+const armLabel = (arm: ContrastArm) =>
+  `${arm.optimizer}·${arm.treatment_digest.slice(0, 6)} ×${arm.replicates.length}`;
+const contrastId = (c: ArmContrast) => `${c.a.treatment_digest}>${c.b.treatment_digest}`;
 
-const PAIR_COLUMNS: readonly Column<SelectionPair>[] = [
+const CONTRAST_COLUMNS: readonly Column<ArmContrast>[] = [
   {
-    id: "pair",
-    label: "selection b − a",
+    id: "contrast",
+    label: "arm b − a",
     width: "minmax(12rem, 2fr)",
-    cell: ({ reading }) =>
-      `${shortId(pairCampaign(reading.a))} → ${shortId(pairCampaign(reading.b))}`,
+    cell: ({ a, b }) => `${armLabel(a)} → ${armLabel(b)}`,
   },
   {
     id: "lift",
-    label: "lift",
+    label: "shift, row-clustered",
     width: "minmax(10rem, 2fr)",
-    cell: ({ reading }) =>
-      readPaired(reading).read ? (
-        <PairedLift reading={reading}>
-          {({ estimate }) => (
-            <span className={sideTone(estimate.side)}>
-              {fmtUnit("delta", estimate.value)}{" "}
-              {fmtInterval("delta", estimate.ci_lo, estimate.ci_hi)}
-            </span>
-          )}
-        </PairedLift>
-      ) : (
-        <span className="l4-dim">
-          <PairedLift reading={reading} unread="sentence" />
+    cell: ({ lift }) =>
+      lift ? (
+        <span className={sideTone(lift.estimate.side)}>
+          {fmtUnit("delta", lift.estimate.value)}{" "}
+          {fmtInterval("delta", lift.estimate.ci_lo, lift.estimate.ci_hi)}
         </span>
+      ) : (
+        <span className="l4-dim">under two rows</span>
       ),
   },
   {
@@ -91,19 +81,27 @@ const PAIR_COLUMNS: readonly Column<SelectionPair>[] = [
     label: "rows",
     width: "4rem",
     align: "end",
-    cell: ({ reading }) => {
-      const pair = readPaired(reading);
-      return pair.read ? pair.cells : PLACEHOLDER;
-    },
+    cell: ({ differences }) => Object.keys(differences).length,
+  },
+  {
+    id: "deff",
+    label: "design effect",
+    width: "6rem",
+    align: "end",
+    cell: ({ design_effect }) =>
+      design_effect === null ? PLACEHOLDER : design_effect.toFixed(2),
   },
   {
     id: "holm",
     label: "Holm",
     width: "8rem",
-    cell: ({ reading }) => {
-      const pair = readPaired(reading);
-      return fmtPValue(pair.read ? (pair.lift.family?.p_adjusted ?? null) : null);
-    },
+    cell: ({ lift }) => fmtPValue(lift?.family?.p_adjusted ?? null),
+  },
+  {
+    id: "bh",
+    label: "BH q",
+    width: "8rem",
+    cell: ({ q_value }) => fmtPValue(q_value),
   },
   {
     id: "guard",

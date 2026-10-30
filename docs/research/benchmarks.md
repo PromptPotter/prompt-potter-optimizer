@@ -177,7 +177,8 @@ Definition only; PromptPotter is the reference solver.
 ## What we report
 
 **Absolute Accuracy** — `correct / total` on test, per (method, model), from `results_*.json`. Its
-interval is paired and clustered (arms differenced per cell), exact or bootstrapped, with SNR per
+interval is paired and clustered (arms differenced per cell, seeds averaged within it: `evidence`
+serves it as `HeadToHead.contrasts`, Holm and BH across the matrix), exact or bootstrapped, with SNR per
 benchmark, never a binomial SE; the Agentic Benchmark Checklist's reporting section is filled and
 published as an appendix ([`external-constraints.md`](external-constraints.md) § M14).
 

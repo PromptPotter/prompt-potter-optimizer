@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
+from statistics import fmean
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -30,7 +31,7 @@ from promptpotter.domain.scoring import (
     extract_item_label,
     turn_scalars,
 )
-from promptpotter.domain.spend import StepUsage, TokenAccount
+from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -282,23 +283,30 @@ async def attempt_bounds(session: Session, wire_params: Mapping[str, Any]) -> di
 _PRICED_RUNS = 32
 
 
-def measured_cell_usd(session: Session, wire_params: Mapping[str, Any]) -> float | None:
+def measured_cell_price(session: Session, wire_params: Mapping[str, Any]) -> CellPrice | None:
     """What a cell BILLED on these models over the archive's newest rows; ``None`` before any."""
     on_models = {
         name: {"model": cfg["model"]}
         for name, cfg in node_config_items(dict(wire_params))
         if cfg.get("model")
     }
-    total, cells = 0.0, 0
+    costs: list[float] = []
+    seconds: list[float] = []
     for m in session.store.archive.measurements_for_config(
         on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
     ):
         # An archive row carries no grade, and the price is no formula's reading.
-        cost = cell_channels_of(m.cell, None).get("cost")
-        if cost is not None:
-            total += cost
-            cells += 1
-    return total / cells if cells else None
+        channels = cell_channels_of(m.cell, None)
+        if (cost := channels.get("cost")) is None:
+            continue
+        costs.append(cost)
+        if (spent := channels.get("latency")) is not None:
+            seconds.append(spent)
+    if not costs:
+        return None
+    return CellPrice(
+        usd=fmean(costs), seconds=fmean(seconds) if seconds else None, cells=len(costs)
+    )
 
 
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:

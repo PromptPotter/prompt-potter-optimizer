@@ -345,6 +345,42 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `candidate-elimination.md` § CAPO's race) the two can crown differently. Open: which reading the
   bench compares. **Rides with:** any change to `capo/members.py::_rank_survivors`. **Re-test:** on a CAPO
   run with offspring < μ, rank one round's survivors both ways.
+- **"Calls held equal" has no axis to hold.** `domain/spend.py::Budget` meters usd, tokens, rounds and
+  wall clock; the roadmap and `external-constraints.md` § 4 hold calls equal, `paper/README.md` holds
+  spent tokens, and `paper/plans/` holds USD under the arm's `search_incurred` meter, so two arms of one
+  point make the same calls only at one cell price and one optimizer cost. Action: one matched axis,
+  decided; if calls, a cells axis on `Budget` the search meter binds. **Rides with:** any change to
+  `Budget`'s axes. **Re-test:** `price-head-to-head paper/plans/comparability.yaml` — do one point's
+  `search_cells` differ by arm?
+- **A pinned `determinism.seed` makes every replicate one draw.** `PINNED_LOOP_KEYS` pins
+  `optimization.determinism` across a head-to-head, and `bench/node_context.py::_rng` seeds every
+  member off the pin instead of the campaign id, so N replicates of an arm on a pinning dataset make
+  the same draws and read as a tight interval. Action: a replicate's identity enters the seed under a
+  pin. **Rides with:** any change to `_rng` or `PINNED_LOOP_KEYS`. **Re-test:** two replicates under a
+  pinned seed send the same first `l1_generate` request.
+- **The $0 price opens a backend session** (`application/head_to_head_price.py::price_head_to_head`
+  through `jobs/launcher/head_to_head.py::dataset_arms`) only to resolve the node models and the
+  partition, so a stopped backend refuses a read that makes no call. **Rides with:** any change to
+  `dataset_arms`. **Re-test:** price a plan with the backend down.
+- **An optimizer's round price is its name's, not its treatment's**
+  (`application/head_to_head_price.py::optimizer_round_price`): the three `escalation_ladder` arms read one potter
+  price, though an `l1` round sends fewer optimizer calls than a `full` one. Action: key it on the
+  treatment once enough campaigns of each have run. **Re-test:** the ablation's optimizer line names
+  one price for three ladders.
+- **INVESTIGATE — a CAPO arm is admitted on its round CEILING** (`preflight.py::check_cap_funds_round`
+  over `round_cells_ceiling`: 4,230 cells on 310 search rows), which its race rarely spends, so a
+  budget point must fund the worst case to mint CAPO at all. **Re-test:** a finished CAPO round's
+  cells against its ceiling.
+- **`notebooks/bbeh_potter.ipynb` states another protocol than `shared_config.py`**: its Methodology
+  cell and Cell 2 say the test set is the ~4,060 non-mini rows and the default target mistral-small;
+  `load_and_split` tests on the second 10 mini rows per task. Action: the notebook states what
+  `shared_config.py` runs. **Re-test:** `grep -n "non-mini" notebooks/bbeh_potter.ipynb`.
+- **An unread backend schema serves "lands nowhere"**: with `schema_source: unreachable` no prompt
+  node declares a part, so `application/pipeline_resolve.py::_pool_fills` serves `PoolRow.fills` empty, the state
+  its description reserves for "nothing in play", and the check-in draws the pool nowhere. Also
+  `application/datasets/ingest.py::fetch_backend_nodes` returns `{}` for an `in_process` connector, never its
+  `pipeline_declaration`. Action: an unknown fill is served unknown. **Re-test:** a draft on an
+  unreachable backend serves its fills unknown, not empty.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
   `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
   hands it down.
@@ -579,10 +615,6 @@ word's `git grep -c` for that sense is 0.
   - `quota.py::refuse_read_rate` takes a principal id and meters the host, while the launch, verb and
     write buckets take the identity and exempt it. **Re-test:** `git grep -n "def refuse_.*_rate" -- promptpotter`.
 - **Seen building the host coupon** (2026-10-29):
-  - `offline_run.py --against` reads `MOVED` for a base run from another checkout: the origin's
-    `changes_description` carries the absolute `origin.yaml` path and `decisions.json` keeps it. A
-    path is not a decision. Action: the origin names its dataset-relative path, or `canon` drops it.
-    **Re-test:** run the base from a second worktree; gepa and levi read `decisions MOVED`.
   - A backend cell is always the box's to pay (`spend_book.py::_CELL_PAYER`): a connector sends on its
     own keys, so an own-key account past its coupon stops at its first backend cell, as the reserve
     binds it. Action: a cell's payer is the connector's key, declared on the connector. **Re-test:** an

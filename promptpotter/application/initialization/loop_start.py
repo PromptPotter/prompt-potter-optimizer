@@ -25,7 +25,7 @@ from promptpotter.application.runner.inner.spawn_context import (
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.judges.registry import build_evaluators
-from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_usd
+from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
@@ -277,6 +277,7 @@ async def _emit_preflight_and_init_session(
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
 
     bound = await cell_bound(session, session.pipeline_params or {})
+    measured = measured_cell_price(session, session.pipeline_params or {})
     instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,
@@ -285,7 +286,7 @@ async def _emit_preflight_and_init_session(
         target_models,
         framing=origin.framing,
         cell_usd=None if bound is None else bound.usd,
-        measured_cell_usd=measured_cell_usd(session, session.pipeline_params or {}),
+        measured_cell_usd=None if measured is None else measured.usd,
         origin_campaigns=_campaigns_on_origin(session),
         instrument=instrument,
         banked_instruments=[] if instrument is None else _banked_instruments(session),

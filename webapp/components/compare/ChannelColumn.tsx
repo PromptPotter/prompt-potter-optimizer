@@ -21,6 +21,7 @@ import type { ChannelModel } from "./useChannelModel";
 export const COLUMN_ROWS = [
   "head",
   "optimizer",
+  "elected",
   "bench",
   "lift",
   "per_usd",
@@ -36,6 +37,19 @@ export type ColumnRow = (typeof COLUMN_ROWS)[number];
 export const ROW_LABEL: Record<ColumnRow, ReactNode> = {
   head: null,
   optimizer: "optimizer",
+  elected: (
+    <Term
+      content={
+        <p className="cmp-line-key">
+          The column the pick&rsquo;s round elected it on, and the one to quote it on: a pick won
+          on ability is quoted on θ unless its θ carries a caveat — there θ is not ability, and the
+          election reads on accuracy.
+        </p>
+      }
+    >
+      elected on
+    </Term>
+  ),
   bench: "bench",
   lift: "lift over origin",
   per_usd: "lift / USD",
@@ -126,6 +140,8 @@ export function ChannelColumn({
             {headline.swapped_in.length > 0 && ` · ${headline.swapped_in.join(", ")}`}
           </span>
         );
+      case "elected":
+        return <ElectedOn election={headline.election} />;
       case "bench":
         return <Metric {...lead.score} />;
       case "lift":
@@ -182,6 +198,16 @@ export function ChannelColumn({
         )}
     </>
   );
+}
+
+function ElectedOn({ election }: { election: HeadToHeadRow["election"] }) {
+  if (!election) return PLACEHOLDER;
+  const ability = election.ability;
+  if (election.reads_on === "ability" && ability) {
+    return `θ ${fmtSigned(ability.theta, 3)}`;
+  }
+  if (election.reads_on === election.elects_on) return election.reads_on;
+  return `${election.reads_on} · θ ${ability?.caveat ?? "unread"}`;
 }
 
 function ColumnReads({

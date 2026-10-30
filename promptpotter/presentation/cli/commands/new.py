@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -25,7 +27,9 @@ from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
 from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
+    ArmRequest,
     EditDraftCampaignPayload,
+    HeadToHeadRequest,
     MintCampaignPayload,
     MintHeadToHeadPayload,
     PauseCyclePayload,
@@ -47,8 +51,9 @@ from promptpotter.presentation.cli.commands.launch import (
     run_inline,
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.presentation.cli.parsers import budget_from_args
+from promptpotter.presentation.cli.parsers import budget_from_args, build_parser
 from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError, PotterError
 
 if TYPE_CHECKING:
@@ -298,16 +303,8 @@ def _arm_request(raw: str) -> dict[str, Any]:
     return {"arm_key": arm_key, "optimization": _set_knobs([f"optimizer={optimizer}", *knobs])}
 
 
-def cmd_head_to_head(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
-    prepare_launch()
-    return _head_to_head(args)
-
-
-async def _head_to_head(args: argparse.Namespace) -> CommandResult:
-    """Each arm runs in its own process, as a server launch does; this waits on them all."""
-    setup_logging(style="full" if args.verbose else "cli")
-    stores = open_stores(args)
-    payload = PayloadInvalidError.validating(
+def _head_to_head_payload(args: argparse.Namespace) -> MintHeadToHeadPayload:
+    return PayloadInvalidError.validating(
         MintHeadToHeadPayload,
         {
             "dataset_name": args.dataset,
@@ -318,6 +315,65 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
             },
         },
     )
+
+
+def _spelled(value: object) -> str:
+    return value if isinstance(value, str) and yaml.safe_load(value) == value else json.dumps(value)
+
+
+_BUDGET_FLAGS = {
+    "usd": "--max-usd",
+    "tokens": "--max-tokens",
+    "rounds": "--max-rounds",
+    "wall_clock_s": "--max-wall-clock",
+}
+
+
+def _arm_spec(arm: ArmRequest) -> str:
+    knobs = arm.optimization
+    sets = [
+        *(
+            f"{field}={getattr(knobs, field)}"
+            for field in sorted(_SET_KNOBS & knobs.model_fields_set - {"optimizer"})
+        ),
+        *(
+            f"{_NODES}.{node}.{knob}={_spelled(value)}"
+            for node, overlay in knobs.nodes.items()
+            for knob, value in overlay.config.items()
+        ),
+    ]
+    return ",".join([f"{arm.arm_key}={knobs.optimizer}", *sets])
+
+
+def head_to_head_command(mint: MintHeadToHeadPayload) -> str:
+    """The `head-to-head` that dispatches *mint*, read back through the verb's own parser first."""
+    request = mint.head_to_head
+    words = ["head-to-head", mint.dataset_name, "--head-to-head", request.head_to_head_id]
+    for arm in request.arms:
+        words += ["--arm", _arm_spec(arm)]
+    for axis in sorted(request.budget.named):
+        bound = getattr(request.budget, axis)
+        words += [_BUDGET_FLAGS[axis], "none" if bound is None else _spelled(bound)]
+    back = _head_to_head_payload(build_parser(VERBS).parse_args(words)).head_to_head
+
+    def declared(r: HeadToHeadRequest) -> list[tuple[str, dict[str, Any]]]:
+        return [(a.arm_key, r.declared_optimization(a)) for a in r.arms]
+
+    if declared(back) != declared(request):
+        raise SystemExit(f"ERROR: no `head-to-head` command line spells {mint.model_dump()}")
+    return shlex.join(["python", "-m", "promptpotter", *words])
+
+
+def cmd_head_to_head(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
+    prepare_launch()
+    return _head_to_head(args)
+
+
+async def _head_to_head(args: argparse.Namespace) -> CommandResult:
+    """Each arm runs in its own process, as a server launch does; this waits on them all."""
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
+    payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
     try:
         outcome = await dispatcher.dispatch(CommandCall(payload))

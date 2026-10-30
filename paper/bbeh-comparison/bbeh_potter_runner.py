@@ -181,7 +181,7 @@ async def run_bbeh_campaign(
         total_test = sum(r["n_test"] for r in per_task_results.values())
         print(
             f"\nMacro-avg test accuracy: {macro_avg:.1%}  "
-            f"(global winner, {total_test} non-mini examples across {len(tasks)} tasks)"
+            f"(global winner, {total_test} held-out mini examples across {len(tasks)} tasks)"
         )
 
         winner_prompt_str = (

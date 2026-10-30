@@ -39,7 +39,7 @@ from promptpotter.application.runner.campaign_ids import (
     origin_content_hash,
     root_cycle_id_of,
 )
-from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_usd
+from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
@@ -83,7 +83,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.command_kinds import HeadToHeadRequest
+    from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
     from promptpotter.domain.prompt_block import Presumption
@@ -428,6 +428,12 @@ def _declared_by(record: HeadToHeadRecord, arms: Mapping[str, str]) -> str:
     return f"its record, declared {record.created_at} on origin {record.origin} (arms: {held})"
 
 
+def arm_config(
+    declared: CampaignConfig, request: HeadToHeadRequest, arm: ArmRequest
+) -> CampaignConfig:
+    return with_optimization(declared, request.declared_optimization(arm))
+
+
 async def arm_plans(
     session: Session,
     declared: CampaignConfig,
@@ -441,7 +447,7 @@ async def arm_plans(
     key is taken, any arm admitted, or anything paid."""
     plans: list[CyclePlan] = []
     for arm in request.arms:
-        config = with_optimization(declared, request.declared_optimization(arm))
+        config = arm_config(declared, request, arm)
         if config.optimization.halt_at_accuracy is not None:
             raise ConflictError(
                 "an arm stops on its budget, never on an accuracy: drop the halt accuracy",
@@ -462,6 +468,7 @@ async def arm_plans(
         _refuse_off_record(record, plan, arms, stood_by=stood_by)
     for plan in plans:
         bound = await cell_bound(plan.session, plan.pipeline_params)
+        measured = measured_cell_price(plan.session, plan.pipeline_params)
         refuse_arm_below_round(
             _arm_of(plan),
             effective_config(plan.declaration),
@@ -469,7 +476,7 @@ async def arm_plans(
             search=len(plan.partition.search),
             cell_usd=None if bound is None else bound.usd,
             unpriced=() if bound is None else bound.unpriced,
-            measured_cell_usd=measured_cell_usd(plan.session, plan.pipeline_params),
+            measured_cell_usd=None if measured is None else measured.usd,
         )
     return plans
 

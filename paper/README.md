@@ -27,6 +27,11 @@ current state.
 `bbeh-comparison/` is the uncontrolled reference arm — each peer run its own way on BBEH, and the
 shared export its notebooks and `notebooks/bbeh_potter.ipynb` write ([`bbeh-comparison/README.md`](bbeh-comparison/README.md)).
 
+`plans/` holds the controlled arms, each a head-to-head declared before it is minted
+(`domain/head_to_head_plan.py::HeadToHeadPlan`): the comparability run, the budget dimension and
+the `escalation_ladder` ablation. `price-head-to-head paper/plans/<plan>.yaml` prices one at $0 off the
+archive and ends on the `head-to-head` commands that mint it, one per budget point.
+
 Method sections stay where the code is: `docs/methods/` and `docs/research/benchmarks.md`. Cite
 them; copying one here is what makes two of them.
 

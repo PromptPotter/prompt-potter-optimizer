@@ -161,7 +161,7 @@ def _round_short(
     return _RoundShort(cap, need, cells, search, price, billed=measured_cell_usd is not None)
 
 
-def _check_cap_funds_round(
+def check_cap_funds_round(
     config: CampaignConfig,
     selected: SelectedOptimizer,
     search: int,
@@ -257,7 +257,7 @@ def run_preflight_checks(
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(selected, dataset)) is not None:
         warnings.append(w)
-    funds = _check_cap_funds_round(config, selected, len(dataset), cell_usd, measured_cell_usd)
+    funds = check_cap_funds_round(config, selected, len(dataset), cell_usd, measured_cell_usd)
     if funds is not None:
         warnings.append(funds)
     if (w := _check_optimizer_below_target(selected.model(), target_models)) is not None:
