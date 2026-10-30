@@ -63,7 +63,8 @@ async def _read_backend_revision(
 ) -> BackendRevision | None:
     """Each launch's wiring records it, and a drift is served (the dashboard, the readout), never
     refused: every contract a wrong number rides is checked on its own and raises — the schema,
-    the observation keys, the package cache — so a revision gate would only stop a backend
+    the observation keys, the package cache, harbor's trial layout (`harbor.py::_layout_fault`) —
+    so a revision gate would only stop a backend
     upgrade that moved none of them."""
     expected = connector.expected_revision
     check = connector.version_check

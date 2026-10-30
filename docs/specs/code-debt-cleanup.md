@@ -27,17 +27,6 @@ acting.
   - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
     `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
   **Re-test:** each input either hashed into the declaration or written as a record.
-- **A backend revision drift is served, not refused — until a connector's numbers read the revision
-  unchecked** (`initialization/wiring.py::_read_backend_revision` → `RunWiringRecord.backend_revision`,
-  the dashboard and the readout's ⚠ line). Served, because every contract a wrong number rides is
-  checked on its own and raises (the schema, `required_observation_keys`, the package cache): a
-  revision gate would stop each backend upgrade that moved none of them, and an unreachable `/status`
-  would stop a run whose cells answer. A refusal is right only where a measurement reads the
-  backend's layout with no check of its own: harbor's `_digest` reads the task layout of its `0.22`
-  series. Action: harbor checks the layout `_digest` reads and raises, so the revision stays a fact.
-  **Re-test:** `git grep -n "EXPECTED_HARBOR_SERIES" -- promptpotter/connectors/harbor.py` still
-  stands in for a layout check.
-
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
   `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.
