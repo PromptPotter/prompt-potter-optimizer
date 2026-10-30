@@ -68,13 +68,15 @@ fi
 say "app: $INSTALL_DIR"
 self_sha() { sha256sum "$HERE/update.sh" 2>/dev/null | cut -d' ' -f1; }
 self_before="$(self_sha)"
+# The commit the live processes run, carried across the re-exec: the landing check rolls back to it.
+landed_from="${UPDATE_LANDED_FROM:-$(git -C "$INSTALL_DIR" rev-parse HEAD)}"
 sync "$INSTALL_DIR" "$REF"
 # `sync` can replace THIS script, and bash keeps reading the descriptor it already opened — so the
 # remainder of the run is the PRE-sync copy, and every fix to this file lands one deploy late while
 # printing the old behaviour's output. Re-exec the new copy once, guarded against a loop.
 if [[ -z "${UPDATE_REEXECED:-}" && -n "$self_before" && "$(self_sha)" != "$self_before" ]]; then
   ok "update.sh changed in this sync — re-running the new copy"
-  export UPDATE_REEXECED=1
+  export UPDATE_REEXECED=1 UPDATE_LANDED_FROM="$landed_from"
   exec bash "$HERE/update.sh" "$@"
 fi
 # Install the exact pinned graph from uv.lock — same source of truth as CI. Two syncs: the first
@@ -82,6 +84,18 @@ fi
 # this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
+# A run is its own process and outlives the restart (`KillMode=process`), so the landed code would
+# read the ledger shapes an older producer still writes. The synced code asks, under the unit's
+# environment as `health` below, and a refusal puts the checkout back on the commit they run.
+if ! landing_out="$(sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" \
+  -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
+  -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
+  "$INSTALL_DIR/.venv/bin/python" -m promptpotter machine-status)"; then
+  printf '%s\n' "$landing_out"
+  git -C "$INSTALL_DIR" reset --hard --quiet "$landed_from"
+  bad "not landed: a live run is on other code — the checkout is back on $(git -C "$INSTALL_DIR" rev-parse --short HEAD); re-run once it pauses or ends"
+  exit 1
+fi
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
 # shell does not load $ENV_FILE. The verb refuses a name naming no dataset, and `set -e` stops the
 # deploy there, before the exact sync drops what that name's extras were.

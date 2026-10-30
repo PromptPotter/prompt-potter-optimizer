@@ -22,7 +22,7 @@ from promptpotter.application.jobs.interlock import (
     this_producer,
     this_producer_lock,
 )
-from promptpotter.config.settings import settings
+from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.spend import Budget
@@ -119,6 +119,8 @@ class Job:
     started_at: str | None
     # A release is its own act, never a fourth stage: `stage` stays where the launch got to.
     released_at: str | None
+    # The code its producer runs, stamped with `producer_id`: a landing waits on a job holding another.
+    code_revision: str
     # What the account holds back for it, which its run's book reads live; its cycle's share of the
     # campaign's ceiling is the cycle's (`CycleShareRecord`).
     reserve: Budget = field(default_factory=Budget)
@@ -225,6 +227,7 @@ class JobRegistry:
             created_at=now,
             started_at=None,
             released_at=None,
+            code_revision=CODE_REVISION,
             # Not at construction: the token takes a process-lifetime lock, and a reader is no producer.
             producer_id=this_producer(self._dir),
         )
@@ -346,6 +349,7 @@ class JobRegistry:
             if job is None or job.released:
                 return False
             job.producer_id = this_producer(self._dir)
+            job.code_revision = CODE_REVISION
             self._persist(job)
             return True
 

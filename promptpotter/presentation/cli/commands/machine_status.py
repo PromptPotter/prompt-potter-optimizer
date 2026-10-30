@@ -31,8 +31,14 @@ async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     )
     lines += [
         f"running: {slot.what} ({slot.user}) since {slot.started_at or 'starting'}"
+        f" on {slot.code_revision[:12]}"
         for slot in status.running
     ]
+    if status.producers_behind:
+        lines.append(
+            f"{status.producers_behind} live producer(s) run code other than "
+            f"{status.code_revision[:12]}: a landing waits until they pause or end"
+        )
     lines += [
         f"queued #{entry.position}: {entry.job_id}  {entry.what}  since {entry.created_at}"
         for entry in status.queue
@@ -44,6 +50,8 @@ async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={**status.model_dump(mode="json"), "machine_binds": account.machine_binds},
         human="\n".join(lines),
+        # `deploy-linux/update.sh` refuses a landing on it.
+        outcome=StopOutcome.FAILED if status.producers_behind else StopOutcome.SUCCESS,
     )
 
 

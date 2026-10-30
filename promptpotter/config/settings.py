@@ -1,6 +1,7 @@
 import codecs
 import locale
 import re
+import subprocess
 import tomllib
 from importlib.metadata import version
 from typing import Literal
@@ -35,6 +36,25 @@ def _app_version() -> str:
 
 
 APP_VERSION: str = _app_version()
+
+
+def _code_revision() -> str:
+    """A checkout's commit, else the installed release: a version is bumped per release, not per landing."""
+    checkout = source_checkout_root()
+    if checkout is None:
+        return f"v{APP_VERSION}"
+    return subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    ).stdout.strip()
+
+
+# Read at import: a sync of the checkout after it never relabels a process still running the old
+# code, which is what a landing compares every live producer by (`jobs/machine_status.py`).
+CODE_REVISION: str = _code_revision()
 
 # Bumping it re-prompts every user for consent; keep in sync with the site's /terms + /privacy.
 TERMS_VERSION: str = "2026-10-11"

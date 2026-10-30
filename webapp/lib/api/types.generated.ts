@@ -2881,6 +2881,13 @@ export interface MachineStatusResponse {
   /** `busy` and the caller's place in `queue`, worded once for the terminal and the
    * alert bar; null where a slot is free and nothing of theirs waits. */
   notice: MachineNotice | null;
+  /** The code the answering process runs */
+  code_revision: string;
+  /** Live producers machine-wide (runs, embedded and inner runs, scoring passes)
+   * running code other than `code_revision`: each writes ledger shapes this
+   * code may refuse, so a landing waits while it is non-zero (`deploy-
+   * linux/update.sh`). */
+  producers_behind: number;
 }
 
 /** One held slot, whoever holds it: a campaign run or a paid verb's scoring pass. */
@@ -2904,6 +2911,8 @@ export interface MachineSlot {
   mine: boolean;
   /** ISO time the holder started running; null while it is still starting */
   started_at: string | null;
+  /** The code its producer runs: a checkout's commit, else the installed release */
+  code_revision: string;
 }
 
 /** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */

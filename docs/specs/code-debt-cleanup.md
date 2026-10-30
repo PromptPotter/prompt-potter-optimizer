@@ -100,10 +100,6 @@ acting.
   carries no meaning. Action: one ink. **Re-test:** read `FreqChart.tsx::colors`.
 - **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
-- **A live producer started on older code writes shapes the landed code refuses**: landing a ledger
-  shape change while any run writes breaks it.
-  Action: a run records its code revision and the landing refuses while a producer of an older one
-  holds a cycle. **Re-test:** `machine-status` before a shape-moving landing.
 - **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
   session. **Rides with:** that session landing.
 

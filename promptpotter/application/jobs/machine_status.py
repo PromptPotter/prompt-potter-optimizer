@@ -11,7 +11,7 @@ from promptpotter.application.jobs.registry import (
     JobRegistry,
     SlotHolder,
 )
-from promptpotter.config.settings import settings
+from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.strict_model import StrictModel
@@ -45,6 +45,9 @@ class MachineSlot(StrictModel):
     started_at: str | None = Field(
         description="ISO time the holder started running; null while it is still starting"
     )
+    code_revision: str = Field(
+        description="The code its producer runs: a checkout's commit, else the installed release"
+    )
 
     @classmethod
     def of(cls, job: Job, *, account: str) -> MachineSlot:
@@ -58,6 +61,7 @@ class MachineSlot(StrictModel):
             user=job.user_id,
             mine=job.user_id == account,
             started_at=job.started_at,
+            code_revision=job.code_revision,
         )
 
 
@@ -159,6 +163,12 @@ class MachineStatusResponse(StrictModel):
         description="`busy` and the caller's place in `queue`, worded once for the terminal and "
         "the alert bar; null where a slot is free and nothing of theirs waits."
     )
+    code_revision: str = Field(description="The code the answering process runs")
+    producers_behind: int = Field(
+        description="Live producers machine-wide (runs, embedded and inner runs, scoring passes) "
+        "running code other than `code_revision`: each writes ledger shapes this code may refuse, "
+        "so a landing waits while it is non-zero (`deploy-linux/update.sh`)."
+    )
 
 
 def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineStatusResponse:
@@ -207,4 +217,8 @@ def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineSt
             for job in jobs.list_launched_today()
             if job.principal_id == principal_id and job.refusal
         ],
+        code_revision=CODE_REVISION,
+        producers_behind=sum(
+            job.code_revision != CODE_REVISION for job in jobs.list_holding_spend()
+        ),
     )

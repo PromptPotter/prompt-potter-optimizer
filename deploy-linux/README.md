@@ -194,6 +194,10 @@ knowing:
 - **A restart signals the API alone** (`KillMode=process`): a run is its own process, so one in
   flight finishes and the returning API reads it off its lock. The app's unit is rewritten only by
   `./install-service.sh`.
+- **It refuses to land while a run on other code is live**: such a run writes ledger shapes the
+  landed code may refuse. The synced checkout's `machine-status` exits 1 on any live producer whose
+  job names another `code_revision`, and the script puts the checkout back on the commit it ran.
+  Re-run once that run pauses or ends.
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
   its env file — needs `./install-admin-bot.sh`.
 - **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing
