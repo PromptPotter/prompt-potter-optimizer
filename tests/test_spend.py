@@ -227,6 +227,7 @@ from promptpotter.infrastructure.store.account_spend import (
     bank_spend,
     billed_spend,
     iter_user_token_usage,
+    ledger_cost,
     sum_user_spend,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -2027,6 +2028,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert [r.mirrored for r in _token_bills(nested)] == [True], "the nested copy bills twice"
     assert unreported_on(root).sends == 0, "a billed nested send stayed held"
     assert billed_spend([nested.path]).sent_usd == 0.0, "the nested ledger billed its mirror"
+    assert ledger_cost([nested.path]).sent_usd == pytest.approx(
+        billed_spend([root.path]).sent_usd
+    ), "the nested run's own cost read another figure than the bill its root carries"
     assert 0.0 < book.usd_metered == pytest.approx(billed_spend([root.path]).sent_usd), (
         "the root's book read another bill than its ledger holds"
     )

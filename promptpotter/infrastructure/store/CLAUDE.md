@@ -24,6 +24,8 @@ roots at the tenant, never the home. A MEMORY read past `store/archive_queries.p
 
 **`store/account_spend.py` banks what a subject still holds before a delete** — every destroyer calls
 it itself, so none can skip the bank; `mirrored` L4 inner copies are skipped, or that money bills twice.
+**A subject's COST and the account's BILL are two folds** (`_Cost`, `_Billed`): a campaign row reads
+`campaign_spend` (cost, an inner run's included); only a bill or a bank skips `mirrored`.
 
 **A cycle's own facts are ledger records, and `index.json` is their fold** — written by
 `projections/cycle_index.py::write_cycle_index`, read through `read_cycle_index` off the ledger, never

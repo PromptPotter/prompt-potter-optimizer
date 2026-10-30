@@ -140,7 +140,11 @@ less wall clock, on an official dataset with a natural origin below 0.4. A one-k
 
 **The path:** (1) replicate the nearest climbing setting and read what the proposer saw of the
 misses; (2) screen library blocks without the optimizer — authored arms, origin plus ONE block;
-(3) the optimizer-model screen — re-run the halted `qwen3.7-flash @ none` arm; (4) combine the winners.
+(3) the optimizer-model screen, per method and per step — potter's L1 moved to MiniMax (jl-optmodel-1);
+(4) combine the winners.
+
+**Hypothesis under test:** each method, and each step within one, has its own most efficient model
+([`../../paper/notes/model-per-method.md`](../../paper/notes/model-per-method.md)).
 
 **Wall clock:**
 - The `n_min` origin-panel top-ups block the round close; root: one scoring pass over every member.

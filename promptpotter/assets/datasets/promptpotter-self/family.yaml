@@ -2,12 +2,14 @@ pipeline:
   backend_name: PromptPotter
   backend_type: promptpotter
   # What an operator may steer the inner optimizer TO on a babysat fork. It must name the model
-  # `assets/optimizers/potter/pipeline.yaml` runs on every node (gpt-6-luna), or every run
+  # `assets/optimizers/potter/pipeline.yaml` runs on every node (minimax-m3.1-flash), or every run
   # silently sits in the taints-the-branch case the gate exists to mark; the others stay because
   # `pipeline.yaml::available_models` still offers them as sanctioned alternatives. Move this list
   # in the SAME commit as the manifest — it and `_MODEL_PROFILES` are the two that do not fail
   # loudly when they lag behind it.
   available_models: &pp_self_models
+    - minimax/minimax-m3.1-flash
+    - qwen/qwen3.7-flash
     - openai/gpt-6-luna
     - deepseek/deepseek-v4-flash:nitro
     - qwen/qwen3.8-27b:nitro

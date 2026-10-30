@@ -28,6 +28,8 @@ class ModelProfile:
 # Keyed by the normalized ``org/model`` id; fill one with `probe-reasoning <model>`.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
     "deepseek/deepseek-v4-flash": ModelProfile(min_max_tokens=8000),
+    # DigitalOcean (the `:nitro` pick) answers half of an L4 outer `l1_generate` with a schema skeleton.
+    "minimax/minimax-m3.1-flash": ModelProfile(default_route=("Together",)),
     "openai/gpt-6-luna": ModelProfile(min_max_tokens=8000, default_route=("OpenAI",)),
     "openai/gpt-oss-20b": ModelProfile(
         min_max_tokens=8000,

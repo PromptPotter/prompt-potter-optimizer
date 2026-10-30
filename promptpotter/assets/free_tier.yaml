@@ -14,6 +14,8 @@ task_models:
   qwen/qwen3.7-flash: {reasoning_effort: [none, low]}
 # Potter's menu below the optimizer bar ($0.60 list output price per M), at the rungs it runs.
 optimizer_models:
+  # Potter's own default (pipeline.yaml); the rung it runs, as measured in jl-optmodel-1.
+  minimax/minimax-m3.1-flash: {reasoning_effort: [low]}
   qwen/qwen3.7-flash: {reasoning_effort: [none, low, medium]}
   openai/gpt-6-luna: {reasoning_effort: [low, medium]}
   deepseek/deepseek-v4-flash:nitro: {reasoning_effort: [none, low, medium]}

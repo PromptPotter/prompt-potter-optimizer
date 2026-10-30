@@ -204,11 +204,52 @@ acting.
   which `new` raises through `jobs/mint.py`; `presentation/cli/commands/new.py` parses `--set` with
   `yaml.safe_load`, so `off` reads `False`. Action: the refusal sits where every entry point passes; `--set`
   keeps `off` a string. **Re-test:** `seed-screen` below a reasoning floor refuses; `--set x=off` lands `"off"`.
+- **A lost mirror loses its money**: `infrastructure/llm/spend_book.py::SpendBook.mirror` logs a failed
+  append, yet the nested record already says `mirrored=True`, so no bill or bank counts that call. Action: a
+  failed carry raises, or the nested record is written only after the carry lands. **Re-test:** a root
+  append that raises leaves the call counted on the account.
+- **A check-in can write framing no node takes**: decomposition fills `upstream_context` /
+  `downstream_context` for any pipeline, and `domain/opt_search_point.py::scored_prompts` refuses at mint
+  where no prompt node declares `problem_description` (`promptpotter-self` hit it; its `task.md` dropped the
+  two). Action: decomposition writes the splice fields only where the schema has a splice target.
+  **Re-test:** a check-in on a params-only backend commits no splice field and mints.
+- **A rebase that changes nothing still mints**: under `deepseek/deepseek-v4.1-flash-1017` with reasoning off
+  (jl-optmodel-1 arm `deepseek1017-off`), `l2_context` fired `l2_axis_yield_drought` after ONE held round,
+  proposed a fork, and the line rebased onto the unchanged origin with no `config_overrides`. The fork
+  stalled the same way and rebased again, a loop bounded only by `domain/run_records.py::MAX_AUTO_REBASES`.
+  Each hop also re-ran a bench pass on the R0 selection. Action:
+  `escalation/firing.py::_rebase_request` refuses a fork whose cut is the origin and that carries no
+  override, and a drought rule does not fire on a single held round. **Re-test:** that arm's config holds
+  past round 1 without minting a fork.
+- **The fastest hosts refuse the `l1_generate` schema**: Cerebras and Groq (`openai/gpt-oss-*`) answer 400 to
+  `L1GenerateOutput`'s inlined JSON schema — Cerebras wants `properties` on every object, Groq strict mode wants
+  every property `required` — so the cheapest fast silicon cannot run an optimizer node. This was found by
+  probing `L1GenerateOutput.model_json_schema()`, not yet the wire schema
+  (`dispatch/l1_wire_schema.py::build_l1_response_schema`). Action: emit the wire schema in the strict-portable
+  subset (closed objects, all-required with nullable optionals). **Re-test:** one `l1_generate` call pinned to
+  Cerebras parses.
 
 ## Open — from the head-to-head arc
 
 A leading **INVESTIGATE** means nobody has shown the item is real; answer that first.
 
+- **`dashboard.json::run_limits` goes stale on `change-run-limits`.** It is copied from the cycle's
+  last `run_wiring` record, while a mid-run `set-limits` writes `standing_budget` + an ack. Seen on
+  h2h-7 `capo-b5` (`__530ab2`): `set-limits --max-rounds 10` armed 10 (ack `effect.armed`), the
+  cycle stopped `rounds_budget` at 10 clean rounds, and the dashboard still served `rounds: 50` —
+  while `cycles` and `evidence` read 10. One served fact, two sources. **Re-test:** after
+  `set-limits --max-rounds N` on a live cycle, `dashboard.json::run_limits.budget.rounds == N`.
+- **The head-to-head guard reads identical budgets as `differs`.** `head_to_heads/<id>.json` keeps
+  `shared.budget: {}` when each arm's ceiling came by `--max-usd` (a standing budget, not the
+  declaration); `evidence/head_to_head.py::pair_guard`'s `off_record` then compares every arm's
+  `next_launch_budget` against `over_the_default({})`. h2h-7's three arms print the same
+  `usd=0.2, rounds=50` under "budget DIFFERS", so no per-arm-ceiling head-to-head reads
+  `controlled`. One budget, two homes. Sent to `arc/n-arm-mint-v2` (#58), which owns the record.
+  **Re-test:** `evidence` on h2h-7 reads `controlled`.
+- **A head-to-head's arms may diverge on budget mid-run, and only `evidence` notices.** `set-limits`
+  on one arm moves it alone (by design), and `evidence` then marks every pair `x` (`Differs on:
+  budget`) — but nothing at the `set-limits` door says the arm is leaving the head-to-head's
+  declared budget. Open: refuse it on an arm, or serve the divergence where it is made.
 - **A reserved cell's bill is on no ledger** (`Connector.holds_own_sends` writes no hold), so
   `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends but never the cell.
   Action: a hold record per reserved cell. **Rides with:** any change to `spend_book.py::reserved`.

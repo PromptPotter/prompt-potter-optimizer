@@ -85,15 +85,20 @@ def _unreported_of(hold: SpendHoldRecord) -> UserSpend:
     return UserSpend(0.0, 0, 0, hold.cost_usd, tokens)
 
 
-class _Billed:
+class _Cost:
+    """What a ledger's subject COST: every answered send, a nested run's included."""
+
     records: ClassVar[RecordClasses] = HOLD_TRAIL
 
     def __init__(self) -> None:
         self._total = ZERO_SPEND
         self._held = HeldSends()
 
+    def _counts(self, usage: TokenUsageRecord) -> bool:
+        return not usage.cached
+
     def feed(self, record: HoldTrailRecord) -> None:
-        if isinstance(record, TokenUsageRecord) and not (record.cached or record.mirrored):
+        if isinstance(record, TokenUsageRecord) and self._counts(record):
             self._total = self._total.plus(_billed_of(record))
         self._held.track(record)
 
@@ -106,6 +111,13 @@ class _Billed:
             if bound is not None:
                 held = held.plus(UserSpend(0.0, 0, 0, bound, 0))
         return self._total, held
+
+
+class _Billed(_Cost):
+    """What a ledger bills the ACCOUNT: its cost less the sends a root ledger already carries."""
+
+    def _counts(self, usage: TokenUsageRecord) -> bool:
+        return not (usage.cached or usage.mirrored)
 
 
 class _Tombstones:
@@ -185,7 +197,7 @@ class _Usage:
         return self._held
 
 
-_SPEND_FOLDS = (_Billed, _Tombstones, _Usage)
+_SPEND_FOLDS = (_Cost, _Billed, _Tombstones, _Usage)
 
 
 def _unreported_once_stopped(ledger: Path, held: UserSpend) -> UserSpend:
@@ -196,17 +208,26 @@ def _unreported_once_stopped(ledger: Path, held: UserSpend) -> UserSpend:
     return ZERO_SPEND if run.producer.attached else held
 
 
-def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
+def _summed(ledgers: Iterable[Path], fold: type[_Cost]) -> UserSpend:
     total = ZERO_SPEND
     for ledger in ledgers:
-        billed, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Billed)
+        spent, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(fold)
         # Whether what is held is unreported moves with the run, not the file: asked per read.
-        total = total.plus(billed).plus(_unreported_once_stopped(ledger, held))
+        total = total.plus(spent).plus(_unreported_once_stopped(ledger, held))
     return total
 
 
+def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
+    return _summed(ledgers, _Billed)
+
+
+def ledger_cost(ledgers: Iterable[Path]) -> UserSpend:
+    return _summed(ledgers, _Cost)
+
+
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
-    own = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id))
+    """What the campaign cost, an L4 inner one too; the account's bill is :func:`billed_spend`'s."""
+    own = ledger_cost(campaigns.campaign_cycle_ledgers(campaign_id))
     banked = _banked(campaigns.workspace).spent
     return own.plus(banked.get(campaign_id, ZERO_SPEND))
 

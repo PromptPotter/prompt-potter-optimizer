@@ -20,12 +20,6 @@ key_challenges: >-
   Outer candidates drift into a single recycled hypothesis instead of grounding each edit in the specific
   inner failure the critique and transcripts show; noisy fitness from a small inner panel makes that drift
   easy.
-upstream_context: >-
-  Outer optimization loop generates mutation proposals for optimizer prompt fields; inner cycle executes with
-  current optimizer prompts to produce outputs and compute scores.
-downstream_context: >-
-  Composite fitness scores are aggregated to select the best optimizer prompt configurations for the next outer
-  iteration.
 ---
 # Task: evolve PromptPotter's own optimizer prompts
 

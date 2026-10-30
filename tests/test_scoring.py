@@ -2753,14 +2753,19 @@ _H2H_BANK = samples(12)
 def _h2h_config(
     optimizer: str, seed: int, scoring: str, proposer_model: str | None
 ) -> CampaignConfig:
+    # The shipped optimizers default to different models, so every arm pins one on each llm node.
+    manifest = yaml.safe_load((optimizers_root() / optimizer / "pipeline.yaml").read_text("utf-8"))
+    model = proposer_model or "qwen/qwen3.7-flash"
     return CampaignConfig.model_validate(
         {
             "optimization": {
                 "optimizer": optimizer,
                 "degradation_threshold": 0.0,
-                "nodes": {}
-                if proposer_model is None
-                else {"l1_generate": {"config": {"model": proposer_model}}},
+                "nodes": {
+                    name: {"config": {"model": model}}
+                    for name, node in manifest["nodes"].items()
+                    if node.get("type") == "llm"
+                },
             },
             "dataset_split": {"bench": 6},
             "run_seed": seed,
