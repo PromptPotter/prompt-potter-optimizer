@@ -774,7 +774,7 @@ class CommandAckRecord(FrozenModel):
     command_id: str
     status: CommandAckStatus
     detail: str = ""
-    effect: CommandEffect = Field(default_factory=NoEffect)
+    effect: CommandEffect
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1097,7 +1097,7 @@ class ResolvedRunRecord(FrozenModel):
     # The roster a connector only NAMES can move under its name; the one every round measured stands.
     experiment: dict[str, Any] | None
     # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
-    model_capabilities: CapabilityMenu = Field(default_factory=dict)
+    model_capabilities: CapabilityMenu
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

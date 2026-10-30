@@ -2087,7 +2087,8 @@
         },
         "required": [
           "command_id",
-          "status"
+          "status",
+          "effect"
         ],
         "title": "CommandAckRecord",
         "type": "object"
@@ -6658,7 +6659,8 @@
         },
         "required": [
           "declaration",
-          "experiment"
+          "experiment",
+          "model_capabilities"
         ],
         "title": "ResolvedRunRecord",
         "type": "object"
