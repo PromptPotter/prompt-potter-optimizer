@@ -1,4 +1,7 @@
 import type {
+  AccountKey,
+  CouponStatus,
+  LifetimeSpend,
   CourseKind,
   ArmElection,
   ArmName,
@@ -35,16 +38,6 @@ function envelope(): { caveat: null; tags: HierarchyTag[]; children: never[] } {
   return { caveat: null, tags: [], children: [] };
 }
 
-const NO_SPEND = {
-  billed_usd: 0,
-  rate_priced_usd: 0,
-  calls_rate_priced: false,
-  bill_is_floor: false,
-  unpriced_tokens: 0,
-  sends_unreported: false,
-  unreported_usd: 0,
-};
-
 const NO_METER: MeteredSpend = {
   meter: "bill",
   metered_usd: 0,
@@ -61,6 +54,42 @@ const NO_METER: MeteredSpend = {
   kinds: {},
   replay_share: null,
 };
+
+export function lifetimeSpend(over: Partial<LifetimeSpend> = {}): LifetimeSpend {
+  return {
+    billed_usd: 0,
+    rate_priced_usd: 0,
+    calls_rate_priced: false,
+    bill_is_floor: false,
+    unpriced_tokens: 0,
+    sends_unreported: false,
+    unreported_usd: 0,
+    ...over,
+  };
+}
+
+export function accountKey(provider: string, last4: string): AccountKey {
+  return { provider, last4, added_at: "2026-01-01T00:00:00Z" };
+}
+
+// A fresh non-host account on a $5 face, nothing spent, no key held.
+export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
+  return {
+    host: false,
+    face_usd: 5,
+    face_tokens: null,
+    left_usd: 5,
+    left_tokens: null,
+    used_share: 0,
+    exhausted: false,
+    void: false,
+    host_key_spend: lifetimeSpend(),
+    own_key_spend: lifetimeSpend(),
+    keys: [],
+    providers: ["anthropic", "openai"],
+    ...over,
+  };
+}
 
 // A step as served: its address is the server's, minted from its course and offset.
 export function hierarchyStep(parent: string, facts: StepFacts): HierarchyStep {
@@ -360,7 +389,7 @@ export function subtreeCampaign(
       root,
       line: root,
       lifecycle: "active",
-      spend_lifetime: NO_SPEND,
+      spend_lifetime: lifetimeSpend(),
       line_course: null,
       runs_with: null,
       deletable_stubs: 0,

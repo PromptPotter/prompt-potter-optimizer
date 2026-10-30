@@ -13,6 +13,7 @@ from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import (
     WIRE_TIMEOUT_S,
     LLMClientBase,
+    ProviderKey,
     hold_ceiling,
     post_json,
     wire_client,
@@ -36,7 +37,6 @@ from promptpotter.infrastructure.llm.send_pacing import (
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared.answer_text import truncate
-from promptpotter.shared.errors import ProviderUnkeyedError
 
 if TYPE_CHECKING:
     import httpx
@@ -268,25 +268,25 @@ class OpenAICompatibleClient(LLMClientBase):
 
     def __init__(
         self,
-        api_key: str,
+        key: ProviderKey,
         *,
         provider: str,
         spec: ProviderSpec,
         rate_limiter: RateLimiter | None = None,
     ):
         super().__init__(
-            provider=provider, display_name=spec.display_name, rate_limiter=rate_limiter
+            provider=provider,
+            display_name=spec.display_name,
+            key=key,
+            rate_limiter=rate_limiter,
         )
-        self._api_key = api_key
         self._spec = spec
 
     @functools.cached_property
     def _http(self) -> httpx.AsyncClient:
-        if not self._api_key.strip():
-            raise ProviderUnkeyedError(provider=self._provider, key=self._spec.api_key_attr)
         return wire_client(
             self._spec.base_url,
-            {"Authorization": f"Bearer {self._api_key}"},
+            {"Authorization": f"Bearer {self._key.secret.get_secret_value()}"},
             timeout_s=self._spec.timeout,
         )
 

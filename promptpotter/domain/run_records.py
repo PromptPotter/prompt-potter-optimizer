@@ -45,8 +45,10 @@ from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
+    KeySource,
     TokenAccount,
     TokenUsageKind,
+    UserSpend,
     bill_or_rate_usd,
     cycle_axes_only,
 )
@@ -436,6 +438,9 @@ class TokenUsageRecord(FrozenModel):
     cost_usd: float | None = None
     # OUR rate's price of an unbilled call, stamped once: it counts against ceilings, never spent.
     rate_priced_usd: float | None = None
+    # Whose wallet paid: the one fact a ledger's path cannot name, since the path names the account.
+    # ``None`` exactly on a replay (``cached``), which no wallet paid.
+    key_source: KeySource | None
     # The `SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay).
     hold_id: str | None = None
     # A nested run's own view of its call; money is summed off the copy on the outer ledger.
@@ -469,6 +474,8 @@ class SpendHoldRecord(FrozenModel):
     # ``None`` where nothing capped the reply: such a send holds no tokens.
     output_tokens: int | None
     cost_usd: float | None = None
+    # Whose wallet an unclosed hold may have drawn: its `TokenUsageRecord` never came to say.
+    key_source: KeySource
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -496,6 +503,27 @@ def _one_subject(subject: BankedSubject) -> None:
         raise ValueError("a banked cycle names its campaign")
 
 
+class BankedSpend(FrozenModel):
+    """One wallet's `UserSpend`, as a tombstone banks it."""
+
+    used_usd: float
+    # What our rate table priced the calls no provider billed (`TokenUsageRecord.rate_priced_usd`).
+    rate_priced_usd: float
+    used_tokens: int
+    unpriced_tokens: int
+    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
+    unreported_usd: float
+    unreported_tokens: int
+
+    @classmethod
+    def of(cls, spent: UserSpend) -> BankedSpend:
+        return cls(**spent._asdict())
+
+    @property
+    def spend(self) -> UserSpend:
+        return UserSpend(**self.model_dump())
+
+
 class SpendTombstoneRecord(FrozenModel):
     """On the WORKSPACE ledger, so deleting what spent it cannot re-earn a spend ceiling."""
 
@@ -504,14 +532,8 @@ class SpendTombstoneRecord(FrozenModel):
     # Empty for a whole-campaign bank.
     cycle_id: str = ""
     draft_id: str = ""
-    used_usd: float
-    # What our rate table priced the calls no provider billed (`TokenUsageRecord.rate_priced_usd`).
-    rate_priced_usd: float
-    used_tokens: int
-    unpriced_tokens: int
-    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
-    unreported_usd: float = 0.0
-    unreported_tokens: int = 0
+    # By whose key paid it, so a deletion keeps the coupon's count as it keeps the account's.
+    spent: dict[KeySource, BankedSpend]
     # What the campaign's ceiling counted of it in each meter, so a bank needs no manifest to name one.
     metered: dict[CeilingMeter, Budget]
     timestamp: str = Field(default_factory=utcnow_iso)

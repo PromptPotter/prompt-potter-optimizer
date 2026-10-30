@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { AboutUnit } from "./AboutUnit";
 import { AccountProfileTab } from "./AccountProfileTab";
 import { AccountUsageTab } from "./AccountUsageTab";
+import { AccountKeysTab } from "./AccountKeysTab";
 import { AccountActivityTab } from "./AccountActivityTab";
 import { AccountPreferencesTab } from "./AccountPreferencesTab";
 import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
@@ -18,6 +19,8 @@ import { DEFAULT_ACCOUNT_PANE, type AccountPane } from "@/lib/view-tab";
 const TAB_TITLES: Record<AccountPane, string> = {
   profile: "Profile",
   usage: "Usage & limits",
+  // The server's refusals name this pane ("Account → API keys"): rename them together.
+  keys: "API keys",
   activity: "Activity",
   storage: "Storage",
   preferences: "Preferences",
@@ -25,7 +28,7 @@ const TAB_TITLES: Record<AccountPane, string> = {
 };
 
 const NAV_GROUPS: readonly { label: string; panes: readonly AccountPane[] }[] = [
-  { label: "Account", panes: ["profile", "usage", "activity", "preferences"] },
+  { label: "Account", panes: ["profile", "usage", "keys", "activity", "preferences"] },
   { label: "Workspace", panes: ["storage"] },
   { label: "This unit", panes: ["about"] },
 ];
@@ -88,6 +91,7 @@ export function AccountModal() {
               </ReadState>
             ) : null}
             {tab === "usage" ? <AccountUsageTab /> : null}
+            {tab === "keys" ? <AccountKeysTab /> : null}
             {tab === "activity" ? <AccountActivityTab /> : null}
             {tab === "storage" ? <WorkspaceStoragePanel /> : null}
             {tab === "preferences" ? <AccountPreferencesTab /> : null}

@@ -862,7 +862,7 @@ class _ScoringPhase[K: Hashable]:
                     walk.n,
                 )
                 # Raises the refusal `hold` would, naming the ceiling that binds, and holds nothing.
-                book.refuse_unless_room(book.held_at(label, cell), cell, NEXT_CELL)
+                book.refuse_unless_room(book.held_at(label, cell), cell, NEXT_CELL, "host")
             raise RuntimeError(
                 f"scoring phase stalled: nothing out and nothing to take at query "
                 f"{len(walk.results)}/{walk.n}"

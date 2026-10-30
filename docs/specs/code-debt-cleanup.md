@@ -185,9 +185,10 @@ acting.
   tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
 - **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
   model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
-  per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:** the
-  host coupon ([`roadmap.md`](roadmap.md) § Host coupon + BYO keys). **Re-test:** a free account's model
-  menu equals `free_tier.yaml::task_models`.
+  per-value lists name only values known to fail; the spend ceiling bounds the rest. An account
+  holding a key of its own is still held to this menu (`quota.py::on_free_tier` reads no key), though
+  its own key pays. **Rides with:** the next check-in pass. **Re-test:** a free account's model menu
+  equals `free_tier.yaml::task_models`, and an own-key account is offered every model.
 - **`application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag**
   (`gpt-oss-20b`, ~1 in 6 LEVI replies), and the INVALID card names potter's `l1_generate`. Action: an
   unclosed block reads to the reply's end; the card names the node that proposed. **Rides with:** the
@@ -530,19 +531,61 @@ word's `git grep -c` for that sense is 0.
   sweeps stale `pp-push-*` (unlink, then `git worktree prune`). Also: the green store keeps one key per
   check name, so a tip's offline-run green overwrites the working tree's own, and the two take turns
   rerunning. **Re-test:** kill a push mid-run, then run `--push` again and list `%TEMP%\pp-push-*`.
-- **Seen hardening the endpoints** (P0, 2026-10-29):
-  - `main.py` CORS keeps `allow_methods=["*"]` / `allow_headers=["*"]` beside the pinned origins;
-    pin them to what the routes serve.
-  - Only launches and paid calls meter a write (`quota.py::refuse_verb_rate`, `paid_call`): a free
-    verb (`set-campaign-label`, `bank-snippet`) has no rate (C6).
-  - Every refusal logs one WARNING (`main.py::_error_response`), so a 429 flood is a log flood.
-  - `/docs` and `/openapi.json` sit outside `main.py::API_ROUTERS`, public by a comment, not by the
-    table; the leaks journey matches public routes by path, so a gated method sharing a public path is
-    skipped.
-  - `auth.py::_require_provider_client` and `callback` dispatch on the provider string with two
-    `type: ignore[union-attr]`: string-keyed call dispatch.
-  - `app.openapi()` warns `UnsupportedFieldAttributeWarning` (alias `body` / `payload` on a union-typed
-    body param): a request alias that has no effect.
+- **Seen bounding the perimeter** (2026-10-29):
+  - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
+    `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against
+    access-model's "all writes flow through one dispatcher". **Re-test:**
+    `git grep -n "@router.\(post\|patch\|delete\)" -- promptpotter/presentation/api/routers`.
+  - `/docs` serves Scalar's HTML, which loads its script from a CDN, while `ResponseHeadersMiddleware`
+    gives every non-API path `_WEBAPP_CSP` (`script-src 'self'`): the page likely renders blank.
+    **Re-test:** open `/docs` in a browser and read the console.
+  - `auth.py::callback` warns "HOST_ADMIN_EMAIL is unset" also when it is set and that admin has not
+    signed in yet. **Re-test:** set it, sign in as someone else, read the log line.
+  - The sign-in redirect codes are a closed set declared only in TypeScript
+    (`AuthCore.tsx::AUTH_ERROR_COPY`); the server mints them as bare strings
+    (`auth.py::_redirect_with_error(code: str)`). **Re-test:** `git grep -n "_redirect_with_error(\"" -- promptpotter`.
+  - `POST /campaigns/{id}/fork-preview` is a read on a write verb, so it spends the write bucket
+    (`quota.py::refuse_write_rate`), not the read one. **Re-test:** `git grep -n "fork-preview" -- promptpotter/presentation`.
+  - `quota.py::refuse_read_rate` takes a principal id and meters the host, while the launch, verb and
+    write buckets take the identity and exempt it. **Re-test:** `git grep -n "def refuse_.*_rate" -- promptpotter`.
+- **Seen building the host coupon** (2026-10-29):
+  - `offline_run.py --against` reads `MOVED` for a base run from another checkout: the origin's
+    `changes_description` carries the absolute `origin.yaml` path and `decisions.json` keeps it. A
+    path is not a decision. Action: the origin names its dataset-relative path, or `canon` drops it.
+    **Re-test:** run the base from a second worktree; gepa and levi read `decisions MOVED`.
+  - A backend cell is always the box's to pay (`spend_book.py::_CELL_PAYER`): a connector sends on its
+    own keys, so an own-key account past its coupon stops at its first backend cell, as the reserve
+    binds it. Action: a cell's payer is the connector's key, declared on the connector. **Re-test:** an
+    own-key account at a used-up coupon runs one TermNorm cell.
+  - `api_keys.json` holds account keys in plaintext at rest, beside `user.json`. Action: encrypt under a
+    box secret, or name the file in access-model's at-rest table. **Re-test:** `cat` one.
+  - `registry.get_llm_client` caches up to 256 clients by key, so a removed key's secret stays in
+    memory until evicted; resolution re-reads `api_keys.json` each send, so it is never SENT. **Re-test:**
+    remove a key, then read `get_llm_client.cache_info()`.
+  - A resumed cycle's prior metering counts as the box's in its book's coupon reserve
+    (`SpendBook.take_up` reads only unreported own-key holds), so a resumed own-key run reserves more of
+    the coupon than it draws. Conservative, not a leak. **Re-test:** resume an own-key cycle and read its
+    `off_coupon_usd`.
+  - `TokenUsageRecord.cached` and `key_source is None` are two spellings of one fact (a replay no
+    wallet paid). Action: one field. **Re-test:** `git grep -n "key_source=None" -- promptpotter`.
+  - `coupon.py::resolve_api_key` folds every account ledger on each send of a non-host account (it reads
+    the remainder fresh). Action: the run's book carries the remainder it was admitted against.
+    **Re-test:** time one send on an account with 100 cycles.
+  - Restamp drops `User.spend_budget_usd_total` / `token_budget_total`: a hand-raised account must be
+    re-granted as `grant.json`. **Re-test:** `ls .promptpotter/projects/*/grant.json` after a restamp.
+  - `CouponStatus.exhausted` is true both used up and `void`, so each reader guards `void` first (three
+    webapp sites). **Re-test:** `git grep -n "\.void" -- webapp/components`.
+  - The refusals in `coupon.py` / `errors.py` name a webapp pane ("Account → API keys"): renaming the
+    pane means editing Python strings. **Re-test:** `git grep -n "API keys" -- promptpotter`.
+  - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
+    **Re-test:** the Host allowance section with a token-bound grant.
+  - `CommitInput` forces `autoComplete="off"` and, after a failed commit, will not resend the same value
+    on Enter. **Re-test:** fail a key PUT, press Enter again.
+  - `AccountSpend` refreshes the coupon both on its poll and from an effect watching the sidebar's
+    `billed_usd`. **Re-test:** `git grep -n "couponRead" -- webapp/components`.
+  - The onboarding dialogs use raw `<button className="login-button">`, not `ui/Button`; and
+    `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
+    **Re-test:** `git grep -n "login-button" -- webapp/components/onboarding`.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.

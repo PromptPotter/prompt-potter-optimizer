@@ -12,8 +12,8 @@ const WEBAPP = path.resolve(__dirname, "..");
 export type FakeIssuer = {
   baseURL: string;
   mintSession(opts: { tenantId: string; email: string | null }): string;
-  /** `0` puts the account at its cap with nothing spent, which is what `AllowanceExhausted` reads. */
-  seedSpendCeiling(tenantId: string, usd: number): void;
+  /** `0` leaves the account's coupon used up with nothing spent, which is what `AllowanceExhausted` reads. */
+  seedCouponFace(tenantId: string, usd: number): void;
   blockEmails(emails: string[]): void;
   stop(): Promise<void>;
 };
@@ -75,23 +75,15 @@ export async function startFakeIssuer(
       return sessionId;
     },
 
-    seedSpendCeiling(tenantId, usd) {
+    seedCouponFace(tenantId, usd) {
       const dir = path.join(home, "projects", tenantId);
       mkdirSync(dir, { recursive: true });
-      // Every field `User` (extra="forbid") declares: `get_or_create` returns this file as-is.
+      // `wallet_store.py::CouponGrant`: a named-null `tokens` lifts that axis, so USD alone binds.
       writeFileSync(
-        path.join(dir, "user.json"),
+        path.join(dir, "grant.json"),
         JSON.stringify({
-          user_id: tenantId,
-          tenant_id: tenantId,
-          email: null,
-          terms_accepted: null,
-          spend_budget_usd_total: usd,
-          token_budget_total: null,
-          max_concurrent_cycles: 2,
-          max_campaigns_per_day: 1000,
-          demo_mode_enabled: true,
-          created_at: new Date().toISOString(),
+          face: { usd, tokens: null },
+          granted_at: new Date().toISOString(),
         }),
       );
     },

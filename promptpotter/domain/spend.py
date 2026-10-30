@@ -179,6 +179,9 @@ SPEND_KIND_LABELS: dict[TokenUsageKind, str] = {
 if set(SPEND_KIND_LABELS) != set(get_args(TokenUsageKind)):
     raise RuntimeError("SPEND_KIND_LABELS is out of step with TokenUsageKind (domain/spend.py)")
 
+# Whose wallet a send drew: the box's key under the account's coupon, or the account's own key.
+KeySource = Literal["host", "user"]
+
 # `search_incurred` is a controlled arm's budget: no sibling's cache or bench pass moves it.
 CeilingMeter = Literal["bill", "search_incurred"]
 
@@ -367,6 +370,27 @@ class UserSpend(NamedTuple):
 
 
 ZERO_SPEND = UserSpend(0.0, 0, 0)
+
+
+class PaidSpend(NamedTuple):
+    """Spend split by whose key paid it: the host's key draws the coupon, the account's own never."""
+
+    host: UserSpend = ZERO_SPEND
+    user: UserSpend = ZERO_SPEND
+
+    @classmethod
+    def of(cls, paid_by: KeySource, spent: UserSpend) -> PaidSpend:
+        return cls(**{paid_by: spent})
+
+    @property
+    def total(self) -> UserSpend:
+        return self.host.plus(self.user)
+
+    def plus(self, other: PaidSpend) -> PaidSpend:
+        return PaidSpend(self.host.plus(other.host), self.user.plus(other.user))
+
+
+NOTHING_PAID = PaidSpend()
 
 
 class LifetimeSpend(StrictModel):

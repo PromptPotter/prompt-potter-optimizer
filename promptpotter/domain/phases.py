@@ -50,6 +50,7 @@ class StopReason(enum.StrEnum):
     TARGET_HIT = "target_hit"
     SPEND_BUDGET = "spend_budget"
     TOKEN_BUDGET = "token_budget"
+    HOST_ALLOWANCE = "host_allowance"
     WALL_CLOCK = "wall_clock"
     ORIGIN_GATE = "origin_gate"
     # Raised at the first cell the backend could not reach once its own retries were spent.
@@ -625,6 +626,17 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "`set-limits --max-tokens <above what is already spent>` then `resume`.",
         True,
     ),
+    # Not SPEND_BUDGET: `set-limits` moves the campaign's ceiling, never the host's coupon.
+    StopReason.HOST_ALLOWANCE: StopReasonInfo(
+        "Host allowance used up",
+        StopOutcome.HALTED,
+        StopCategory.BUDGET,
+        True,
+        False,
+        "The box's allowance for this account is spent. Add your own key for the provider under "
+        "Account → API keys, then `resume`; a backend's sends still run on the box's key.",
+        True,
+    ),
     # A cell still open at the edge was cut; each launch's clock starts afresh.
     StopReason.WALL_CLOCK: StopReasonInfo(
         "Wall clock reached",
@@ -782,6 +794,7 @@ REFUSAL_STOPS: dict[ErrorCategory, StopReason] = {
     ErrorCategory.PROVIDER_THROTTLED: StopReason.PROVIDER_THROTTLED,
     ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
     ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
+    ErrorCategory.HOST_ALLOWANCE: StopReason.HOST_ALLOWANCE,
     ErrorCategory.WALL_CLOCK: StopReason.WALL_CLOCK,
     ErrorCategory.PRICE_LIST_UNREACHABLE: StopReason.PRICE_LIST_UNREACHABLE,
     ErrorCategory.NO_RATE: StopReason.NO_RATE,

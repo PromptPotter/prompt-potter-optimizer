@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, NoReturn, assert_never
 from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.initialization.loop_start import verb_ledger
+from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -52,7 +53,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
-from promptpotter.infrastructure.llm.send_pacing import set_abort_check, set_rate_tenant
+from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     LiveHold,
@@ -304,11 +305,10 @@ def admit_and_share(
                 job_id=job.job_id,
                 hop=hop,
             )
-            # The campaign's ceiling as composed, never as the account clamped it: the account
-            # binds through the reservation. An axis it leaves open is the headroom admitted on it.
-            ceiling = Budget(
-                usd=admitted.usd if declared.usd is None else declared.usd,
-                tokens=admitted.tokens if declared.tokens is None else declared.tokens,
+            # The campaign's ceiling as composed, never as a delegate's claim clamped it: the
+            # account binds through the reservation.
+            ceiling = admitted.over(
+                Budget(usd=admitted.usd if declared.usd is None else declared.usd)
             )
         else:
             # The enclosing book's room is spendable from NOW, on top of what the campaign spent.
@@ -512,9 +512,12 @@ async def paid_pass(
         )
         admitted = True
         job_registry.mark_started(job.job_id)
-        set_rate_tenant(str(stores.identity.tenant_id))
-        with spending_under(book):
-            yield book
+        unbind = bind_account(stores)
+        try:
+            with spending_under(book):
+                yield book
+        finally:
+            unbind()
     except BaseException as exc:
         job_registry.release(job.job_id, refusal="" if admitted else str(exc))
         stopped_by = _let_go(stores, holding)

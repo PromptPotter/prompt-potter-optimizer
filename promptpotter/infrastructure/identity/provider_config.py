@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,22 @@ class ProviderConfigBundle:
 
 
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(f.name for f in fields(ProviderConfigBundle))
+
+
+@dataclass(frozen=True)
+class ProviderIdentity:
+    issuer: str
+    subject: str
+    email: str | None
+    provider: str
+
+
+class SignInClient(Protocol):
+    """One provider's half of a sign-in: `nonce` is the flow's, bound into an ID token where the provider issues one."""
+
+    def authorize_url(self, *, state: str, nonce: str) -> str: ...
+
+    async def exchange_code(self, *, code: str, nonce: str) -> ProviderIdentity: ...
 
 
 class OIDCConfigError(ValueError):

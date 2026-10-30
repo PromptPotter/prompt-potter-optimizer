@@ -79,6 +79,12 @@
 .account-limit-control > .account-kicker{flex:0 0 104px}
 .account-limit.readonly{padding:var(--space-10) var(--space-12);border-left:2px solid var(--color-border)}
 .account-limit-input{width:6em;font-variant-numeric:tabular-nums}
+.account-keys{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-6)}
+.account-key{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-8) var(--space-12);padding:var(--space-10) var(--space-12);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
+.account-key-provider{flex:1 1 7rem;font-family:var(--font-mono);font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary)}
+.account-key-held{flex:999 1 10rem;display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
+.account-key-held code{font-family:var(--font-mono);font-size:var(--text-base);color:var(--color-text-primary)}
+.account-key-input{flex:999 1 14rem;min-width:0;font-size:16px}
 
 @media (max-width:640px){
   .account-modal{flex-direction:column}

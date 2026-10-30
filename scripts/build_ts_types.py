@@ -24,8 +24,8 @@ from promptpotter.presentation.api.routers.commands import commands_router
 
 def _served_roots() -> list[typing.Any]:
     roots: list[typing.Any] = [app.router.responses["default"]["model"]]
-    for router, _gate in API_ROUTERS:
-        for route in router.routes:
+    for mount in API_ROUTERS:
+        for route in mount.router.routes:
             # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
             if isinstance(route, APIRoute) and (answer := vars(route)["response_model"]):
                 roots.append(answer)

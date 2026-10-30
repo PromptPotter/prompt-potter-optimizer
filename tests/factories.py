@@ -388,6 +388,7 @@ def billed_call(cost_usd: float | None = None, **fields: Any) -> TokenUsageRecor
         "input_tokens": 1,
         "output_tokens": 0,
         "cost_usd": cost_usd,
+        "key_source": "host",
     } | fields
     return TokenUsageRecord(**record)
 

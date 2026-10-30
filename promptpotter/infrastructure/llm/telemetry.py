@@ -31,7 +31,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.scoring import GradedCell, WalkedCell
-from promptpotter.domain.spend import TokenAccount, TokenUsageKind
+from promptpotter.domain.spend import KeySource, TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole, measured_pass
@@ -162,6 +162,7 @@ def emit_token_usage(
     kind: TokenUsageKind,
     usage: TokenAccount,
     duration_s: float,
+    key_source: KeySource | None,
     model: str | None = None,
     provider: str | None = None,
     served_by: str | None = None,
@@ -189,6 +190,7 @@ def emit_token_usage(
         rate_priced_usd=rate_priced_usd(
             usage, model=model, provider=provider, cost_usd=cost_usd, recorded=recorded_rate_usd
         ),
+        key_source=key_source,
         hold_id=hold_id,
         mirrored=mirrored,
         cached=cached,
@@ -288,6 +290,7 @@ def emit_spend_hold(
     cost_usd: float | None,
     model: str | None,
     provider: str | None,
+    key_source: KeySource,
     ledger: CycleEventLog | None,
 ) -> None:
     """``kind`` arrives already filed (``spend_book.py::filed``)."""
@@ -301,6 +304,7 @@ def emit_spend_hold(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd,
+            key_source=key_source,
             round=current_round(),
         ),
         ledger,

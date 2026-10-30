@@ -10,10 +10,10 @@ from contextvars import ContextVar
 
 import httpx
 
+from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
-from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
@@ -88,6 +88,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
             usage=response.usage,
             cost_usd=response.cost_usd,
             duration_s=time.monotonic() - started,
+            key_source=None,
             cached=True,
         )
 
@@ -146,7 +147,7 @@ def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResp
 
 
 async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float) -> LLMResponse:
-    client = get_llm_client(stage.provider)
+    client = keyed_client(stage.provider)
     label = f"{judge}:{stage.role}"
     # Unconditional: `heartbeat` takes `ledger=None`, so a missing sink cannot disarm liveness.
     beat = asyncio.create_task(

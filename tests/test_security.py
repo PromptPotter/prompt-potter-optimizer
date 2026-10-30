@@ -15,10 +15,12 @@ import logging
 import os
 import re
 import sys
+import threading
 import types
+import uuid
 from datetime import date
 from pathlib import Path
-from typing import Any, override
+from typing import Any, cast, override
 
 import pytest
 from factories import (
@@ -30,6 +32,7 @@ from factories import (
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from offline_world import Router
@@ -38,6 +41,7 @@ from pydantic import SecretStr
 from promptpotter.application import account, health, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.ingest import ingest_draft
+from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
     request_job,
@@ -93,7 +97,7 @@ from promptpotter.domain.spend import Budget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
-from promptpotter.infrastructure.identity.google import GoogleProviderClient, ProviderIdentity
+from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
     read_grant,
@@ -105,6 +109,7 @@ from promptpotter.infrastructure.identity.paths import IdentityPaths, default_id
 from promptpotter.infrastructure.identity.provider_config import (
     OIDCProviderConfig,
     ProviderConfigBundle,
+    ProviderIdentity,
 )
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -121,8 +126,12 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.site_records import SiteRecord, SiteRecordStore
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.user_store import count_accounts
 from promptpotter.main import API_ROUTERS, app
-from promptpotter.presentation.api.deps import require_site_records_token
+from promptpotter.presentation.api.deps import (
+    build_stores_from_identity,
+    require_site_records_token,
+)
 from promptpotter.presentation.api.middleware.oidc import (
     SESSION_COOKIE_NAME,
     identity_of_session,
@@ -144,12 +153,13 @@ from promptpotter.shared.identity import (
     TenantId,
     UserId,
     acting_principal,
+    default_identity,
     require_capability,
 )
 
 _FENCE, _FENCE_END = "<UNTRUSTED_DATASET_CONTENT", "</UNTRUSTED_DATASET_CONTENT>"
 
-# 1. Leaks
+# 1. Leaks and the perimeter
 
 
 def test_no_path_secret_or_dataset_text_leaves_its_fence(
@@ -431,23 +441,193 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         "a run naming its account's pack drew another account's"
     )
 
-    # A stranger reaches only the routers mounted public; a route added under a gated one inherits its gate.
+    # A stranger reaches only the routes mounted public, by method: a gated method beside a public
+    # one on the same path is still gated, and a route added under a gated router inherits its gate.
     monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "on")
     public = {
-        f"/api/v1{route.path}"
-        for router, gate in API_ROUTERS
-        if gate is None
-        for route in router.routes
+        (method.lower(), f"{mount.prefix}{route.path}")
+        for mount in API_ROUTERS
+        if mount.gate is None
+        for route in mount.router.routes
         if isinstance(route, APIRoute)
+        for method in route.methods or ()
     }
     anonymous = TestClient(app)
     assert anonymous.get("/api/v1/health").status_code == 200, (
         "the health probe asked for a session"
     )
     for path, operations in app.openapi()["paths"].items():
-        for method in operations if path not in public else ():
+        for method in operations:
+            if (method, path) in public:
+                continue
             answer = anonymous.request(method, re.sub(r"\{[^}]+\}", "x", path))
             assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
+    asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
+
+
+async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fence's other half: how many strangers cross it, how fast they write, from where."""
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(home))
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "on")
+    monkeypatch.setattr(settings_mod.settings, "MAX_ACCOUNTS", 2)
+    monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "root@x.com")
+    projects = default_projects_root()
+
+    class Answering(GoogleProviderClient):
+        @override
+        async def exchange_code(self, *, code: str, nonce: str) -> ProviderIdentity:
+            return ProviderIdentity(
+                issuer="https://accounts.example",
+                subject=code,
+                email=f"{code}@x.com",
+                provider="google",
+            )
+
+    paths = default_identity_paths()
+    google = OIDCProviderConfig(client_id="c", client_secret="s", redirect_uri="https://r")
+    bundle = IdentityBundle(
+        paths=paths,
+        config=ProviderConfigBundle(google=google, github=None),
+        session_store=OIDCSessionStore(paths.sessions_dir),
+        jwks_cache=JWKSCache(),
+        clients={"google": Answering(google, JWKSCache())},
+    )
+    monkeypatch.setattr(app.state, "identity_bundle", bundle, raising=False)
+
+    async def sign_in(who: str) -> tuple[str, str | None]:
+        flow = f"{auth.OAUTH_FLOW_COOKIE_NAME}=google.st.n".encode()
+        request = Request(
+            {
+                "type": "http",
+                "app": app,
+                "scheme": "https",
+                "server": ("testserver", 443),
+                "path": "/auth/callback/google",
+                "query_string": f"state=st&code={who}".encode(),
+                "headers": [(b"cookie", flow)],
+            }
+        )
+        answer = await auth.callback(request, BackgroundTasks(), "google")
+        session = next(
+            (
+                value.split(";", 1)[0]
+                for name, _, value in (
+                    h.partition("=") for h in answer.headers.getlist("set-cookie")
+                )
+                if name == SESSION_COOKIE_NAME and value.split(";", 1)[0] not in ('""', "")
+            ),
+            None,
+        )
+        return answer.headers["location"], session
+
+    # The ceiling counts accounts on disk; an existing one always signs in, and the host always does.
+    for who in ("ada", "bob"):
+        assert (await sign_in(who))[1] is not None, f"{who} was refused under the ceiling"
+    sessions_before = sorted(paths.sessions_dir.iterdir())
+    where, session = await sign_in("eve")
+    assert (where, session) == ("/?auth_error=accounts_full", None), (
+        "a sign-up past the ceiling opened a session, or the browser was not told why"
+    )
+    assert sorted(paths.sessions_dir.iterdir()) == sessions_before, (
+        "a refused sign-up kept a session"
+    )
+    assert count_accounts(projects) == 2, "a sign-up past the ceiling opened an account"
+    assert (await sign_in("ada"))[1] is not None, "an existing account was refused at the ceiling"
+    assert (await sign_in("root"))[1] is not None, "the host was refused at the ceiling"
+    assert count_accounts(projects) == 3
+
+    # Two first arrivals racing for the last place: one opens, the other is refused.
+    monkeypatch.setattr(settings_mod.settings, "MAX_ACCOUNTS", 4)
+    start = threading.Barrier(2)
+
+    def arrive(user: str) -> bool:
+        stranger = IdentityContext(
+            user_id=UserId(user), tenant_id=TenantId(user), issuer=Issuer("https://x")
+        )
+        start.wait()
+        try:
+            return account.arrive(build_stores_from_identity(stranger), device=None).opened
+        except account.AccountCeilingError:
+            return False
+
+    opened = await asyncio.gather(
+        asyncio.to_thread(arrive, "racer-1"), asyncio.to_thread(arrive, "racer-2")
+    )
+    assert sorted(opened) == [False, True], "two first sign-ins at the ceiling both opened"
+    assert count_accounts(projects) == 4
+
+    # Every write a session sends is metered, a free verb's too; a throttle banks no trail line,
+    # or a flood of refusals would be a flood of writes. The host is never throttled.
+    monkeypatch.setattr(settings_mod.settings, "MAX_ACCOUNTS", 100)
+    monkeypatch.setattr(
+        app.state,
+        "job_registry",
+        JobRegistry(home / "jobs", capacity=lambda _: 1),
+        raising=False,
+    )
+    session_id, session_data = bundle.session_store.create(
+        user_id="writer-1",
+        tenant_id="writer-1",
+        issuer="https://accounts.example",
+        subject="writer-1",
+        email="writer@x.com",
+        provider="google",
+    )
+    writer = identity_of_session(session_data, bundle)
+    browser = TestClient(app, cookies={SESSION_COOKIE_NAME: session_id})
+
+    def label() -> Any:
+        return browser.post(
+            f"/api/v1/commands/{CommandKind.SET_CAMPAIGN_LABEL}",
+            json={"campaign_id": "nobody", "label": "x"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+
+    def refusals() -> int:
+        lines = account.tenant_trail(build_stores_from_identity(writer)).lines
+        return sum(line.what == "request_refused" for line in lines)
+
+    assert label().status_code == 404 and refusals() == 1, "a refused write left no trail line"
+    with pytest.raises(quota.RateLimitedError):
+        while True:
+            quota.refuse_write_rate(writer)
+    throttled = label()
+    assert (throttled.status_code, throttled.json()["error"]) == (429, "rate_limited"), (
+        "a free verb wrote past its session's write rate"
+    )
+    assert refusals() == 1, "a throttled write banked a trail line"
+    assert browser.get("/api/v1/auth/me").status_code == 200, "a throttled writer lost its reads"
+    host = default_identity()
+    for _ in range(200):
+        quota.refuse_write_rate(host)
+
+    # Cross-origin, a credentialed caller is offered only the methods the routes serve and the
+    # headers a client sends; another origin is offered nothing.
+    site = "https://site.example"
+    served: dict[str, Any] = next(
+        {**m.kwargs, "allow_origins": [site]}
+        for m in app.user_middleware
+        if m.cls is cast(Any, CORSMiddleware)
+    )
+    crossing = TestClient(CORSMiddleware(app, **served))
+
+    def preflight(origin: str, method: str, headers: str = "content-type") -> Any:
+        return crossing.options(
+            "/api/v1/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": headers,
+            },
+        )
+
+    assert preflight(site, "POST", "content-type, idempotency-key").status_code == 200
+    for method, headers, why in (
+        ("TRACE", "content-type", "a method no route serves"),
+        ("POST", "x-forged", "a header no client sends"),
+    ):
+        assert preflight(site, method, headers).status_code == 400, f"{why} was offered"
+    assert "access-control-allow-origin" not in preflight("https://evil.example", "GET").headers
 
 
 # 2. Delegation
@@ -566,7 +746,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
 
     class Answering(GoogleProviderClient):
         @override
-        async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
+        async def exchange_code(self, *, code: str, nonce: str) -> ProviderIdentity:
             return ProviderIdentity(
                 issuer="https://accounts.example",
                 subject="s1",
@@ -585,8 +765,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         config=ProviderConfigBundle(google=google, github=None),
         session_store=sessions,
         jwks_cache=JWKSCache(),
-        google=Answering(google, JWKSCache()),
-        github=None,
+        clients={"google": Answering(google, JWKSCache())},
     )
     app = FastAPI()
     app.state.identity_bundle = bundle

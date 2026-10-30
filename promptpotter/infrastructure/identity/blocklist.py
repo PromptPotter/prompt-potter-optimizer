@@ -43,7 +43,7 @@ def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
     if not blocked:
         return BlocklistDecision(blocked=False, reason="blocklist_empty")
     if not email:
-        # No email claim: admitted, since entitlement is the default and the free-tier ceiling still bounds it.
+        # No email claim: admitted, since entitlement is the default and the host coupon still bounds it.
         return BlocklistDecision(blocked=False, reason="email_missing_from_claims")
     if _norm_email(email) in blocked:
         return BlocklistDecision(blocked=True, reason="email_blocked")

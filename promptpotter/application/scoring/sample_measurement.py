@@ -183,6 +183,7 @@ def emit_replayed_step_tokens(
             served_by=part.served_by,
             cost_usd=part.cost_usd,
             recorded_rate_usd=part.rate_priced_usd,
+            key_source=None,
             cached=True,
         )
 
