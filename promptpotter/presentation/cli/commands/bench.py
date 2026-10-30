@@ -41,7 +41,7 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     pause = PauseCyclePayload(
         campaign_id=holder.campaign_id, cycle_id=holder.cycle_id, reason="Ctrl+C"
     )
-    with ctrl_c_pauses(store, pause):
+    with ctrl_c_pauses(store, [pause]):
         sent = await refused_by(
             CommandDispatcher(store).dispatch(
                 CommandCall(GradeBenchPayload(campaign_id=campaign_id))

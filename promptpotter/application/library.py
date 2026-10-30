@@ -8,7 +8,9 @@ from pydantic import Field
 from promptpotter.domain.prompt_block import (
     AUTHORED_SOURCE,
     Authored,
+    BlockPack,
     Cited,
+    PackRefusal,
     PromptPart,
     Snippet,
     snippet_id,
@@ -72,13 +74,19 @@ class LibraryResponse(StrictModel):
         description="Every source a snippet names, once, in first-named order"
     )
     snippets: list[LibrarySnippet] = Field(description="By pack name, then each pack's own order")
+    refused: list[PackRefusal] = Field(
+        description="Each pack held but served none of, by name, and why: the rest serve on"
+    )
 
 
 def library(shelf: PackShelf) -> LibraryResponse:
     snippets: list[LibrarySnippet] = []
     sources: dict[str, LibrarySource] = {}
-    for name in shelf.names():
-        pack = shelf.read(name)
+    refused: list[PackRefusal] = []
+    for name, pack in shelf.shelved().items():
+        if isinstance(pack, PackRefusal):
+            refused.append(pack)
+            continue
         for s in pack.snippets:
             cited = s.provenance if isinstance(s.provenance, Cited) else None
             authored = s.provenance if isinstance(s.provenance, Authored) else None
@@ -107,7 +115,7 @@ def library(shelf: PackShelf) -> LibraryResponse:
                 )
             )
     return LibraryResponse(
-        parts=list(PromptPart), sources=list(sources.values()), snippets=snippets
+        parts=list(PromptPart), sources=list(sources.values()), snippets=snippets, refused=refused
     )
 
 
@@ -127,7 +135,12 @@ def bank_snippet(stores: Stores, *, supersedes: str, text: str, experiment: str)
             code="snippet_unchanged",
         )
     shelf = stores.block_packs
-    held = {snippet_id(s.text): s for name in shelf.names() for s in shelf.read(name).snippets}
+    held = {
+        snippet_id(s.text): s
+        for pack in shelf.shelved().values()
+        if isinstance(pack, BlockPack)
+        for s in pack.snippets
+    }
     parent = held.get(supersedes)
     if parent is None:
         raise NotFoundError(f"no snippet {supersedes!r} in this library", code="snippet_not_found")

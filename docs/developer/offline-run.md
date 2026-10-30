@@ -43,8 +43,10 @@ green optimizer under the same arguments prints `unchanged since green` for it; 
 or pass `--against` to rerun all. A default-argument green by hand is the gate's green too.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
-§ The controlled comparison): two workspaces, each running one head-to-head's arms (`--optimizer`,
-potter and capo by default), one after a foreign campaign on the dataset — the one layout putting
+§ The controlled comparison): two workspaces, each minting one head-to-head's arms (`--optimizer`,
+potter and capo by default) in one act through `application/embedded_run.py::run_head_to_head`, as
+the `head-to-head` verb mints them, and running them one after another, one workspace after a
+foreign campaign on the dataset — the one layout putting
 several optimizers' campaigns in ONE workspace, for the webapp's Compare tab. It fails unless a
 skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory holds only
 runs it filed, and every election read its head-to-head's freeze plus its own lines; whether the
@@ -79,6 +81,7 @@ decisions. Each campaign is a child process, as many at once as free memory hold
 | `diverged/` | The first optimizer's campaign resumed with `--fork-on-divergence` under an edited proposer prompt: the parent ends on one `REBASED` stop, the fork runs on, and two further forks give one campaign four courses (the multi-course sidebar fixture). |
 | `rebased/` | Potter's campaign paused at round 1, beside a prior campaign, resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire: it fails unless the line forks, each fork ends on a stop that is not a failure, the line's cycles together run no more rounds than its budget, and the line ends on a stop other than `REBASED`. |
 | `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
+| `controlled/arms/requests/`, `controlled/arm-<optimizer>/` | A head-to-head's arms share one world, minted in one act: every arm's requests land in one directory, and each arm's `decisions.json` `harness` counts the whole act. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
 its producer lock dropped — the cycle `paused` after one SIGINT — its `mint-campaign` record must

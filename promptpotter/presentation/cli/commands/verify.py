@@ -47,7 +47,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
     pause = PauseCyclePayload.model_validate({**address, "reason": "Ctrl+C"})
-    with ctrl_c_pauses(stores, pause):
+    with ctrl_c_pauses(stores, [pause]):
         dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
 
     outcome = dispatched.result

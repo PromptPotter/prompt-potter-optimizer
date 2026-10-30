@@ -13,6 +13,7 @@ import {
   Button,
   Chip,
   Empty,
+  FailureLine,
   Menu,
   MenuCheck,
   ReadState,
@@ -133,6 +134,13 @@ export function SnippetLibrary({
           ];
           return (
             <>
+              {library.refused.map((r) => (
+                <FailureLine
+                  key={r.name}
+                  lead={`Pack ${r.name} refused:`}
+                  failure={{ message: r.reason }}
+                />
+              ))}
               <div className="snippet-filters">
                 <div className="snippet-head">
                   <svg className="snippet-glyph" viewBox="0 0 24 24" aria-hidden="true">

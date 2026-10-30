@@ -23,6 +23,7 @@ import {
   ChipGroup,
   CommitInput,
   Empty,
+  FailureLine,
   Loading,
   Switch,
   Term,
@@ -201,7 +202,8 @@ function KnobGroups({
   );
 }
 
-function KnobItem({
+// `declared` is what "Changed from" and Reset name: the manifest's here, the setup's on a head-to-head arm.
+export function KnobItem({
   node,
   knob: k,
   declaredLabel,
@@ -275,7 +277,9 @@ function counted(n: number, noun: { one: string; many: string }): string {
 
 // Each pool is drawn at the arm's prompt parts it fills; one serving neither a fill nor a pack renders nothing.
 function CandidateBorrows({ pools, onChange }: { pools: PoolRow[]; onChange: OnChange }) {
-  const shown = pools.filter((p) => p.fills.length > 0 || p.packs.length > 0);
+  const shown = pools.filter(
+    (p) => p.fills.length > 0 || p.packs.length > 0 || p.refused.length > 0,
+  );
   if (shown.length === 0) return null;
   return (
     <div className="mech-borrow">
@@ -327,6 +331,10 @@ function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) 
           </ChipGroup>
         </div>
       ) : null}
+      {/* A refused pack serves nothing, so it sits beside the chips it would have been. */}
+      {pool.refused.map((r) => (
+        <FailureLine key={r.name} lead={`Pack ${r.name} refused:`} failure={{ message: r.reason }} />
+      ))}
       {pool.fills.length > 0 ? (
         <ul className="mech-fills" aria-label={`Where ${noun.many} land`}>
           {pool.fills.map((f) => {

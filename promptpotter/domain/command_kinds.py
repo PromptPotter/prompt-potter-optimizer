@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from promptpotter.domain.campaign import Optimize, Purpose
+from promptpotter.domain.campaign import Arm, ArmName, Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
@@ -83,6 +83,12 @@ class CommandKind(StrEnum):
     STEP_CYCLE = "step-cycle", "launching:step_cycle", CAMPAIGN_STEP_CAP, "step-cycle"
     FORK_CYCLE = "fork-cycle", "launching:fork_cycle", CAMPAIGN_RUN_CAP, "resume"
     MINT_CAMPAIGN = "mint-campaign", "launching:mint_campaign", CAMPAIGN_CREATE_CAP, "new"
+    MINT_HEAD_TO_HEAD = (
+        "mint-head-to-head",
+        "launching:mint_head_to_head",
+        CAMPAIGN_CREATE_CAP,
+        "head-to-head",
+    )
     START_CHECKIN = "start-checkin", "launching:start_checkin", CAMPAIGN_CREATE_CAP, "new"
     # A verify SPENDS on real cells, so it sits with the verbs that buy measurement, not the step verbs.
     VERIFY_CANDIDATE = (
@@ -579,12 +585,101 @@ class ResolveOriginPayload(DraftPayload, kind=CommandKind.RESOLVE_ORIGIN):
     message: str = Field(default="", max_length=4000)
 
 
+class ArmRequest(StrictModel):
+    """One arm as asked: its key, and the optimizer it runs with that optimizer's knobs."""
+
+    arm_key: ArmName
+    optimization: OptimizationOverrides = Field(
+        description="Laid over the dataset's own `optimization`: `optimizer` is required, and "
+        "`budget` and `halt_at_accuracy` are refused, since every arm runs the head-to-head's "
+        "budget to its end."
+    )
+
+    @property
+    def optimization_sent(self) -> dict[str, JsonValue]:
+        return self.optimization.model_dump(mode="json", exclude_unset=True)
+
+    @model_serializer(mode="wrap")
+    def _record_what_was_sent(self, handler: SerializerFunctionWrapHandler) -> dict[str, JsonValue]:
+        """The ``CommandRecord`` carries this dump; a default there records a knob nobody set."""
+        data: dict[str, JsonValue] = handler(self)
+        data["optimization"] = self.optimization_sent
+        return data
+
+    @model_validator(mode="after")
+    def _runs_the_head_to_heads_budget(self) -> ArmRequest:
+        sent = self.optimization.model_fields_set
+        if "optimizer" not in sent:
+            raise ValueError("an arm names the optimizer it runs")
+        if refused := sorted(sent & {"budget", "halt_at_accuracy"}):
+            raise ValueError(
+                f"an arm sets no {', '.join(refused)}: every arm runs the head-to-head's budget to "
+                "its end"
+            )
+        return self
+
+
+class HeadToHeadRequest(StrictModel):
+    """Arms of one head-to-head asked in one act: all minted and admitted, or none."""
+
+    head_to_head_id: ArmName
+    arms: list[ArmRequest] = Field(
+        min_length=1,
+        max_length=16,
+        description="An id already declared takes these as further arms, each held to its record.",
+    )
+    budget: Budget = Field(
+        default_factory=Budget,
+        description="Every arm's own: each campaign spends up to it on its own book. An axis left "
+        "out is the dataset's.",
+    )
+
+    @model_validator(mode="after")
+    def _keys_distinct(self) -> HeadToHeadRequest:
+        keys = [arm.arm_key for arm in self.arms]
+        if len(set(keys)) != len(keys):
+            raise ValueError("an arm key names one arm")
+        return self
+
+    def declared_optimization(self, arm: ArmRequest) -> dict[str, JsonValue]:
+        budget = self.budget.model_dump(mode="json", exclude_unset=True)
+        return {**arm.optimization_sent, **({"budget": budget} if budget else {})}
+
+    def purpose(self, arm: ArmRequest) -> Compare:
+        return Compare(arm=Arm(head_to_head_id=self.head_to_head_id, arm_key=arm.arm_key))
+
+
 class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
     """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
     draft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle."""
 
     budget: Budget = Budget()
     diag: bool = Field(default=False, description="Run the diagnostic shape.")
+    head_to_head: HeadToHeadRequest | None = Field(
+        default=None,
+        description="Start the draft as these arms of one head-to-head, its origin every arm's, "
+        "in place of one campaign. Its own `budget` binds each arm, so `budget` and `diag` are "
+        "refused beside it.",
+    )
+
+    @model_validator(mode="after")
+    def _arms_run_their_own_budget(self) -> StartCheckinPayload:
+        if self.head_to_head is not None and (self.budget.named or self.diag):
+            raise ValueError("a head-to-head's arms run its budget and the full shape")
+        return self
+
+
+class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.MINT_HEAD_TO_HEAD):
+    """Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,
+    priced and admitted before any is minted, so a refused arm leaves none behind."""
+
+    dataset_name: str = Field(min_length=1, max_length=64)
+    head_to_head: HeadToHeadRequest
+
+    @model_validator(mode="after")
+    def _name_is_a_dataset_name(self) -> MintHeadToHeadPayload:
+        validate_dataset_name(self.dataset_name)
+        return self
 
 
 class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
@@ -594,11 +689,6 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         default=None,
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "
         "the fields sent move anything",
-    )
-    purpose: Purpose = Field(
-        default=Optimize(),
-        description="`compare` mints a controlled arm of its head-to-head, declared by its first "
-        "arm; an arm off the declared instrument or budget is refused 409",
     )
     diag: bool = Field(
         default=False,

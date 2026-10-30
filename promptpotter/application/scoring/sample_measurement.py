@@ -15,6 +15,8 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
@@ -275,6 +277,28 @@ async def attempt_bounds(session: Session, wire_params: Mapping[str, Any]) -> di
         for node, cfg, spend in _node_spends(session, wire_params)
         if isinstance(spend, LLMSpendBound)
     }
+
+
+_PRICED_RUNS = 32
+
+
+def measured_cell_usd(session: Session, wire_params: Mapping[str, Any]) -> float | None:
+    """What a cell BILLED on these models over the archive's newest rows; ``None`` before any."""
+    on_models = {
+        name: {"model": cfg["model"]}
+        for name, cfg in node_config_items(dict(wire_params))
+        if cfg.get("model")
+    }
+    total, cells = 0.0, 0
+    for m in session.store.archive.measurements_for_config(
+        on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
+    ):
+        # An archive row carries no grade, and the price is no formula's reading.
+        cost = cell_channels_of(m.cell, None).get("cost")
+        if cost is not None:
+            total += cost
+            cells += 1
+    return total / cells if cells else None
 
 
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:

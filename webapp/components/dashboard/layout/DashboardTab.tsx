@@ -14,6 +14,7 @@ import { TimeRay } from "./TimeRay";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { ForestCard } from "@/components/candidates/ForestCard";
 import { BackendRetries } from "@/components/dashboard/pipeline/BackendRetries";
+import { BackendRevisionDrift } from "@/components/dashboard/pipeline/BackendRevisionDrift";
 import { OptimizerCard } from "@/components/dashboard/pipeline/OptimizerCard";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
@@ -77,6 +78,7 @@ export function DashboardTab() {
 
         <CardFrame title="Pipeline" headingTag="h2">
           <PipelineStack datasetName={datasetName} />
+          <BackendRevisionDrift />
           <BackendRetries />
         </CardFrame>
         <OptimizerCard pipeline={optimizerPipeline} />

@@ -77,6 +77,10 @@ export interface ServedDashboard {
    * delta over moved since it was declared, under an unchanged origin: this
    * launch runs today's values. */
   defaults_drift: DefaultsDrift | null;
+  /** What this launch read of the backend's revision beside the one its connector
+   * expects; `None` where the connector checks none. A drift is served, never
+   * refused. */
+  backend_revision: BackendRevision | null;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
@@ -739,6 +743,13 @@ export interface Treatment {
   prompt_hashes: Record<string, string>;
   manifest: string;
   source: string;
+}
+
+/** What a launch read of the backend's revision, beside the one its connector was written against. */
+export interface BackendRevision {
+  expected: string;
+  reported: string | null;
+  unread: string | null;
 }
 
 /** One race catch-up: the priors eliminator ``member`` re-measured on one sample. */
@@ -2266,6 +2277,9 @@ export interface PoolRow {
    * order; none for a pool no pack feeds or no member draws, and none before
    * the facts a Start mints against are known */
   packs: PackOffer[];
+  /** The packs it would offer but refuses, each with why, served beside `packs`:
+   * one bad pack never hides the rest */
+  refused: PackRefusal[];
 }
 
 /** One path an initializer's `active` knob may name, with what it keeps. */
@@ -2314,6 +2328,17 @@ export interface PackOffer {
   entries: number;
   /** Whether `packs` names it under this config */
   on: boolean;
+}
+
+/** A pack the shelf holds but serves none of: the rest of the library serves on without it. */
+export interface PackRefusal {
+  /** Its directory name, as a `packs` knob names it */
+  name: string;
+  /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
+   * install and this account both hold the name */
+  code: 'block_pack_invalid' | 'block_pack_collision';
+  /** What to fix, in a sentence */
+  reason: string;
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
@@ -2842,6 +2867,8 @@ export interface LibraryResponse {
   sources: LibrarySource[];
   /** By pack name, then each pack's own order */
   snippets: LibrarySnippet[];
+  /** Each pack held but served none of, by name, and why: the rest serve on */
+  refused: PackRefusal[];
 }
 
 /** One source a snippet names: a cited work as its pack declares it, or the authored one. */
@@ -3725,6 +3752,18 @@ export interface StartCheckinResponse {
   hop: CycleHop | null;
 }
 
+/** What a head-to-head's act answers, and its retry under the same key: each arm's job and */
+export interface HeadToHeadStarted {
+  head_to_head_id: string;
+  arms: ArmStarted[];
+}
+
+export interface ArmStarted {
+  arm_key: string;
+  job_id: string;
+  hop: CycleHop;
+}
+
 /** What a pass did, or would do. */
 export interface ArchiveReport {
   files_touched: number;
@@ -4042,9 +4081,6 @@ export interface MintCampaignPayload {
   /** Laid over the dataset's own `optimization` before the mint freezes it; only
    * the fields sent move anything */
   optimization: OptimizationOverrides | null;
-  /** `compare` mints a controlled arm of its head-to-head, declared by its first
-   * arm; an arm off the declared instrument or budget is refused 409 */
-  purpose: Optimize | Compare;
   /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
    * the other run-mode fields are `start-run`'s alone. */
   diag: boolean;
@@ -4300,6 +4336,31 @@ export interface LivesConfig {
   cap: number;
 }
 
+/** Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned, */
+export interface MintHeadToHeadPayload {
+  dataset_name: string;
+  head_to_head: HeadToHeadRequest;
+}
+
+/** Arms of one head-to-head asked in one act: all minted and admitted, or none. */
+export interface HeadToHeadRequest {
+  head_to_head_id: string;
+  /** An id already declared takes these as further arms, each held to its record. */
+  arms: ArmRequest[];
+  /** Every arm's own: each campaign spends up to it on its own book. An axis left
+   * out is the dataset's. */
+  budget: Budget;
+}
+
+/** One arm as asked: its key, and the optimizer it runs with that optimizer's knobs. */
+export interface ArmRequest {
+  arm_key: string;
+  /** Laid over the dataset's own `optimization`: `optimizer` is required, and
+   * `budget` and `halt_at_accuracy` are refused, since every arm runs the
+   * head-to-head's budget to its end. */
+  optimization: OptimizationOverrides;
+}
+
 /** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */
 export interface OriginGateDecisionPayload {
   /** The full id: a prefix is the terminal's to resolve, before it builds a
@@ -4370,6 +4431,10 @@ export interface StartCheckinPayload {
   budget: Budget;
   /** Run the diagnostic shape. */
   diag: boolean;
+  /** Start the draft as these arms of one head-to-head, its origin every arm's, in
+   * place of one campaign. Its own `budget` binds each arm, so `budget` and
+   * `diag` are refused beside it. */
+  head_to_head: HeadToHeadRequest | null;
 }
 
 /** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
@@ -4457,7 +4522,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "mint-head-to-head" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -4480,6 +4545,7 @@ export interface CommandPayloads {
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
   "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
+  "mint-head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "origin-gate-decision": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
   "pause-cycle": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
@@ -4510,6 +4576,7 @@ export interface CommandResponses {
   "fork-cycle": CommandAcceptedBody;
   "grade-bench": CommandAcceptedBody;
   "mint-campaign": CommandAcceptedBody;
+  "mint-head-to-head": HeadToHeadStarted;
   "origin-gate-decision": CommandAcceptedBody;
   "pause-cycle": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
@@ -4517,7 +4584,7 @@ export interface CommandResponses {
   "set-concurrent-cycles": CommandAcceptedBody;
   "set-sample-lookahead": CommandAcceptedBody;
   "skip-searchpoint": CommandAcceptedBody;
-  "start-checkin": StartCheckinResponse;
+  "start-checkin": StartCheckinResponse | HeadToHeadStarted;
   "start-run": CommandAcceptedBody;
   "step-cycle": CommandAcceptedBody;
   "submit-arms": CommandAcceptedBody;

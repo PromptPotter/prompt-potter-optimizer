@@ -111,13 +111,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "`--set column.query=input`, applied before the resolver runs.",
             ),
             Arg(
-                "--arm",
-                default=None,
-                metavar="HEAD_TO_HEAD:KEY",
-                help="Mint as a controlled arm of a head-to-head, declared by its first arm off that "
-                "arm's instrument and budget; a later arm on any other is refused.",
-            ),
-            Arg(
                 "--diag",
                 dest="diag",
                 action="store_true",
@@ -136,6 +129,37 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "campaign's own knob, so `--set halt_at_accuracy=ACC` spelled short.",
             ),
             NO_WAIT,
+            *BUDGET_AXES,
+        ),
+    ),
+    Verb(
+        "head-to-head",
+        "new:cmd_head_to_head",
+        help="Mint the arms of one controlled head-to-head on a dataset NAME in one act, each a "
+        "campaign on the same origin and bench set that searches prompts alone, and run them side "
+        "by side, each in its own process, until every arm ends. Every arm is planned, priced on "
+        "the budget axes below (each arm's own) and admitted before any is minted: a refused arm "
+        "leaves none behind. An id already declared takes these as further arms, held to its "
+        "record. `evidence` reads the result.",
+        args=(
+            Arg("dataset", help="The dataset name every arm runs on."),
+            Arg(
+                "--head-to-head",
+                required=True,
+                metavar="ID",
+                help="The head-to-head's id: letters, digits, '-' and '_'.",
+            ),
+            Arg(
+                "--arm",
+                dest="arms",
+                action="append",
+                required=True,
+                metavar="KEY=OPTIMIZER[,KNOB=VALUE…]",
+                help="Repeatable, one per arm: its key, the optimizer it runs, and that "
+                "optimizer's knobs in `new --set`'s spelling — `--arm capo=capo "
+                "--arm capo-b5=capo,nodes.<node>.max_blocks=5`. No `budget.*` or "
+                "`halt_at_accuracy`: every arm runs the budget below to its end.",
+            ),
             *BUDGET_AXES,
         ),
     ),
@@ -580,8 +604,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "cycles",
         "cycles:cmd_cycles",
         help="Every cycle of every campaign you own that loads, with its run state (`run_phase`) — derived at each read and written to "
-        "no file, so this is where a terminal reads which runs are live, then each head-to-head arm "
-        "as its `--arm` address. Read-only, zero spend.",
+        "no file, so this is where a terminal reads which runs are live, then each head-to-head's "
+        "arms by key. Read-only, zero spend.",
         args=(
             Arg("--campaign", default="", help="Only this campaign's cycles."),
             Arg("--attached", action="store_true", help="Only cycles a producer process holds."),

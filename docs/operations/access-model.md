@@ -129,7 +129,8 @@ EXECUTABLE** — a custom node, a plugin connector, arbitrary Python. Until then
 against a guess, and the guess decides its shape: every tenant-controlled path is audited inert (the
 scoring formula AST-allowlisted in `application/scoring/formula/compiler.py`, YAML `safe_load`ed,
 slugs regex-validated, the provider registry closed). Waiting is cheap **only while the launch seam
-stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_run.py`).
+stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
+`jobs/launcher/head_to_head.py::admit_head_to_head`, plus `application/embedded_run.py`).
 
 ---
 

@@ -175,7 +175,7 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
         tags.append(HierarchyTag(kind="self_optimization", value="l4", label="L4"))
     if isinstance(purpose := campaign.declaration.purpose, Compare):
         arm = purpose.arm
-        # The value is `new --arm`'s own address, so a taken head-to-head id is read off the listing.
+        # The value names the head-to-head and the key, so a taken id is read off the listing.
         tags.append(
             HierarchyTag(
                 kind="arm",

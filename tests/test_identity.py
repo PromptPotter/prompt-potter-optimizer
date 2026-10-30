@@ -61,8 +61,10 @@ from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    CyclePlan,
+    arm_plans,
     declare,
-    mint_framed_cycle,
+    mint_arms,
     resolve_cycle_plan,
     resolve_resume,
 )
@@ -122,7 +124,7 @@ from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
-from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
+from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -131,12 +133,14 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.command_kinds import (
+    ArmRequest,
     ForkSeed,
+    HeadToHeadRequest,
     StartCheckinPayload,
     SubmittedArm,
 )
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
@@ -1075,7 +1079,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             declaration=declaring(rungs),
             experiment=None,
             model_capabilities={},
-            backend_revision=None,
         )
     fork_seed = parse_cycle_seed(
         ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
@@ -1167,15 +1170,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
 
-    def minted(declaration: RunDeclaration, campaign_id: str) -> object:
-        return asyncio.run(
-            mint_framed_cycle(arming, declaration, rows_30, campaign_id=campaign_id, task_text=None)
+    def arm_of(key: str, budget: Budget) -> list[CyclePlan]:
+        request = HeadToHeadRequest(
+            head_to_head_id="h",
+            arms=[
+                ArmRequest(
+                    arm_key=key,
+                    optimization=OptimizationOverrides(optimizer=door.optimization.optimizer),
+                )
+            ],
+            budget=budget,
         )
+        return asyncio.run(arm_plans(arming, door, request, rows_30))
 
-    minted(armed, "decl__0000h1")
-    # An arm declared over other bench defaults never joins its head-to-head.
+    # No dollar cap: a backend holding its own sends prices no cell before a run.
+    mint_arms(arm_of("a", Budget(usd=None, rounds=2)), billed=None)
+    # An arm declared over another budget never joins its head-to-head, and takes no campaign.
+    standing = stores.campaigns.list_campaigns(lifecycle="all")
     with pytest.raises(ConflictError):
-        minted(twin.model_copy(update={"bench_defaults_pin": "moved"}), "decl__0000h2")
+        arm_of("b", Budget(usd=None, rounds=3))
+    assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
+        "an arm refused off its head-to-head's record minted a campaign"
+    )
     # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
     # campaign minted on that declaration resolves to.
     panel = InnerTasks(
@@ -1317,7 +1333,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         declaration={},
         experiment=None,
         model_capabilities={"": {"m": floored}},
-        backend_revision=None,
     )
     with pytest.raises(ConfigDriftError) as refused:
         resolve_resume(recut, held_campaign, rows_30[:-1])

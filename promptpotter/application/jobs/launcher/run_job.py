@@ -88,7 +88,8 @@ class JobSpec(StrictModel):
         return self
 
 
-def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:
+def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> asyncio.Task[None]:
+    """Answers the task that ends when the run's process exits."""
     log_path = spec.jobs_dir / "logs" / f"{spec.job_id}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,8 +127,10 @@ def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> No
             spec.hop, job_id=spec.job_id, detail="its process exited before the run began"
         )
 
-    job_registry.attach_task(spec.job_id, asyncio.create_task(watch(), name=f"job-{spec.job_id}"))
+    exited_task = asyncio.create_task(watch(), name=f"job-{spec.job_id}")
+    job_registry.attach_task(spec.job_id, exited_task)
     logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, log_path)
+    return exited_task
 
 
 async def run_held_job(
@@ -225,8 +228,8 @@ class HeldRun:
             install_datasets_root=stores.install_datasets_root,
         )
 
-    def detach(self, *, mode: RunMode) -> None:
-        spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
+    def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
+        return spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
 
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None

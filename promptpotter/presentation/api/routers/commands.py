@@ -14,6 +14,10 @@ from promptpotter.application.commands.origin_resolving import (
 )
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
+from promptpotter.application.jobs.launcher.head_to_head import (
+    HeadToHeadLaunched,
+    HeadToHeadStarted,
+)
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
@@ -22,6 +26,7 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     CompactArchivePayload,
     EditDraftCampaignPayload,
+    MintHeadToHeadPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
@@ -46,21 +51,40 @@ async def resolve_origin(
     return await dispatch_origin_resolution(stores, CommandCall(payload, key))
 
 
-@commands_router.post(f"/{CommandKind.START_CHECKIN}", response_model=StartCheckinResponse)
+@commands_router.post(
+    f"/{CommandKind.START_CHECKIN}", response_model=StartCheckinResponse | HeadToHeadStarted
+)
 async def start_checkin(
     job_registry: JobRegistryDep,
     stores: StoresDep,
     payload: StartCheckinPayload,
     key: IdempotencyKeyDep,
-) -> StartCheckinResponse:
-    """Mint the draft's campaign and root cycle, close the draft and detach the loop.
+) -> StartCheckinResponse | HeadToHeadStarted:
+    """Mint the draft's campaign and root cycle, close the draft and detach the loop; with
+    `head_to_head`, one campaign per arm, each detached.
 
     An incomplete origin answers 422 and the draft stays open.
     """
     launched = await dispatch_start_checkin(
         stores, CommandCall(payload, key), job_registry=job_registry
     )
+    if isinstance(launched, HeadToHeadLaunched):
+        return launched.started
     return StartCheckinResponse(job_id=launched.job.job_id, hop=launched.hop)
+
+
+@commands_router.post(f"/{CommandKind.MINT_HEAD_TO_HEAD}", response_model=HeadToHeadStarted)
+async def mint_head_to_head(
+    job_registry: JobRegistryDep,
+    stores: StoresDep,
+    payload: MintHeadToHeadPayload,
+    key: IdempotencyKeyDep,
+) -> HeadToHeadStarted:
+    """Mint and detach every arm, or none; a retry under the same key answers the same arms."""
+    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
+    outcome = await dispatcher.dispatch(CommandCall(payload, key))
+    launched: HeadToHeadLaunched = outcome.result
+    return launched.started
 
 
 @commands_router.post(f"/{CommandKind.COMPACT_ARCHIVE}", response_model=ArchiveReport)

@@ -92,6 +92,7 @@ from promptpotter.domain.pipeline_schema import (
     reach_map,
 )
 from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
+from promptpotter.domain.prompt_block import PackRefusal
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
 from promptpotter.domain.search_point import (
     SHOTS_KEY,
@@ -609,6 +610,10 @@ class PoolRow(StrictModel):
         "order; none for a pool no pack feeds or no member draws, and none before the facts a "
         "Start mints against are known"
     )
+    refused: list[PackRefusal] = Field(
+        description="The packs it would offer but refuses, each with why, served beside `packs`: "
+        "one bad pack never hides the rest"
+    )
 
 
 class OptimizerNodePrompt(StrictModel):
@@ -1034,17 +1039,20 @@ def _pool_fills(
 
 def _pack_offers(
     selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
-) -> list[PackOffer]:
+) -> tuple[list[PackOffer], list[PackRefusal]]:
     if (named := initializer.packs(selected)) is None or mint is None:
-        return []
-    return [
+        return [], []
+    shelved = mint.shelf.shelved()
+    offered = [
         PackOffer(
             name=name,
             entries=len(mint.shelf.entries([name], admits=mint.admits)),
             on=name in named,
         )
-        for name in mint.shelf.names()
+        for name, pack in shelved.items()
+        if not isinstance(pack, PackRefusal)
     ]
+    return offered, [pack for pack in shelved.values() if isinstance(pack, PackRefusal)]
 
 
 def _opened_parts(target: PipelineSchema) -> set[str]:
@@ -1099,6 +1107,7 @@ def _pool_row(
 ) -> PoolRow:
     held = initializer.held(selected, mint)
     drawn = any(initializer.pool in selected.draws(member) for member in selected.members)
+    packs, refused = _pack_offers(selected, initializer, mint) if drawn else ([], [])
     return PoolRow(
         pool=initializer.pool.kind,
         source=initializer.pool.source,
@@ -1107,7 +1116,8 @@ def _pool_row(
         offered=offers(held),
         drawn_by=_pool_draws(selected, initializer.pool),
         fills=_pool_fills(selected, initializer, held, opened) if drawn else [],
-        packs=_pack_offers(selected, initializer, mint) if drawn else [],
+        packs=packs,
+        refused=refused,
     )
 
 

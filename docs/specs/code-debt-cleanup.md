@@ -26,9 +26,17 @@ acting.
   - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
   - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
     `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
-  - **A backend revision unlike the connector's expected one is a log warning**
-    (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
   **Re-test:** each input either hashed into the declaration or written as a record.
+- **A backend revision drift is served, not refused — until a connector's numbers read the revision
+  unchecked** (`initialization/wiring.py::_read_backend_revision` → `RunWiringRecord.backend_revision`,
+  the dashboard and the readout's ⚠ line). Served, because every contract a wrong number rides is
+  checked on its own and raises (the schema, `required_observation_keys`, the package cache): a
+  revision gate would stop each backend upgrade that moved none of them, and an unreachable `/status`
+  would stop a run whose cells answer. A refusal is right only where a measurement reads the
+  backend's layout with no check of its own: harbor's `_digest` reads the task layout of its `0.22`
+  series. Action: harbor checks the layout `_digest` reads and raises, so the revision stays a fact.
+  **Re-test:** `git grep -n "EXPECTED_HARBOR_SERIES" -- promptpotter/connectors/harbor.py` still
+  stands in for a layout check.
 
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
@@ -79,7 +87,8 @@ acting.
   `selection.tsx`), `hooks/useConnector`'s provider; to `derivations/` — `cell-means`,
   `prompt-fields`, `origin-readiness`; to `prefs/` — `run-card-prefs`, once that unlanded file lands.
   Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
-  `shell/node-surface/`, root `PairedLift` / `SummaryBlock`. Hard samples and compare each spread over
+  `shell/node-surface/`, root `PairedLift` / `SummaryBlock`; a surface holding chrome:
+  `dashboard/pipeline/` (`git grep -n "dashboard/pipeline" -- webapp/components/ingest`). Hard samples and compare each spread over
   several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`).
   **Re-test:** `git ls-files ':(glob)webapp/lib/*.tsx'` lists none.
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
@@ -329,15 +338,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `finish_reason=error` then pass one schema repair; unknown whether the row banks the answer or a
   miss. **Rides with:** the next head-to-head read. **Re-test:** per arm, the hit rate of error rows
   against the arm's other rows.
-- **An arm refused at run init keeps its key, and its config can no longer be changed.**
-  `preflight.py::refuse_arm_below_round` advises "size the round down with the optimizer's own
-  knobs", but a node knob is fixed at mint. `new --arm <h2h>:<key>` on that key is refused ("is
-  campaign … already"), so the operator mints under a second key and the head-to-head keeps a dead
-  arm that never searched. Seen on h2h-7: capo `__bca431` was refused at its $0.03 cap; `capo-b5`
-  `__530ab2` was minted with `max_blocks=5`. Also seen there: `set-limits --max-usd 0.20` on
-  `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
-  re-mintable under its own key, or should the refusal run before the mint so no key is taken?
-  **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
 - **INVESTIGATE — CAPO's survivors are ranked on another reading than the reference ranks them on.**
   `population` keeps μ best-first by mean objective on the cells all survivors measured; promptolution's
   CAPO sorts survivors on raw score over every cell each has been evaluated on, cached across rounds,
@@ -345,10 +345,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `candidate-elimination.md` § CAPO's race) the two can crown differently. Open: which reading the
   bench compares. **Rides with:** any change to `capo/members.py::_rank_survivors`. **Re-test:** on a CAPO
   run with offspring < μ, rank one round's survivors both ways.
-- **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
-  malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
-  or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
-  kept the old `Authored` shape. Action: refuse the pack, serve the rest.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
   `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
   hands it down.
@@ -372,6 +368,40 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   derived by verbatim equality with the donor, not recorded on the lineage, so an LLM edit that lands on
   the donor's value reads as donated. The capo offline bench turns on one seed: lift +0.700 or none
   after a draw-order change, so the fixture cannot tell a mating-law change from a reshuffle.
+- **`config/prompt_blocks.py` is hashed whole into every optimizer's `treatment.source`**
+  (`shapes_optimizer_prompt(__name__)`): the per-pack refusal, a shelf read with no prompt text,
+  re-keyed every treatment. Action: mark only the units a prompt reads, as `optimizer_manifest.py`
+  does. **Re-test:** edit `PackShelf.refusals`; potter's treatment key stays.
+- **Two packs holding one snippet text raise a bare `ValueError`** (`config/prompt_blocks.py::PackShelf._held`)
+  where every other shelf failure is a `PackRefusal` or a typed refusal of the knob: a `packs` knob
+  naming both reaches the operator as an error, not a sentence. Action: `BlockPoolInitializer.refusal`
+  names the repeated entry. **Re-test:** two account packs with one text, both named; the draft serves.
+- **A detached arm's job is the spawner's until its process adopts it**
+  (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_reap_if_orphaned`): a `head-to-head`
+  terminal killed between the spawn and the adoption leaves jobs a reconciling read releases, so the
+  child's `adopt` refuses and the arm's minted cycle never runs. Action: the child holds the producer
+  lock before the spawner returns. **Re-test:** kill the terminal right after its `arm …` lines; each
+  arm's cycle runs or reads released with its reason.
+- **Two acts on one fresh head-to-head id race its record**: `jobs/mint.py::arm_plans` reads the
+  standing record outside any lock, so two concurrent acts each declare their own `SharedPart`.
+  Action: declare the record under the workspace lock and plan the second off it. **Re-test:** two
+  `mint-head-to-head` on one fresh id at once — one is refused off the record.
+- **A refused launch still spends its rate tokens** (`jobs/quota.py::check_launch_quotas`): the
+  bucket is debited before the slot checks that can still refuse, so a head-to-head refused
+  `machine_busy` costs all its arms' tokens. Action: debit on admission. **Re-test:** refuse N
+  launches on a full box; the next is not `rate_limited`.
+- **Two launch doors**: `jobs/launcher/launch.py::launch` (one run, may queue) and
+  `jobs/launcher/head_to_head.py::admit_head_to_head` (N arms, never queued) each request slots and
+  admit. Action: one door admitting N, queueing only when N is 1. **Re-test:** `git grep -c
+  "check_launch_quotas(" -- promptpotter/application/jobs/launcher/*.py` is 1.
+- **The origin's `changes_description` embeds the checkout's absolute path** (`Origin from
+  /…/origin.yaml`): a served individual names the host's filesystem, and two checkouts of one commit
+  read `decisions MOVED` in `scripts/offline_run.py --against`. Action: name the dataset-relative
+  path. **Re-test:** `grep -c '"Origin from /' <home>/<optimizer>/decisions.json` is 0.
+- **The controlled offline leg's arm-memory count moves between identical runs** (`arm potter: memory
+  holds 380` then `375` own answers on one tree): a cell coalesced with a twin in flight is answered
+  from memory, not sent. A printed reading, not a decision. Action: count filed answers, not distinct
+  ones. **Re-test:** two `--controlled` runs of one tree print one count.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
