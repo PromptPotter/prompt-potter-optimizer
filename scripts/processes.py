@@ -208,16 +208,24 @@ def _locked(fd: int) -> bool:
 _HELD = "PROMPTPOTTER_HEAVY_LOCK_HELD"
 
 
+def clone_cache() -> Path:
+    """The clone's one `.gate_cache`, every worktree's and every pushed tip's."""
+    rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if rc:
+        raise RuntimeError(f"gate: {REPO} is not in a git clone: {common}")
+    cache = Path(common.strip()).parent / ".gate_cache"
+    cache.mkdir(exist_ok=True)
+    return cache
+
+
 def queue_behind_siblings(label: str, *, exempt: bool = False) -> None:
     """One heavy job per clone at a time, every worktree's included: an OS lock, dropped when we exit."""
     if os.environ.get(_HELD):
         return
     os.environ[_HELD] = label
-    rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
-    if exempt or rc:  # no clone, so no sibling
+    if exempt:
         return
-    path = Path(common).parent / ".gate_cache" / "gate.lock"
-    path.parent.mkdir(exist_ok=True)
+    path = clone_cache() / "gate.lock"
     # Never closed: the process holds the lock to its end, whichever way it ends.
     fd = os.open(path, os.O_RDWR | os.O_CREAT)
     # No timeout: a whole gate legitimately holds it for many minutes, and a dead holder's lock

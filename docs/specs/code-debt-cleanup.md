@@ -573,11 +573,9 @@ word's `git grep -c` for that sense is 0.
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).
   - `vitest.config.ts` loads as CommonJS (Vite warns on every run).
-- **A worktree that ran the offline gate cannot be removed by git**: `.gate_cache/offline-run` nests
-  campaign paths past Windows' 260-char limit (`git worktree remove` fails "Filename too long"), and a
-  worktree's `webapp/node_modules` junction makes any forced recursive delete reach the main tree's.
-  Action: the offline home lives outside the tree (or under a short root). **Re-test:** run the
-  offline gate in a worktree; `git worktree remove` succeeds.
+- **A worktree's `webapp/node_modules` junction makes a forced recursive delete reach the main
+  tree's**, so a worktree is removed by unlinking its junctions first. **Re-test:**
+  `git worktree remove` on a worktree with its junctions in place leaves main's `node_modules`.
 - **A side worktree cannot pass the full gate**: Turbopack refuses the `node_modules` junction
   ("points out of the filesystem root"), so `next-build` and `playwright` never run there, and pytest's
   `compileall` breaks on long Temp paths. A rebuilt commit series is therefore gated without them.
@@ -591,12 +589,11 @@ word's `git grep -c` for that sense is 0.
   `gate.py` (and through it `tests_owning`, `yaml`) in every child, while `OFFLINE_RUN_READS` names
   neither file. Fan-out sizing sits beside `processes.py::free_mb`. **Re-test:**
   `git grep -n "from gate import" -- scripts`.
-- **A killed push leaves live links into the main tree.** `gate.py::_tip_checkout` links `.venv`,
-  `webapp/node_modules` and `.gate_cache` into `%TEMP%\pp-push-*`. A hard kill skips the unlink, so the
-  temp dir keeps junctions that a later recursive temp delete could follow. Action: the next `--push`
-  sweeps stale `pp-push-*` (unlink, then `git worktree prune`). Also: the green store keeps one key per
-  check name, so a tip's offline-run green overwrites the working tree's own, and the two take turns
-  rerunning. **Re-test:** kill a push mid-run, then run `--push` again and list `%TEMP%\pp-push-*`.
+- **A killed push leaves live links into the main tree.** `gate.py::_tip_checkout` links `.venv` and
+  `webapp/node_modules` into `%TEMP%\pp-push-*`. A hard kill skips the unlink, so the temp dir keeps
+  junctions that a later recursive temp delete could follow. Action: the next `--push` sweeps stale
+  `pp-push-*` (unlink, then `git worktree prune`). **Re-test:** kill a push mid-run, then run
+  `--push` again and list `%TEMP%\pp-push-*`.
 - **Seen bounding the perimeter** (2026-10-29):
   - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
     `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against

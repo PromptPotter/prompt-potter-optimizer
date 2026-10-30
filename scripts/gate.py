@@ -31,6 +31,7 @@ from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from processes import (
     REPO,
     Outcome,
+    clone_cache,
     close_job,
     end_children_with_this_process,
     free_mb,
@@ -1301,7 +1302,8 @@ CHECKS: tuple[Check, ...] = (
         lambda _: run(
             [sys.executable, "scripts/offline_run.py"],
             REPO,
-            PROMPTPOTTER_HOME=str(REPO / ".gate_cache" / OFFLINE_RUN),
+            # The clone's, so a worktree's run answers for main and the worktree deletes clean.
+            PROMPTPOTTER_HOME=str(clone_cache() / OFFLINE_RUN),
         ),
         landing=True,
         reads=OFFLINE_RUN_READS,
@@ -1415,8 +1417,8 @@ def _lanes(
     return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
 
 
-# What a pushed tip's checkout borrows from the pushing tree: its env, and the store its greens key in.
-_BORROWED = (".venv", "webapp/node_modules", ".gate_cache")
+# What a pushed tip's checkout borrows from the pushing tree: its env. Its greens are the clone's.
+_BORROWED = (".venv", "webapp/node_modules")
 
 
 def _link(link: Path, target: Path) -> None:
@@ -1434,7 +1436,6 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
     code, out = git("worktree", "add", "--detach", str(tree), tip)
     if code:
         raise RuntimeError(f"git worktree add {tip}: {out}")
-    (REPO / ".gate_cache").mkdir(exist_ok=True)
     links = [tree / rel for rel in _BORROWED if (REPO / rel).is_dir()]
     try:
         for link in links:

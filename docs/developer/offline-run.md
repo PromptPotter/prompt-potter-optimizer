@@ -24,14 +24,15 @@ its `decisions.json` holds the same rounds and headline as the default `at_end` 
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.
 
-**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in a
-home of its own — whenever a file the engine runs from has changed since it was last green, so an
+**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in the
+clone's home (`processes.py::clone_cache`, one for every worktree) — whenever a file the engine runs from has changed since it was last green, so an
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
 docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-push
 hook runs it on each pushed tip** with every other CI check (`gate.py --push`), in a throwaway `git worktree` of that tip
-borrowing the pushing tree's `.venv`, `webapp/node_modules` and `.gate_cache` as links
-(`gate.py::_tip_checkout`), so its verdict is the tip's whatever the working tree holds, and a tip
-already green is a stamp read. The pre-commit hook and `--changed` leave it out: it proves a
+borrowing the pushing tree's `.venv` and `webapp/node_modules` as links
+(`gate.py::_tip_checkout`), so its verdict is the tip's whatever the working tree holds. The green
+store is the clone's (`last_green.py::LastGreen`), keyed by content, so a tip already green in any
+worktree is a stamp read. The pre-commit hook and `--changed` leave it out: it proves a
 landing, not an edit. CI runs it on every push.
 
 **A green optimizer is not run twice.** Each optimizer's workspace, with every leg nested in it, is
