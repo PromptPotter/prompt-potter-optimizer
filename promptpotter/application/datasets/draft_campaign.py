@@ -16,7 +16,7 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, NodeSearchNarrowing
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.infrastructure.store.stores import Stores, owned_draft_data
 from promptpotter.shared.clock import utcnow_iso
@@ -270,7 +270,7 @@ def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str
     connector = connectors.CONNECTORS.get(draft.connector)
     steps = draft.pipeline_steps or list(connector.default_pipeline)
     if steps:
-        pipeline["pipelines"] = {"default": list(steps)}
+        pipeline["pipelines"] = {DEFAULT_PIPELINE: list(steps)}
     if connector.available_models:
         pipeline["available_models"] = list(connector.available_models)
     return pipeline

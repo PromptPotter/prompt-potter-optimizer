@@ -101,9 +101,9 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     LayerReading,
     as_read_by,
     ask_l2_escalation,
+    bank_and_route,
     l2_fired,
     l3_fired,
-    observe,
 )
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, EscalationLadder
 from promptpotter.application.optimizers.potter.members import L1Generate
@@ -2256,7 +2256,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL), (
         "not vacuous: the full ladder fires"
     )
-    # `--diag` asks the climb with no `observe` before it: on the L1 arm that composes no layer.
+    # `--diag` asks the climb with no `bank_and_route` before it: on the L1 arm that composes no layer.
     diag_asks = {
         ask_l2_escalation(
             ladder,
@@ -2368,7 +2368,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     def observed(advances: list[RoundAdvance]) -> Ladder:
         ladder = Ladder()
         for advance in advances:
-            ladder, _ = observe(
+            ladder, _ = bank_and_route(
                 ladder, advance=advance, l1_patience=99, escalation_ladder=EscalationLadder.FULL
             )
         return ladder

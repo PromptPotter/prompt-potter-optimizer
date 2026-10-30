@@ -14,6 +14,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
+from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -136,6 +137,6 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
         ),
         task_description=read_dataset_framing(dataset_dir).description,
         pipeline_nodes=dict(pipeline.get("nodes") or {}),
-        active_steps=declared_pipelines(pipeline).get("default", []),
+        active_steps=declared_pipelines(pipeline).get(DEFAULT_PIPELINE, []),
         candidate_library=read_candidate_library_file(dataset_dir),
     )

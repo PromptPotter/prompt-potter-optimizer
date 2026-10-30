@@ -370,7 +370,7 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
 class RoundWalked(NamedTuple):
     result: RoundResult
     cut: StopReason | None
-    # What the controller observed of the round, acted on once it closes (`post_round`).
+    # The rule the controller banked off the round, acted on once it closes (`post_round`).
     rule: str | None
 
 
@@ -491,7 +491,7 @@ async def execute_round(
     rule = None
     if (controller := plan.controller) is not None:
         seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
-        rule = controller.observe(NodeContext(seat, controller), result)
+        rule = controller.bank_round(NodeContext(seat, controller), result)
     return RoundWalked(result, measured.cut, rule)
 
 
@@ -581,6 +581,6 @@ async def post_round(
         raise StopLoop(stop)
     if walked.rule is not None and not is_final_round:
         controller = cycle.optimizer.plan.controller
-        assert controller is not None, "only a controller observes a rule"
+        assert controller is not None, "only a controller banks a rule"
         seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
         await controller.act(NodeContext(seat, controller), walked.rule)

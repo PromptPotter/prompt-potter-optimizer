@@ -171,12 +171,6 @@ acting.
 - **A repair takes `session` beside `cycle`** (`apply_correction`, `repair_incomplete_rounds`):
   `cycle.session` is that session, two doors into one state. The re-bank warning also fires on zero
   retired candidates. **Re-test:** neither takes a `Session`.
-- **`default` names two walks**: the optimizer manifest's round walk (a bare `"default"` at each
-  `optimizer_manifest.py` site, beside the `INITIAL_POPULATION` / `RUN_INIT` constants) and the
-  backend's pipeline (`domain/pipeline_schema.py`). **Re-test:** the round walk read through one
-  constant.
-- **`Escalation.observe` writes the `Ladder`** (`ctx.put`): a controller's observation mutates state
-  under a read's name. **Re-test:** the write named for what it does, or moved to `act`.
 
 ## Open — multi-arc
 

@@ -162,7 +162,7 @@ def as_read_by(ladder: Ladder, ask: LadderAsk) -> Ladder:
     return ladder.model_copy(update=read)
 
 
-def observe(
+def bank_and_route(
     ladder: Ladder,
     *,
     advance: RoundAdvance,

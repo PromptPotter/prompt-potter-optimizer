@@ -809,8 +809,8 @@ class Controller(NodeMember, Protocol):
         """The members it runs, each under its own context (``NodeContext.fire``)."""
         ...
 
-    def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
-        """Read the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
+    def bank_round(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
+        """Bank the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
         ...
 
     async def act(self, ctx: NodeContext, cause: str) -> None: ...

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
+    DEFAULT_PIPELINE,
     MEMBER_KINDS,
     OUTPUT_CONTRACT_KEYS,
     SCHEMA_TOGGLE_PARAM,
@@ -185,12 +186,12 @@ def derive_pipeline_view(
     descriptions: Mapping[str, str],
 ) -> PipelineView:
     declared = list(nodes)
-    chain = [n for n in (pipelines.get("default") or declared) if n in nodes]
+    chain = [n for n in (pipelines.get(DEFAULT_PIPELINE) or declared) if n in nodes]
     in_chain = set(chain)
     others = sorted(
         (name, [s for s in seq if s in nodes])
         for name, seq in pipelines.items()
-        if name != "default"
+        if name != DEFAULT_PIPELINE
     )
     # Sharing no step with the chain makes a pipeline a PHASE, drawn ahead of it; sharing steps, an ALTERNATIVE.
     spine = [*(s for _n, seq in others if not (set(seq) & in_chain) for s in seq), *chain]
@@ -331,7 +332,7 @@ def _check_member_structure(
 
     if not any(node.kind in MEMBER_KINDS for node in parsed.values()):
         return
-    default = list(pipelines.get("default") or [])
+    default = list(pipelines.get(DEFAULT_PIPELINE) or [])
     measurements = [n for n in default if kind(n) is NodeKind.GATEWAY]
     if len(measurements) != 1:
         _refuse(
@@ -370,7 +371,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     nodes = _block(config["nodes"], "nodes")
     resolved_schemas = _block(config.get("resolved_schemas"), "resolved_schemas")
     resolved_prompts = _block(config.get("resolved_prompts"), "resolved_prompts")
-    pipelines = {"default": list(nodes)} | {
+    pipelines = {DEFAULT_PIPELINE: list(nodes)} | {
         name: _names(steps, f"pipelines.{name}")
         for name, steps in _block(config.get("pipelines"), "pipelines").items()
     }

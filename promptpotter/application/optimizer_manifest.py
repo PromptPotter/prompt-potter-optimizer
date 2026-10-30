@@ -35,6 +35,7 @@ from promptpotter.domain.opt_search_point import PROMPT_FIELDS, OptimizerPromptT
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
+    DEFAULT_PIPELINE,
     MEMBER_KINDS,
     ManifestNodeOverlay,
     NodeKind,
@@ -197,15 +198,15 @@ class RoundPlan:
     def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
         """The proposers of each walk that is a round of its own, by pipeline: seeds heading round 1 are its."""
         alone = {INITIAL_POPULATION: self.initial_population} if self.seeds_alone else {}
-        return {"default": self.proposers, **alone}
+        return {DEFAULT_PIPELINE: self.proposers, **alone}
 
     def walk(self, *, stands: bool) -> RoundWalk:
         """A round seeds only where no population stands: a resumed one restores its own."""
         if not self.initial_population or stands:
-            return RoundWalk("default", (), self.proposers, self.gate)
+            return RoundWalk(DEFAULT_PIPELINE, (), self.proposers, self.gate)
         if self.seeds_alone:
             return RoundWalk(INITIAL_POPULATION, (), self.initial_population, self.gate)
-        return RoundWalk("default", self.initial_population, self.proposers, self.gate)
+        return RoundWalk(DEFAULT_PIPELINE, self.initial_population, self.proposers, self.gate)
 
     @property
     def first_walk(self) -> tuple[NodeMember, ...]:
@@ -226,7 +227,7 @@ def _round_plan(
     seeds_walk: Literal["alone", "before_default"] | None,
     gate: ArmGateMode,
 ) -> RoundPlan:
-    walk = schema.pipelines["default"]
+    walk = schema.pipelines[DEFAULT_PIPELINE]
     declared = {n.name: n.kind for n in schema.declared_nodes}
     if undeclared := [n for n in walk if n not in declared]:
         raise _walk_refused(name, f"`default` walks {undeclared}, which it does not declare.")
@@ -273,7 +274,7 @@ def _round_plan(
     ]
     proposers = cast("tuple[Proposer, ...]", members[RoundRole.PROPOSER])
     walks: tuple[tuple[str, Sequence[Proposer]], ...] = (
-        ("default", proposers),
+        (DEFAULT_PIPELINE, proposers),
         (INITIAL_POPULATION, initial),
     )
     for pipeline, walked in walks:
@@ -378,7 +379,7 @@ class SelectedOptimizer:
 
     def round_cells(self, search: int) -> int:
         """Cells a round after the first asks for; 0 where the search split holds no panel."""
-        return self.sampler.drawn(self.knobs(self.sampler.name), search, "default").cells
+        return self.sampler.drawn(self.knobs(self.sampler.name), search, DEFAULT_PIPELINE).cells
 
     def round_cells_ceiling(self, search: int) -> int:
         """The most cells one round buys: its arms on the walk's panel, then the parent's reads past theirs."""
@@ -860,7 +861,7 @@ def _select(
     return selected
 
 
-_WALKS = (RUN_INIT, INITIAL_POPULATION, "default")
+_WALKS = (RUN_INIT, INITIAL_POPULATION, DEFAULT_PIPELINE)
 
 
 def _edges_of(member: NodeMember) -> frozenset[type]:

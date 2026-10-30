@@ -68,9 +68,9 @@ from promptpotter.application.optimizers.potter.escalation.rules import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import (
     PotterPhase,
+    bank_and_route,
     l2_fired,
     l3_fired,
-    observe,
 )
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
@@ -602,7 +602,7 @@ class Escalation(nodes.Controller):
             for knob, label, value in patiences
         )
 
-    def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
+    def bank_round(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
         knobs = ctx.knobs(EscalationKnobs)
         # Structural, not a stall: heals L2 now instead of burning l1_patience rounds.
         l1_mandatory_breach = any(
@@ -614,7 +614,7 @@ class Escalation(nodes.Controller):
         l1_zero_candidates = ctx.recall(L1Readout, round_result.round).l1_parse_failure is not None
         # The stamped grade's own rates, so routing and verdict cannot diverge.
         evidence_starved = evidence_starved_node(round_result.health.node_failure_rates) is not None
-        ladder, event = observe(
+        ladder, event = bank_and_route(
             ctx.slice(Ladder),
             advance=round_result.overlap.advance,
             l1_patience=knobs.l1_patience,

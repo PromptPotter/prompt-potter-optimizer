@@ -78,6 +78,7 @@ from promptpotter.domain.pipeline_parsing import (
 )
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
+    DEFAULT_PIPELINE,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
@@ -832,7 +833,7 @@ def _draft_declared(
 
 
 def _declared_chain(dataset_dir: Path) -> list[str]:
-    return declared_pipelines(read_dataset_pipeline(dataset_dir) or {}).get("default", [])
+    return declared_pipelines(read_dataset_pipeline(dataset_dir) or {}).get(DEFAULT_PIPELINE, [])
 
 
 def _locked(stores: Stores, hop: CycleHop, config: CampaignConfig) -> CampaignConfig:
@@ -939,7 +940,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
     raw = stores.campaigns.read_resolved_run(hop).declaration
     if raw is None and dataset is not None:
         raw = dataset_pipeline_declaration(stores, dataset, experiment_outside_run(stores, dataset))
-    schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
+    schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {DEFAULT_PIPELINE: []}})
     seed = stores.campaigns.read_cycle_seed(hop)
     cfg = resolve_campaign_config(stores, campaign, hop)
     active, filtered = _resolve_active_schema(

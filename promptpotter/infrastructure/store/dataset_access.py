@@ -14,6 +14,7 @@ from promptpotter import connectors
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
+from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.read_model import file_sig
@@ -155,7 +156,7 @@ def declared_pipelines(declaration: Mapping[str, Any]) -> dict[str, list[str]]:
         str(name): [str(step) for step in steps or []]
         for name, steps in (declaration.get("pipelines") or {}).items()
     }
-    return ({"default": [str(node) for node in nodes]} if nodes else {}) | declared
+    return ({DEFAULT_PIPELINE: [str(node) for node in nodes]} if nodes else {}) | declared
 
 
 def nearest_file(dataset_dir: Path, filename: str) -> Path | None:

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.pricing import inline_route
@@ -422,7 +422,7 @@ def dataset_pipeline(
         "backend_type": "dspy",
         "available_models": sorted({model, *allowed.get("model", [])}),
         "nodes": {PROGRAM_NODE: node},
-        "pipelines": {"default": [PROGRAM_NODE]},
+        "pipelines": {DEFAULT_PIPELINE: [PROGRAM_NODE]},
     }
 
 
