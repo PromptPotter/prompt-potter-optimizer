@@ -261,8 +261,7 @@ def _mint_and_rebase_fork(
     child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
     branch = store.standing_rounds(child, moment=None).rounds[cut - 1].close
     store.restate_round(
-        child,
-        branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),
+        child, cut - 1, branch.optimizer_state.model_copy(update={"slices": learned.slices})
     )
     session = session.bound(child, purpose=session.purpose)
     observers = _onto_fork(

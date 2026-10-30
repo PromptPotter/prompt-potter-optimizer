@@ -8,17 +8,16 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fo
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimizers.nodes import RoundContext
-from promptpotter.application.run_callbacks import RunCallbacks, stated_line
+from promptpotter.application.run_callbacks import stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.run_records import (
     ForkDirection,
     ForkTrigger,
     RoundRestatedRecord,
 )
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import ConflictError, ErrorCategory
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
@@ -28,13 +27,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign_config import LivesConfig
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.optimizer_state import OptimizerState, StatePart
     from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.run_records import RoundProposedRecord
     from promptpotter.domain.scoring import GradedCell
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRound
 
 logger = logging.getLogger(__name__)
 
@@ -84,31 +82,26 @@ def repair_cut(prior: list[RoundResult]) -> RepairCut:
 
 
 def _rebank_on_branch(
-    campaign_store: CampaignStore,
-    parent: CycleHop,
-    branch_cycle_id: str,
+    cycle: Cycle,
+    closes: Mapping[int, StandingRound],
+    branch: CycleHop,
     rounds: list[RoundResult],
     retirements: list[tuple[int, ArmKey]],
-    *,
-    slot_of: Mapping[str, int],
-    difficulty: DifficultyView,
-    lives: LivesConfig | None,
 ) -> list[RoundResult]:
-    branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
-    closes = campaign_store.standing_rounds(parent, moment=None).rounds
-    keys: dict[int, list[ArmKey]] = {}
-    for round_num, key in retirements:
-        keys.setdefault(round_num, []).append(key)
+    session = cycle.session
+    retired = {round_num for round_num, _ in retirements}
     restated: dict[int, RoundResult] = {}
     for t in rounds:
-        if t.round not in keys:
+        if t.round not in retired:
             continue
-        line, series, standing = stated_line(t, rounds, difficulty, lives=lives)
+        line, series, standing = stated_line(
+            t, rounds, cycle.difficulty, lives=cycle.config.optimization.lives
+        )
         # Under its round's own anchors, never the resuming launch's.
         anchors = closes[t.round].close.anchors
-        offset = campaign_store.restate_round(
+        offset = session.store.campaigns.rebank_round(
             branch,
-            RoundRestatedRecord.of(line, slot_of, series, standing, anchors),
+            RoundRestatedRecord.of(line, session.bank.slot_of, series, standing, anchors),
         )
         # The restatement MOVES the document's address; the retired one re-folds to the holed round.
         restated[t.round] = t.model_copy(update={"at_offset": offset})
@@ -116,13 +109,11 @@ def _rebank_on_branch(
 
 
 async def repair_incomplete_rounds(
-    prior: list[RoundResult],
-    session: Session,
-    cycle: Cycle,
-    dataset: list[Any],
+    prior: list[RoundResult], cycle: Cycle, dataset: list[Any]
 ) -> list[RoundResult]:
     """Writes nothing, to a ledger or to *prior*; an untouched round is the SAME object handed in."""
 
+    session = cycle.session
     by_key = {s.key: s for s in dataset}
     corrected = list(prior)
     for slot, t in enumerate(prior):
@@ -194,64 +185,62 @@ async def repair_incomplete_rounds(
     return corrected
 
 
-def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> RoundContext:
-    """*rr*'s round as the run stood in it: the trajectory up to it, *rr* closed."""
-    cycle.replay_priors([*(p for p in rounds if p.round < rr.round), rr])
-    ledger = cycle.session.state.ledger
-    assert ledger is not None, "a resume replays its rounds under the run's observers"
-    return RoundContext(cycle=cycle, round_num=rr.round, callbacks=RunCallbacks(ledger=ledger))
+def _seat_on(
+    cycle: Cycle, rounds: list[RoundResult], rr: RoundResult, callbacks: RunCallbacks
+) -> RoundContext:
+    """*rr*'s round as the run stood in it, a view: the trajectory up to it, *rr* closed."""
+    seated = cycle.seated([*(p for p in rounds if p.round < rr.round), rr])
+    return RoundContext(cycle=seated, round_num=rr.round, callbacks=callbacks)
 
 
-def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-    """``{round: {node: fingerprint}}``, each member asked in ITS OWN round, then the cycle reseated on *rounds*."""
+def round_packages(
+    cycle: Cycle, rounds: list[RoundResult], callbacks: RunCallbacks
+) -> dict[int, dict[str, str]]:
+    """``{round: {node: fingerprint}}``, each member asked in ITS OWN round's seat."""
     out: dict[int, dict[str, str]] = {}
     for rr in rounds:
-        seat = _seat_on(cycle, rounds, rr)
+        seat = _seat_on(cycle, rounds, rr, callbacks)
         out[rr.round] = {
             node: fingerprint
             for member in cycle.optimizer.members
             for node, fingerprint in member.round_packages(NodeContext(seat, member)).items()
         }
-    cycle.replay_priors(rounds)
     return out
 
 
 async def _rederived(
-    cycle: Cycle, rounds: list[RoundResult], drifted: list[int]
+    cycle: Cycle, rounds: list[RoundResult], drifted: list[int], callbacks: RunCallbacks
 ) -> dict[int, OptimizerState]:
     """A repair, not a rewind: measurements and winner untouched; round 0's state is the origin path's. Before the branch exists, so a member that cannot re-derive refuses the repair rather than leave the branch graded on a hole."""
     restated = list(rounds)
     states: dict[int, OptimizerState] = {}
-    try:
-        for slot, rr in enumerate(rounds):
-            if rr.round not in drifted or rr.round == 0:
-                continue
-            seat = _seat_on(cycle, restated, rr)
-            # Outside the round loop this ContextVar still holds whatever the last round set.
-            parts: list[StatePart] = []
-            for member in cycle.optimizer.members:
-                try:
-                    with at_round(rr.round):
-                        parts.extend(await member.rederive(NodeContext(seat, member)))
-                except Exception as exc:
-                    raise ConflictError(
-                        f"The repair refused: round {rr.round}'s {member.name} read evidence the "
-                        f"repair moved and could not re-derive what it recorded ({exc}). "
-                        f"`resume --from {rr.round - 1}` re-runs that round instead.",
-                        code="repair_refused",
-                    ) from exc
-            if not parts:
-                continue
-            states[rr.round] = rr.closed_state.holding(*parts)
-            restated[slot] = rr.model_copy(update={"optimizer_state": states[rr.round]})
-            logger.warning(
-                "Round %d %s re-derived: its input package drifted when the round was "
-                "repaired, so what it recorded described evidence that no longer exists.",
-                rr.round,
-                ", ".join(part.kind for part in parts),
-            )
-    finally:
-        cycle.replay_priors(rounds)
+    for slot, rr in enumerate(rounds):
+        if rr.round not in drifted or rr.round == 0:
+            continue
+        seat = _seat_on(cycle, restated, rr, callbacks)
+        # Outside the round loop this ContextVar still holds whatever the last round set.
+        parts: list[StatePart] = []
+        for member in cycle.optimizer.members:
+            try:
+                with at_round(rr.round):
+                    parts.extend(await member.rederive(NodeContext(seat, member)))
+            except Exception as exc:
+                raise ConflictError(
+                    f"The repair refused: round {rr.round}'s {member.name} read evidence the "
+                    f"repair moved and could not re-derive what it recorded ({exc}). "
+                    f"`resume --from {rr.round - 1}` re-runs that round instead.",
+                    code="repair_refused",
+                ) from exc
+        if not parts:
+            continue
+        states[rr.round] = rr.closed_state.holding(*parts)
+        restated[slot] = rr.model_copy(update={"optimizer_state": states[rr.round]})
+        logger.warning(
+            "Round %d %s re-derived: its input package drifted when the round was "
+            "repaired, so what it recorded described evidence that no longer exists.",
+            rr.round,
+            ", ".join(part.kind for part in parts),
+        )
     return states
 
 
@@ -259,8 +248,7 @@ def _package_drift(
     before: dict[int, dict[str, str]],
     after: dict[int, dict[str, str]],
     closed: set[int],
-    campaign_store: CampaignStore,
-    hop: CycleHop,
+    proposed: Mapping[int, object],
 ) -> tuple[dict[int, ReplayMismatch], list[int]]:
     """A mismatch is raised at the CONSUMER (``rn + 1``), never the producer, and only where it owns something."""
     mismatches: dict[int, ReplayMismatch] = {}
@@ -276,7 +264,7 @@ def _package_drift(
             ", ".join(moved),
         )
         nxt = rn + 1
-        owns = nxt in closed or campaign_store.round_proposals(hop, nxt) is not None
+        owns = nxt in closed or nxt in proposed
         if owns and nxt not in mismatches:
             mismatches[nxt] = ReplayMismatch(
                 round_num=nxt,
@@ -289,18 +277,19 @@ def _package_drift(
 
 
 async def apply_correction(
-    campaign_store: CampaignStore,
-    hop: CycleHop,
+    cycle: Cycle,
     prior: list[RoundResult],
     packages_before: dict[int, dict[str, str]],
-    session: Session,
-    cycle: Cycle,
     dataset: list[Any],
+    callbacks: RunCallbacks,
 ) -> str | None:
+    """*cycle* is seated on *prior*, and is seated on what the branch carries where one is cut."""
+    session = cycle.session
+    campaign_store, hop = session.store.campaigns, session.hop
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.
     carried_rounds = prior[: cut.resume_at]
-    mended = await repair_incomplete_rounds(carried_rounds, session, cycle, dataset)
+    mended = await repair_incomplete_rounds(carried_rounds, cycle, dataset)
     repaired = [
         after.round
         for before, after in zip(carried_rounds, mended, strict=True)
@@ -310,16 +299,18 @@ async def apply_correction(
         return None
     # The whole trajectory: a round above the cut reads those below, so its package shows the reach.
     corrected = [*mended, *prior[cut.resume_at :]]
+    # One read of the line before the branch exists to displace it.
+    standing = campaign_store.standing_rounds(hop, moment=None)
+    proposed: dict[int, RoundProposedRecord] = {
+        n: held.record for n, held in standing.proposals.items()
+    }
     mismatches, drifted = _package_drift(
         packages_before,
-        round_packages(cycle, corrected),
+        round_packages(cycle, corrected, callbacks),
         {t.round for t in corrected},
-        campaign_store,
-        hop,
+        proposed,
     )
-    rederived = await _rederived(cycle, corrected, drifted)
-    # Read before the branch exists to displace it.
-    carried = campaign_store.round_proposals(hop, cut.resume_at)
+    rederived = await _rederived(cycle, corrected, drifted, callbacks)
     repair_target = mint_fork(
         campaign_store,
         hop,
@@ -344,37 +335,27 @@ async def apply_correction(
         ", ".join(str(r) for r in repaired),
     )
     branch = CycleHop(campaign_id=hop.campaign_id, cycle_id=repair_target)
-    corrected = _rebank_on_branch(
-        campaign_store,
-        hop,
-        repair_target,
-        corrected,
-        cut.retirements,
-        slot_of=session.bank.slot_of,
-        difficulty=cycle.difficulty,
-        lives=cycle.config.optimization.lives,
-    )
-    logger.warning(
-        "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "
-        "what a reader sees at those positions is the corrected measurement rather than the "
-        "parent's, which is the version the cut retired.",
-        len(cut.retirements),
-        repair_target,
-    )
+    corrected = _rebank_on_branch(cycle, standing.rounds, branch, corrected, cut.retirements)
+    if cut.retirements:
+        logger.warning(
+            "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "
+            "what a reader sees at those positions is the corrected measurement rather than the "
+            "parent's, which is the version the cut retired.",
+            len(cut.retirements),
+            repair_target,
+        )
     for slot, rr in enumerate(corrected):
         if (state := rederived.get(rr.round)) is not None:
             corrected[slot] = rr.model_copy(update={"optimizer_state": state})
-            campaign_store.restate_round(
-                branch, campaign_store.restated_state(branch, corrected[slot])
-            )
+            campaign_store.restate_round(branch, rr.round, state)
 
     equivalent = not mismatches
     campaign_store.grade_fork(
         branch, ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
     )
     if equivalent:
-        if carried is not None:
-            CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch))).append(carried)
+        if (carried := proposed.get(cut.resume_at)) is not None:
+            campaign_store.propose_round(branch, carried)
         logger.warning(
             "The correction reached nothing any node reads — cut %s marked EQUIVALENT "
             "and carries round %d's candidates across unchanged; the line continues on it.",

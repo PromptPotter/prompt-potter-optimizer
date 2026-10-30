@@ -153,24 +153,6 @@ acting.
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:** five builders plus one full gate with no reap and no gate waiting
   longer than its own run.
-- **Ledger shapes left standing:** `round_restated` carries the whole round. **Re-test:** the
-  symbol deleted, read, or tested.
-- **A restatement has two writers** (backbone arc, 2026-10-29): `node_context.py::NodeContext._bank`
-  appends a `RoundRestatedRecord` to the run's own `CycleEventLog` on `session.hop`, while
-  `resume_and_fork/repair.py` writes one through `CampaignStore.restate_round` onto the branch. And
-  `NodeContext.bank_proposals` returns silently on an unbound ledger where `_bank` asserts one.
-  Action: one restatement seam taking the hop; one posture on a missing ledger. **Re-test:**
-  `git grep -n "restated_state(" -- promptpotter` names one caller.
-- **Fingerprinting a repair moves the live `Cycle`**: `repair.py::round_packages` and `_rederived`
-  seat the run's own cycle round by round (`Cycle.replay_priors`, which reseats `rounds`,
-  `population`, `slices` and the ruler) and reseat it after; `round_packages` holds no `finally`, so a
-  raising member leaves the cycle on a past round. Each seat also re-copies every round
-  (`Lineage.rounds`), and `_package_drift` / `restated_state` re-fold the ledger chain per round.
-  Action: a round's seat is a view, not the cycle. **Re-test:** `round_packages` leaves `Cycle` as
-  handed in.
-- **A repair takes `session` beside `cycle`** (`apply_correction`, `repair_incomplete_rounds`):
-  `cycle.session` is that session, two doors into one state. The re-bank warning also fires on zero
-  retired candidates. **Re-test:** neither takes a `Session`.
 
 ## Open — multi-arc
 
