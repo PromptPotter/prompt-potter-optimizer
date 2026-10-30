@@ -1001,6 +1001,8 @@ class RunWiringRecord(FrozenModel):
     elects_on: DisplayMetric
     max_cells_in_flight: int
     measured_unit: MeasuredUnit
+    # The optimizer's gateway node: every scoring pass of the run, the origin's included, runs as it.
+    measurement_node: str
     # ``None`` when Langfuse is disabled, and on a mint's record: no launch has opened a trace.
     langfuse_trace_url: str | None
     run_limits: RunLimits

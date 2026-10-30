@@ -2,7 +2,6 @@
 
 import type { SubtreeCourse } from "@/lib/api";
 import type { CyclePath } from "@/lib/ids";
-import { phaseWalks } from "./run-phase";
 import { candidatesAtPath, type LineageIndex } from "./lineage-candidates";
 
 export function innerPanelIndex(
@@ -29,10 +28,4 @@ export function panelCellKey(candidateLabel: string, cell: string): string {
 export function panelCellLabel(cell: string): string {
   const slash = cell.lastIndexOf("/");
   return slash >= 0 ? cell.slice(slash + 1) : cell;
-}
-
-export function runningInnerRun(index: LineageIndex): SubtreeCourse | null {
-  return (
-    index.courses.find((c) => c.facts.mint === "inner" && phaseWalks(c.state.status.run_phase)) ?? null
-  );
 }

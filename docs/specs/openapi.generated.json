@@ -4010,16 +4010,27 @@
             "title": "Fitness Bands",
             "type": "array"
           },
-          "measurement_node": {
+          "inner": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CycleHop"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Measurement Node"
+            "description": "The inner cycle an open cell runs, where a cell is a whole campaign (L4), in this cycle's sandbox; null where no open cell has named one."
+          },
+          "measurement_node": {
+            "description": "The optimizer node every scoring pass of the run runs as — origin, round, bench and verify alike — as its wiring declares it.",
+            "title": "Measurement Node",
+            "type": "string"
+          },
+          "measuring": {
+            "default": false,
+            "description": "Whether `measurement_node` is the node at work now: `measuring_arm` is served only while it is.",
+            "title": "Measuring",
+            "type": "boolean"
           },
           "nodes": {
             "additionalProperties": {
@@ -4045,6 +4056,7 @@
           }
         },
         "required": [
+          "measurement_node",
           "fitness_bands"
         ],
         "title": "CurrentRound",
@@ -14458,6 +14470,7 @@
           "at_time",
           "round_cells_ceiling",
           "run_limits",
+          "current_round",
           "campaign_id",
           "cycle_id",
           "run_phase",

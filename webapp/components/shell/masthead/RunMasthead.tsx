@@ -26,7 +26,7 @@ import { fmtAgo, PLACEHOLDER, shortId, shortModel } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
-import { measuringArm, useCycleStream } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 import { useCampaign, useRegistry } from "@/lib/state/registry";
 import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
@@ -98,7 +98,7 @@ function RunHeader() {
       : null;
   const round = dash?.round_axis.position ?? null;
   const roundsCap = dash ? budgetAxis(dash.run_limits.budget, "rounds") : null;
-  const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : PLACEHOLDER);
+  const position = dash?.measuring_arm?.label ??(round != null ? `R${round}` : PLACEHOLDER);
 
   const spend = readSpend(dash);
   const { metered } = spend;

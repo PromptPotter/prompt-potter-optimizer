@@ -119,9 +119,7 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
 
 
 def _render_measure_enter(v: MeasureEnterView) -> str:
-    return "\n" + _node_top(
-        "MEASURE", f"{v.node} · {v.n_candidates} candidates on {v.n_samples} cells"
-    )
+    return "\n" + _node_top("MEASURE", f"{v.n_candidates} candidates on {v.n_samples} cells")
 
 
 def render_round_verdict(

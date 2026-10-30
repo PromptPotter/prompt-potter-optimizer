@@ -174,10 +174,7 @@ def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
 def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
     current = state.current_round
     if live and (rows := current.candidates):
-        measuring = current.measurement_node is not None and (
-            current.active_node == current.measurement_node
-        )
-        named = [c for c in rows if measuring and c.reading.arm == state.measuring_arm]
+        named = [c for c in rows if c.reading.arm == state.measuring_arm]
         return (named or rows)[-1].reading.arm
     closed = [r for r in state.rounds if r.candidates]
     return closed[-1].candidates[-1].reading.arm if closed else None

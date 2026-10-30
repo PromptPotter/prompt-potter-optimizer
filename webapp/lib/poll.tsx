@@ -15,7 +15,7 @@ import { reportIncident } from "@/lib/diagnostics";
 import { dashboardRead, isWarming, stepsRead } from "./api";
 import { encodeCyclePath, type CyclePath } from "./ids";
 import { useAuthGate } from "./state/auth";
-import type { ArmName, HierarchyStep, LiveCandidate, ServedDashboard } from "./api/types";
+import type { HierarchyStep, LiveCandidate, ServedDashboard } from "./api/types";
 import { shownData, useRead } from "./hooks/useRead";
 import { invalidateReads, readThrough } from "./read-cache";
 import { useWorkspace } from "./workspace";
@@ -37,17 +37,6 @@ export function liveCandidate(
 ): LiveCandidate | null {
   if (!key) return null;
   return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
-}
-
-export function isMeasuring(dash: ServedDashboard | null): boolean {
-  const cr = dash?.current_round;
-  return cr?.measurement_node != null && cr.active_node === cr.measurement_node;
-}
-
-// The served `dash.measuring_arm` goes stale between rounds.
-export function measuringArm(dash: ServedDashboard | null): ArmName | null {
-  if (!dash || !isMeasuring(dash)) return null;
-  return dash.measuring_arm;
 }
 
 interface CycleStreamState {

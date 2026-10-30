@@ -11,7 +11,7 @@ import {
 import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";
-import { isMeasuring, useCycleStream } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 import { useSelection } from "@/lib/SelectionContext";
 import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import {
@@ -198,7 +198,7 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
 
   // `active_node` names a node here only on a self-optimizing campaign; the chip then holds unpulsed.
   const namedHere = isLive && interior.some((n) => n.id === activeNode);
-  const calling = isLive && isMeasuring(dash) && !namedHere;
+  const calling = isLive && dash?.current_round.measuring === true && !namedHere;
 
   const sole = interior.length === 1 ? interior[0] : undefined;
   // The live record alone; never fall back to the config row, which answers for the root.

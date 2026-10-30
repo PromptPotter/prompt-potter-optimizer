@@ -164,6 +164,7 @@ def declare_run_wiring(
             elects_on=selected.elects_on,
             max_cells_in_flight=session.backend_client.max_cells_in_flight,
             measured_unit=session.backend_client.measured_unit,
+            measurement_node=selected.plan.measurement,
             # Composed here: the Langfuse host is backend-only, so a browser cannot.
             langfuse_trace_url=None
             if tracing is None

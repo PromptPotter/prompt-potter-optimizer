@@ -4638,14 +4638,9 @@
           "n_samples": {
             "title": "N Samples",
             "type": "integer"
-          },
-          "node": {
-            "title": "Node",
-            "type": "string"
           }
         },
         "required": [
-          "node",
           "n_candidates",
           "n_samples"
         ],
@@ -7778,6 +7773,10 @@
             "title": "Measured Unit",
             "type": "string"
           },
+          "measurement_node": {
+            "title": "Measurement Node",
+            "type": "string"
+          },
           "record_type": {
             "const": "run_wiring",
             "default": "run_wiring",
@@ -7802,6 +7801,7 @@
           "elects_on",
           "max_cells_in_flight",
           "measured_unit",
+          "measurement_node",
           "langfuse_trace_url",
           "run_limits",
           "defaults_drift"

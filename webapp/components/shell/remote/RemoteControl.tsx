@@ -47,9 +47,9 @@ export function RemoteControl() {
         <button
           type="button"
           className="remote-btn remote-drill"
-          onClick={() => m.drillInto(innerHop.campaignId, innerHop.cycleId)}
+          onClick={() => m.drillInto(innerHop.campaign_id, innerHop.cycle_id)}
           aria-label="Open the running inner cycle's dashboard"
-          title={`An inner run is live — ${innerHop.campaignId}. Open its dashboard.`}
+          title={`An inner run is live — ${innerHop.campaign_id}. Open its dashboard.`}
         >
           <span aria-hidden="true">⤷</span>
           <span className="remote-btn-label">inner</span>

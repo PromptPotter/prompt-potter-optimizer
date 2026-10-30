@@ -8,7 +8,7 @@ from typing import assert_never
 
 from promptpotter.domain.arms import Concluded, Measuring
 from promptpotter.domain.bench import BenchReading
-from promptpotter.domain.cycle_paths import Cut, CycleDir
+from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RoundSummary, VerificationKind, VerificationMark
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.phase_views import (
@@ -17,7 +17,6 @@ from promptpotter.domain.phase_views import (
     BenchScoredView,
     InitEnterView,
     InitExitView,
-    MeasureEnterView,
     OptimizerStepEnterView,
     RoundStartView,
     VerifyEnterView,
@@ -117,9 +116,6 @@ _PHASE_TO_STATE: dict[str, DashboardState] = {
 }
 
 
-_CHECKIN_NODE = "checkin"
-
-
 def _opened(kind: VerificationKind, arm: ArmName, rows: int) -> VerificationMark:
     return VerificationMark(
         kind=kind, arm=arm, state="running", rows=rows, scored=0, level=None, failed_as=None
@@ -131,6 +127,7 @@ class LiveDashboardProjection(Projection):
         # No state stands before the first `RunWiringRecord`: what lands earlier waits here.
         self._unwired: list[CycleRecord] | None = []
         self.state: LiveDashboardState
+        self._measurement_node: str
         self._at = ""
         self._standings: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
         self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {}
@@ -151,8 +148,8 @@ class LiveDashboardProjection(Projection):
         # A launch hears a hold still on at its first send: one the last launch saw open ends here.
         self._holds: dict[str, ProviderHoldRecord] = {}
         self._in_flight: tuple[str, str] | None = None
+        self._inner: CycleHop | None = None
         self._proposer_node: str | None = None
-        self._measurement_node: str | None = None
         self._step_node: str | None = None
 
     def value(self) -> LiveDashboardState | None:
@@ -189,6 +186,7 @@ class LiveDashboardProjection(Projection):
             m.orphaned() if m.state == "running" else m for m in self.state.verification
         ]
         self._launch()
+        self._measurement_node = record.measurement_node
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if self.state.declared_phase == record.run_phase:
@@ -277,8 +275,6 @@ class LiveDashboardProjection(Projection):
                     self.short_formula_template = view.composite_fitness_formula_short
             case RoundStartView():
                 self._proposer_node = view.node
-            case MeasureEnterView():
-                self._measurement_node = view.node
             case OptimizerStepEnterView():
                 self._step_node = view.node
             case BenchEnterView():
@@ -386,6 +382,8 @@ class LiveDashboardProjection(Projection):
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
         qi, qt = record.sample_idx or 0, record.sample_total or 0
         self._open_samples.pop(record.position, None)
+        # A beat names no cell: an inner run still open names itself again on its next beat.
+        self._inner = None
         self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
         # A pass no arm walks (a bench pass, a verify) moves the run's scalars, never the round's arms.
         if self._buffer.take(record) is not None:
@@ -471,8 +469,8 @@ class LiveDashboardProjection(Projection):
         self._in_flight = (record.call_id, record.node)
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        # Taken so a streaming call moves `at_time`, which `_fold` stamps before every handler.
-        del record
+        if record.inner is not None:
+            self._inner = record.inner
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         self._sticky_llm_calls[record.node] = (self.state.round, build_node_block(record))
@@ -503,19 +501,19 @@ class LiveDashboardProjection(Projection):
             return self._in_flight[1]
         state = self.state.state
         match state:
-            case DashboardState.INIT | DashboardState.ORIGIN:
-                return _CHECKIN_NODE
             case DashboardState.PROPOSING:
                 return self._proposer_node
             case (
-                DashboardState.SCORING
+                DashboardState.ORIGIN
+                | DashboardState.SCORING
                 | DashboardState.BETWEEN_SAMPLES
                 | DashboardState.BETWEEN_CANDIDATES
+                | DashboardState.BENCH
             ):
                 return self._measurement_node
             case DashboardState.OPTIMIZER_STEP:
                 return self._step_node
-            case DashboardState.BENCH | DashboardState.STOPPED:
+            case DashboardState.INIT | DashboardState.STOPPED:
                 return None
             case _:
                 assert_never(state)
@@ -547,10 +545,14 @@ class LiveDashboardProjection(Projection):
             waiting_since = self._waiting[1]
         # The field holds one sender: the episode that has held longest.
         held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)
+        active = self._active_node()
+        measuring = active == self._measurement_node
         current = CurrentRound(
             round=s.round,
-            active_node=self._active_node(),
+            active_node=active,
             measurement_node=self._measurement_node,
+            measuring=measuring,
+            inner=self._inner,
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
             fitness_bands=fitness_bands(
                 GradedCell.of(w.facts, w.grade)
@@ -564,6 +566,7 @@ class LiveDashboardProjection(Projection):
             update={
                 "at_offset": self.at_offset,
                 "current_round": current,
+                "measuring_arm": s.measuring_arm if measuring else None,
                 "in_flight": in_flight,
                 "lookahead_allowed": allowed,
                 "lookahead_most": most,

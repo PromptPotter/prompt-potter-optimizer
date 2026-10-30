@@ -7,6 +7,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     LiveCandidate,
     RoundSummary,
@@ -80,7 +81,20 @@ class CurrentRound(StrictModel):
 
     round: int = 0
     active_node: str | None = None
-    measurement_node: str | None = None
+    measurement_node: str = Field(
+        description="The optimizer node every scoring pass of the run runs as — origin, round, "
+        "bench and verify alike — as its wiring declares it."
+    )
+    measuring: bool = Field(
+        default=False,
+        description="Whether `measurement_node` is the node at work now: `measuring_arm` is "
+        "served only while it is.",
+    )
+    inner: CycleHop | None = Field(
+        default=None,
+        description="The inner cycle an open cell runs, where a cell is a whole campaign (L4), "
+        "in this cycle's sandbox; null where no open cell has named one.",
+    )
     candidates: list[LiveCandidate] = Field(default_factory=list)
     fitness_bands: list[int] = Field(
         description="How many scored rows across `candidates` graded into each tenth of [0, 1], "
@@ -90,8 +104,8 @@ class CurrentRound(StrictModel):
     racing: RacingBlock | None = None
 
     @classmethod
-    def unentered(cls) -> CurrentRound:
-        return cls(fitness_bands=fitness_bands(()))
+    def unentered(cls, measurement_node: str) -> CurrentRound:
+        return cls(measurement_node=measurement_node, fitness_bands=fitness_bands(()))
 
 
 class DashboardFacts(StrictModel):
@@ -157,7 +171,7 @@ class DashboardFacts(StrictModel):
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
-    current_round: CurrentRound = Field(default_factory=CurrentRound.unentered)
+    current_round: CurrentRound
 
     error: DashboardError | None = None
 
@@ -196,7 +210,11 @@ class LiveDashboardState(DashboardFacts):
 
     @classmethod
     def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
-        return cls(at_time=wiring.timestamp, **cls.launched(wiring))
+        return cls(
+            at_time=wiring.timestamp,
+            current_round=CurrentRound.unentered(wiring.measurement_node),
+            **cls.launched(wiring),
+        )
 
     @staticmethod
     def launched(wiring: RunWiringRecord) -> dict[str, Any]:

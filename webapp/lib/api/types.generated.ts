@@ -755,7 +755,15 @@ export interface CatchUpLogEntry {
 export interface CurrentRound {
   round: number;
   active_node: string | null;
-  measurement_node: string | null;
+  /** The optimizer node every scoring pass of the run runs as — origin, round,
+   * bench and verify alike — as its wiring declares it. */
+  measurement_node: string;
+  /** Whether `measurement_node` is the node at work now: `measuring_arm` is served
+   * only while it is. */
+  measuring: boolean;
+  /** The inner cycle an open cell runs, where a cell is a whole campaign (L4), in
+   * this cycle's sandbox; null where no open cell has named one. */
+  inner: CycleHop | null;
   candidates: LiveCandidate[];
   /** How many scored rows across `candidates` graded into each tenth of [0, 1],
    * lowest first, banded as a closed round's `fitness_bands` is. */

@@ -375,7 +375,9 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
     active_node: null,
-    measurement_node: null,
+    measurement_node: "l1_score",
+    measuring: false,
+    inner: null,
     candidates: [],
     fitness_bands: NO_FITNESS_BANDS,
     nodes: {},

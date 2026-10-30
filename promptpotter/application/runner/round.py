@@ -408,7 +408,6 @@ class _Walking:
                     "enter",
                     round=round_num,
                     view=MeasureEnterView(
-                        node=plan.measurement,
                         n_candidates=len(self.population.proposals),
                         n_samples=len(self.panel.cells),
                     ),
