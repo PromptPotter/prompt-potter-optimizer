@@ -128,10 +128,6 @@ acting.
   carries no meaning. Action: one ink. **Re-test:** read `FreqChart.tsx::colors`.
 - **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
-- **A running server keeps serving a ledger refusal after the ledger is replaced**: `/hierarchy`
-  answered `ledger_unreadable` for a cycle whose ledger was rewritten whole, until restart. Action: key a
-  refusal on the file's identity (size + mtime) like the fold it guards. **Re-test:** delete a refused
-  campaign and re-mint the same content under a live server; the next read answers 200.
 - **A live producer started on older code writes shapes the landed code refuses**: landing a ledger
   shape change while any run writes breaks it.
   Action: a run records its code revision and the landing refuses while a producer of an older one
