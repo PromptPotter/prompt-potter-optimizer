@@ -215,7 +215,6 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     PairedReading,
     ReadingState,
-    RoundArm,
 )
 from promptpotter.domain.phase_views import BenchGradedView
 from promptpotter.domain.phases import (
@@ -1005,7 +1004,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     won = round_result(
         1,
         selected="c0",
-        voted={"electable": 1, "reference": RoundArm(round=0, arm=PARENT)},
+        voted={"electable": 1},
         cells={ArmKey("c0"): crowned_on, PARENT: bar_rows},
     )
     assert crowning_cells([won, round_result(2, improved=False)], "c0") == {

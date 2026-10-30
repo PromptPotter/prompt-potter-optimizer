@@ -98,7 +98,6 @@ def _origin_round(
             selected=key,
             leading=key,
             ended_on=key,
-            reference=None,
             electable=0,
             fit=fit,
             elects_on=elects_on,

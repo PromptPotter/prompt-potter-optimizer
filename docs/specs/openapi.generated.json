@@ -6212,16 +6212,6 @@
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
-          "reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundArm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "ruler": {
             "$ref": "#/components/schemas/RulerStamp"
           },
@@ -6252,7 +6242,6 @@
           "selected",
           "leading",
           "ended_on",
-          "reference",
           "electable",
           "elects_on",
           "ruler"
@@ -13738,26 +13727,6 @@
         ],
         "title": "RoundAdvance",
         "type": "string"
-      },
-      "RoundArm": {
-        "additionalProperties": false,
-        "description": "One arm of one round, by its record's own address: an id alone names no candidate, since a\nlater round can propose the same individual again.",
-        "properties": {
-          "arm": {
-            "title": "Arm",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "round",
-          "arm"
-        ],
-        "title": "RoundArm",
-        "type": "object"
       },
       "RoundAudit": {
         "additionalProperties": false,
