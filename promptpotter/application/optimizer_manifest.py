@@ -5,7 +5,7 @@ import contextvars
 import functools
 import json
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
@@ -19,7 +19,6 @@ from promptpotter.application.optimizers.nodes import (
     Initializer,
     PanelSize,
     Reviewer,
-    RoundRole,
     RoundWalk,
     source_digest,
 )
@@ -173,6 +172,15 @@ def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSc
     )
 
 
+# How many nodes a role holds: exactly one, at most one, at least one, any number.
+Holds = Literal["one", "optional", "some", "any"]
+
+
+def _role(holds: Holds, *kinds: NodeKind) -> dict[str, Any]:
+    """A `RoundPlan` field the round walk fills: the node kinds it admits and how many it holds."""
+    return {"admits": frozenset(kinds), "holds": holds}
+
+
 @shapes_optimizer_prompt
 @dataclass(frozen=True)
 class RoundPlan:
@@ -183,16 +191,21 @@ class RoundPlan:
     # Its own round, read against C0 (LEVI's calibration); else the seeds race round 1's offspring (CAPO).
     seeds_alone: bool
     gate: ArmGateMode
-    # `default`'s walk, a field per role in `RoundRole`'s order.
-    sampler: Sampler
-    proposers: tuple[Proposer, ...]
-    measurement: str
-    eliminator: Eliminator | None
-    selector: Selector
+    # The round walk, a field per role in the order it lists them (`_round_plan`): a node takes
+    # the first role at or past the one before it that admits its kind, so one kind serves two.
+    sampler: Sampler = field(metadata=_role("one", NodeKind.SAMPLER))
+    proposers: tuple[Proposer, ...] = field(
+        metadata=_role("some", NodeKind.LLM, NodeKind.ALGORITHM)
+    )
+    # Races the measurement node's walk.
+    eliminator: Eliminator | None = field(metadata=_role("optional", NodeKind.ELIMINATOR))
+    # The gateway is no member: the bench's scoring walks it, so the plan holds its name.
+    measurement: str = field(metadata=_role("one", NodeKind.GATEWAY))
+    selector: Selector = field(metadata=_role("one", NodeKind.SELECTOR))
     # Absent, the selector's ``ranked`` is the next population whole.
-    survivor: Survivor | None
-    adapters: tuple[Adapter, ...]
-    controller: Controller | None
+    survivor: Survivor | None = field(metadata=_role("optional", NodeKind.ALGORITHM))
+    adapters: tuple[Adapter, ...] = field(metadata=_role("any", NodeKind.LLM))
+    controller: Controller | None = field(metadata=_role("optional", NodeKind.CONTROLLER))
 
     @property
     def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
@@ -231,50 +244,43 @@ def _round_plan(
     declared = {n.name: n.kind for n in schema.declared_nodes}
     if undeclared := [n for n in walk if n not in declared]:
         raise _walk_refused(name, f"`default` walks {undeclared}, which it does not declare.")
-    roles = list(RoundRole)
-    held: dict[RoundRole, list[str]] = {role: [] for role in roles}
+    roles = [f for f in fields(RoundPlan) if "admits" in f.metadata]
+    held: dict[str, list[str]] = {role.name: [] for role in roles}
     at = 0
     for node in walk:
         kind = declared[node]
-        rank = next((i for i in range(at, len(roles)) if kind in roles[i].admits), None)
+        rank = next((i for i in range(at, len(roles)) if kind in roles[i].metadata["admits"]), None)
         if rank is None:
             raise _walk_refused(
                 name,
-                f"`default` walks {kind} node {node!r} after its {roles[at].name.lower()}, where "
-                f"the bench has no role for it: a round runs {[r.name.lower() for r in roles]}, "
-                "in that order.",
+                f"`default` walks {kind} node {node!r} after its {roles[at].name}, where the "
+                f"bench has no role for it: a round runs {[r.name for r in roles]}, in that order.",
             )
         at = rank
-        held[roles[at]].append(node)
+        held[roles[at].name].append(node)
 
-    gateways = [n for n in held[RoundRole.MEASUREMENT] if declared[n] is NodeKind.GATEWAY]
-    members = {
-        role: tuple(optimizers.NODE_MEMBERS.get(n) for n in held[role] if n not in gateways)
-        for role in roles
-    }
-    counts = {role: len(walked) for role, walked in members.items()}
-    if (
-        len(gateways) != 1
-        or counts[RoundRole.SAMPLER] != 1
-        or counts[RoundRole.SELECTOR] != 1
-        or not counts[RoundRole.PROPOSER]
-        or counts[RoundRole.MEASUREMENT] > 1
-        or counts[RoundRole.SURVIVOR] > 1
-        or counts[RoundRole.CONTROLLER] > 1
-    ):
-        raise _walk_refused(
-            name,
-            f"`default` must walk one sampler, at least one proposer, one {NodeKind.GATEWAY} "
-            "node raced by at most one eliminator, one selector, then at most one survival node "
-            f"and one controller — it walks {walk}.",
+    filled: dict[str, Any] = {}
+    for role in roles:
+        nodes, holds = held[role.name], role.metadata["holds"]
+        if (holds in ("one", "some") and not nodes) or (holds in ("one", "optional") and nodes[1:]):
+            raise _walk_refused(
+                name,
+                f"`default` walks {nodes} as its {role.name}, and a round holds {holds} — it "
+                f"walks {walk}.",
+            )
+        # A gateway is no member: the plan holds its name.
+        members = [
+            n if declared[n] is NodeKind.GATEWAY else optimizers.NODE_MEMBERS.get(n) for n in nodes
+        ]
+        filled[role.name] = (
+            tuple(members) if holds in ("some", "any") else next(iter(members), None)
         )
     initial = [
         cast("Proposer", optimizers.NODE_MEMBERS.get(n))
         for n in schema.pipelines.get(INITIAL_POPULATION, ())
     ]
-    proposers = cast("tuple[Proposer, ...]", members[RoundRole.PROPOSER])
     walks: tuple[tuple[str, Sequence[Proposer]], ...] = (
-        (DEFAULT_PIPELINE, proposers),
+        (DEFAULT_PIPELINE, filled["proposers"]),
         (INITIAL_POPULATION, initial),
     )
     for pipeline, walked in walks:
@@ -301,22 +307,12 @@ def _round_plan(
             f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
         )
 
-    def one(role: RoundRole) -> Any:
-        return next(iter(members[role]), None)
-
     return RoundPlan(
         initializers=tuple(cast("Initializer", m) for m in initializers),
         initial_population=tuple(initial),
         seeds_alone=seeds_walk == "alone",
         gate=gate,
-        sampler=one(RoundRole.SAMPLER),
-        proposers=proposers,
-        measurement=gateways[0],
-        eliminator=one(RoundRole.MEASUREMENT),
-        selector=one(RoundRole.SELECTOR),
-        survivor=one(RoundRole.SURVIVOR),
-        adapters=cast("tuple[Adapter, ...]", members[RoundRole.ADAPTER]),
-        controller=one(RoundRole.CONTROLLER),
+        **filled,
     )
 
 

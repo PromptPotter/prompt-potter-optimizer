@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.optimizers.nodes import (
+        Controller,
         MeasuredRound,
         Panel,
         Proposer,
@@ -367,11 +368,17 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
+class ControllerAct(NamedTuple):
+    """The rule a controller banked off its round, acted on once the round closes (`post_round`)."""
+
+    controller: Controller
+    rule: str
+
+
 class RoundWalked(NamedTuple):
     result: RoundResult
     cut: StopReason | None
-    # The rule the controller banked off the round, acted on once it closes (`post_round`).
-    rule: str | None
+    act: ControllerAct | None
 
 
 async def _proposed(ctx: RoundContext, panel: Panel) -> Proposals:
@@ -488,11 +495,12 @@ async def execute_round(
     result = await _adapt_beside_overlap(
         ctx, result, measured, population, pool, is_final_round=is_final_round
     )
-    rule = None
+    act = None
     if (controller := plan.controller) is not None:
         seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
-        rule = controller.bank_round(NodeContext(seat, controller), result)
-    return RoundWalked(result, measured.cut, rule)
+        if (rule := controller.bank_round(NodeContext(seat, controller), result)) is not None:
+            act = ControllerAct(controller, rule)
+    return RoundWalked(result, measured.cut, act)
 
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
@@ -579,8 +587,6 @@ async def post_round(
 
     if (stop := standing_tripped(cycle)) is not None:
         raise StopLoop(stop)
-    if walked.rule is not None and not is_final_round:
-        controller = cycle.optimizer.plan.controller
-        assert controller is not None, "only a controller banks a rule"
+    if (act := walked.act) is not None and not is_final_round:
         seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
-        await controller.act(NodeContext(seat, controller), walked.rule)
+        await act.controller.act(NodeContext(seat, act.controller), act.rule)

@@ -159,7 +159,8 @@ async def _run_single_cycle(
             campaign_config,
             session,
             cb,
-            diag=mode.diag,
+            # `run_optimization` refused a --diag launch on an optimizer with no controller.
+            diagnosing=cycle.optimizer.plan.controller if mode.diag else None,
         )
         if stepped:
             pause_cause = PauseCause.STEP
