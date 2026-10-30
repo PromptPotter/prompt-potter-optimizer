@@ -18,6 +18,11 @@ acting.
   - **Today's ledgers are read by tolerance until the 2026-10-30 wipe**: the new `ResolvedRunRecord`
     fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
     fields required and tag the union with the wipe.
+  - **`reset` cannot run after a shape change**, which is the only time it is needed. It banks spend
+    by folding the ledgers that the strict readers refuse (`UnregisteredStatePartError
+    'descriptor_calibration'` on 2026-10-30), so that day's wipe was a plain delete and nothing was
+    banked. `reset` also does not recognise `drafts/` or `ruler.jsonl`. Action: the bank reads
+    something that survives a reshape, or a reshape wipes without banking.
   - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
   - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
     `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
