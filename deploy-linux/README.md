@@ -285,13 +285,13 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
 ### Optional outbound feeds
 
 - **New accounts into your CRM** — `N8N_SIGNUP_WEBHOOK_URL`; the app POSTs the new account's
-  contact fields on its first `/auth/me`, best-effort (`admin_bot.py::forward_new_account_to_crm`).
+  contact fields on its first `/auth/me`, best-effort (`promptpotter/presentation/admin_bot.py::forward_new_account_to_crm`).
   Copy the path from the workflow's webhook node, not its file name; a `POST`-only webhook answers
   *"not registered"* to a browser GET, so confirm with the receiver's own API.
 - **What accounts did, into your morning briefing** — `N8N_TRAIL_WEBHOOK_URL` +
   `N8N_TRAIL_WEBHOOK_SECRET` in the **bot's** file; every half hour the bot POSTs the last 24 h of
   `/trail` lines plus the box's health, secret in `X-Trail-Secret`
-  (`admin_bot.py::forward_trail_to_briefing`). Each send is the whole window, so an offline box
+  (`promptpotter/presentation/admin_bot.py::forward_trail_to_briefing`). Each send is the whole window, so an offline box
   shows as an old `as_of`. The briefing cannot ask — that would be an inbound cross-tenant read.
 - **The box's health** — `promptpotter health` runs every probe (`application/health.py::probes`:
   remote backends, each sign-in provider's view of `oidc.json`, each LLM key); a state change is
