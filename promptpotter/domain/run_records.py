@@ -51,6 +51,7 @@ from promptpotter.domain.spend import (
     UserSpend,
     bill_or_rate_usd,
     cycle_axes_only,
+    money_axes_only,
 )
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
@@ -980,13 +981,24 @@ class StandingBudgetRecord(FrozenModel):
     """A cycle's standing budget, LAST wins; read PHYSICALLY, so a fork never inherits one."""
 
     record_type: Literal["standing_budget"] = "standing_budget"
-    # The cycle axes an operator named; the money axes are the campaign's (`Campaign.standing_budget`).
+    # The cycle axes an operator named; the money axes are the campaign's (`CampaignCeilingRecord`).
     budget: Budget = Budget()
     # RUN-scoped: the closed-round count at which the launch in flight pauses (``step-cycle``).
     pause_at_round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
     _cycle_axes = field_validator("budget")(cycle_axes_only)
+
+
+class CampaignCeilingRecord(FrozenModel):
+    """The money axes an operator named for the whole campaign (`set-limits`), LAST wins on its ROOT's
+    ledger, so every cycle of it reads one; every move lands through `jobs/quota.py::move_campaign_money`."""
+
+    record_type: Literal["campaign_ceiling"] = "campaign_ceiling"
+    budget: Budget
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+    _money_axes = field_validator("budget")(money_axes_only)
 
 
 class CycleShareRecord(FrozenModel):
@@ -1290,6 +1302,7 @@ CycleRecord = Annotated[
     | AccountEventRecord
     | ArmRecord
     | BackendWarningRecord
+    | CampaignCeilingRecord
     | FlightRecord
     | PricedKeyRecord
     | CommandAckRecord

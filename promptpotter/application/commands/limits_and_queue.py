@@ -8,7 +8,7 @@ from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import withdraw_queued
 from promptpotter.domain.run_records import ArmedCeilingEffect
-from promptpotter.domain.spend import CYCLE_AXES, MONEY_AXES, Budget
+from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
 
@@ -36,12 +36,8 @@ def change_run_limits(dispatched: DispatchedToCycle[ChangeRunLimitsPayload]) -> 
 
 
 def _armed_ceiling(stores: Stores, hop: CycleHop) -> ArmedCeilingEffect:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    assert campaign is not None, "a cycle command addresses a campaign it loaded"
     cycle = stores.campaigns.read_standing_budget(hop).budget
-    return ArmedCeilingEffect(
-        armed=campaign.standing_budget.only(MONEY_AXES).over(cycle.only(CYCLE_AXES))
-    )
+    return ArmedCeilingEffect(armed=stores.campaigns.read_campaign_ceiling(hop).over(cycle))
 
 
 def _clamp_to_account_ceilings(

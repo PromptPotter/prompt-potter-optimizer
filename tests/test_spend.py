@@ -3079,8 +3079,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert standing.budget == Budget(rounds=3), (
         "the standing record is written WHOLE: a spend move must carry the round cap it did not touch"
     )
-    reread = metered.campaigns.load_campaign("camp-3")
-    assert reread is not None and reread.standing_budget == Budget(tokens=1_000), (
+    assert metered.campaigns.read_campaign_ceiling(campaign.root_hop) == Budget(tokens=1_000), (
         "a money ceiling landed on one cycle, not the campaign every cycle shares"
     )
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
@@ -3088,8 +3087,8 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
         "the ack's ceiling is not what a stop fires at: the campaign's money and the cycle's own"
     )
-    lifted, held = metered.campaigns.load_campaign("camp-3"), registry.get(job.job_id)
-    assert lifted is not None and lifted.standing_budget == Budget(usd=None, tokens=1_000), (
+    lifted, held = metered.campaigns.read_campaign_ceiling(hop), registry.get(job.job_id)
+    assert lifted == Budget(usd=None, tokens=1_000), (
         "an uncapped campaign ceiling was stored as the account's headroom"
     )
     assert held is not None and cycle_share(metered, held).usd is None, (

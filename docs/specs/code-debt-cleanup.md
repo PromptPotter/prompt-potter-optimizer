@@ -10,12 +10,6 @@ acting.
 
 **Rides with:** any pass in the file named.
 
-- **Inputs that change a run but leave no event** (audit 2026-10-29, `decisions.md` § 0009's last
-  bullets). Left:
-  - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
-  - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
-    `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
-  **Re-test:** each input either hashed into the declaration or written as a record.
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
   `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.

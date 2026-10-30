@@ -30,6 +30,7 @@ from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     BankedSubject,
+    CampaignCeilingRecord,
     ComparisonExit,
     CycleFinal,
     CycleFinalRecord,
@@ -77,6 +78,7 @@ from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
     StandingRounds,
+    scan_campaign_ceiling,
     scan_cycle_facts,
     scan_cycle_share,
     scan_last,
@@ -760,6 +762,16 @@ class CampaignStore:
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
         return standing_budget(self.cycle_dir(hop))
+
+    def write_campaign_ceiling(self, campaign: Campaign, money: Budget) -> None:
+        """Whole, last wins, on the campaign's root: an axis it leaves unnamed stands no more."""
+        CycleEventLog.open(CycleDir(self.cycle_dir(campaign.root_hop))).append(
+            CampaignCeilingRecord(budget=money)
+        )
+
+    def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
+        """Off any cycle of the campaign: each reads its root's."""
+        return scan_campaign_ceiling(self.cycle_dir(hop))
 
     def write_cycle_share(self, hop: CycleHop, allotment: Budget) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(

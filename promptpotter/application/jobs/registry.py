@@ -157,7 +157,7 @@ class Job:
 
     @property
     def admitted(self) -> bool:
-        """Its reservation and allotment are stamped: before this, a failure is a refusal."""
+        """Its reservation is stamped and its cycle's share landed: before this, a failure is a refusal."""
         return self.admitted_at is not None
 
     @property

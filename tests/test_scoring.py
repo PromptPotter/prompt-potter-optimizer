@@ -3634,8 +3634,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
                 )
             )
         if "capped" in arms:
-            capped = f"capo_capped_{h2h_id}"
-            h2h_stores.campaigns.update_campaign(capped, standing_budget=Budget(usd=1.0))
+            capped = h2h_stores.campaigns.load_campaign(f"capo_capped_{h2h_id}")
+            assert capped is not None
+            h2h_stores.campaigns.write_campaign_ceiling(capped, Budget(usd=1.0))
         if "rewound" in arms:
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
             assert rewound is not None

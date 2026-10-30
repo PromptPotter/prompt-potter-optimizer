@@ -14,6 +14,7 @@ ProjectionKind = Literal[
     "arm",
     "backend_warning",
     "bank_partition",
+    "campaign_ceiling",
     "decision",
     "command",
     "command_ack",

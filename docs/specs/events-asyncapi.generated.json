@@ -1907,6 +1907,30 @@
         "title": "Budget",
         "type": "object"
       },
+      "CampaignCeilingRecord": {
+        "additionalProperties": false,
+        "description": "The money axes an operator named for the whole campaign (`set-limits`), LAST wins on its ROOT's\nledger, so every cycle of it reads one; every move lands through `jobs/quota.py::move_campaign_money`.",
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "record_type": {
+            "const": "campaign_ceiling",
+            "default": "campaign_ceiling",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "budget"
+        ],
+        "title": "CampaignCeilingRecord",
+        "type": "object"
+      },
       "CandidatesGeneratedView": {
         "additionalProperties": false,
         "description": "``propose:exit``.",
@@ -2601,6 +2625,7 @@
             "arm": "#/components/schemas/ArmRecord",
             "backend_warning": "#/components/schemas/BackendWarningRecord",
             "bank_partition": "#/components/schemas/PartitionRecord",
+            "campaign_ceiling": "#/components/schemas/CampaignCeilingRecord",
             "command": "#/components/schemas/CommandRecord",
             "command_ack": "#/components/schemas/CommandAckRecord",
             "cycle_final": "#/components/schemas/CycleFinalRecord",
@@ -2660,6 +2685,9 @@
           },
           {
             "$ref": "#/components/schemas/BackendWarningRecord"
+          },
+          {
+            "$ref": "#/components/schemas/CampaignCeilingRecord"
           },
           {
             "$ref": "#/components/schemas/FlightRecord"
@@ -6234,6 +6262,7 @@
               "arm",
               "backend_warning",
               "bank_partition",
+              "campaign_ceiling",
               "decision",
               "command",
               "command_ack",

@@ -32,6 +32,7 @@ from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
+    CampaignCeilingRecord,
     CommandAckRecord,
     CommandRecord,
     ComparisonExit,
@@ -81,7 +82,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verify_pass import VerifyPass, VerifyReading
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CycleLayout, root_cycle_id
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
@@ -860,6 +861,7 @@ LEDGER_FOLDS = (
     *map(
         _last,
         (
+            CampaignCeilingRecord,
             CycleSeedRecord,
             CycleShareRecord,
             PartitionRecord,
@@ -933,6 +935,13 @@ def scan_ledger_controls(ledger_path: Path) -> Controls:
 def scan_cycle_share(ledger_path: Path) -> CycleShareRecord | None:
     """The cycle's own share, never inherited: a fork's ledger alone."""
     return scan_last([LedgerSpan(ledger_path)], CycleShareRecord)
+
+
+def scan_campaign_ceiling(cycle_dir: Path) -> Budget:
+    """The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none."""
+    root = CycleLayout(cycle_dir.parent / root_cycle_id(cycle_dir.name)).ledger
+    held = scan_last([LedgerSpan(root)], CampaignCeilingRecord)
+    return Budget() if held is None else held.budget
 
 
 def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
