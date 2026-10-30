@@ -191,13 +191,6 @@ def _by_record_type(folds: Iterable[LedgerFold[Any, Any]]) -> dict[str, type[Str
     }
 
 
-def _model_of(
-    models: dict[str, type[StrictModel]], rec: dict[str, Any]
-) -> type[StrictModel] | None:
-    kind = rec.get("record_type")
-    return models.get(kind) if isinstance(kind, str) else None
-
-
 class LedgerSpan(NamedTuple):
     path: Path
     until: int | None = None
@@ -288,16 +281,17 @@ def appended_here(path: Path, raw: bytes, at: range) -> None:
 
 type _Make = Callable[[], LedgerFold[Any, Any]]
 
-_SCREENS_NOTHING = re.compile(b"(?!)")
+# Any JSON spacing: a line rewritten through `io.write_jsonl` is as readable as the appender's compact one.
+_RECORD_TYPE = re.compile(rb'"record_type"\s*:\s*"([^"]+)"')
 
 
 class _Feeder:
     def __init__(self, ledger: Path, folds: dict[_Make, LedgerFold[Any, Any]]) -> None:
         self.folds = folds
         self._ledger = ledger
-        self._models = _by_record_type(folds.values())
-        probes = b"|".join(sorted(re.escape(p.encode()) for p in self._models))
-        self._screen = re.compile(b'"(' + probes + b')"') if probes else _SCREENS_NOTHING
+        self._models = {
+            kind.encode(): model for kind, model in _by_record_type(folds.values()).items()
+        }
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
         # By kind, so the folds that never take a refused line (run state, spend) still read whole.
         self.refused: dict[type[StrictModel], LedgerUnreadableError] = {}
@@ -305,37 +299,28 @@ class _Feeder:
     def line(self, offset: int, raw: bytes) -> None:
         for placed in self._placed:
             placed.at_offset = offset
-        if self._screen.search(raw) is None:
+        kind = _RECORD_TYPE.search(raw)
+        model = None if kind is None else self._models.get(kind[1])
+        if model is None:
             return
+        # The bytes go to pydantic's own parser: a `json.loads` first costs as much again.
         try:
-            record = ledger_record(self._typed, raw, ledger=self._ledger, offset=offset)
+            record = ledger_record(
+                model.model_validate_json, raw, ledger=self._ledger, offset=offset
+            )
         except LedgerUnreadableError as refusal:
-            for model in self._reached(raw):
-                self.refused.setdefault(model, refusal)
+            self.refused.setdefault(model, refusal)
             return
         if record is None:
             return
         for fold in self.folds.values():
-            if type(record) in fold.records:
+            if model in fold.records:
                 feed_fold(fold, record, ledger=self._ledger, offset=offset)
 
     def vouch(self, fold: LedgerFold[Any, Any]) -> None:
         for model in fold.records:
             if (refusal := self.refused.get(model)) is not None:
                 raise refusal.with_traceback(None)
-
-    def _reached(self, raw: bytes) -> list[type[StrictModel]]:
-        try:
-            rec = line_dict(raw)
-        except ValueError:
-            # No record at all, so it may have been any kind it names.
-            return [self._models[kind.decode()] for kind in self._screen.findall(raw)]
-        return [self._models[rec["record_type"]]]
-
-    def _typed(self, raw: bytes) -> StrictModel | None:
-        rec = line_dict(raw)
-        model = _model_of(self._models, rec)
-        return None if model is None else model.model_validate(rec)
 
 
 def _fresh[F](make: Callable[[], F], seed: F | None) -> F:

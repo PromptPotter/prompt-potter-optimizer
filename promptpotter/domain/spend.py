@@ -519,13 +519,22 @@ def _bucket_per_kind() -> dict[TokenUsageKind, SpendBucket]:
     return {kind: SpendBucket() for kind in get_args(TokenUsageKind)}
 
 
+def spend_slot[K, M: StrictModel](held: dict[K, M], key: K, make: type[M]) -> M:
+    """``held[key]``, made on first use. Never ``setdefault(key, M())``: that builds a model per
+    record on a ledger fold's hot path."""
+    slot = held.get(key)
+    if slot is None:
+        slot = held[key] = make()
+    return slot
+
+
 def _bank_into[K](buckets: dict[K, SpendBucket], key: K, record: TokenUsageRecord) -> None:
-    buckets.setdefault(key, SpendBucket()).bank(record)
+    spend_slot(buckets, key, SpendBucket).bank(record)
 
 
 def _absorb_into[K](buckets: dict[K, SpendBucket], other: Mapping[K, SpendBucket]) -> None:
     for key, theirs in other.items():
-        buckets.setdefault(key, SpendBucket()).absorb(theirs)
+        spend_slot(buckets, key, SpendBucket).absorb(theirs)
 
 
 class SpendRollup(StrictModel):
@@ -545,10 +554,11 @@ class SpendRollup(StrictModel):
     unpriced_tokens: int = 0
     # Folded in `bank`, never a `@computed_field`: that serializes but does not round-trip on resume.
 
-    # Outside every total and off the wire: only `review.md` reads them.
-    _by_role: dict[MeasurementRole | None, SpendBucket] = PrivateAttr(default_factory=dict)
-    _by_node: dict[str, SpendBucket] = PrivateAttr(default_factory=dict)
-    _by_nested_node: dict[str, SpendBucket] = PrivateAttr(default_factory=dict)
+    # Outside every total and off the wire: only `review.md` reads them. A `{}` default, never
+    # `default_factory`: pydantic signature-inspects a private factory on every instance.
+    _by_role: dict[MeasurementRole | None, SpendBucket] = PrivateAttr(default={})
+    _by_node: dict[str, SpendBucket] = PrivateAttr(default={})
+    _by_nested_node: dict[str, SpendBucket] = PrivateAttr(default={})
 
     @field_validator("by_kind")
     @classmethod

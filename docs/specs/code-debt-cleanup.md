@@ -221,6 +221,18 @@ acting.
   describes the subject (the selected searchpoint's own cells), or stays a search-coverage statistic
   labelled as such, with samples only weak candidates measured counted as *unchallenged*. **Rides
   with:** any change to `hit_spread` or the run card. **Re-test:** ask the operator which.
+- **A scoring cell beats as an LLM call.** `application/scoring/sample_measurement.py::_send_cell`
+  and `search_point_scorer.py::_claim_cell` append `LLMCallProgressRecord`s named
+  `node="backend_scoring"` (no view has it) with a `call_id` of `scoring:{position}`, so the
+  dashboard fold cannot key a beat's `inner` hop to its open cell: with look-ahead above 1,
+  `CurrentRound.inner` names the latest-beating cell. Action: a cell beat carries its `position`
+  and no node. **Rides with:** the next change to the heartbeat record. **Re-test:**
+  `git grep -n '"backend_scoring"' promptpotter`.
+- **An optimizer's measurement node is derived twice**: `optimizer_manifest.py::RoundPlan.measurement`
+  (the gateway `default` walks) and `pipeline_resolve.py::measurement_node(view)` (the first
+  `measurement` node of the view), which serves `OptimizerPipelineResponse.measurement_node` as
+  nullable though no admitted manifest lacks one. **Rides with:** the next change to that response.
+  **Re-test:** `git grep -n "measurement_node(schema.view)" promptpotter`.
 - **`domain/export.py` carries no optimization spend or tokens**, so a reader cannot compute amortized lifetime cost ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost reporting — binds every run from now, not only the preprint). **Rides with:** the next export shape change. **Re-test:** `grep -n "spend\|token" promptpotter/domain/export.py`.
 
 ## Open — optimizer tuning
@@ -405,6 +417,39 @@ word's `git grep -c` for that sense is 0.
   sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
+- **A cold server folds every ledger before the first page answers**: the first
+  `GET /hierarchy?depth=1` waits on a full `LEDGER_FOLDS` pass over every `projects/` ledger, and
+  the browser shows a sidebar stuck on "loading…". On 2026-10-30, with 91 MB / 129k lines in
+  `projects/`, it took 33 s cold beside the boot sweep and 1.1 s warm (`.scratch/cold_real.py`).
+  `SpendRollup`'s private-attr factories and per-record `setdefault(k, Model())` cost a further
+  70–90 s before they were cut. Two shapes remain:
+  - The `run_state_stamps` ETag is the first opener. To learn the launch claim, its "stats only"
+    stamp folds the whole roster.
+  - `jobs/reaper.py::periodic_sweep` runs at boot, beside the first page. Over 58 ledgers it folds
+    23 s, about 10 s of it on L4 inner-sandbox ledgers that no page reads.
+
+  The fold itself is the root: pydantic validates each screened line on every cold start. A fold
+  snapshot keyed by `file_sig` would make a restart pay only the tail.
+- **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
+  `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as
+  "no measurement". The panel walk runs hardest-first, so its first cells can hold one or two truth
+  labels. A task model that answers `Uncertain` on about 75% of cells then trips the gate by chance in
+  about 18% of arms (0.75⁶).
+  - Seen 2026-10-30 in L4 inner `justlogic.d234__731eda`: C1.2 was cut at 0/6, all `Uncertain` and
+    every one parsed. The round's own n_min top-up read it at 0.393 against C0's 0.5 over the 28-cell
+    origin panel.
+  - The bar and the sidebar lead with the 6-cell 0%; the 39% shows only as the overlap series.
+  - Collapse must be judged against the truth labels the cells hold, and against the parent's answers on
+    the same cells. An engine decision: prove it with an offline run.
+- **The Candidates card shows empty axes while its lineage read is pending**: `CandidatesCard` gates on
+  `dash` only. On a cold first page `viewedNode` is undefined, so the chart draws no bars and no
+  `ReadState`, and reads as broken. Gate on the lineage read's own state.
+- **The server's shutdown notice counts runs it does not host**: `main.py::_telegram_shutdown_notice`
+  reads `JobRegistry.list_running()`, which holds the machine's CLI runs too. A server stopped beside a
+  CLI campaign reports it "stopped … in flight" and says "Resume from the campaign once it is back up",
+  but the run continues. The notice must name only the jobs this process owns. Seen 2026-10-30 against
+  `promptpotter-self.panel__606cc9`; the same stop logged `ASGI callable returned without completing
+  response` for its open `events:subscribe` stream.
 - **One node's knob gates four nodes' pool access**: `potter/dispatch/facade.py` declares `BlockPool` and
   `DemoPool` draws on `L1GenerateKnobs` for every hub member, so the check-in shows `l1_critique`,
   `l2_context` and `l3_plan` "open · l1_generate.block_access". Either each reader owns its access or

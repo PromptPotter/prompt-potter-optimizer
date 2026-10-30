@@ -77,6 +77,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     SpendRollup,
     metered,
+    spend_slot,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verify_pass import VerifyPass, VerifyReading
@@ -748,7 +749,7 @@ class _Spend:
         self._worked_s = 0.0
 
     def feed(self, usage: TokenUsageRecord) -> None:
-        self._by_round.setdefault(usage.spend_round, SpendRollup()).bank(usage)
+        spend_slot(self._by_round, usage.spend_round, SpendRollup).bank(usage)
         if not usage.cached:
             self._calls += 1
             self._worked_s += usage.duration_s
@@ -1173,7 +1174,7 @@ def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRo
     for span in spans:
         own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Spend, span.until)
         for n, held in own.by_round.items():
-            by_round.setdefault(n, SpendRollup()).absorb(held)
+            spend_slot(by_round, n, SpendRollup).absorb(held)
     return dict(sorted(by_round.items()))
 
 

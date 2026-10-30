@@ -59,7 +59,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
-from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
+from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, spend_slot
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
@@ -462,7 +462,7 @@ class LiveDashboardProjection(Projection):
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         self.state.spend.bank(record)
-        self.state.spend_by_round.setdefault(str(record.spend_round), SpendRollup()).bank(record)
+        spend_slot(self.state.spend_by_round, str(record.spend_round), SpendRollup).bank(record)
 
     def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
         return MeteredSpend.of(self.state.spend, meters)
