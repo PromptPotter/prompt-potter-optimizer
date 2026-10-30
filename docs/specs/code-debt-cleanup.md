@@ -145,6 +145,25 @@ acting.
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:** five builders plus one full gate with no reap and no gate waiting
   longer than its own run.
+- **`initialization/session.py::LaunchState.ledger` is `Optional` while a round needs it**:
+  `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
+  asserts presence and five other readers branch on `None`. Action: the run's state is built with its
+  ledger. **Re-test:** `git grep -n "state.ledger" -- promptpotter/application`.
+- **`node_context.py::Lineage.rounds` copies every round on each access** (`model_copy` to seal
+  `optimizer_state`), and a member reads it per step. Action: seal once at a round's close, or serve
+  a sealed view. **Re-test:** read `Lineage.rounds`.
+- **`store.py::CampaignStore.restate_round` folds the branch's whole chain per restated round**
+  (`standing_rounds` to find the close), so a repair restating N rounds folds N times. Action: the
+  restatement takes the close its caller already holds. **Re-test:** read `restate_round`.
+- **`run_records.py::RoundEnteredRecord.rewound` is a flag keeping two acts apart** — entering a round
+  and displacing what stood past it — that `ledger_scan.py::_Standing.feed` splits again. Action:
+  two records, or one whose displacement is its own field. **Rides with:** the `arc/records` arc.
+  **Re-test:** `git grep -n "rewound" -- promptpotter/domain/run_records.py`.
+- **A store write during a live run reaches live projections only on the live ledger's next append**
+  (`infrastructure/ledger.py::CycleEventLog._catch_up`): a restatement or proposal banked through
+  `CampaignStore` by hop sits unfanned until the loop appends again. Action: the store appends
+  through the open log when one is open. **Re-test:** after a member's `bank_proposals`, the
+  dashboard shows the proposal only once the next record lands.
 
 ## Open — multi-arc
 
