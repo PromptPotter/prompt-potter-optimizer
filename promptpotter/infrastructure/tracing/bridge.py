@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,7 +21,7 @@ from promptpotter.infrastructure.tracing.events import (
 from promptpotter.infrastructure.tracing.file_sink import FileSink
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
 from promptpotter.infrastructure.tracing.mlflow_server import MLflowSink
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import SendRefusedError, graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
@@ -38,14 +39,20 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 
+logger = logging.getLogger(__name__)
+
 DATASET_NAME: str = "ground_truth"
 
 
 class TracingProjection(Projection):
-    def __init__(self, hop: CycleHop, sinks: Sequence[TraceSink]) -> None:
+    def __init__(
+        self, hop: CycleHop, sinks: Sequence[TraceSink], *, unopened: Sequence[str] = ()
+    ) -> None:
         self._enabled: bool = settings.OBS_ENABLED
         self._hop = hop
         self._sinks = tuple(sinks)
+        # A configured sink that never opened: `start` serves it beside the sinks that fail there.
+        self._unopened = tuple(unopened)
         self._langfuse = next((s for s in self._sinks if isinstance(s, LangfuseSink)), None)
         # A close with no open (a call replayed from cache, a bracket entered before a restart) reaches no sink.
         self._open: set[tuple[int | None, str]] = set()
@@ -61,7 +68,8 @@ class TracingProjection(Projection):
             sinks.append(LangfuseSink(store_base_dir, hop.campaign_id, langfuse))
         if settings.MLFLOW_TRACKING_URI:
             sinks.append(MLflowSink(store_base_dir))
-        return cls(hop, sinks)
+        unopened = () if langfuse is None or langfuse.failure is None else (langfuse.failure,)
+        return cls(hop, sinks, unopened=unopened)
 
     def start(
         self,
@@ -69,15 +77,30 @@ class TracingProjection(Projection):
         config_snapshot: dict[str, Any],
         dataset: Sequence[Sample],
         langfuse_session_id: str | None,
-    ) -> None:
+    ) -> list[str]:
+        """Each sink that will trace nothing this run, as a sentence: its caller serves them."""
+        if not self._enabled:
+            return []
         opening = CampaignStart(
             campaign_id=self._hop.campaign_id,
             config=config_snapshot,
             cycle_id=self._hop.cycle_id,
             session_id=langfuse_session_id or self._hop.campaign_id,
         )
-        self._tell("campaign start", lambda sink: sink.on_campaign_start(opening))
+        failed = list(self._unopened)
+        for sink in self._sinks:
+            try:
+                sink.on_campaign_start(opening)
+            except SendRefusedError:
+                raise
+            except Exception as exc:
+                logger.exception("%s failed on campaign start", type(sink).__name__)
+                failed.append(
+                    f"{type(sink).__name__} failed on campaign start "
+                    f"({type(exc).__name__}: {exc}), so this run traces nothing to it"
+                )
         self._register_dataset(dataset)
+        return failed
 
     def _tell(self, what: str, call: Callable[[TraceSink], None]) -> None:
         if not self._enabled:

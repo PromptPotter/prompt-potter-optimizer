@@ -40,7 +40,6 @@ from promptpotter.domain.validators import StopSignal
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
@@ -94,10 +93,11 @@ class Minibatch(nodes.Sampler):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     size_knob: ClassVar[str | None] = None
 
-    def round_cells(self, knobs: MinibatchKnobs, search: int) -> int:
-        if search - knobs.pareto_size < knobs.size:
-            return 0
-        return knobs.size + knobs.pareto_size
+    def drawn(self, knobs: MinibatchKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+        fits = search - knobs.pareto_size >= knobs.size
+        return nodes.PanelSize(
+            cells=knobs.size + knobs.pareto_size if fits else 0, block_size=knobs.size
+        )
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         knobs = ctx.knobs(MinibatchKnobs)
@@ -126,7 +126,7 @@ class GepaReflect(nodes.Proposer):
     name: ClassVar[str] = "gepa_reflect"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "each"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
@@ -139,9 +139,12 @@ class GepaReflect(nodes.Proposer):
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
 
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.block_size
+
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
         # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
-        return nodes.rows_read_packages(rounds, [self.name])
+        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     async def propose(self, ctx: NodeContext, panel: Panel, _proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)
@@ -410,6 +413,9 @@ class Pareto(nodes.Selector):
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
 
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.cells - panel.block_size
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         pareto_set = ctx.slice(ParetoSet).keys
         candidates = dict(ctx.slice(ParetoScores).scores)
@@ -444,7 +450,7 @@ class Pareto(nodes.Selector):
                 leading=None,
                 verdict_reason="no candidate carries a verdict on every Pareto-set cell; none "
                 "is admitted",
-                population=kept,
+                ranked=kept,
             )
         aggregates = {cid: _aggregate(scores) for cid, scores in candidates.items()}
         top = max(aggregates.values())
@@ -466,7 +472,7 @@ class Pareto(nodes.Selector):
             selected=ArmKey(selected_id) if selected_id else None,
             leading=ArmKey(leading) if leading else None,
             verdict_reason=verdict,
-            population=kept,
+            ranked=kept,
         )
 
 

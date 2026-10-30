@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { FailureLine } from "@/components/ui";
 import type { CyclePath } from "@/lib/ids";
 
 export function ApplyScenarioPanel({
@@ -65,11 +66,7 @@ export function ApplyScenarioPanel({
         be re-read under, so it forks with no preview — that is the steer panel on a searchpoint.
         Budget and sample look-ahead are the only two that move a running cycle in place.
       </p>
-      {cmd.failure && (
-        <p className="note-warn" role="alert">
-          apply: {cmd.failure.message}
-        </p>
-      )}
+      <FailureLine failure={cmd.failure} lead="apply:" />
       {done ? (
         <p className="note-info">
           Forked at round {at}. The sidebar follows the new branch as it comes up.

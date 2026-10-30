@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./styles/index.css";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider } from "@/lib/state/auth";
 import { SurfaceFavicon } from "@/components/brand/SurfaceFavicon";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 

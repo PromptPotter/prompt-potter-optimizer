@@ -16,10 +16,14 @@ from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
 from promptpotter.application.jobs.quota import on_free_tier, paid_call
 from promptpotter.application.knobs import bench_defaults_pin
-from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.optimizers.nodes import MintFacts
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, defaults_drift
+from promptpotter.application.pipeline_resolve import (
+    campaign_admits,
+    configure_and_apply_pipeline,
+    defaults_drift,
+    mint_facts,
+)
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
     refuse_below_reasoning_floor,
@@ -33,8 +37,6 @@ from promptpotter.application.runner.campaign_ids import (
     origin_content_hash,
     root_cycle_id_of,
 )
-from promptpotter.application.scoring.formula.compiler import split_scoring_block
-from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
@@ -55,7 +57,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
-from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.dataset_access import (
@@ -71,11 +72,14 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.initialization.session import Session
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
+    from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.treatment import Treatment
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -84,28 +88,31 @@ logger = logging.getLogger(__name__)
 
 def refuse_unrunnable(
     campaign_config: CampaignConfig,
+    selected: SelectedOptimizer,
     dataset: Sequence[Sample],
     pipeline_params: Mapping[str, Any],
     schema: PipelineSchema,
     *,
     free: bool,
+    shelf: PackShelf,
 ) -> BankPartition:
     """Every refusal a run owes, before anything is paid or written; an upload's Start asks it of the draft."""
-    refuse_unfit_pipeline(campaign_config, schema)
+    refuse_unfit_pipeline(selected, schema)
     partition = partition_bank(
         dataset, campaign_config.dataset_split, seed=campaign_config.run_seed
     )
-    refusal = check_search_split_holds_round(campaign_config, len(partition.search))
+    refusal = check_search_split_holds_round(selected, len(partition.search))
     if refusal is not None:
         raise PayloadInvalidError(refusal, code="search_split_below_round")
-    per_sample = split_scoring_block(campaign_config.scoring, judge_instrument=None).per_sample
-    mint = MintFacts(partition.demo, schema, matcher_of(per_sample))
-    if pools := select_optimizer(campaign_config.optimization).pool_refusals(mint=mint):
+    mint = mint_facts(campaign_config, partition.demo, schema, shelf)
+    if pools := selected.pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
-    refuse_below_reasoning_floor(campaign_config, pipeline_params)
-    refuse_unpriced(unpriced_routes(campaign_config, pipeline_params, schema))
+    refuse_below_reasoning_floor(selected, pipeline_params)
+    refuse_unpriced(unpriced_routes(campaign_config, selected, pipeline_params, schema))
     if free:
-        refuse_outside_free_tier(outside_free_tier(campaign_config, pipeline_params, schema))
+        refuse_outside_free_tier(
+            outside_free_tier(campaign_config, selected, pipeline_params, schema)
+        )
     return partition
 
 
@@ -119,7 +126,11 @@ class CyclePlan:
     origin: OptSearchPoint
     # What the origin's render splices in, which a mint's check-in may commit after the refusals.
     framing: TaskDecomposition
-    treatment: Treatment
+    # The one selection every refusal was asked of: the mint hashes it into `Campaign.treatment`,
+    # declares its wiring under it, and the launch binds it (`binding_optimizer`).
+    optimizer: SelectedOptimizer
+    # What the cycle's chain and scorer admit, which its pools draw and `treatment` hashes.
+    admits: frozenset[Presumption]
     partition: BankPartition
     # The draw every later read of the cycle restores, written by the seam that mints it.
     drawn: PartitionRecord
@@ -132,11 +143,20 @@ class CyclePlan:
     def origin_hash(self) -> str:
         """The origin's content — merged params, framing, the search rows: what two declarations on one origin share."""
         points = PointContext(schema=self.schema, framing=self.framing, demo=self.partition.demo)
-        return origin_content_hash(self.origin, points, list(self.partition.search))
+        return origin_content_hash(
+            self.origin,
+            points,
+            list(self.partition.search),
+            candidate_library=self.session.candidate_library,
+        )
 
     @property
     def cycle_id(self) -> str:
         return root_cycle_id_of(self.origin_hash, self.declaration)
+
+    @property
+    def treatment(self) -> Treatment:
+        return self.optimizer.treatment(self.admits, self.session.store.block_packs)
 
 
 @dataclass(frozen=True)
@@ -145,6 +165,7 @@ class MintedCycle:
     campaign_id: str
     campaign_config: CampaignConfig
     session: Session
+    optimizer: SelectedOptimizer
 
 
 def declare(
@@ -194,12 +215,16 @@ def resolve_cycle_plan(
         root_seed = campaigns.read_cycle_seed(campaign.root_hop)
         origin_override = (root_seed.origin_prompts or None) if root_seed else None
         runs_under = campaigns.read_cycle_seed(hop)
+    runs = apply_cycle_seed(campaign_config, runs_under)
+    selected = select_optimizer(runs.optimization)
     partition = refuse_unrunnable(
-        apply_cycle_seed(campaign_config, runs_under),
+        runs,
+        selected,
         dataset,
         pipeline_params,
         configured.pipeline_schema,
         free=on_free_tier(session.store),
+        shelf=session.store.block_packs,
     )
     seed = (
         CycleSeed(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
@@ -217,7 +242,8 @@ def resolve_cycle_plan(
             schema=schema,
         ),
         framing=campaign_framing(session.store, campaign_config, session.dataset),
-        treatment=select_optimizer(campaign_config.optimization).treatment(),
+        optimizer=selected,
+        admits=campaign_admits(runs, configured.pipeline_schema),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
         drawn=partition.record(dataset_hash=session.bank.dataset_hash),
@@ -230,13 +256,29 @@ class ConfigDriftError(ConflictError):
     code = "config_drift"
 
     def __init__(
-        self, campaign: Campaign, *, current_hash: str, drift: DefaultsDrift | None
+        self,
+        campaign: Campaign,
+        *,
+        current_hash: str,
+        drift: DefaultsDrift | None,
+        capabilities_moved: list[str],
+        revision_moved: str | None,
     ) -> None:
         self.dataset_name = campaign.dataset_name
-        cause = (
-            f"what its declaration is a delta over moved since the mint ({', '.join(drift.moved())})"
-            if drift is not None
-            else "the dataset, its origin prompts or its framing changed, not its declaration"
+        causes: list[str] = []
+        if drift is not None:
+            moved = ", ".join(drift.moved())
+            causes.append(f"what its declaration is a delta over moved since the mint ({moved})")
+        if capabilities_moved:
+            causes.append(
+                f"the model capability snapshot moved for {', '.join(capabilities_moved)}, "
+                "so a reasoning floor laid into the origin may have moved"
+            )
+        if revision_moved is not None:
+            causes.append(revision_moved)
+        cause = "; ".join(causes) or (
+            "the dataset, its origin prompts, its candidate library or its framing changed, "
+            "not its declaration"
         )
         super().__init__(
             f"campaign {campaign.campaign_id} no longer resolves to the origin it was minted on "
@@ -248,37 +290,77 @@ class ConfigDriftError(ConflictError):
                 "stored_hash": campaign.root_content_hash,
                 "current_hash": current_hash,
                 "defaults_pin_moved": drift is not None,
+                "capabilities_moved": capabilities_moved,
+                "backend_revision_moved": revision_moved is not None,
             },
         )
 
 
-def refuse_drifted_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> None:
-    """*session* is bound to the cycle the resume runs."""
+def _capabilities_moved(recorded: CapabilityMenu, running: CapabilityMenu) -> list[str]:
+    """``provider/model`` whose answered capability moved; an empty *recorded* menu names none."""
+    if not recorded:
+        return []
+    return sorted(
+        f"{provider}/{model}"
+        for provider in {*recorded, *running}
+        for model in {*recorded.get(provider, {}), *running.get(provider, {})}
+        if recorded.get(provider, {}).get(model) != running.get(provider, {}).get(model)
+    )
+
+
+def _revision_moved(recorded: str | None, running: str | None) -> str | None:
+    """``None`` where nothing recorded one: an unknown revision names no move."""
+    if recorded is None or recorded == running:
+        return None
+    return f"the backend reports revision {running or 'none'}, not the {recorded} it ran under"
+
+
+def resolve_resume(
+    session: Session, campaign: Campaign, dataset: Sequence[Sample]
+) -> SelectedOptimizer:
+    """*session* is bound to the cycle the resume runs; its refusals are that cycle's, asked of the selection it answers."""
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
-    hop = session.hop
-    if campaign.root_content_hash == plan.origin_hash:
-        return
-    # A seed that steers the pipeline declared its own values at the cut, so it runs under them.
+    checked = plan
     if plan.seed is not None and plan.seed.pipeline_overlay:
-        logger.info(
-            "resume %s/%s: origin hash moved %s -> %s under a steering seed — resuming in place",
-            hop.campaign_id,
-            hop.cycle_id,
-            campaign.root_content_hash,
-            plan.origin_hash,
-        )
-        return
-    raise ConfigDriftError(campaign, current_hash=plan.origin_hash, drift=defaults_drift(campaign))
+        # A steering seed is its cycle's declared delta: the root's own content is what is checked.
+        root = session.bound(campaign.root_hop, purpose=session.purpose)
+        checked = resolve_cycle_plan(root, campaign.declaration, dataset)
+    if campaign.root_content_hash == checked.origin_hash:
+        return plan.optimizer
+    recorded = session.store.campaigns.read_resolved_run(campaign.root_hop)
+    raise ConfigDriftError(
+        campaign,
+        current_hash=checked.origin_hash,
+        drift=defaults_drift(campaign, running=checked.treatment),
+        capabilities_moved=_capabilities_moved(
+            recorded.model_capabilities, checked.session.pipeline_schema.model_capabilities
+        ),
+        revision_moved=_revision_moved(recorded.backend_revision, checked.session.backend_revision),
+    )
+
+
+def _differs_line(name: str, declared: object, running: object) -> str:
+    """A scalar names both values; a structured part (budget, loop, environment) names itself."""
+    if isinstance(declared, str | int | None) and isinstance(running, str | int | None):
+        return f"{name} (declared {declared}, this arm {running})"
+    return name
 
 
 def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
     campaigns = session.store.campaigns
     shared = plan.declaration.shared_part()
-    declared = campaigns.load_head_to_head(request.head_to_head_id)
+    h2h_id = request.head_to_head_id
+    declared = campaigns.load_head_to_head(h2h_id)
+    arms = {
+        purpose.arm.arm_key: other.campaign_id
+        for other in campaigns.list_campaigns(lifecycle="all")
+        if isinstance(purpose := other.declaration.purpose, Compare)
+        and purpose.arm.head_to_head_id == h2h_id
+    }
     if declared is None:
         campaigns.declare_head_to_head(
             HeadToHeadRecord(
-                head_to_head_id=request.head_to_head_id,
+                head_to_head_id=h2h_id,
                 created_at=utcnow_iso(),
                 origin=plan.origin_hash,
                 shared=shared,
@@ -295,20 +377,30 @@ def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
         if declared.origin != plan.origin_hash:
             differs.append("origin")
         if differs:
-            raise ConflictError(
-                f"head-to-head {request.head_to_head_id} declares another "
-                f"{', '.join(differs)}: this arm would not be graded on its bench set",
-                code="arm_off_bench_set",
-                details={"differs_on": differs},
+            running = {**shared.model_dump(mode="json"), "origin": plan.origin_hash}
+            stood = {**declared.shared.model_dump(mode="json"), "origin": declared.origin}
+            held = (
+                ", ".join(f"{key}={cid}" for key, cid in sorted(arms.items()))
+                if arms
+                else "no campaign left"
             )
-    taken = [
-        other.campaign_id
-        for other in campaigns.list_campaigns(lifecycle="all")
-        if other.declaration.purpose == Compare(arm=request)
-    ]
-    if taken:
+            raise ConflictError(
+                f"head-to-head id {h2h_id} is taken: declared {declared.created_at} on origin "
+                f"{declared.origin} (arms: {held}). This arm differs on "
+                f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it "
+                "would not be graded on that bench set. Name a new head-to-head id "
+                "(`cycles` lists the taken ones), or declare this arm alike.",
+                code="arm_off_bench_set",
+                details={
+                    "differs_on": differs,
+                    "declared_at": declared.created_at,
+                    "declared_origin": declared.origin,
+                    "arms": arms,
+                },
+            )
+    if (taken := arms.get(request.arm_key)) is not None:
         raise ConflictError(
-            f"arm {request.arm_key} of {request.head_to_head_id} is campaign {taken[0]} already",
+            f"arm {request.arm_key} of {h2h_id} is campaign {taken} already",
             code="arm_taken",
         )
 
@@ -366,8 +458,10 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     )
     _write_plan(session.store, hop, plan.drawn, plan.seed)
     session = session.bound(hop, purpose=declaration.purpose)
+    # What the origin hash was taken under, so a resume that no longer hashes alike names why.
+    session.record_resolved_run()
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-    declare_run_wiring(session, campaign_config, ledger, tracing=None)
+    declare_run_wiring(session, campaign_config, ledger, selected=plan.optimizer, tracing=None)
     campaigns.mint_cycle(hop)
     save_active_pointer(session.store.base_dir, hop)
     # So `dashboard.json` stands from the mint on, through the window before the loop starts.
@@ -385,6 +479,7 @@ def mint(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCyc
         campaign_id=campaign_id,
         campaign_config=effective_config(plan.declaration),
         session=_mint_campaign(plan, hop=hop, billed=billed),
+        optimizer=plan.optimizer,
     )
 
 

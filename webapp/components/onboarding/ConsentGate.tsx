@@ -3,10 +3,10 @@
 
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/state/auth";
 import { acceptTerms } from "@/lib/api/account";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { Dialog } from "@/components/ui";
+import { Dialog, FailureLine } from "@/components/ui";
 
 export function ConsentGate() {
   const { status, me, refresh } = useAuth();
@@ -75,11 +75,7 @@ export function ConsentGate() {
             </span>
           </label>
 
-          {cmd.failure ? (
-            <p className="account-error" role="alert">
-              {cmd.failure.message}
-            </p>
-          ) : null}
+          <FailureLine failure={cmd.failure} />
 
           <div className="consent-actions">
             <button

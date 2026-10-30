@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import ConfigDict, Field, RootModel, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmState, Proposal, Proposed
@@ -25,6 +25,7 @@ from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
+    GateDecision,
     GateKind,
     LaunchStage,
     PauseCause,
@@ -32,7 +33,11 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import (
+    CapabilityMenu,
+    ManifestNodeOverlay,
+    NodeSearchNarrowing,
+)
 from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
@@ -670,6 +675,67 @@ class CommandRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class NoEffect(FrozenModel):
+    """An ack whose command names no effect beyond having happened."""
+
+
+class PausedEffect(FrozenModel):
+    """``pause-cycle``, taken by the loop."""
+
+    run_phase: Literal[RunPhase.PAUSED]
+
+
+class SkippedEffect(FrozenModel):
+    """``skip-sample``, taken by the loop."""
+
+    skipped: int
+
+
+class GateDecidedEffect(FrozenModel):
+    """``origin-gate-decision``, taken by the loop."""
+
+    decision: GateDecision
+
+
+class ArmsTakenEffect(FrozenModel):
+    """``submit-arms``: how many arms the round banked."""
+
+    arms: int
+
+
+class LookaheadTakenEffect(FrozenModel):
+    """``set-sample-lookahead``, spent by the round that took it."""
+
+    cells: int
+    auto: bool
+
+
+class ArmedCeilingEffect(FrozenModel):
+    """``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands."""
+
+    armed: Budget
+
+
+class OriginEditedEffect(RootModel[dict[str, dict[Literal["from", "to"], Any]]]):
+    """A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new."""
+
+    model_config = ConfigDict(frozen=True)
+    root: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
+
+
+# Told apart by their fields, so an ack written before any tag still reads as its kind.
+CommandEffect = (
+    NoEffect
+    | PausedEffect
+    | SkippedEffect
+    | GateDecidedEffect
+    | ArmsTakenEffect
+    | LookaheadTakenEffect
+    | ArmedCeilingEffect
+    | OriginEditedEffect
+)
+
+
 class CommandAckRecord(FrozenModel):
     """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken."""
 
@@ -677,7 +743,7 @@ class CommandAckRecord(FrozenModel):
     command_id: str
     status: CommandAckStatus
     detail: str = ""
-    effect: dict[str, Any] = Field(default_factory=dict)
+    effect: CommandEffect = Field(default_factory=NoEffect)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -698,11 +764,16 @@ RoundWarningKind = Literal[
     "critique_cluster_dropped",
     # Nothing failed: the round promoted an arm the origin panel does not back (`runner/round.py`).
     "round_not_advanced",
+    # A declared child no node could make: `mating`'s pool under two, a `locus_crossover` pair on
+    # under two loci, or an `l1_generate` recombination naming no two pool entries.
+    "offspring_dropped",
+    # A configured trace sink that failed to open at the run's start: the run traces nothing to it.
+    "trace_sink_failed",
 ]
 
 
 class RoundWarningRecord(FrozenModel):
-    """A mid-round SELF-HEAL the run continued past; never re-add a kind with no emitter."""
+    """A SELF-HEAL the run continued past, mid-round or at its start; never re-add a kind with no emitter."""
 
     record_type: Literal["round_warning"] = "round_warning"
     kind: RoundWarningKind
@@ -893,6 +964,17 @@ class StandingBudgetRecord(FrozenModel):
     _cycle_axes = field_validator("budget")(cycle_axes_only)
 
 
+class CycleShareRecord(FrozenModel):
+    """The cycle's share of its campaign's ceiling, LAST wins and never inherited: its ONE store, which
+    the book spending on the cycle and every sibling's admission read. Every move lands through
+    `jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`)."""
+
+    record_type: Literal["cycle_share"] = "cycle_share"
+    # The most the cycle may have metered of its campaign's ceiling, in all.
+    allotment: Budget
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class DefaultsPin(FrozenModel):
     """What a declaration is a delta over, in two halves: the bench's defaults, which every arm of
     a head-to-head shares, and its optimizer's whole treatment — manifest, source and prompts —
@@ -965,6 +1047,10 @@ class ResolvedRunRecord(FrozenModel):
     declaration: dict[str, Any]
     # The roster a connector only NAMES can move under its name; the one every round measured stands.
     experiment: dict[str, Any] | None
+    # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
+    model_capabilities: CapabilityMenu = Field(default_factory=dict)
+    # `None` where the connector checks no revision or the backend reported none.
+    backend_revision: str | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1105,6 +1191,22 @@ class InterventionRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class ComparisonExit(enum.StrEnum):
+    """A launch act that runs an arm off the comparison its head-to-head declared."""
+
+    REWIND = "rewind"
+    FORK_ON_DIVERGENCE = "fork_on_divergence"
+    NO_DIVERGENCE_CHECK = "no_divergence_check"
+
+
+class LeftComparisonRecord(FrozenModel):
+    """Appended on an arm's cycle as the act runs: from it on, the arm's line reads uncontrolled."""
+
+    record_type: Literal["left_comparison"] = "left_comparison"
+    act: ComparisonExit
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class LaunchClaimRecord(FrozenModel):
     """Stands only while its process lives: ``claimant_lock`` is the OS lock that process holds."""
 
@@ -1144,6 +1246,7 @@ CycleRecord = Annotated[
     | CycleFinalRecord
     | CycleMintedRecord
     | CycleSeedRecord
+    | CycleShareRecord
     | CycleSupersededRecord
     | ElectionRecord
     | ErrorRecord
@@ -1153,6 +1256,7 @@ CycleRecord = Annotated[
     | LaunchClaimRecord
     | LaunchClockRecord
     | LaunchReleasedRecord
+    | LeftComparisonRecord
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord

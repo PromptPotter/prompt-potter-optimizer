@@ -141,6 +141,7 @@ async def resolve_origin_turn(
     degraded_cause = _degraded_cause(
         output=raw, applied=updated is not draft, repair_attempts=repair_attempts
     )
+    updated = updated.patch(resolver_ran=True)
 
     block = resolution_block(updated).model_copy(
         update={

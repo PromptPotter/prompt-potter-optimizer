@@ -2,6 +2,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { buildIsStale } from "@/lib/api";
+import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
 import s from "./ErrorBoundary.module.css";
 
 interface Props {
@@ -23,14 +24,13 @@ function fromStaleBuild(error: Error): boolean {
 }
 
 // Reload ONCE. A time, not a flag, so a later rebuild heals too without anyone clearing it.
-const RELOAD_STAMP = "promptpotter.chunk-reload-at";
 const RELOAD_GUARD_MS = 20_000;
 
 function reloadOnceForStaleBuild(): ReloadOutcome {
   try {
-    const last = Number(sessionStorage.getItem(RELOAD_STAMP) ?? 0);
+    const last = Number(sessionStorage.getItem(STORAGE_KEYS.chunkReloadAt) ?? 0);
     if (Number.isFinite(last) && Date.now() - last < RELOAD_GUARD_MS) return "already-tried";
-    sessionStorage.setItem(RELOAD_STAMP, String(Date.now()));
+    sessionStorage.setItem(STORAGE_KEYS.chunkReloadAt,String(Date.now()));
   } catch {
     // Storage blocked: the stamp is the only bound, so reloading here would loop. Ask instead.
     return "cannot-track";

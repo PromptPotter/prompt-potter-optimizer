@@ -2,23 +2,35 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
-import { CardFrame, SegmentedControl, Toolbar, ToolbarSep } from "@/components/ui";
+import type { LiftEstimate } from "@/lib/api/types";
+import {
+  CardFrame,
+  DataTable,
+  Empty,
+  FailureLine,
+  Loading,
+  SegmentedControl,
+  Toolbar,
+  ToolbarSep,
+  type Column,
+} from "@/components/ui";
+import { LIVE_EVIDENCE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
-import { useCompareSelection } from "@/lib/compare-selection";
-import { campaignAt, readPaired } from "@/lib/derivations";
+import { useCompareSelection } from "@/lib/state/compare-selection";
+import { campaignAt, phaseWalks, readPaired } from "@/lib/derivations";
 import { invalidateReads } from "@/lib/read-cache";
-import { useRegistry } from "@/lib/registry";
+import { useRegistry } from "@/lib/state/registry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import {
   sideTone,
-  fmtMetricInterval,
-  fmtMetricValue,
+  fmtInterval,
   fmtSigned,
+  fmtUnit,
+  PLACEHOLDER,
   shortId,
   verdictTone,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
-import { phaseWalks } from "@/lib/run-phase";
 import { PairedLift } from "@/components/shell/PairedLift";
 import { ChannelCards } from "./ChannelCards";
 import { Coverage, EvidenceCharts, SeriesLegend, type CompareView } from "./EvidenceCharts";
@@ -39,8 +51,6 @@ const VIEWS: readonly { value: CompareView; label: string; title: string }[] = [
     title: "Cells merged: one estimate per subject, with its 95% interval",
   },
 ];
-
-const LIVE_EVIDENCE_MS = 30000;
 
 function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, string> {
   return new Map(
@@ -71,7 +81,7 @@ export function ComparePane() {
     .join("|");
   useEffect(() => invalidateReads("evidence"), [moved]);
   const running = compared.some((a) => phaseWalks(a.state.run_phase));
-  const { evidence, loading, error, invalidMetric } = useEvidence(
+  const { evidence, loading, failure, invalidMetric } = useEvidence(
     selected,
     running ? LIVE_EVIDENCE_MS : null,
     { ranking, winnerChain, config, metric, grid },
@@ -113,13 +123,13 @@ export function ComparePane() {
                 rather than refusing it.
               </p>
             </CardFrame>
-          ) : error ? (
+          ) : failure !== null ? (
             <CardFrame title="Compare" headingTag="h2">
-              <p className="note-warn">Could not read the selection: {error}</p>
+              <FailureLine failure={failure} lead="Could not read the selection." />
             </CardFrame>
           ) : !evidence || loading ? (
             <CardFrame title="Compare" headingTag="h2">
-              <p className="note-empty">Reading {selected.length} channel(s)…</p>
+              <Loading>Reading {selected.length} channel(s)…</Loading>
             </CardFrame>
           ) : (
             <ScenarioEditsProvider value={editing}>
@@ -354,10 +364,10 @@ function MetricUnavailable({
   const m = evidence.metric;
   return (
     <>
-      <p className="note-empty">
+      <Empty>
         No subject in this selection can be read as <strong>{m.spec.label}</strong>.{" "}
         {m.spec.description}
-      </p>
+      </Empty>
       <p className="note-info">
         Cells measured but unreadable here: {unreadable(evidence.subjects, names)}. Absent, never
         zero — pick another metric to compare these subjects.
@@ -394,7 +404,7 @@ function WinnerChains({
   const parted = evidence.subjects.some((s) => s.scenario?.winner_changed);
   return (
     <p className="note-lede">
-      {evidence.chain_points ?? "—"} point(s) across {evidence.branch_subjects} branch(es),
+      {evidence.chain_points ?? PLACEHOLDER} point(s) across {evidence.branch_subjects} branch(es),
       shown under their heads in the <strong>Merged</strong> view. Each point is read on the cells
       that round actually scored — the subsets move between rounds, so a chain drawn on one shared
       axis would redraw earlier rounds on evidence they never had.
@@ -419,7 +429,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
       {evidence.replicates.map((r) => (
         <p className="note-info" key={r.arm_id}>
           Arm <code>{r.arm_id.slice(0, 8)}</code> ran {r.campaign_ids.length} times, spread{" "}
-          {fmtMetricValue(unit, r.level_spread)}.{" "}
+          {fmtUnit(unit, r.level_spread)}.{" "}
           {r.n_instruments === 1 ? (
             <>
               A <strong>replicate</strong> — that spread is noise, not an effect.
@@ -434,32 +444,32 @@ function Readings({ evidence }: { evidence: Evidence }) {
         </p>
       ))}
       {!v ? (
-        <p className="note-empty">
+        <Empty>
           The variance split needs two subjects sharing two cells. Subjects on different datasets
           never share one, which is why a mixed selection stops here.
-        </p>
+        </Empty>
       ) : (
         <>
           <dl className="l4-readings">
             <div>
               <dt>cell effect</dt>
-              <dd>{fmtMetricValue(unit, v.cell_effect_sd)}</dd>
+              <dd>{fmtUnit(unit, v.cell_effect_sd)}</dd>
             </div>
             <div>
               <dt>subject effect</dt>
               <dd className={cx(v.subject_sd_below_noise && "l4-dim")}>
-                {fmtMetricValue(unit, v.subject_effect_sd)}
+                {fmtUnit(unit, v.subject_effect_sd)}
               </dd>
             </div>
             <div>
               <dt>residual</dt>
-              <dd>{fmtMetricValue(unit, v.residual_sd)}</dd>
+              <dd>{fmtUnit(unit, v.residual_sd)}</dd>
             </div>
           </dl>
           <p className="note-lede">
             Over the {v.n_cells} cell{v.n_cells === 1 ? "" : "s"} all {v.n_subjects} subjects
             measured. Under the null a subject mean still scatters by{" "}
-            {fmtMetricValue(unit, v.null_subject_scatter)} —{" "}
+            {fmtUnit(unit, v.null_subject_scatter)} —{" "}
             {v.subject_sd_below_noise ? (
               <strong>so nothing here is distinguishable from noise.</strong>
             ) : (
@@ -471,9 +481,9 @@ function Readings({ evidence }: { evidence: Evidence }) {
       {p && (
         <p className="note-lede">
           At {p.cells_per_subject} cells/subject the paired SE is{" "}
-          {fmtMetricValue(unit, p.paired_se)}, so the smallest detectable effect is{" "}
-          {fmtMetricValue(unit, p.min_detectable_effect)}. The widest gap on the roster is{" "}
-          {fmtMetricValue(unit, p.largest_subject_gap)}
+          {fmtUnit(unit, p.paired_se)}, so the smallest detectable effect is{" "}
+          {fmtUnit(unit, p.min_detectable_effect)}. The widest gap on the roster is{" "}
+          {fmtUnit(unit, p.largest_subject_gap)}
           {p.cells_for_largest_gap !== null && (
             <> — resolving it would take ~{p.cells_for_largest_gap} cells per subject</>
           )}
@@ -511,61 +521,95 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
   }
   if (evidence.edits.length === 0) {
     return (
-      <p className="note-empty">
+      <Empty>
         No scored edits in this selection. One needs its campaign&rsquo;s round-0 origin plus a
         second searchpoint measured on cells that origin also scored — and a campaign channel to
         be ticked at all.
-      </p>
+      </Empty>
     );
   }
+  // Keyed on both halves: two campaigns can share one `sp_hash`.
+  const rows: RankedEdit[] = evidence.edits.map((row, i) => {
+    const pair = readPaired(row.reading);
+    return pair.read
+      ? { row, rank: i + 1, lift: pair.lift.estimate, cells: pair.cells }
+      : { row, rank: null, lift: null, cells: null };
+  });
   return (
-    <div className="l4-table-wrap">
-      <table className="l4-table">
-        <thead>
-          <tr>
-            <th scope="col">#</th>
-            <th scope="col">edit</th>
-            <th scope="col">{m.spec.label} over its origin · 95% CI</th>
-            <th scope="col">cells</th>
-            <th scope="col">seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* Keyed on both halves: two campaigns can share one `sp_hash`. */}
-          {evidence.edits.map((row, i) => {
-            const pair = readPaired(row.reading);
-            const lift = pair.read ? pair.lift.estimate : null;
-            return (
-              <tr className="l4-row" key={`${row.campaign_id}/${row.sp_hash}`}>
-                <td className="l4-rank">{lift === null ? "—" : i + 1}</td>
-                <td className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
-                  <code>{row.sp_hash}</code> {row.label}
-                  <span className="l4-dim"> {shortId(row.campaign_id)}</span>
-                </td>
-                {lift === null ? (
-                  <td className="l4-dim">
-                    <PairedLift reading={row.reading} unread="sentence" />
-                  </td>
-                ) : (
-                  <td className={cx("l4-effect", sideTone(lift.side))}>
-                    <span className="l4-effect-mean">{fmtMetricValue(m.spec.unit, lift.value)}</span>
-                    <span className="l4-effect-ci">
-                      {fmtMetricInterval(m.spec.unit, lift.ci_lo, lift.ci_hi)}
-                    </span>
-                  </td>
-                )}
-                <td className="l4-num">{pair.read ? pair.cells : "—"}</td>
-                <td className="l4-num">{row.provenance.length}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <>
+      <DataTable
+        ariaLabel="Edits ranked over their origin"
+        columns={rankColumns(m.spec.label, m.spec.unit)}
+        rows={rows}
+        getRowId={({ row }) => `${row.campaign_id}/${row.sp_hash}`}
+      />
       <p className="note-lede">
         An interval spanning zero is the ordinary outcome on a small panel — the ranking orders
         these, it does not endorse them. To settle one, deepen it with <code>verify</code> rather
         than repeating it.
       </p>
-    </div>
+    </>
   );
+}
+
+interface RankedEdit {
+  row: Evidence["edits"][number];
+  // Null where the pair was not read: an unread edit holds no rank.
+  rank: number | null;
+  lift: LiftEstimate | null;
+  cells: number | null;
+}
+
+function rankColumns(label: string, unit: Evidence["metric"]["spec"]["unit"]): Column<RankedEdit>[] {
+  return [
+    {
+      id: "rank",
+      label: "#",
+      width: "4ch",
+      align: "end",
+      cell: ({ rank }) => <span className="l4-rank">{rank ?? PLACEHOLDER}</span>,
+    },
+    {
+      id: "edit",
+      label: "edit",
+      width: "minmax(20ch, 2fr)",
+      cell: ({ row }) => (
+        <span className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
+          <code>{row.sp_hash}</code> {row.label}
+          <span className="l4-dim"> {shortId(row.campaign_id)}</span>
+        </span>
+      ),
+    },
+    {
+      id: "lift",
+      label: `${label} over its origin · 95% CI`,
+      width: "minmax(20ch, 1.5fr)",
+      wrap: true,
+      cell: ({ row, lift }) =>
+        lift === null ? (
+          <span className="l4-dim">
+            <PairedLift reading={row.reading} unread="sentence" />
+          </span>
+        ) : (
+          <span className={cx("l4-effect", sideTone(lift.side))}>
+            <span className="l4-effect-mean">{fmtUnit(unit, lift.value)}</span>
+            <span className="l4-effect-ci">{fmtInterval(unit, lift.ci_lo, lift.ci_hi)}</span>
+          </span>
+        ),
+    },
+    {
+      id: "cells",
+      label: "cells",
+      width: "7ch",
+      align: "end",
+      cell: ({ cells }) => <span className="l4-num">{cells ?? PLACEHOLDER}</span>,
+    },
+    {
+      id: "seen",
+      label: "seen",
+      width: "6ch",
+      align: "end",
+      cell: ({ row }) => <span className="l4-num">{row.provenance.length}</span>,
+    },
+  ];
 }

@@ -10,7 +10,7 @@ import {
   resolveObserveSubject,
   type ObserveSelection,
   type ObserveSubject,
-} from "../searchPoint";
+} from "../search-point";
 import type { ArmName, LiveCandidate, ServedRound } from "@/lib/api/types";
 import {
   armReading,

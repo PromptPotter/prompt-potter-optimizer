@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, get_args
@@ -29,6 +31,7 @@ from promptpotter.application.datasets.prompts import (
     has_dataset_prompts,
     load_dataset_node_overlay,
 )
+from promptpotter.application.datasets.startability import draft_samples
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.free_tier import free_task_models, with_free_tier_layer
 from promptpotter.application.initialization.session import Session
@@ -36,14 +39,19 @@ from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
-    prompt_body,
+    node_prompt,
+    prompt_edits,
+    prompt_key,
     resolve_optimizer,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import KnobDraw
+from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts, admits
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
+from promptpotter.application.scoring.formula.compiler import split_scoring_block
+from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.arms import Concluded
+from promptpotter.domain.bench import partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -52,7 +60,7 @@ from promptpotter.domain.campaign_config import (
     effective_config,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import render_prompt
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
@@ -73,6 +81,7 @@ from promptpotter.domain.pipeline_schema import (
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
+    MovableAgent,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
@@ -82,9 +91,13 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     reach_map,
 )
-from promptpotter.domain.pool import Access, PoolSource
+from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
-from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
+from promptpotter.domain.search_point import (
+    SHOTS_KEY,
+    missing_template_vars,
+    strip_rendered_prompt,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
@@ -115,10 +128,16 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.application.optimizers.nodes import Initializer
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pool import Pool, PoolEntry
+    from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.domain.sample import Sample
+    from promptpotter.domain.treatment import Treatment
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -481,18 +500,92 @@ def _validate_model_ownership(
             )
 
 
-class KnobSwitch(StrictModel):
-    node: str = Field(description="The node whose knob sets a reader's access")
-    knob: str = Field(description="That knob, under `nodes.{node}.config`")
+KnobType = Literal["boolean", "integer", "number", "string", "array", "object"]
+
+_KNOB_TYPES: tuple[KnobType, ...] = get_args(KnobType)
+
+
+class KnobRow(StrictModel):
+    """One knob of one optimizer node, as every surface offers it: its only served row."""
+
+    key: str = Field(description="The knob's name under `nodes.{node}.config`")
+    description: str = Field(
+        description="What the knob does — its field description, as plain text (RST literals "
+        "unmarked)"
+    )
+    summary: str = Field(
+        description="The description's first sentence, cut at its first clause where that runs "
+        "long: the one line a setup surface shows before the whole text"
+    )
+    type: KnobType = Field(description="JSON Schema type the value takes")
+    options: list[str] | None = Field(
+        description="The closed set a string knob takes, in declared order; null when open"
+    )
+    nullable: bool = Field(description="Whether null is a legal value (an opt-in knob, off)")
+    minimum: float | None = Field(description="The least legal value, itself legal; null when none")
+    exclusive_minimum: float | None = Field(
+        description="A bound every legal value lies strictly above; null when none"
+    )
+    maximum: float | None = Field(
+        description="The greatest legal value, itself legal; null when none"
+    )
+    exclusive_maximum: float | None = Field(
+        description="A bound every legal value lies strictly below; null when none"
+    )
+    declared: Any = Field(description="The value the manifest declares — a campaign's floor")
+    value: Any = Field(description="The value this config runs, the manifest's under its overlays")
+    movable_by: list[MovableAgent] = Field(
+        description="The agents that may move it within a run, as a config row's `movable_by` "
+        "reads; `optimizer` where another member steers it, empty where only the operator does"
+    )
+
+
+class NodeKnobs(StrictModel):
+    node: str = Field(description="The manifest node that owns these knobs")
+    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
+    knobs: list[KnobRow] = Field(description="Its knobs, in declared order")
+
+
+class KnobRef(StrictModel):
+    """One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`."""
+
+    node: str = Field(description="The manifest node that owns the knob")
+    knob: str = Field(description="The knob's name under `nodes.{node}.config`")
 
 
 class PoolDraw(StrictModel):
-    node: str = Field(description="A node drawing from the pool, in walk order")
+    """The nodes that read a pool under one knob: one knob, one access, however many readers."""
+
+    switch: KnobRef = Field(description="The knob that sets `access`")
     access: Access = Field(
-        description="How it draws under this config: `off` not at all, `open` a window to "
+        description="How they draw under this config: `off` not at all, `open` a window to "
         "suggest from, `closed` an entry's id only"
     )
-    switch: KnobSwitch = Field(description="The knob that sets `access`")
+    nodes: list[str] = Field(
+        description="Every node reading the pool as this knob sets it, in walk order; potter's "
+        "critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what L1 sees"
+    )
+
+
+class PoolFill(StrictModel):
+    """One part of a candidate a pool's entries in play reach: the place a surface draws the pool."""
+
+    part: str = Field(description="A prompt field a target prompt node opens to search, or `shots`")
+    entries: int = Field(description="How many entries in play land there")
+    most: int | None = Field(
+        description="The most one candidate carries there: the shots any member writing them may "
+        "attach; null for a field, whose text a candidate takes or adapts"
+    )
+
+
+class PackOffer(StrictModel):
+    """One block pack this account reads, as a pool's `packs` knob names it."""
+
+    name: str = Field(description="The value `packs` holds for it")
+    entries: int = Field(
+        description="The pool entries it holds that this run admits, one per part a snippet suits"
+    )
+    on: bool = Field(description="Whether `packs` names it under this config")
 
 
 class PoolRow(StrictModel):
@@ -500,17 +593,61 @@ class PoolRow(StrictModel):
     source: PoolSource = Field(description="Where its entries come from")
     initializer: str = Field(description="The run-init node writing it once, before round 0")
     active: list[str] = Field(description="The initializer's `active` paths: the entries in play")
+    offered: list[PoolOffer] = Field(
+        description="Every path `active` may name — `*` first, each leading run of an entry's "
+        "group before what it holds, each entry id — with what it reads as and the entries it "
+        "keeps; a demo pool's are the split its Start draws, none before that split is known"
+    )
     drawn_by: list[PoolDraw]
+    fills: list[PoolFill] = Field(
+        description="The candidate parts its entries in play reach under this config, in render "
+        "order, shots last: empty where no member draws it or nothing is in play, and then a "
+        "surface draws the pool nowhere"
+    )
+    packs: list[PackOffer] = Field(
+        description="The block packs it may draw from, the install's and the account's, in name "
+        "order; none for a pool no pack feeds or no member draws, and none before the facts a "
+        "Start mints against are known"
+    )
+
+
+class OptimizerNodePrompt(StrictModel):
+    """The prompt an optimizer node runs under a config, before any L4 override."""
+
+    fields: dict[str, str] = Field(description="Every prompt field by name, its edits laid on")
+    edited: list[str] = Field(
+        description="The fields this config sets over the template, each written to "
+        "`optimization.nodes.{node}.config.{field}`"
+    )
+    version: str = Field(description="The `prompt_version` the node's config names")
+    versions_declared: int = Field(
+        description="How many versions the manifest declares for the node's prompt family — a "
+        "surface showing this one says so where there are more"
+    )
+
+
+class ProposerRow(StrictModel):
+    node: str = Field(description="The manifest node making the arms")
+    makes: str = Field(description="What its arms are, in plain words: the manifest node's `makes`")
 
 
 class OptimizerSetup(StrictModel):
     """What the selected optimizer runs under a config, derived once for check-in and campaign."""
 
-    knobs: dict[str, dict[str, Any]] = Field(
-        description="Every member's knob values, the manifest's under the config's overlays"
+    main: list[KnobRef] = Field(description="The knobs a setup surface leads with, in order")
+    knobs: list[NodeKnobs] = Field(
+        description="Every member taking a knob, in declared order, but a pool initializer: its "
+        "knobs are its `pools` row"
+    )
+    prompts: dict[str, OptimizerNodePrompt] = Field(
+        description="By node, each node running a prompt; a node naming no `prompt_family` has "
+        "no entry"
     )
     arms_per_round: int = Field(description="Arms each round tests")
-    proposers: list[str] = Field(description="The nodes making each round's arms, in walk order")
+    proposers: list[ProposerRow] = Field(
+        description="The nodes making each round's arms under this config, in walk order: one "
+        "that opens or adds arms and adds none here is off, and absent"
+    )
     pools: list[PoolRow] = Field(description="What the members draw from")
 
 
@@ -698,16 +835,13 @@ def _locked(stores: Stores, hop: CycleHop, config: CampaignConfig) -> CampaignCo
     return config if locked == config.scoring else config.model_copy(update={"scoring": locked})
 
 
-def defaults_drift(campaign: Campaign) -> DefaultsDrift | None:
+def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
     """The one answer to whether what the declaration is a delta over moved since its mint."""
     declared = DefaultsPin(
         bench=campaign.declaration.bench_defaults_pin, treatment=campaign.treatment
     )
-    optimization = effective_config(campaign.declaration).optimization
-    running = DefaultsPin(
-        bench=bench_defaults_pin(), treatment=select_optimizer(optimization).treatment()
-    )
-    return None if running == declared else DefaultsDrift(declared=declared, running=running)
+    now = DefaultsPin(bench=bench_defaults_pin(), treatment=running)
+    return None if now == declared else DefaultsDrift(declared=declared, running=now)
 
 
 def resolve_campaign_config(
@@ -837,31 +971,166 @@ def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> C
     return resolve_schema_menu(_routed_as_run(m.filtered, params, m.active), workspace=workspace)
 
 
-def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
+def campaign_admits(cfg: CampaignConfig, schema: PipelineSchema) -> frozenset[Presumption]:
+    """What a campaign's chain and scorer let a block presume: its pools draw and its treatment hashes this one set."""
+    per_sample = split_scoring_block(cfg.scoring, judge_instrument=None).per_sample
+    return admits(schema, matcher_of(per_sample))
+
+
+def mint_facts(
+    cfg: CampaignConfig, demo: Sequence[Sample], schema: PipelineSchema, shelf: PackShelf
+) -> MintFacts:
+    return MintFacts(demo, campaign_admits(cfg, schema), shelf)
+
+
+def _draft_mint(stores: Stores, draft: DraftCampaign, m: _Merge) -> MintFacts | None:
+    """The demo split the draft's Start will draw, so its pool offers the keys before Start."""
+    samples = draft_samples(stores, draft)
+    if samples is None:
+        return None
+    demo = partition_bank(samples, m.cfg.dataset_split, seed=m.cfg.run_seed).demo
+    return mint_facts(m.cfg, demo, m.filtered, stores.block_packs)
+
+
+def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
+    drawn = stores.campaigns.read_bank_partition(m.hop)
+    bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
+    if drawn is None or bank is None:
+        return None
+    return mint_facts(
+        m.cfg, restored_partition(bank.samples, drawn).demo, m.filtered, stores.block_packs
+    )
+
+
+def _pool_draws(selected: SelectedOptimizer, pool: type[Pool]) -> list[PoolDraw]:
+    grouped: dict[tuple[str, str], PoolDraw] = {}
+    for member in selected.members:
+        if not isinstance(draw := member.draws.get(pool), KnobDraw):
+            continue
+        ref = KnobRef(node=selected.knob_owner(member, draw.knobs), knob=draw.knob)
+        held = grouped.setdefault(
+            (ref.node, ref.knob),
+            PoolDraw(switch=ref, access=selected.access(member, pool), nodes=[]),
+        )
+        held.nodes.append(member.name)
+    return list(grouped.values())
+
+
+def _pool_fills(
+    selected: SelectedOptimizer, initializer: Initializer, held: list[PoolEntry], opened: set[str]
+) -> list[PoolFill]:
+    in_play = set(kept(initializer.active(selected), ((e.id, e.group) for e in held)))
+    landed = Counter(initializer.pool.part(e) for e in held if e.id in in_play)
+    return [
+        PoolFill(
+            part=part,
+            entries=landed[part],
+            most=selected.shot_cap if part == SHOTS_KEY else None,
+        )
+        for part in (*PROMPT_FIELDS, SHOTS_KEY)
+        if landed[part] and part in opened
+    ]
+
+
+def _pack_offers(
+    selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
+) -> list[PackOffer]:
+    if initializer.pool.source is not PoolSource.LIBRARY or mint is None:
+        return []
+    named: list[str] = selected.knobs(initializer.name).model_dump(mode="json")["packs"]
+    return [
+        PackOffer(
+            name=name,
+            entries=len(mint.shelf.entries([name], admits=mint.admits)),
+            on=name in named,
+        )
+        for name in mint.shelf.names()
+    ]
+
+
+def _opened_parts(target: PipelineSchema) -> set[str]:
+    nodes = target.prompt_nodes()
+    return {f for node in nodes for f in node.open_prompt_fields} | (
+        {SHOTS_KEY} if nodes else set()
+    )
+
+
+def _node_knobs(selected: SelectedOptimizer) -> list[NodeKnobs]:
+    nodes: list[NodeKnobs] = []
+    params = _param_rows(selected)
+    initializers = {initializer.name for initializer in selected.plan.initializers}
+    for node in selected.member_nodes:
+        if node in initializers:
+            continue
+        schema = optimizers.NODE_MEMBERS.get(node).knobs.model_json_schema()
+        declared = selected.declared_knobs(node).model_dump(mode="json")
+        value = selected.knobs(node).model_dump(mode="json")
+        movable = {p.key: p.movable_by for p in params.get(node, [])}
+        rows = [
+            _knob_row(key, prop, schema.get("$defs") or {}, declared, value, movable[key])
+            for key, prop in (schema.get("properties") or {}).items()
+        ]
+        if rows:
+            nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), knobs=rows))
+    return nodes
+
+
+def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]:
+    out: dict[str, OptimizerNodePrompt] = {}
+    declared = list(selected.manifest.resolved_prompts)
+    for node in selected.schema.declared_nodes:
+        config = selected.node_config(node.name)
+        if prompt_key(config) is None:
+            continue
+        family = str(config["prompt_family"])
+        out[node.name] = OptimizerNodePrompt(
+            fields=node_prompt(node.name, config, selected.manifest).model_dump(),
+            edited=list(prompt_edits(config)),
+            version=str(config.get("prompt_version") or ""),
+            versions_declared=sum(k.partition("/")[0] == family for k in declared),
+        )
+    return out
+
+
+def _pool_row(
+    selected: SelectedOptimizer,
+    initializer: Initializer,
+    mint: MintFacts | None,
+    opened: set[str],
+) -> PoolRow:
+    held = initializer.held(selected, mint)
+    drawn = any(initializer.pool in selected.draws(member) for member in selected.members)
+    return PoolRow(
+        pool=initializer.pool.kind,
+        source=initializer.pool.source,
+        initializer=initializer.name,
+        active=initializer.active(selected),
+        offered=offers(held),
+        drawn_by=_pool_draws(selected, initializer.pool),
+        fills=_pool_fills(selected, initializer, held, opened) if drawn else [],
+        packs=_pack_offers(selected, initializer, mint) if drawn else [],
+    )
+
+
+def optimizer_setup(
+    cfg: CampaignConfig, mint: MintFacts | None, target: PipelineSchema
+) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
-    members = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes]
+    opened = _opened_parts(target)
     return OptimizerSetup(
-        knobs={n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes},
-        arms_per_round=selected.arms_per_round,
-        proposers=[p.name for p in selected.plan.proposers],
-        pools=[
-            PoolRow(
-                pool=initializer.pool.kind,
-                source=initializer.pool.source,
-                initializer=initializer.name,
-                active=initializer.active(selected),
-                drawn_by=[
-                    PoolDraw(
-                        node=m.name,
-                        access=selected.access(m, initializer.pool),
-                        switch=KnobSwitch(node=selected.knob_owner(m, draw.knobs), knob=draw.knob),
-                    )
-                    for m in members
-                    if isinstance(draw := m.draws.get(initializer.pool), KnobDraw)
-                ],
-            )
-            for initializer in selected.plan.initializers
+        main=[
+            KnobRef(node=node, knob=knob)
+            for node, _, knob in (ref.partition(".") for ref in selected.manifest.main)
         ],
+        knobs=_node_knobs(selected),
+        prompts=_node_prompts(selected),
+        arms_per_round=selected.arms_per_round,
+        proposers=[
+            ProposerRow(node=p.name, makes=selected.makes(p))
+            for p in selected.plan.proposers
+            if p.proposes == "edits" or p.arms(selected) > 0
+        ],
+        pools=[_pool_row(selected, i, mint, opened) for i in selected.plan.initializers],
     )
 
 
@@ -899,6 +1168,7 @@ def _response(
     connector: str,
     backend_type: str,
     nests: list[NestedPipelineRef],
+    mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
     rows = _rows(m, params)
     return CampaignPipelineResponse(
@@ -909,7 +1179,7 @@ def _response(
         backend_type=backend_type,
         self_optimization=is_self_optimization(backend_type),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.cfg),
+        optimizer_setup=optimizer_setup(m.cfg, mint, m.filtered),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -935,6 +1205,7 @@ def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> Campaign
         backend_type=draft.connector,
         # A dataset dir is what declares inner cells, and a check-in has none yet.
         nests=[],
+        mint=_draft_mint(stores, draft, m),
     )
 
 
@@ -1004,6 +1275,7 @@ def resolve_pipeline_for_campaign(
         nests=[]
         if m.dataset is None
         else nested_pipeline_refs(m.dataset, experiment, m.filtered.view),
+        mint=_cycle_mint(stores, m),
     )
 
 
@@ -1108,34 +1380,8 @@ def resolve_pipeline_for_dataset(stores: Stores, dataset_name: str) -> DatasetPi
     )
 
 
-class StartPrompt(StrictModel):
-    fields: dict[str, Any] = Field(description="The prompt body, by decomposition field")
-    version: str = Field(description="The `prompt_version` the node's config names")
-    versions_declared: int = Field(
-        description="How many versions the manifest declares for the node's prompt family — a "
-        "surface showing this one says so where there are more"
-    )
-
-
-def _start_prompts(selected: SelectedOptimizer) -> dict[str, StartPrompt]:
-    out: dict[str, StartPrompt] = {}
-    declared = list(selected.manifest.resolved_prompts)
-    for node in selected.schema.declared_nodes:
-        config = node.current_config
-        body = prompt_body(selected.manifest, config)
-        if body is not None:
-            family = str(config.get("prompt_family"))
-            out[node.name] = StartPrompt(
-                fields=body,
-                version=str(config.get("prompt_version") or ""),
-                versions_declared=sum(k.partition("/")[0] == family for k in declared),
-            )
-    return out
-
-
 class OptimizerPipelineResponse(StrictModel):
-    """What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw
-    manifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``."""
+    """An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`."""
 
     view: PipelineView | None = Field(
         description="The graph topology — the same shape a campaign pipeline serves"
@@ -1146,8 +1392,8 @@ class OptimizerPipelineResponse(StrictModel):
         "declares no measurement node."
     )
     node_config_schema: dict[str, list[NodeConfigParam]] = Field(
-        description="Per-node typed config rows, so the node detail renders the optimizer's own "
-        "knobs through the canonical config element rather than a chip and a JSON dump"
+        description="Per-node typed config rows of what is no member's knob — an llm node's call "
+        "config and prompt fields; a knob's one row is `OptimizerSetup.knobs`"
     )
     node_output_schema: dict[str, NodeOutputSchema | None]
     model_capabilities: CapabilityMenu = Field(
@@ -1155,73 +1401,40 @@ class OptimizerPipelineResponse(StrictModel):
         "it accepts and what a round costs are the facts every other node's rows need too"
     )
     reach: dict[str, NodeReach] = Field(
-        description="Where the search reaches per node, summed off the rows above rather than in "
-        "the browser — the same reading a campaign pipeline serves"
+        description="Where the search reaches per node, summed off every param it carries — the "
+        "rows above and its knobs — rather than in the browser, the same reading a campaign "
+        "pipeline serves"
     )
-    start_prompts: dict[str, StartPrompt] = Field(
-        description="The prompt each node STARTS from, by node, as the run resolves it off the "
-        "node's `prompt_family`/`prompt_version` — the floor under a searchpoint carrying no "
-        "evolved delta for that node. A node declaring no prompt has no entry."
-    )
+
+
+def _param_rows(selected: SelectedOptimizer) -> dict[str, list[NodeConfigParam]]:
+    """Every param of every node, knobs included: what reach sums and a knob's `movable_by` reads."""
+    return selected.schema.node_config_schema(selected.steered_axes)
+
+
+def _knob_keys(selected: SelectedOptimizer, node: str) -> frozenset[str]:
+    if node not in selected.member_nodes:
+        return frozenset()
+    return frozenset(optimizers.NODE_MEMBERS.get(node).knobs.model_fields)
 
 
 def resolve_pipeline_for_optimizer(stores: Stores, optimizer: str) -> OptimizerPipelineResponse:
     selected = resolve_optimizer(optimizer, {}, gate="off")
     schema = selected.schema
-    # The reach must sum the SAME rows it serves, or the glyph and the padlock disagree.
-    rows = schema.node_config_schema(selected.steered_axes)
+    # One reading for the glyph and each padlock: a knob's padlock rides its `KnobRow`.
+    rows = _param_rows(selected)
     return OptimizerPipelineResponse(
         view=schema.view,
         measurement_node=measurement_node(schema.view),
-        node_config_schema=rows,
+        node_config_schema={
+            node: [r for r in node_rows if r.key not in _knob_keys(selected, node)]
+            for node, node_rows in rows.items()
+        },
         node_output_schema=schema.node_output_schemas(),
         reach=reach_map(rows),
         # Per tenant: a hand-authored catalogue override lives in their workspace.
         model_capabilities=resolve_schema_menu(schema, workspace=stores.base_dir),
-        start_prompts=_start_prompts(selected),
     )
-
-
-KnobType = Literal["boolean", "integer", "number", "string", "array", "object"]
-
-_KNOB_TYPES: tuple[KnobType, ...] = get_args(KnobType)
-
-
-class KnobRow(StrictModel):
-    """One knob of one optimizer node, as a settings surface offers it."""
-
-    key: str = Field(description="The knob's name under `nodes.{node}.config`")
-    description: str = Field(description="What the knob does — its field description")
-    type: KnobType = Field(description="JSON Schema type the value takes")
-    options: list[str] | None = Field(
-        description="The closed set a string knob takes, in declared order; null when open"
-    )
-    nullable: bool = Field(description="Whether null is a legal value (an opt-in knob, off)")
-    minimum: float | None = Field(description="The least legal value, itself legal; null when none")
-    exclusive_minimum: float | None = Field(
-        description="A bound every legal value lies strictly above; null when none"
-    )
-    maximum: float | None = Field(
-        description="The greatest legal value, itself legal; null when none"
-    )
-    exclusive_maximum: float | None = Field(
-        description="A bound every legal value lies strictly below; null when none"
-    )
-    value: Any = Field(description="The value the manifest declares — a campaign's floor")
-
-
-class NodeKnobs(StrictModel):
-    node: str = Field(description="The manifest node that owns these knobs")
-    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
-    knobs: list[KnobRow] = Field(description="Its knobs, in declared order")
-
-
-class OptimizerKnobsResponse(StrictModel):
-    """Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`."""
-
-    optimizer: str = Field(description="The manifest name, as `optimization.optimizer` names it")
-    version: str = Field(description="The manifest's own version")
-    nodes: list[NodeKnobs] = Field(description="Every node taking a knob, in declared order")
 
 
 def _knob_type(kind: Mapping[str, Any]) -> KnobType:
@@ -1232,7 +1445,36 @@ def _knob_type(kind: Mapping[str, Any]) -> KnobType:
     raise ValueError(f"knob type {declared!r} is none of {', '.join(_KNOB_TYPES)}")
 
 
-def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value: Any) -> KnobRow:
+_RST_LITERAL = re.compile(r"``(.+?)``", re.DOTALL)
+# Read on the marked text: a stop before a capital, a literal or the end ends a sentence; "e.g. x"
+# and "0.15" end none.
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?=\s+[A-Z(`]|\s*$)")
+_CLAUSE_END = re.compile(r"[:;](?=\s)|\s—\s")
+_SUMMARY_CHARS = 120
+# A clause shorter than this is a symbol being named (`T: …`, `b: …`), no summary.
+_CLAUSE_MIN_CHARS = 24
+
+
+def _plain(text: str) -> str:
+    return _RST_LITERAL.sub(r"\1", text)
+
+
+def _summary(marked: str) -> str:
+    first = _plain(_SENTENCE_END.split(marked.strip(), maxsplit=1)[0].strip())
+    if len(first) <= _SUMMARY_CHARS:
+        return first
+    clause = _CLAUSE_END.search(first, _CLAUSE_MIN_CHARS)
+    return first[: clause.start()].rstrip() if clause else first
+
+
+def _knob_row(
+    key: str,
+    prop: Mapping[str, Any],
+    defs: Mapping[str, Any],
+    declared: Mapping[str, Any],
+    value: Mapping[str, Any],
+    movable_by: list[MovableAgent],
+) -> KnobRow:
     options = [
         defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
         for ref in prop.get("anyOf") or [prop]
@@ -1240,9 +1482,11 @@ def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value:
     nullable = any(o.get("type") == "null" for o in options)
     kind = next(o for o in options if o.get("type") != "null")
     enum = kind.get("enum") or ([kind["const"]] if "const" in kind else None)
+    description = str(prop.get("description") or "")
     return KnobRow(
         key=key,
-        description=str(prop.get("description") or ""),
+        description=_plain(description),
+        summary=_summary(description),
         type=_knob_type(kind),
         options=[str(v) for v in enum] if enum else None,
         nullable=nullable,
@@ -1250,23 +1494,10 @@ def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value:
         exclusive_minimum=kind.get("exclusiveMinimum"),
         maximum=kind.get("maximum"),
         exclusive_maximum=kind.get("exclusiveMaximum"),
-        value=value,
+        declared=declared[key],
+        value=value[key],
+        movable_by=movable_by,
     )
-
-
-def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
-    selected = resolve_optimizer(name, {}, gate="off")
-    nodes: list[NodeKnobs] = []
-    for node in selected.member_nodes:
-        schema = optimizers.NODE_MEMBERS.get(node).knobs.model_json_schema()
-        declared = selected.declared_knobs(node).model_dump(mode="json")
-        rows = [
-            _knob_row(key, prop, schema.get("$defs") or {}, declared[key])
-            for key, prop in (schema.get("properties") or {}).items()
-        ]
-        if rows:
-            nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), knobs=rows))
-    return OptimizerKnobsResponse(optimizer=selected.name, version=selected.version, nodes=nodes)
 
 
 class OptimizerEntry(StrictModel):

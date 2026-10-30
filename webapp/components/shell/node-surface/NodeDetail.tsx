@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import type { DraftPatch, NodePrompt, StartPrompt } from "@/lib/api";
+import type { DraftPatch, NodePrompt, OptimizerNodePrompt } from "@/lib/api";
 import { useSelection, type SelectedNode } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
 import type { NodeBlock } from "@/lib/api/types";
@@ -17,9 +17,10 @@ import {
   type ObserveState,
   type ObserveSubject,
 } from "@/lib/derivations";
-import { fmtPct0, fmtSecs, fmtValue } from "@/lib/format";
+import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
 import { nodeKind } from "@/lib/types";
-import { CopyButton, SegmentedControl } from "@/components/ui";
+import { CopyButton, Empty, Loading, SegmentedControl } from "@/components/ui";
+import { MemberKnobList } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
@@ -30,11 +31,8 @@ interface NodeAuthoring {
 }
 
 // The optimizer's own prompt, as the one prompt node it is.
-function startPrompts(id: string, origin: StartPrompt | null): Record<string, NodePrompt> {
-  if (!origin) return {};
-  const fields: Record<string, string> = {};
-  for (const [k, v] of Object.entries(origin.fields)) if (typeof v === "string") fields[k] = v;
-  return { [id]: { fields, shots: [] } };
+function startPrompts(id: string, origin: OptimizerNodePrompt | null): Record<string, NodePrompt> {
+  return origin ? { [id]: { fields: origin.fields, shots: [] } } : {};
 }
 
 interface Props {
@@ -90,7 +88,8 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   } = useRoundNodes();
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
 
-  const origin = optimizer?.start_prompts[id] ?? null;
+  // Under the viewed config, its field edits laid on: what this node runs, not the bare template.
+  const origin = (isOptimizer ? cv.optimizerSetup?.prompts[id] : undefined) ?? null;
 
   const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
   const program = isOptimizer
@@ -129,7 +128,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
           {/* A div: `CopyButton`'s choices menu opens a `Popover`, which is flow content. */}
           <div className="setup-preview-side">
             <span className={cx("opt-detail-status", isLiveNow && "live")}>
-              ● {isLiveNow ? `live · round ${liveRound ?? "—"}` : scopeLabel(isOptimizer)}
+              ● {isLiveNow ? `live · round ${liveRound ?? PLACEHOLDER}` : scopeLabel(isOptimizer)}
             </span>
             {isOptimizer && viewedRound != null && (
               <span
@@ -162,6 +161,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             origin={origin}
             schema={schema}
             modelCapabilities={modelCapabilities}
+            onPromptApply={onPromptApply}
           />
         ) : (
           <TargetProgram
@@ -202,12 +202,15 @@ function OptimizerProgram({
   origin,
   schema,
   modelCapabilities,
+  onPromptApply,
 }: {
   id: string;
   node: Parameters<typeof NodeSurface>[0]["node"];
-  origin: StartPrompt | null;
+  origin: OptimizerNodePrompt | null;
   schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
+  // A check-in's: its optimizer prompt is edited here, as `nodes.<node>.config.<field>`.
+  onPromptApply: ((patch: DraftPatch) => void) | undefined;
 }) {
   return (
     <>
@@ -218,7 +221,12 @@ function OptimizerProgram({
         schema={schema}
         modelCapabilities={modelCapabilities}
         mode="values"
+        promptScope="optimizer"
+        edited={origin?.edited}
+        onApply={onPromptApply}
       />
+      {/* `node_config_schema` holds the call config and prompt rows; a member's knobs are served once, in `optimizer_setup`. */}
+      <MemberKnobList node={id} />
       {origin && origin.versions_declared > 1 && (
         <p className="inspector-note">
           Showing prompt {origin.version} of {origin.versions_declared} this node declares.
@@ -329,11 +337,11 @@ function RunSection({
     <>
       <hr className="setup-preview-divider" />
       {kind == null ? (
-        <div className="opt-detail-empty">
-          {kindLoading
-            ? "Reading the optimizer manifest…"
-            : "This node is not in the served pipeline."}
-        </div>
+        kindLoading ? (
+          <Loading className="opt-detail-empty">Reading the optimizer manifest…</Loading>
+        ) : (
+          <Empty className="opt-detail-empty">This node is not in the served pipeline.</Empty>
+        )
       ) : kind === "measurement" ? (
         <MeasurementRun round={round} />
       ) : (
@@ -387,12 +395,12 @@ function CallRun({
         prefix?.state === "unreported"
           ? "not reported"
           : prefix?.share != null
-            ? `${fmtPct0(prefix.share)} of prompt`
+            ? `${fmtUnit("rate", prefix.share)} of prompt`
             : "",
     },
     { label: "template", value: block?.input.template_name ?? "" },
     { label: "ts", value: block?.timestamp ?? "" },
-  ].filter((c) => c.value !== "" && c.value !== "—");
+  ].filter((c) => c.value !== "" && c.value !== PLACEHOLDER);
 
   return (
     <>
@@ -408,11 +416,11 @@ function CallRun({
       )}
 
       {!block ? (
-        <div className="opt-detail-empty">
-          {loading
-            ? "Loading this round's audit trail…"
-            : "This node has not fired in any cached round yet."}
-        </div>
+        loading ? (
+          <Loading className="opt-detail-empty">Loading this round&apos;s audit trail…</Loading>
+        ) : (
+          <Empty className="opt-detail-empty">This node has not fired in any cached round yet.</Empty>
+        )
       ) : (
         <>
           {variants && variants.length > 0 && <L1Variants variants={variants} />}
@@ -438,7 +446,7 @@ function CallRun({
                     ))}
                   </dl>
                 ) : (
-                  <div className="opt-detail-col-empty">No template fields on this block.</div>
+                  <Empty className="opt-detail-col-empty">No template fields on this block.</Empty>
                 )}
               </div>
             </section>
@@ -452,11 +460,11 @@ function CallRun({
                   {response != null ? (
                     <pre className="opt-detail-pre">{fmtValue(response, { pretty: true })}</pre>
                   ) : inFlight ? (
-                    <div className="opt-detail-col-empty">
+                    <Loading className="opt-detail-col-empty">
                       In flight — response not yet written.
-                    </div>
+                    </Loading>
                   ) : (
-                    <div className="opt-detail-col-empty">No response on this block.</div>
+                    <Empty className="opt-detail-col-empty">No response on this block.</Empty>
                   )}
                 </div>
               </section>

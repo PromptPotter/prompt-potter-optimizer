@@ -76,12 +76,15 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
     key = normalize_model_id(model)
     # The table a bill is computed from, never the snapshot's `pricing` — that is one gateway's.
     rate = lookup_rate(model, provider or None)
+    profile = model_profile(model)
     answer = partial(
         ModelCapability,
         model=model,
         provider=provider,
         input_usd_per_mtok=_per_mtok(rate.input if rate else None),
         output_usd_per_mtok=_per_mtok(rate.output if rate else None),
+        # Measured, so it narrows every arm below: an unknown catalogue entry included.
+        refused_efforts=sorted(profile.refuses_efforts) if profile else [],
     )
 
     override_path = _override_path(workspace)
@@ -119,7 +122,7 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
             reasoning_efforts=None,
             reasoning_note=(
                 f"Not in this workspace's catalogue snapshot — every value the node declares is "
-                f"offered. Correct it in {CAPABILITY_FILE} if that is wrong."
+                f"offered but those measured to fail. Correct it in {CAPABILITY_FILE} if that is wrong."
             ),
             source="unknown",
         )
@@ -142,7 +145,6 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
         else "Catalogue lists no reasoning_effort — which does not mean the rungs are inert here."
     )
 
-    profile = model_profile(model)
     indistinct: list[str] | None = None
     if profile is not None:
         if refused := profile.refuses_efforts & set(offered):

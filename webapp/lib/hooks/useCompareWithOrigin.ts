@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
-import { useCompareSelection, type CompareChannel } from "@/lib/compare-selection";
+import { useCompareSelection, type CompareChannel } from "@/lib/state/compare-selection";
 import { armAt, individualOf, originAt, originOf } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { pathOfAddress } from "@/lib/ids";

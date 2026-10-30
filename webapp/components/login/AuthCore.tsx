@@ -1,4 +1,5 @@
 "use client";
+import { FailureLine } from "@/components/ui";
 
 function GoogleMark() {
   return (
@@ -43,9 +44,7 @@ export function AuthCore({ errorCode }: Props) {
   return (
     <div className="auth-core">
       {errorCode ? (
-        <p className="account-error" role="alert">
-          {AUTH_ERROR_COPY[errorCode] ?? AUTH_ERROR_FALLBACK}
-        </p>
+        <FailureLine failure={{ message: AUTH_ERROR_COPY[errorCode] ?? AUTH_ERROR_FALLBACK }} />
       ) : null}
 
       <p className="auth-note">

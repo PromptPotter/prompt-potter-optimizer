@@ -36,6 +36,7 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.campaign_config import over_the_default
 from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
+from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
@@ -64,7 +65,8 @@ GUARD_STATE_INFO: dict[GuardState, str] = {
     ),
     GuardState.UNCONTROLLED: (
         "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a "
-        "head-to-head could read other campaigns' measurements and take an operator's steer."
+        "head-to-head, or an arm a launch act ran off it, could read other campaigns' "
+        "measurements, take an operator's steer or re-run its own rounds."
     ),
     GuardState.DIFFERS: (
         "Not one quantity: what graded or bounded these headlines differs, so a gap between two "
@@ -174,10 +176,17 @@ class GuardMember(NamedTuple):
     bench_defaults_pin: str
     optimizer_models: tuple[str, ...]
     human_intervened: bool
+    # The line's `LeftComparisonRecord` acts: an arm with any stands outside its head-to-head.
+    left_comparison: tuple[ComparisonExit, ...]
 
 
-def _joins(purpose: Purpose, record: HeadToHeadRecord) -> bool:
-    return isinstance(purpose, Compare) and purpose.arm.head_to_head_id == record.head_to_head_id
+def _joins(member: GuardMember, record: HeadToHeadRecord) -> bool:
+    purpose = member.purpose
+    return (
+        isinstance(purpose, Compare)
+        and purpose.arm.head_to_head_id == record.head_to_head_id
+        and not member.left_comparison
+    )
 
 
 def _apart(values: Sequence[object]) -> bool:
@@ -213,9 +222,7 @@ def pair_guard(
         differs_on.append(GuardDifference.HUMAN_INTERVENED)
     if origin_read_apart:
         differs_on.append(GuardDifference.ORIGIN_READING)
-    controlled = (
-        bool(members) and record is not None and all(_joins(m.purpose, record) for m in members)
-    )
+    controlled = bool(members) and record is not None and all(_joins(m, record) for m in members)
     state = (
         GuardState.DIFFERS
         if differs_on
@@ -226,6 +233,8 @@ def pair_guard(
     sentence = GUARD_STATE_INFO[state]
     if differs_on:
         sentence += f" Differs on: {', '.join(d.value for d in differs_on)}."
+    if left := sorted({act.value for m in members for act in m.left_comparison}):
+        sentence += f" Left its comparison by: {', '.join(left)}."
     return PairGuard(
         state=state,
         sentence=sentence,
@@ -253,6 +262,10 @@ class HeadToHeadRow(StrictModel):
     subject: str
     campaign_id: str
     optimizer: str
+    swapped_in: list[str] = Field(
+        description="The members this arm's optimizer walks and some other arm's does not: what "
+        "it was swapped in for. Empty where every arm walks the members it does."
+    )
     optimizer_models: list[str]
     purpose: Purpose
     guard: PairGuard
@@ -287,7 +300,10 @@ class HeadToHead(StrictModel):
 
     rows: list[HeadToHeadRow]
     covers_selection: bool
-    optimizers_differ: bool
+    swapped: list[str] = Field(
+        description="The members some arm's optimizer walks and another's does not: what the "
+        "arms' optimizers differ by. Empty where every arm walks one roster, whatever its knobs."
+    )
     guard: PairGuard
     headline: BenchColumn
     verdict: bool | None
@@ -317,6 +333,7 @@ class Grader(NamedTuple):
 class _Graded(NamedTuple):
     row: HeadToHeadRow
     member: GuardMember
+    walks: frozenset[str]
     origin: MemberRows | None
     selected: MemberRows | None
     sample_keys: list[str]
@@ -385,7 +402,7 @@ def head_to_head(
     ungraded_arms = [
         g.row.campaign_id
         for g in read
-        if g.row.bench.graded is None and record is not None and _joins(g.row.purpose, record)
+        if g.row.bench.graded is None and record is not None and _joins(g.member, record)
     ]
     verdict_absent = (
         ReadingState.UNDER_TWO_CELLS
@@ -395,6 +412,7 @@ def head_to_head(
         else None
     )
     verdict = None if verdict_absent is not None else guard.state is not GuardState.DIFFERS
+    everywhere = frozenset.intersection(*(g.walks for g in read))
     return HeadToHead(
         rows=[
             g.row.model_copy(
@@ -402,13 +420,14 @@ def head_to_head(
                     "guard": g.row.guard
                     if reference is None or g.row.bench.graded is None
                     else _guard([g, reference], None),
+                    "swapped_in": sorted(g.walks - everywhere),
                     **_ratios(g.row, base),
                 }
             )
             for g in read
         ],
         covers_selection=set(asked) <= {g.row.subject for g in read},
-        optimizers_differ=len({g.row.optimizer for g in read}) > 1,
+        swapped=sorted(frozenset().union(*(g.walks for g in read)) - everywhere),
         guard=guard,
         headline=BENCH_HEADLINE,
         verdict=verdict,
@@ -550,12 +569,15 @@ def _read(
         bench_defaults_pin=campaign.declaration.bench_defaults_pin,
         optimizer_models=tuple(optimizer_models),
         human_intervened=reading.human_intervened,
+        left_comparison=tuple(stores.campaigns.left_comparison(hop)),
     )
     return _Graded(
         row=HeadToHeadRow(
             subject=reading.key,
             campaign_id=reading.campaign_id,
             optimizer=config.optimization.optimizer,
+            # Set once every arm is read: what an arm was swapped in for is a fact of the set.
+            swapped_in=[],
             optimizer_models=optimizer_models,
             purpose=campaign.declaration.purpose,
             guard=pair_guard([member], record, origin_read_apart=False),
@@ -580,6 +602,7 @@ def _read(
             worked_ratio=None,
         ),
         member=member,
+        walks=frozenset(selected.member_nodes),
         origin=origin_pass,
         selected=selected_pass,
         sample_keys=[] if passes is None else passes.origin.sample_keys,

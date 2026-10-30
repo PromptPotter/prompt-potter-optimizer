@@ -2,17 +2,18 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from pydantic import Field
+from pydantic import BaseModel, Field
 from scalar_fastapi import get_scalar_api_reference
 from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
@@ -37,14 +38,16 @@ from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
 from promptpotter.presentation.api.deps import (
+    admit_session,
     auth_is_open,
     build_stores_from_identity,
+    require_site_records_token,
     resolve_identity,
 )
 from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
-from promptpotter.presentation.api.routers.auth import auth_router
+from promptpotter.presentation.api.routers.auth import auth_flow_router, auth_router
 from promptpotter.presentation.api.routers.backends import backends_router
 from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
@@ -134,6 +137,7 @@ app = FastAPI(
 )
 
 
+# Public, beside `/openapi.json`: both serve the contract the repo publishes as `openapi.generated.json`.
 @app.get("/docs", include_in_schema=False)
 async def scalar_docs() -> Response:
     doc: Response = get_scalar_api_reference(
@@ -288,20 +292,47 @@ async def health_check() -> HealthResponse:
     )
 
 
-API_ROUTERS: tuple[APIRouter, ...] = (
-    _health,
-    backends_router,
-    campaigns_router,
-    active_router,
-    hierarchy_router,
-    datasets_router,
-    origins_router,
-    commands_router,
-    auth_router,
-    site_records_router,
+# Each router's gate is applied at its mount, so no route under it can forget one; `None` is public.
+API_ROUTERS: tuple[tuple[APIRouter, Callable[..., object] | None], ...] = (
+    (_health, None),
+    (backends_router, admit_session),
+    (campaigns_router, admit_session),
+    (active_router, admit_session),
+    (hierarchy_router, admit_session),
+    (datasets_router, admit_session),
+    (origins_router, admit_session),
+    (commands_router, admit_session),
+    (auth_flow_router, None),
+    (auth_router, admit_session),
+    (site_records_router, require_site_records_token),
 )
-for _router in API_ROUTERS:
-    app.include_router(_router, prefix="/api/v1")
+for _router, _gate in API_ROUTERS:
+    app.include_router(
+        _router, prefix="/api/v1", dependencies=[] if _gate is None else [Depends(_gate)]
+    )
+
+
+def _open_request_objects() -> set[str]:
+    opened: set[str] = set()
+    for router, _gate in API_ROUTERS:
+        for route in router.routes:
+            # FastAPI sets `dependant` on the instance outside `APIRoute`'s declared attributes.
+            for param in (
+                vars(route)["dependant"].body_params if isinstance(route, APIRoute) else ()
+            ):
+                body = param.field_info.annotation
+                if isinstance(body, type) and issubclass(body, BaseModel):
+                    schema = body.model_json_schema()
+                    opened |= {
+                        node["title"]
+                        for node in (schema, *schema.get("$defs", {}).values())
+                        if "properties" in node and node.get("additionalProperties") is not False
+                    }
+    return opened
+
+
+# A request object refuses an unknown key (`StrictModel`), or a misspelled knob runs as its default.
+assert not (_open := _open_request_objects()), f"request bodies keep unknown keys: {sorted(_open)}"
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():

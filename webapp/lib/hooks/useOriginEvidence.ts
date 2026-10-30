@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
+import { LIVE_EVIDENCE_MS } from "@/lib/cadence";
 import { invalidateReads } from "@/lib/read-cache";
 import { armAt, individualOf, type ObservePoint } from "@/lib/derivations";
 import { useViewedLineage } from "@/lib/lineage";
@@ -9,8 +10,7 @@ import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useCompareWithOrigin } from "./useCompareWithOrigin";
 import { useEvidence, type EvidenceAsk } from "./useEvidence";
-
-const LIVE_EVIDENCE_MS = 30000;
+import type { ReadFailure } from "./useRead";
 
 const WITH_CONFIG: EvidenceAsk = { config: true };
 
@@ -36,12 +36,12 @@ function recorded(subject: SubjectReading | null): boolean {
 
 function changesOf(
   evidence: Evidence | null,
-  error: string | null,
+  failure: ReadFailure | null,
   origin: SubjectReading | null,
   // `undefined`: the point IS the origin.
   shown: SubjectReading | null | undefined,
 ): OriginChanges {
-  if (error) return { status: "failed", message: error };
+  if (failure) return { status: "failed", message: failure.message };
   if (!evidence?.config_keys) return { status: "pending" };
   if (!recorded(origin) || (shown !== undefined && !recorded(shown))) {
     return { status: "unrecorded" };
@@ -57,7 +57,7 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const { dash, isLive } = useCycleStream();
   const placed = point ? armAt(index, viewedPath, point.key) : null;
   const pair = useCompareWithOrigin(viewedPath, placed ? placed.facts.reading.arm.key : null);
-  const { evidence, error } = useEvidence(
+  const { evidence, failure } = useEvidence(
     pair.subjects,
     isLive ? LIVE_EVIDENCE_MS : null,
     WITH_CONFIG,
@@ -88,7 +88,7 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
         ? { status: "pending" }
         : placed !== null && individualOf(index, placed) === null
           ? { status: "unrecorded" }
-          : changesOf(evidence, error, origin, shownKey === undefined ? undefined : shown),
+          : changesOf(evidence, failure, origin, shownKey === undefined ? undefined : shown),
     compare: pair.run,
   };
 }

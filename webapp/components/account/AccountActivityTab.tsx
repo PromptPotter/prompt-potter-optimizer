@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AccountEmpty, AccountFailure, AccountLoading } from "./AccountSection";
+import { Empty, ReadState } from "@/components/ui";
 import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtCompact } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
@@ -57,18 +57,20 @@ export function AccountActivityTab() {
           <option value="api_key">By API Key</option>
         </select>
       </div>
-      {read.status === "failed" ? (
-        <AccountFailure message={read.failure.message} subject="activity" />
-      ) : read.status !== "ready" ? (
-        <AccountLoading subject="activity" />
-      ) : read.data.total_requests === 0 ? (
-        <AccountEmpty title={`No model calls in the ${WINDOW_LABEL[window].toLowerCase()}`}>
-          Spend, requests and tokens appear here as soon as a campaign runs. Widen the window to
-          look further back.
-        </AccountEmpty>
-      ) : (
-        <ActivityCharts data={read.data} />
-      )}
+      <ReadState
+        read={read}
+        subject="activity"
+        empty={(data) =>
+          data.total_requests === 0 ? (
+            <Empty title={`No model calls in the ${WINDOW_LABEL[window].toLowerCase()}`}>
+              Spend, requests and tokens appear here as soon as a campaign runs. Widen the window
+              to look further back.
+            </Empty>
+          ) : null
+        }
+      >
+        {(data) => <ActivityCharts data={data} />}
+      </ReadState>
     </>
   );
 }
@@ -194,7 +196,7 @@ function ActivityBarChart({
             })}
           </svg>
         ) : (
-          <p className="activity-chart-empty">No data in this window</p>
+          <Empty className="activity-chart-empty">No data in this window</Empty>
         )}
       </div>
     </section>

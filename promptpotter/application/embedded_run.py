@@ -15,8 +15,9 @@ from promptpotter.application.jobs.mint import (
     declare,
     fresh_campaign_id,
     mint_framed_cycle,
-    refuse_drifted_resume,
+    resolve_resume,
 )
+from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
@@ -159,6 +161,7 @@ async def run_campaign(
     """Answers the session bound to the cycle the run ended on. Blocks under ``origin_gate: strict``
     until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
     declaration = None
+    resumed: SelectedOptimizer | None = None
     if session.campaign_id:
         if campaign_config is not None or isinstance(purpose, Compare):
             raise PayloadInvalidError(
@@ -169,7 +172,7 @@ async def run_campaign(
         campaign = session.store.campaigns.load_campaign(session.campaign_id)
         if campaign is None:
             raise NotFoundError(f"campaign not found: {session.campaign_id}")
-        refuse_drifted_resume(session, campaign, session.bank.samples)
+        resumed = resolve_resume(session, campaign, session.bank.samples)
         campaign_config = resolve_campaign_config(session.store, campaign, session.hop)
         session = configure_and_apply_pipeline(session, campaign_config)
     else:
@@ -188,7 +191,10 @@ async def run_campaign(
         requested=budget,
         step_rounds=step_rounds,
     ) as (job_id, held):
-        if declaration is not None:
+        if declaration is None:
+            assert resumed is not None, "a session bound to a campaign resumes it"
+            optimizer = resumed
+        else:
             minted = await mint_framed_cycle(
                 session,
                 declaration,
@@ -196,8 +202,14 @@ async def run_campaign(
                 campaign_id=fresh_campaign_id(session),
                 task_text=None,
             )
-            session = minted.session
-            JobRegistry.attach(session.store.jobs_dir).update_target(job_id, hop=session.hop)
+            session, optimizer = minted.session, minted.optimizer
+            land_job(
+                session.store,
+                JobRegistry.attach(session.store.jobs_dir),
+                job_id,
+                session.hop,
+                held.share,
+            )
         return await run_optimization(
             list(session.bank.samples),
             campaign_config,
@@ -210,4 +222,5 @@ async def run_campaign(
             langfuse_session_id=langfuse_session_id,
             budget=held,
             mode=mode,
+            optimizer=optimizer,
         )

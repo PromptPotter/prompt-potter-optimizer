@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { cx } from "@/lib/cx";
-import { phaseWalks } from "@/lib/run-phase";
+import { phaseWalks } from "@/lib/derivations";
 import { useViewedCourse } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";

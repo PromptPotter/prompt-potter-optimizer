@@ -2,7 +2,7 @@ import type { ActivityItem, HierarchyStep, ProducerReading } from "@/lib/api/typ
 import type { RunPhase, RunStatus } from "@/lib/api/types.generated";
 import { fmtDuration } from "@/lib/format";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
-import { STATUS_MARK, phaseParked, phaseWalks, type RunPhaseTone } from "@/lib/run-phase";
+import { STATUS_MARK, phaseParked, phaseWalks, type RunPhaseTone } from "./run-phase";
 
 export interface RayStep {
   // Never a window index, which shifts when a new cycle is discovered.

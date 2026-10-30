@@ -4,6 +4,7 @@ import type { CapabilityMenu, DraftPatch, ModelCapability, NodeConfigParam } fro
 import type { ParamIntent } from "@/lib/api/types";
 import { CommitInput, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
+import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import {
   configRows,
@@ -267,7 +268,7 @@ function axisNote(
 
 function ModelCard({ caps }: { caps: ModelCapability }) {
   const tok = (v: number | null) => (v === null ? null : `${v.toLocaleString()} tok`);
-  const usd = (v: number | null) => (v === null ? "?" : `$${v.toFixed(2)}`);
+  const usd = (v: number | null) => (v === null ? "?" : fmtUnit("usd", v));
   const price =
     caps.input_usd_per_mtok === null && caps.output_usd_per_mtok === null
       ? null
@@ -347,7 +348,7 @@ function ConfigRowView({
       <div className="config-value">
         {!onValue ? (
           <span className={cx("config-static", row.kind === "nested" && "is-structured")}>
-            {row.value || "—"}
+            {row.value || PLACEHOLDER}
           </span>
         ) : row.kind === "nested" ? (
           <CommitInput

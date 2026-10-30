@@ -11,7 +11,7 @@ import {
   roundsCoveringSample,
   sameSampleSet,
   toggleInSet,
-} from "@/lib/sample-set";
+} from "@/lib/derivations";
 import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
 

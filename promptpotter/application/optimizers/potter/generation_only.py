@@ -22,7 +22,7 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
     cb.on_round_entered(round_num)
 
     await settle_owed_outputs(ctx)
-    walk = cycle.optimizer.plan.walk(cycle.population)
+    walk = cycle.optimizer.plan.walk(stands=bool(cycle.population))
     opening = announce_opening(ctx, walk)
     generate = NodeContext(ctx, optimizers.NODE_MEMBERS.get("l1_generate"))
     population = await propose_l1_population(generate)

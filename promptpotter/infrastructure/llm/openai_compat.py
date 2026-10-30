@@ -36,6 +36,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared.answer_text import truncate
+from promptpotter.shared.errors import ProviderUnkeyedError
 
 if TYPE_CHECKING:
     import httpx
@@ -281,6 +282,8 @@ class OpenAICompatibleClient(LLMClientBase):
 
     @functools.cached_property
     def _http(self) -> httpx.AsyncClient:
+        if not self._api_key.strip():
+            raise ProviderUnkeyedError(provider=self._provider, key=self._spec.api_key_attr)
         return wire_client(
             self._spec.base_url,
             {"Authorization": f"Bearer {self._api_key}"},

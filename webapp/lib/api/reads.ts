@@ -14,7 +14,6 @@ import type {
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
   DatasetIndexResponse,
-  DraftListResponse,
   Cell,
   CellsResponse,
   DatasetStorageResponse,
@@ -25,7 +24,7 @@ import type {
   SubtreeEntry,
   HierarchyResponse,
   MachineStatusResponse,
-  OptimizerKnobsResponse,
+  LibraryResponse,
   OptimizerRoster,
   MeResponse,
   Evidence,
@@ -97,10 +96,6 @@ export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
 
 export function originsRead(): ReadDescriptor<OriginListResponse> {
   return once("origins", `${API}/origins`);
-}
-
-export function draftsRead(): ReadDescriptor<DraftListResponse> {
-  return once("drafts", `${API}/drafts`);
 }
 
 export function optimizerPipelineRead(optimizer: string): ReadDescriptor<OptimizerPipelineResponse> {
@@ -252,8 +247,8 @@ export function storageByDatasetRead(): ReadDescriptor<DatasetStorageResponse> {
   return once("storage-by-dataset", `${API}/workspace/storage-by-dataset`);
 }
 
-export function optimizerKnobsRead(optimizer: string): ReadDescriptor<OptimizerKnobsResponse> {
-  return once("optimizer-knobs", `${API}/optimizers/${enc(optimizer)}/knobs`);
+export function libraryRead(): ReadDescriptor<LibraryResponse> {
+  return once("library", `${API}/library`);
 }
 
 export function configMapRead(campaignId: string): ReadDescriptor<ConfigMapResponse> {

@@ -19,9 +19,18 @@ import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
-import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
-import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
-import { Badge, CopyButton, SegmentedControl, Term, type Segment } from "@/components/ui";
+import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
+import { fmtUnit, unitCount, unitPlural } from "@/lib/format";
+import {
+  Badge,
+  CopyButton,
+  Empty,
+  FailureLine,
+  Loading,
+  SegmentedControl,
+  Term,
+  type Segment,
+} from "@/components/ui";
 import { TERMS } from "@/lib/terms";
 import { NodeSurface } from "./NodeSurface";
 import { PanelCellRow } from "./PanelCellRow";
@@ -121,18 +130,32 @@ export function MeasurementRun({
   const oneCandidate = candFilter !== "all";
 
   if (!dash || (!isLiveView && roundLoading)) {
-    return <Region>Loading round {round}…</Region>;
+    return (
+      <Region>
+        <Loading className="samples-empty">Loading round {round}…</Loading>
+      </Region>
+    );
   }
   const unit = dash.measured_unit;
   if (!isLiveView && roundFailure) {
-    return <Region>Could not load round {round}.</Region>;
+    return (
+      <Region>
+        <FailureLine
+          failure={roundFailure}
+          lead={`Could not load round ${round}.`}
+          className="samples-empty"
+        />
+      </Region>
+    );
   }
   if (candidates.length === 0) {
     return (
       <Region>
-        {isLiveView && isLive
-          ? "No candidates running yet this round. They'll appear here as the optimizer scores them."
-          : `Round ${round} carries no candidates.`}
+        <Empty className="samples-empty">
+          {isLiveView && isLive
+            ? "No candidates running yet this round. They'll appear here as the optimizer scores them."
+            : `Round ${round} carries no candidates.`}
+        </Empty>
       </Region>
     );
   }
@@ -195,7 +218,7 @@ export function MeasurementRun({
                     <span className="rsv-tally-score">
                       {[
                         reading.panel.scored != null ? `${reading.panel.scored} scored` : null,
-                        accuracy != null ? fmtPct0(accuracy) : null,
+                        accuracy != null ? fmtUnit("rate", accuracy) : null,
                       ]
                         .filter((part) => part !== null)
                         .join(" · ")}
@@ -304,7 +327,7 @@ const PANEL_RENDER_CAP = 250;
 function Region({ children }: { children: ReactNode }) {
   return (
     <section className="opt-detail-samples" aria-label="What this step scored">
-      <div className="samples-empty">{children}</div>
+      {children}
     </section>
   );
 }
@@ -328,6 +351,6 @@ function segmentFor(c: ArmRow, verdict: CandidateVerdict | undefined): Segment<s
   const accuracy = own?.accuracy?.value;
   return {
     value: arm.key,
-    label: accuracy != null ? `${arm.label} · ${fmtPct0(accuracy)}` : arm.label,
+    label: accuracy != null ? `${arm.label} · ${fmtUnit("rate", accuracy)}` : arm.label,
   };
 }

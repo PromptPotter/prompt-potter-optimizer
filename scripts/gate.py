@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import dataclasses
 import fnmatch
 import json
@@ -15,7 +16,8 @@ import tempfile
 import threading
 import time
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cache
 from importlib import metadata
@@ -94,6 +96,8 @@ class Selection:
     narrowed: tuple[str, ...] | None = None
     # The py lane's probes not kept green, asked in one host process.
     probes: tuple[_Probe, ...] = ()
+    # The commit-msg hook's message: a "commit" check then reads the index, not the working tree.
+    commit_msg: str | None = None
 
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
@@ -198,9 +202,9 @@ def _layering(_: Selection) -> Outcome:
     imports: dict[str, list[str]] = {}
     for path in _sources(REPO / package, "*.py"):
         rel = path.relative_to(REPO).as_posix()
-        reached = tests_owning._imported(
+        reached = tests_owning.imported(
             ast.parse(path.read_text(encoding="utf-8")),
-            tests_owning._module_name(rel),
+            tests_owning.module_name(rel),
             path.name == "__init__.py",
         )
         imports[rel[len(package) :]] = sorted(target[len(package) :] for target in reached)
@@ -497,13 +501,11 @@ _PROBE = re.compile(r'<!--\s*probe:\s*(git grep -cE "([^"]+)" -- (\S+) (==|<=|>=
 # Git's ERE runs in bounded time except through a back-reference.
 _BACKREFERENCE = re.compile(r"\\[1-9]")
 _TRACKER = "docs/specs/code-debt-cleanup.md"
+# Past four counts at once the probes finish no sooner and the job's peak doubles.
+_PROBE_WIDTH = 4
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
-_KNOWN_FALSE: dict[str, str] = {
-    'git grep -cE "\\.theta - " -- promptpotter/*.py == 0': "θ differenced without `comparable_to`",
-    'git grep -cE "<table" -- webapp/components/*.tsx == 0': "hand-rolled `<table>`",
-    'git grep -cE "role=.dialog." -- webapp/components/*.tsx <= 1': "a hand-rolled dialog",
-}
+_KNOWN_FALSE: dict[str, str] = {}
 
 
 @cache
@@ -662,6 +664,12 @@ def _ts_holds(text: str, symbol: str) -> bool:
     return bool(held)
 
 
+@cache
+def _document(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    return tomllib.loads(text) if path.suffix == ".toml" else yaml.safe_load(text)
+
+
 def _symbol_in(path: Path, symbol: str) -> bool:
     """Python: a name the module binds, a method also bare (`ledger.py::iter`). YAML and TOML: a key
     path from the document root. Markdown: a heading. CSS: a selector or a custom property.
@@ -670,11 +678,9 @@ def _symbol_in(path: Path, symbol: str) -> bool:
         names = _defined(path)
         tails = {name.rpartition(".")[2] for name in names}
         return any(fnmatch.fnmatchcase(n, symbol) for n in names) or symbol in tails
+    if path.suffix in (".yaml", ".yml", ".toml"):
+        return _key_path(_document(path), symbol.split("."))
     text = path.read_text(encoding="utf-8")
-    if path.suffix in (".yaml", ".yml"):
-        return _key_path(yaml.safe_load(text), symbol.split("."))
-    if path.suffix == ".toml":
-        return _key_path(tomllib.loads(text), symbol.split("."))
     if path.suffix in (".ts", ".tsx"):
         return _ts_holds(text, symbol)
     word = _word(symbol)
@@ -707,6 +713,47 @@ def _on_disk(*pathspec: str) -> tuple[int, list[str]]:
     if code:
         return code, [out]
     return 0, sorted({p for p in out.split("\0") if p and (REPO / p).is_file()})
+
+
+# A link, then `§ Name`: the name runs to the first punctuation (`0.5` keeps its dot) and may
+# wrap a line; the prose it runs into is cut by the longest-prefix match below.
+_SECTION_CLAIM = re.compile(
+    r"\]\(([^)\s]+)\)\s*§[ \t]*((?:[^.,;()\[\]|·*<\s]|\.(?=\w))(?:[^.,;()\[\]|·*<]|\.(?=\w))*)"
+)
+_HEADING = re.compile(r"(?m)^#{1,6}[ \t]+(.+?)[ \t#]*$")
+
+
+@cache
+def _headings(path: Path) -> tuple[str, ...]:
+    text = _FENCE.sub("", path.read_text("utf-8"))
+    return tuple(h.replace("`", "") for h in _HEADING.findall(text))
+
+
+def _section_claims(rel: str, prose: str) -> list[str]:
+    """Each `[...](doc.md) § Name` names exactly one heading there: the longest prefix of the
+    name ending on a word boundary that matches any heading must match only one."""
+    failures = []
+    here = (REPO / rel).parent
+    for target, name in _SECTION_CLAIM.findall(prose):
+        path = Path(os.path.normpath(here / target.partition("#")[0]))
+        if path.suffix != ".md" or not path.is_relative_to(REPO):
+            continue  # a sibling checkout's page, or a section of no markdown file
+        claim = f"  {rel}: `{target}` § {' '.join(name.split())}"
+        if not path.is_file():
+            failures.append(f"{claim}: no such file")
+            continue
+        headings = _headings(path)
+        words = " ".join(name.replace("`", "").split())
+        cuts = [m.start() for m in re.finditer(r"(?<=\w)(?!\w)", words)]
+        for cut in reversed(cuts):
+            hit = re.compile(rf"(?<![\w-]){re.escape(words[:cut])}(?![\w-]|\.\w)")
+            if matched := [h for h in headings if hit.search(h)]:
+                if len(matched) > 1:
+                    failures.append(f"{claim}: matches {len(matched)} headings: {matched}")
+                break
+        else:
+            failures.append(f"{claim}: matches no heading")
+    return failures
 
 
 def _doc_claims(_: Selection) -> Outcome:
@@ -758,33 +805,39 @@ def _doc_claims(_: Selection) -> Outcome:
         for probe, phrase in _KNOWN_FALSE.items()
         if phrase not in urgent
     ]
-    probed: set[str] = set()
+    probes: list[tuple[str, ...]] = []
     for rel in every_doc:
+        unfenced = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
+        failures += _section_claims(rel, unfenced)
         # A probe quoted in code is an example, never one to run.
-        prose = _BACKTICKED.sub("", _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8")))
+        prose = _BACKTICKED.sub("", unfenced)
         for opened in _PROBE_OPENS.finditer(prose):
             if not (parsed := _PROBE.match(prose, opened.start())):
                 line = prose[opened.start() :].partition("\n")[0]
                 failures.append(f"  {rel}: a probe that does not parse: {line}")
                 continue
-            probe, pattern, where, op, bound = parsed.groups()
-            probed.add(probe)
-            count = _probe_count(pattern, where)
-            if isinstance(count, str):
-                failures.append(f"  {rel}: `{probe}` cannot run: {count}")
-                continue
-            limit = int(bound)
-            holds = {"==": count == limit, "<=": count <= limit, ">=": count >= limit}[op]
-            tracked = _KNOWN_FALSE.get(probe)
-            if holds and tracked:
-                failures.append(
-                    f"  {rel}: `{probe}` now holds, so {tracked!r} is done: the sentence states "
-                    "the invariant again and the entry leaves `_KNOWN_FALSE` and the tracker"
-                )
-            elif not holds and not tracked:
-                failures.append(
-                    f"  {rel}: `{probe}` counts {count}, so the sentence beside it is false"
-                )
+            probes.append((rel, *parsed.groups()))
+    probed = {probe for _, probe, *_ in probes}
+    # Each count waits on two git processes, so the counts are asked side by side, in this job.
+    joined = ("job", metered.job)
+    with ThreadPoolExecutor(_PROBE_WIDTH, initializer=metered.__setattr__, initargs=joined) as pool:
+        counts = list(pool.map(lambda p: _probe_count(p[2], p[3]), probes))
+    for (rel, probe, _pattern, _where, op, bound), count in zip(probes, counts, strict=True):
+        if isinstance(count, str):
+            failures.append(f"  {rel}: `{probe}` cannot run: {count}")
+            continue
+        limit = int(bound)
+        holds = {"==": count == limit, "<=": count <= limit, ">=": count >= limit}[op]
+        tracked = _KNOWN_FALSE.get(probe)
+        if holds and tracked:
+            failures.append(
+                f"  {rel}: `{probe}` now holds, so {tracked!r} is done: the sentence states "
+                "the invariant again and the entry leaves `_KNOWN_FALSE` and the tracker"
+            )
+        elif not holds and not tracked:
+            failures.append(
+                f"  {rel}: `{probe}` counts {count}, so the sentence beside it is false"
+            )
     failures += [
         f"  `_KNOWN_FALSE` names a probe no doc carries: `{p}`"
         for p in _KNOWN_FALSE.keys() - probed
@@ -954,9 +1007,11 @@ _RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
 @dataclass(frozen=True)
 class Check:
     name: str
-    kind: Literal["py", "web", "release"]  # CI's `check` job, its `webapp` job, publish.yml
+    # CI's `check` job, its `webapp` job, publish.yml, the commit-msg hook.
+    kind: Literal["py", "web", "release", "commit"]
     run: Callable[[Selection], Outcome]
-    staged: bool = False  # in the pre-commit fast set
+    # The pre-commit hook's fast set (`--staged`). The pre-push hook runs every check CI runs.
+    on_commit: bool = False
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak (next-build's) is more than any lane beside it leaves free.
@@ -974,7 +1029,7 @@ class Check:
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
 
     def inputs(self) -> tuple[str, ...] | None:
-        if self.kind == "release":  # the answer lives on the network
+        if self.kind in ("release", "commit"):  # the answer lives on the network, or in HEAD
             return None
         reads = self.reads() if callable(self.reads) else self.reads
         return reads or (_ENGINE if self.kind == "py" else _WEBAPP_READS)
@@ -1074,23 +1129,87 @@ def _extras(_: Selection) -> Outcome:
     return 0, ""
 
 
+# The ledger's wire shape, kept fresh by the `specs` check: what `restamp` prunes a line against.
+_EVENTS_SPEC = "docs/specs/events-asyncapi.generated.json"
+
+
+def _ledger_shape(text: str) -> dict[str, bool]:
+    """Every key path a ledger line may carry → whether its reader requires it, walked from
+    `CycleRecord`'s discriminator; a list's or a mapping's members sit at their holder's path."""
+    schemas = json.loads(text)["components"]["schemas"]
+    shape: dict[str, bool] = {}
+
+    def walk(node: dict[str, Any], path: str, seen: frozenset[str]) -> None:
+        if ref := node.get("$ref"):
+            name = ref.rpartition("/")[2]
+            if name not in seen:
+                walk(schemas[name], path, seen | {name})
+            return
+        for branch in (*node.get("anyOf", ()), *node.get("oneOf", ()), *node.get("allOf", ())):
+            walk(branch, path, seen)
+        required = set(node.get("required", ()))
+        for key, sub in node.get("properties", {}).items():
+            shape[path + key] = shape.get(path + key, False) or key in required
+            walk(sub, f"{path}{key}.", seen)
+        for held in (node.get("items"), node.get("additionalProperties")):
+            if isinstance(held, dict):
+                walk(held, path, seen)
+
+    for kind, ref in schemas["CycleRecord"]["discriminator"]["mapping"].items():
+        shape[kind] = True
+        walk({"$ref": ref}, f"{kind}.", frozenset())
+    return shape
+
+
+def _ledger_fields(sel: Selection) -> Outcome:
+    """A commit that drops a ledger key, or requires one an older line lacks, leaves every
+    campaign written before it unreadable until `restamp` runs: its body says so."""
+    code, before = git("show", f"HEAD:{_EVENTS_SPEC}")
+    if code:
+        return code, before
+    if sel.commit_msg is None:
+        after = (REPO / _EVENTS_SPEC).read_text(encoding="utf-8")
+    elif (shown := git("show", f":{_EVENTS_SPEC}"))[0]:
+        return shown
+    else:
+        after = shown[1]
+    was, now = _ledger_shape(before), _ledger_shape(after)
+    moved = [f"  dropped {key}" for key in sorted(was.keys() - now.keys())] + [
+        f"  newly required {key}"
+        for key, required in sorted(now.items())
+        # Under a key the older line lacks, nothing is newly missing.
+        if required and not was.get(key) and key.rpartition(".")[0] in was
+    ]
+    body = "\n".join(
+        line for line in (sel.commit_msg or "").splitlines() if not line.startswith("#")
+    )
+    if not moved or "restamp" in body:
+        return 0, ""
+    return 1, (
+        "a ledger record's shape moved, so a campaign on disk written before it is unreadable "
+        "until `python -m promptpotter restamp --apply` prunes a dropped key (a newly required "
+        "one it cannot: its report names the campaign to delete). Name `restamp` in the commit "
+        "body:\n" + "\n".join(moved)
+    )
+
+
 CHECKS: tuple[Check, ...] = (
-    Check("ruff-format", "py", _ruff("format", "--check"), staged=True, reads=_RUFF_READS),
-    Check("ruff-check", "py", _ruff("check"), staged=True, reads=_RUFF_READS),
+    Check("ruff-format", "py", _ruff("format", "--check"), on_commit=True, reads=_RUFF_READS),
+    Check("ruff-check", "py", _ruff("check"), on_commit=True, reads=_RUFF_READS),
     Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
     Check("mypy", "py", _mypy),
     Check(
         "extras",
         "py",
         _extras,
-        staged=True,
+        on_commit=True,
         reads=("pyproject.toml", ".github/workflows/", "deploy-linux/", *_GATE),
     ),
     Check(
         "layering",
         "py",
         _layering,
-        staged=True,
+        on_commit=True,
         reads=("promptpotter/", "scripts/tests_owning.py", *_GATE),
     ),
     Check(
@@ -1105,13 +1224,13 @@ CHECKS: tuple[Check, ...] = (
         _Probe(_HANDLER_PROBE, judge=_dangling_handlers),
         reads=_ENGINE_RUNTIME,
     ),
-    Check("instruction-files", "py", _instruction_files, staged=True, reads=_TREE),
-    Check("doc-claims", "py", _doc_claims, staged=True, reads=_TREE),
+    Check("instruction-files", "py", _instruction_files, on_commit=True, reads=_TREE),
+    Check("doc-claims", "py", _doc_claims, on_commit=True, reads=_TREE),
     Check(
         "surface-ledger",
         "py",
         lambda _: run([sys.executable, "scripts/complexity_ledger.py", "--check"], REPO),
-        staged=True,
+        on_commit=True,
         reads=(
             "promptpotter/",
             "tests/",
@@ -1122,12 +1241,12 @@ CHECKS: tuple[Check, ...] = (
         ),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
-    Check("undiffable", "py", _undiffable, staged=True, reads=_TREE),
+    Check("undiffable", "py", _undiffable, on_commit=True, reads=_TREE),
     Check(
         "ts-types",
         "py",
         _Probe("scripts/build_ts_types.py", ("webapp/lib/api/types.generated.ts",)),
-        staged=True,
+        on_commit=True,
         reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
@@ -1137,7 +1256,7 @@ CHECKS: tuple[Check, ...] = (
         _Probe(
             "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
         ),
-        staged=True,
+        on_commit=True,
         reads=(
             "scripts/build_vendor_marks.py",
             "webapp/assets/vendor-marks/",
@@ -1156,7 +1275,7 @@ CHECKS: tuple[Check, ...] = (
                 "promptpotter/assets/checkin/resolved_schemas.json",
             ),
         ),
-        staged=True,
+        on_commit=True,
     ),
     Check(
         "specs",
@@ -1165,7 +1284,7 @@ CHECKS: tuple[Check, ...] = (
             "scripts/build_specs.py",
             ("docs/specs/openapi.generated.json", "docs/specs/events-asyncapi.generated.json"),
         ),
-        staged=True,
+        on_commit=True,
     ),
     # Last in the host: it imports every module, which no regenerator before it may see.
     Check(
@@ -1181,7 +1300,8 @@ CHECKS: tuple[Check, ...] = (
         reads=_suite_reads,
         narrow=_owning_tests,
     ),
-    # The script keeps its own green under this name and these inputs, so a run by hand answers for it.
+    # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
+    # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
     Check(
         OFFLINE_RUN,
         "py",
@@ -1193,8 +1313,8 @@ CHECKS: tuple[Check, ...] = (
         landing=True,
         reads=OFFLINE_RUN_READS,
     ),
-    Check("lockfile", "web", _lockfile, staged=True),
-    Check("eslint", "web", _eslint, staged=True, narrow=_web_modules),
+    Check("lockfile", "web", _lockfile, on_commit=True),
+    Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
     Check(
         "next-build",
@@ -1209,7 +1329,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored
     # `next-env.d.ts` that imports them; the exclude in `tsconfig.json` keeps out `.next/dev`.
-    Check("tsc", "web", _tsc, staged=True),
+    Check("tsc", "web", _tsc, on_commit=True),
     Check(
         "playwright",
         "web",
@@ -1223,6 +1343,7 @@ CHECKS: tuple[Check, ...] = (
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
+    Check("ledger-fields", "commit", _ledger_fields),
 )
 # A lane runs in this order, so what a check reads is built before it.
 assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)
@@ -1292,6 +1413,59 @@ def _lanes(
         thread.join()
     ran.append([_execute(check, sel, store) for check in checks if check.alone])
     return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
+
+
+# What a pushed tip's checkout borrows from the pushing tree: its env, and the store its greens key in.
+_BORROWED = (".venv", "webapp/node_modules", ".gate_cache")
+
+
+def _link(link: Path, target: Path) -> None:
+    if sys.platform == "win32":  # a junction: a directory symlink needs a privilege
+        code, out = run(["cmd", "/c", "mklink", "/J", str(link), str(target)], REPO)
+        if code:
+            raise RuntimeError(f"mklink /J {link}: {out}")
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@contextlib.contextmanager
+def _tip_checkout(tip: str) -> Iterator[Path]:
+    tree = Path(tempfile.gettempdir()) / f"pp-push-{tip[:12]}-{os.getpid()}"
+    code, out = git("worktree", "add", "--detach", str(tree), tip)
+    if code:
+        raise RuntimeError(f"git worktree add {tip}: {out}")
+    (REPO / ".gate_cache").mkdir(exist_ok=True)
+    links = [tree / rel for rel in _BORROWED if (REPO / rel).is_dir()]
+    try:
+        for link in links:
+            _link(link, (REPO / link.relative_to(tree)).resolve())
+        yield tree
+    finally:
+        # Each link goes before the tree, so no delete walks into what it points at.
+        for link in links:
+            if link.is_symlink() or link.is_junction():
+                os.unlink(link)
+        code, out = git("worktree", "remove", "-f", "-f", str(tree))
+        if code:
+            raise RuntimeError(f"git worktree remove {tree}: {out}")
+
+
+def _prove_tips(refs: str, names: Sequence[str]) -> int:
+    # *refs* is git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` a line.
+    # An all-zero local sha is a branch deletion: no tip to prove.
+    tips = sorted({sha for line in refs.splitlines() if set(sha := line.split()[1]) != {"0"}})
+    failed = 0
+    for tip in tips:
+        began = time.monotonic()
+        with _tip_checkout(tip) as tree:
+            argv = [sys.executable, "scripts/gate.py", "--only", ",".join(names)]
+            rc = subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL).returncode
+        verdict = "FAIL" if rc else "green"
+        print(
+            f"gate[push]: {tip[:12]} {verdict} in its own checkout, {time.monotonic() - began:.1f}s"
+        )
+        failed += bool(rc)
+    return 1 if failed else 0
 
 
 # `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
@@ -1388,6 +1562,11 @@ def main() -> int:
         "--staged", action="store_true", help="the pre-commit fast set, scoped to staged files"
     )
     scope.add_argument(
+        "--push",
+        action="store_true",
+        help="the pre-push hook: every CI check, in a clean checkout of each tip git names on stdin",
+    )
+    scope.add_argument(
         "--changed",
         action="store_true",
         help="while iterating: the checks that read a file changed since HEAD, and inside "
@@ -1401,20 +1580,30 @@ def main() -> int:
         help="checks by name, the flag repeated or the names comma-separated",
     )
     parser.add_argument(
-        "--commit-msg", metavar="FILE", help="the commit-msg hook: a subject opening on ASCII"
+        "--commit-msg",
+        metavar="FILE",
+        help="the commit-msg hook: a subject opening on ASCII, and the `commit` checks",
     )
     args = parser.parse_args()
     if args.commit_msg:
-        subject = Path(args.commit_msg).read_bytes().split(b"\n", 1)[0]
-        if subject[:1].isascii():
-            return 0
-        # A BOM (`EF BB BF`, PowerShell's `Out-File`) hides in front of the type `git log` greps.
-        print(f"gate: the commit subject opens on a non-ASCII byte: {subject!r}")
-        return 1
+        message = Path(args.commit_msg).read_bytes()
+        subject = message.split(b"\n", 1)[0]
+        if not subject[:1].isascii():
+            # A BOM (`EF BB BF`, PowerShell's `Out-File`) hides in front of the type `git log` greps.
+            print(f"gate: the commit subject opens on a non-ASCII byte: {subject!r}")
+            return 1
+        sel = Selection(True, (), (), commit_msg=message.decode("utf-8", errors="replace"))
+        refused = 0
+        for check in (c for c in CHECKS if c.kind == "commit"):
+            rc, out = check.run(sel)
+            if rc:
+                refused += 1
+                print(f"gate: {check.name}: {out}")
+        return 1 if refused else 0
 
     selected = (("py", args.py), ("web", args.web), ("release", args.release))
     kinds = {k for k, on in selected if on} or {"py", "web"}
-    checks = [c for c in CHECKS if c.kind in kinds and (c.staged or not args.staged)]
+    checks = [c for c in CHECKS if c.kind in kinds and (c.on_commit or not args.staged)]
     if args.only:
         asked = {name for value in args.only for name in value.split(",") if name}
         if unknown := sorted(asked - {c.name for c in CHECKS}):
@@ -1441,6 +1630,9 @@ def main() -> int:
                 check = named[check.after]
                 checks.append(check)
     checks.sort(key=CHECKS.index)
+    if args.push:
+        # Before any re-exec: each checkout pins its own, and a path pinned here would name this tree.
+        return _prove_tips(sys.stdin.read(), [c.name for c in checks])
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)

@@ -16,8 +16,8 @@ The pure layer: no I/O, no async; `scripts/gate.py::_LAYERING` refuses an import
 - **`ForkSpec.keep_rounds` names the act**: unset is `operator_steered` (an offshoot from the origin), set
   is `operator_rewind` (rounds `0..N-1` lifted). `mint_fork` is its one writer.
   <!-- probe: git grep -cE "ForkSpec\(" -- promptpotter/*.py <= 2 -->
-- **`AbilityReading.comparable_to` is the only test for differencing two θ**
-  <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py == 0 --> — a cell the `DeltaRuler` does not
+- **`AbilityReading.comparable_to` is the only test for differencing two θ**, and
+  `AbilityReading.minus` the one difference <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py <= 1 --> — a cell the `DeltaRuler` does not
   carry enters no θ (`ThetaCaveat.UNMEASURED_DELTA`).
 - **`CycleHop` is the `(campaign, cycle)` address**: an object holding both exposes it as a property
   (`Campaign.root_hop`, `Session.hop`, `Job.hop`), never re-paired from two `str`s at a call site;
@@ -53,4 +53,5 @@ migration**, fatal one way or the other; which way is correct depends on the pay
   a retired key is pruned by `application/maintenance/restamp.py::_prune_record`.
 
 A renamed or newly required field cannot be pruned: `application/maintenance/restamp.py::check_readable`
-names each refused cycle's campaign `delete`.
+names each refused cycle's campaign `delete`. **A commit moving a ledger key names `restamp` in its
+body** — the commit-msg hook's `scripts/gate.py::_ledger_fields` refuses it otherwise.

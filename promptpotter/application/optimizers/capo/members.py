@@ -21,6 +21,7 @@ from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.descriptors import prompt_chars
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import rewrite, rewritten
+from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
 from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
@@ -52,6 +53,7 @@ if TYPE_CHECKING:
         Panel,
         PromptArity,
         Proposals,
+        Proposing,
         Selection,
     )
     from promptpotter.application.scoring.query_loop import Walk
@@ -94,7 +96,7 @@ class FewShot(nodes.Proposer):
     name: ClassVar[str] = "few_shot"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[Proposing] = "edits"
     variation_mode: ClassVar[VariationMode] = "deterministic"
     knobs: ClassVar[type[StrictModel]] = nodes.ShotKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Replay, Target})
@@ -163,14 +165,9 @@ class Blocks(nodes.Sampler):
     knobs: ClassVar[type[StrictModel]] = BlocksKnobs
     size_knob: ClassVar[str | None] = None
 
-    def round_cells(self, knobs: BlocksKnobs, search: int) -> int:
-        return min(knobs.max_blocks, search // knobs.block_size) * knobs.block_size
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        # Round 1's origin is no member: its reading is one block beside the arms'.
-        block = selected.knobs_of(self.name, BlocksKnobs).block_size
-        panel = selected.round_cells(search)
-        return selected.arms_per_round * panel + block if panel else 0
+    def drawn(self, knobs: BlocksKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+        n_blocks = min(knobs.max_blocks, search // knobs.block_size)
+        return nodes.PanelSize(cells=n_blocks * knobs.block_size, block_size=knobs.block_size)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
@@ -226,7 +223,6 @@ def _rank_survivors(
     survivors: Sequence[ArmKey],
     rows: Mapping[ArmKey, CellSheet],
     *,
-    size: int,
     objective: CapoObjective,
 ) -> list[ArmKey]:
     readings = {key: _cell_objectives(rows[key].cells, objective) for key in survivors}
@@ -235,7 +231,7 @@ def _rank_survivors(
     def mean(key: ArmKey) -> float:
         return sum(readings[key][s] for s in shared) / len(shared) if shared else 0.0
 
-    return sorted(survivors, key=mean, reverse=True)[:size]
+    return sorted(survivors, key=mean, reverse=True)
 
 
 def _readings(
@@ -437,9 +433,7 @@ class PairedT(nodes.Eliminator):
     # Cut once μ others are significantly better: it can no longer be among the μ kept.
     stop_disqualifies: ClassVar[bool] = True
 
-    @property
-    def consults(self) -> frozenset[type]:
-        return frozenset({PopulationSelector})
+    consults: ClassVar[frozenset[type]] = frozenset({Survival})
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -457,7 +451,7 @@ class PairedT(nodes.Eliminator):
     def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> PairedTRace:
         return PairedTRace(
             ctx,
-            survivors=ctx.knobs(PopulationKnobs).size,
+            survivors=ctx.knobs(SurvivalKnobs).size,
             block_size=panel.block_size,
             n_cells=len(panel.order),
             objective=ctx.slice(CapoObjective),
@@ -487,7 +481,7 @@ class CapoInit(nodes.Proposer):
     name: ClassVar[str] = "capo_init"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = CapoInitKnobs
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
@@ -550,52 +544,16 @@ class CapoInit(nodes.Proposer):
         return initial
 
 
-class MatingKnobs(StrictModel):
-    offspring: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        ge=1,
-        description="c, the offspring one round makes — each from two parents drawn at random "
-        "from the population, never by score.",
-    )
-
-
-class Mating(nodes.Proposer):
-    """Each child is its first parent's copy naming both; the recombining nodes after it write it."""
-
-    name: ClassVar[str] = "mating"
-    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
-    opens: ClassVar[bool] = True
-    variation_mode: ClassVar[VariationMode] = "deterministic"
-    knobs: ClassVar[type[StrictModel]] = MatingKnobs
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay})
-
-    def arms(self, selected: SelectedOptimizer) -> int:
-        return selected.knobs_of(self.name, MatingKnobs).offspring
-
-    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
-        carried = list(ctx.read(Lineage).population)
-        if len(carried) < 2:
-            raise ValueError(f"a mating needs two parents; the population holds {len(carried)}")
-        rng = ctx.read(Replay).rng()
-        pairs = [rng.sample(carried, 2) for _ in range(ctx.knobs(MatingKnobs).offspring)]
-        children = ctx.read(Children)
-        return nodes.Proposals(
-            [
-                children.child([a, b], changes_description=f"crossover {a.id[:6]}+{b.id[:6]}")
-                for a, b in pairs
-            ]
-        )
-
-
 def _mated(ctx: NodeContext, proposals: Proposals) -> list[list[OptSearchPoint]]:
-    carried = {individual.id: individual for individual in ctx.read(Lineage).population}
-    return [[carried[pid] for pid in p.individual.lineage.parent_ids] for p in proposals.proposals]
+    lineage = ctx.read(Lineage)
+    return [lineage.parents(p.individual) for p in proposals.proposals]
 
 
 class CapoCrossover(nodes.Proposer):
     name: ClassVar[str] = "capo_crossover"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[Proposing] = "edits"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
@@ -617,7 +575,7 @@ class ShotCrossover(nodes.Proposer):
     name: ClassVar[str] = "shot_crossover"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[Proposing] = "edits"
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay, Target})
 
@@ -646,7 +604,7 @@ class CapoMutate(nodes.Proposer):
     name: ClassVar[str] = "capo_mutate"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[Proposing] = "edits"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
@@ -669,16 +627,13 @@ class PopulationRejoin(nodes.Proposer):
 
     name: ClassVar[str] = "population_rejoin"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[Proposing] = "adds"
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage})
-
-    @property
-    def consults(self) -> frozenset[type]:
-        return frozenset({PopulationSelector})
+    consults: ClassVar[frozenset[type]] = frozenset({Survival})
 
     def arms(self, selected: SelectedOptimizer) -> int:
-        return selected.reached_knobs(self, PopulationKnobs).size
+        return selected.reached_knobs(self, SurvivalKnobs).size
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         return nodes.Proposals(
@@ -689,15 +644,6 @@ class PopulationRejoin(nodes.Proposer):
         )
 
 
-class PopulationKnobs(StrictModel):
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = Field(
-        ge=2,
-        description="μ, the individuals CAPO carries into the next round: the race's survivors, "
-        "best first, cut to this many. The paired-t race reads it too: an arm is cut once μ "
-        "others are significantly better, since it can no longer be among them.",
-    )
-
-
 def _replay_population_kept(
     ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> list[ArmKey]:
@@ -705,15 +651,15 @@ def _replay_population_kept(
     return _rank_survivors(
         survivors,
         {key: ctx.round_data.rows(key) for key in survivors},
-        size=int(inputs_ref["size"]),
         objective=_recorded_objective(inputs_ref),
     )
 
 
 class PopulationSelector(nodes.Selector):
+    """Ranks the race's survivors on CAPO's objective; `survival` keeps the top μ."""
+
     name: ClassVar[str] = "population"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    knobs: ClassVar[type[StrictModel]] = PopulationKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_on: ClassVar[DisplayMetric] = "accuracy"
@@ -721,23 +667,6 @@ class PopulationSelector(nodes.Selector):
     replayers: ClassVar[Mapping[str, Replayer]] = {
         CapoCheckpointKind.POPULATION_KEPT: _replay_population_kept
     }
-
-    def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
-    ) -> list[OptimizerFact]:
-        if round_result.round == 0:
-            return []
-        kept = len(round_result.closed_state.population)
-        size = selected.knobs_of(self.name, PopulationKnobs).size
-        return [
-            OptimizerFact(
-                key="population",
-                label="Population",
-                text=f"{kept} kept (μ {size})",
-                value=kept,
-                kind="stat",
-            )
-        ]
 
     def parent_cells(
         self,
@@ -749,30 +678,31 @@ class PopulationSelector(nodes.Selector):
         walked = {cell.key for cell in rows.get(ArmKey(ctx.read(Lineage).parent.id), NO_CELLS)}
         return [s for s in panel.cells if s.key in walked] or panel.cells[: panel.block_size]
 
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        # Round 1's origin is no arm and reads block one; later the incumbent races as an arm.
+        return panel.block_size
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
-        size = ctx.knobs(PopulationKnobs).size
         survivors = measured.electable
         objective = ctx.slice(CapoObjective)
         rows = {key: measured.rows[key] for key in survivors}
-        kept = _rank_survivors(survivors, rows, size=size, objective=objective)
+        ranked = _rank_survivors(survivors, rows, objective=objective)
         ctx.read(Replay).decide(
             CapoCheckpointKind.POPULATION_KEPT,
             {
                 "survivors": survivors,
                 "round_num": ctx.round_num,
-                "size": size,
                 "length_penalty": objective.length_penalty,
                 "length_norm": objective.length_norm,
             },
-            kept,
+            ranked,
         )
-        best = kept[0] if kept else None
+        best = ranked[0] if ranked else None
         lineage = ctx.read(Lineage)
         carried = lineage.population
         verdict = (
-            f"kept {len(kept)} of {len(survivors)} surviving arms (μ {size}) by mean objective "
-            f"(length penalty {objective.length_penalty}) on their shared cells; "
-            f"best {measured.labels[best]}"
+            f"ranked {len(ranked)} surviving arms by mean objective (length penalty "
+            f"{objective.length_penalty}) on their shared cells; best {measured.labels[best]}"
             if best is not None
             else f"no arm survived the race; the population of {len(carried)} stands"
         )
@@ -781,7 +711,7 @@ class PopulationSelector(nodes.Selector):
             # The race's best survivor, which the incumbent may be: it races as an arm.
             leading=best,
             verdict_reason=verdict,
-            population=[measured.arms[key].individual for key in kept] if kept else list(carried),
+            ranked=[measured.arms[key].individual for key in ranked] if ranked else carried,
         )
 
 
@@ -790,7 +720,6 @@ MEMBERS = (
     Blocks(),
     PairedT(),
     CapoInit(),
-    Mating(),
     CapoCrossover(),
     ShotCrossover(),
     CapoMutate(),

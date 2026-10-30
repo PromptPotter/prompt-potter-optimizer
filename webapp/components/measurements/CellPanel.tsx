@@ -3,11 +3,11 @@ import { useState } from "react";
 import { cellRead, type Cell, type CellSpan } from "@/lib/api";
 import { RATE_PRICED_LABEL } from "@/lib/api/types.generated";
 import type { CellAddress } from "@/lib/address";
-import { fmtPct0 } from "@/lib/format";
+import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { fitnessStyle } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
-import { CopyButton, ErrorNote, Loading, SegmentedControl, SidePanel } from "@/components/ui";
+import { CopyButton, ReadState, SegmentedControl, SidePanel } from "@/components/ui";
 
 type SpanTab = "input" | "output" | "details" | "tokens";
 
@@ -19,12 +19,8 @@ const SPAN_TABS = [
 ] as const;
 
 function show(v: unknown): string {
-  if (v == null) return "—";
+  if (v == null) return PLACEHOLDER;
   return typeof v === "string" ? v : JSON.stringify(v, null, 2);
-}
-
-function secs(v: number | null | undefined): string {
-  return v == null ? "—" : `${v.toFixed(v < 10 ? 2 : 1)} s`;
 }
 
 function SpanBody({ span, tab }: { span: CellSpan; tab: SpanTab }) {
@@ -40,11 +36,11 @@ function SpanBody({ span, tab }: { span: CellSpan; tab: SpanTab }) {
     return (
       <dl className="cell-facts">
         <dt>Model</dt>
-        <dd>{span.model ?? "—"}</dd>
+        <dd>{span.model ?? PLACEHOLDER}</dd>
         <dt>Provider</dt>
-        <dd>{span.provider ?? "—"}</dd>
+        <dd>{span.provider ?? PLACEHOLDER}</dd>
         <dt>Seconds</dt>
-        <dd>{secs(span.seconds)}</dd>
+        <dd>{fmtUnit("seconds", span.seconds)}</dd>
         <dt>Config</dt>
         <dd>
           <pre className="cell-pre">{show(span.config)}</pre>
@@ -54,17 +50,17 @@ function SpanBody({ span, tab }: { span: CellSpan; tab: SpanTab }) {
   return (
     <dl className="cell-facts">
       <dt>Input tokens</dt>
-      <dd>{span.input_tokens ?? "—"}</dd>
+      <dd>{span.input_tokens ?? PLACEHOLDER}</dd>
       <dt>Output tokens</dt>
-      <dd>{span.output_tokens ?? "—"}</dd>
+      <dd>{span.output_tokens ?? PLACEHOLDER}</dd>
       <dt>Provider cache</dt>
-      <dd>{span.cache_read_tokens ?? "—"}</dd>
+      <dd>{span.cache_read_tokens ?? PLACEHOLDER}</dd>
       <dt>Billed</dt>
-      <dd>{span.cost_usd == null ? "—" : `$${span.cost_usd.toFixed(5)}`}</dd>
+      <dd>{fmtUnit("usd", span.cost_usd)}</dd>
       {span.rate_priced_usd != null && (
         <>
           <dt>{RATE_PRICED_LABEL}</dt>
-          <dd>${span.rate_priced_usd.toFixed(5)}</dd>
+          <dd>{fmtUnit("usd", span.rate_priced_usd)}</dd>
         </>
       )}
       {span.estimated && (
@@ -87,24 +83,24 @@ function CellBody({ cell }: { cell: Cell }) {
         <span className={cx("cell-status", `is-${cell.status.toLowerCase()}`)}>{cell.status}</span>
         {cell.fitness != null && (
           <span className="cell-fit" style={fitnessStyle(cell.fitness)}>
-            {fmtPct0(cell.fitness)}
+            {fmtUnit("rate", cell.fitness)}
           </span>
         )}
-        <span className="cell-dim">{secs(cell.seconds)}</span>
+        <span className="cell-dim">{fmtUnit("seconds", cell.seconds)}</span>
         <span className="cell-dim">{cell.role}</span>
         <CopyButton data={cell} title="Copy this cell as JSON" />
       </div>
       <div className="cell-answer">
         <div>
           <div className="cell-label">Predicted</div>
-          <pre className="cell-pre">{cell.predicted || "—"}</pre>
+          <pre className="cell-pre">{cell.predicted || PLACEHOLDER}</pre>
         </div>
         <div>
           <div className="cell-label">Ground truth</div>
           <pre className="cell-pre">{cell.ground_truth_text}</pre>
         </div>
       </div>
-      {cell.error && <ErrorNote>{cell.error}</ErrorNote>}
+      {cell.error && <p className="note-warn">{cell.error}</p>}
       <details className="cell-query">
         <summary className="cell-label">Query</summary>
         <pre className="cell-pre">{cell.query}</pre>
@@ -122,7 +118,7 @@ function CellBody({ cell }: { cell: Cell }) {
                 >
                   <span className="cell-span-name">{sp.node}</span>
                   <span className="cell-dim">
-                    {sp.model ?? "no model"} · {secs(sp.seconds)}
+                    {sp.model ?? "no model"} · {fmtUnit("seconds", sp.seconds)}
                   </span>
                 </button>
               </li>
@@ -169,14 +165,10 @@ export function CellPanel({
       hasNext={hasNext}
       onStep={onStep}
     >
-      {read.status === "ready" ? (
-        // Keyed by the address, so a J/K step starts on the first span again.
-        <CellBody key={cell.answer} cell={read.data} />
-      ) : read.status === "failed" ? (
-        <ErrorNote>{read.failure.message}</ErrorNote>
-      ) : (
-        <Loading />
-      )}
+      <ReadState read={read} subject="this sample">
+        {/* Keyed by the address, so a J/K step starts on the first span again. */}
+        {(data) => <CellBody key={cell.answer} cell={data} />}
+      </ReadState>
     </SidePanel>
   );
 }

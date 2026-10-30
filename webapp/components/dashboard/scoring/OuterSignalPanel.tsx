@@ -4,10 +4,9 @@ import { memo, useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import type { ArmReading, RoundAdvance, ServedRound } from "@/lib/api/types";
 import { ROUND_ADVANCE_LABELS } from "@/lib/api/types.generated";
-import { CardFrame, Badge } from "@/components/ui";
-import { liftOf } from "@/lib/derivations";
-import type { LiftSide } from "@/lib/fitness";
-import { fmtSigned } from "@/lib/format";
+import { CardFrame, Badge, Empty } from "@/components/ui";
+import { liftOf, type LiftSide } from "@/lib/derivations";
+import { fmtInterval, fmtLogits, fmtUnit } from "@/lib/format";
 
 const AXIS_W = 220;
 const ROW_H = 18;
@@ -68,7 +67,7 @@ const PRECISION_ADVICE: Record<NonNullable<ServedRound["panel_precision_verdict"
 
 function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
   const stroke = STROKE[d.side];
-  const value = `${fmtSigned(d.lift)} [${fmtSigned(d.lo)}, ${fmtSigned(d.hi)}]`;
+  const value = `${fmtUnit("delta", d.lift)} ${fmtInterval("delta", d.lo, d.hi)}`;
   return (
     <div className="ov-row">
       <span className="ov-cell-label" title={`${d.label} — round ${d.round}`}>
@@ -124,19 +123,19 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   return (
     <CardFrame title="Outer signal" headingTag="h2">
       {!latest ? (
-        <p className="note-empty">
+        <Empty>
           {rounds.some((r) => r.round > 0)
             ? "No round has two cells both its leading arm and the origin measured, so no interval can be drawn. A one-cell panel never will — the reading is honest, not missing."
             : "Select a pp-self cycle with a completed round to see whether its panel resolves anything yet."}
-        </p>
+        </Empty>
       ) : (
         <>
           <p className="note-lede">
             <Badge tone={verdictWord(latest).tone}>
               {verdictWord(latest).word}
             </Badge>{" "}
-            Round {latest.round}&rsquo;s leading arm lifts <strong>{fmtSigned(latest.lift)}</strong> [
-            {fmtSigned(latest.lo)}, {fmtSigned(latest.hi)}] over its parent, on the cells both measured.
+            Round {latest.round}&rsquo;s leading arm lifts <strong>{fmtUnit("delta", latest.lift)}</strong>{" "}
+            {fmtInterval("delta", latest.lo, latest.hi)} over its parent, on the cells both measured.
             {latest.side === "spans"
               ? " The interval spans 0 — this panel cannot yet tell that arm from its parent, and the point estimate above should not be read as a win."
               : ""}
@@ -148,8 +147,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
           </div>
           {precision ? (
             <p className="note-lede">
-              Each cell was measured to ±{precision.estimation_sd.toFixed(3)} logits; the cells
-              landed ±{precision.observed_sd.toFixed(3)} apart across {precision.n_cells}.
+              Each cell was measured to ±{fmtLogits(precision.estimation_sd)}; the cells landed ±
+              {fmtLogits(precision.observed_sd)} apart across {precision.n_cells}.
               {advice ? ` ${PRECISION_ADVICE[advice]}` : ""}
             </p>
           ) : null}

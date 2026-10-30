@@ -2,20 +2,19 @@
 // A NOTICE, never a gate: what the spend bought stays readable.
 
 import { useState } from "react";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/state/auth";
 import { Dialog } from "@/components/ui";
 import { quotaRead } from "@/lib/api";
 import { fmtUsd } from "@/lib/format";
+import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-
-const DISMISSED = "promptpotter.allowance-exhausted.dismissed";
 
 export function AllowanceExhausted() {
   const { status, me } = useAuth();
   const quota = readyData(useRead(quotaRead(), { auth: true }));
   const [dismissed, setDismissed] = useState(() => {
     try {
-      return window.localStorage.getItem(DISMISSED) === "1";
+      return window.localStorage.getItem(STORAGE_KEYS.allowanceExhaustedDismissed) === "1";
     } catch {
       return false;
     }
@@ -27,7 +26,7 @@ export function AllowanceExhausted() {
 
   const onDismiss = () => {
     try {
-      window.localStorage.setItem(DISMISSED, "1");
+      window.localStorage.setItem(STORAGE_KEYS.allowanceExhaustedDismissed, "1");
     } catch {
       // Refused storage just shows this again next visit — the harmless direction.
     }

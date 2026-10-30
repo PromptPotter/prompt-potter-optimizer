@@ -1,5 +1,5 @@
 import type { Evidence, HeadToHeadRow, SubjectReading } from "@/lib/api/types";
-import type { CompareChannel } from "@/lib/compare-selection";
+import type { CompareChannel } from "@/lib/state/compare-selection";
 
 export interface CompareItem {
   channel: CompareChannel;

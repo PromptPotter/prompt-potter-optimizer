@@ -1,4 +1,5 @@
 import type { Conditional } from "@/lib/api/client";
+import { READ_BEAT_MS } from "@/lib/cadence";
 
 export const READ_CACHE_MAX_KEYS = 64;
 
@@ -103,9 +104,6 @@ interface ReadWatch {
   intervalMs: number | null;
   fire: () => void;
 }
-
-// Every interval must be a multiple of the beat.
-export const READ_BEAT_MS = 1000;
 
 const watches = new Map<ReadWatch, number>();
 let beat: ReturnType<typeof setInterval> | null = null;

@@ -1,14 +1,15 @@
 "use client";
 import { useId, useState } from "react";
-import { postCommand, type HierarchyCampaign } from "@/lib/api";
+import { postCommand, type ListedCampaign } from "@/lib/api";
 import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useIngest } from "@/lib/ingest-flow";
 import { useWorkspace } from "@/lib/workspace";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
-import { Button, Dialog, Menu, MenuItem } from "@/components/ui";
+import { Button, Dialog, FailureLine, Menu, MenuItem } from "@/components/ui";
 
 interface Props {
-  campaign: HierarchyCampaign;
+  campaign: ListedCampaign;
   variant?: "row" | "standalone";
 }
 
@@ -21,6 +22,9 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
   const renameFormId = useId();
   // The ROOT hop: a drilled-in inner leaf still belongs to the campaign being deleted.
   const { campaignId: viewedCampaignId, followActive } = useWorkspace();
+  const { flow } = useIngest();
+  // An unstarted campaign has no run to rename or archive: Delete is its one action.
+  const unstarted = campaign.level === "unstarted";
 
   const runArchive = () =>
     void cmd.run("archive", () =>
@@ -45,6 +49,15 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
 
   const runDelete = () => {
     setConfirmDelete(false);
+    // An unstarted campaign is a check-in: its draft is discarded, and the flow lets go of it.
+    if (unstarted) {
+      void cmd.run(
+        "delete",
+        () => postCommand("discard-draft", { draft_id: campaign.address }),
+        () => flow.discarded(campaign.address),
+      );
+      return;
+    }
     void cmd.run(
       "delete",
       () => postCommand("delete-campaign", { campaign_id: campaign.address }),
@@ -56,7 +69,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
   };
 
   const pending = cmd.pending !== null;
-  const archived = campaign.facts.lifecycle === "archived";
+  const archived = !unstarted && campaign.facts.lifecycle === "archived";
   const deleteActions: ModalAction[] = [
     { label: "Cancel", onClick: () => setConfirmDelete(false) },
     { label: "Delete", variant: "danger", onClick: runDelete },
@@ -88,25 +101,29 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
       >
         {({ close }) => (
           <>
-            <MenuItem
-              onClick={() => {
-                close();
-                cmd.clear();
-                setDraft(campaign.facts.label ?? "");
-                setRenaming(true);
-              }}
-            >
-              Rename
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                close();
-                if (archived) runUnarchive();
-                else runArchive();
-              }}
-            >
-              {archived ? "Unarchive" : "Archive"}
-            </MenuItem>
+            {!unstarted && (
+              <>
+                <MenuItem
+                  onClick={() => {
+                    close();
+                    cmd.clear();
+                    setDraft(campaign.facts.label ?? "");
+                    setRenaming(true);
+                  }}
+                >
+                  Rename
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    close();
+                    if (archived) runUnarchive();
+                    else runArchive();
+                  }}
+                >
+                  {archived ? "Unarchive" : "Archive"}
+                </MenuItem>
+              </>
+            )}
             <MenuItem
               onClick={() => {
                 close();
@@ -118,11 +135,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
           </>
         )}
       </Menu>
-      {cmd.failure && (
-        <span className="campaign-menu-err" title={cmd.failure.message}>
-          !
-        </span>
-      )}
+      <FailureLine failure={cmd.failure} className="campaign-menu-err" />
       <Dialog
         open={renaming}
         title="Rename campaign"
@@ -143,7 +156,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
             runRename();
           }}
         >
-          <label className="new-campaign-field">
+          <label className="campaign-rename-field">
             <span>Name</span>
             <input
               type="text"
@@ -158,8 +171,12 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
       </Dialog>
       <Modal
         open={confirmDelete}
-        title="Delete this campaign?"
-        message={`This permanently removes "${campaign.label}" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`}
+        title={unstarted ? "Delete this unstarted campaign?" : "Delete this campaign?"}
+        message={
+          unstarted
+            ? `This permanently removes the "${campaign.label}" check-in — its setup and its upload — from disk. There is no recovery. What the check-in cost stays on the account.`
+            : `This permanently removes "${campaign.label}" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`
+        }
         actions={deleteActions}
         onClose={() => setConfirmDelete(false)}
       />

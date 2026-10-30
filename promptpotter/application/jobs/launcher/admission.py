@@ -14,6 +14,7 @@ from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
     declare_run_budget,
+    hold_moved,
     move_campaign_money,
     next_launch_budget,
     refuse_verb_rate,
@@ -53,7 +54,8 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check, set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
-    JobHold,
+    Hold,
+    LiveHold,
     SpendBook,
     bound_spend_book,
     spending_under,
@@ -324,12 +326,19 @@ def admit_and_share(
         allotment = share_campaign_ceiling(
             ceiling, stores=stores, job_registry=job_registry, job=job, hop=hop, meter=meter
         )
-        job_registry.mark_admitted(job.job_id, reserve, allotment)
+        job_registry.mark_admitted(job.job_id, reserve)
         if hop is not None:
+            hold_moved(stores, hop, allotment)
             move_campaign_money(
                 asked, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
             )
-    return HeldBudget(admitted=admitted, standing=asked, job_id=job.job_id, step_rounds=step_rounds)
+    return HeldBudget(
+        admitted=admitted,
+        standing=asked,
+        job_id=job.job_id,
+        share=allotment,
+        step_rounds=step_rounds,
+    )
 
 
 def _within(declared: Budget, enclosing: Budget) -> Budget:
@@ -348,10 +357,19 @@ def open_spend_book(
     opened: float,
     live: bool,
 ) -> SpendBook:
-    """Its money is read off the job, which a reshare moves; a *live* book reads the cycle's standing axes too."""
+    """On a cycle its share is read live off the cycle's record, which a reshare moves, and its
+    reserve off the job; off one, as admitted. A *live* book reads the cycle's standing axes too."""
+    hold: Hold | LiveHold
+    if hop is None:
+        job = job_registry.get(held.job_id)
+        if job is None:
+            raise RuntimeError(f"a book opens only on its own job, and {held.job_id} is gone")
+        hold = Hold(held.share, job.reserve)
+    else:
+        hold = LiveHold(stores.campaigns.cycle_dir(hop), job_registry.job_file(held.job_id))
     return SpendBook(
         declared=held.admitted,
-        hold=JobHold(job_registry.job_file(held.job_id)),
+        hold=hold,
         meters=meters,
         opened=opened,
         cycle_dir=stores.campaigns.cycle_dir(hop) if live and hop is not None else None,

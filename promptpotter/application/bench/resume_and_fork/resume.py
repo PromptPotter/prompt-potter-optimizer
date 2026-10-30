@@ -6,16 +6,16 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
-from promptpotter.application.bench.resume_and_fork.repair import apply_correction
+from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_decisions,
 )
-from promptpotter.application.pipeline_resolve import defaults_drift
+from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_records import ForkTrigger
+from promptpotter.domain.run_records import ComparisonExit, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 
@@ -132,7 +132,7 @@ async def _replay_line(
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
-    packages_before = cycle.optimizer.round_packages(cycle, prior)
+    packages_before = round_packages(cycle, prior)
     cycle.replay_priors(prior)
     # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
     standing = campaign_store.standing_rounds(hop, moment=None)
@@ -150,7 +150,10 @@ async def _replay_line(
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         # The declaration never moves; the defaults it is a delta over can, under the same name.
-        drifted = campaign is not None and defaults_drift(campaign) is not None
+        running = cycle.optimizer.treatment(
+            campaign_admits(cycle.config, session.pipeline_schema), session.store.block_packs
+        )
+        drifted = campaign is not None and defaults_drift(campaign, running=running) is not None
         if not optimizer_mismatches and stale is None and not drifted:
             return None
 
@@ -178,6 +181,12 @@ async def _replay_line(
                 reason=f"resume_divergence:{div.kind}",
                 issued_by=SYSTEM_PRINCIPAL,
             )
+            if not self_inflicted:
+                # The operator's flag ran the line past a divergence it halts on.
+                session.leave_comparison(
+                    ComparisonExit.FORK_ON_DIVERGENCE,
+                    on=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
+                )
             if div.round_num == 0:
                 cycle.reopen_origin()
             else:

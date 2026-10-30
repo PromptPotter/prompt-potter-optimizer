@@ -30,6 +30,7 @@ export type {
   FilesResponse,
   ServedBackpressure,
   LineageDivergence,
+  GeneSource,
   LensShift,
   ArmReading,
   ArmPanel,
@@ -56,7 +57,7 @@ export type {
   OptimizerFact,
   OptimizerLimit,
   OptimizerPipelineResponse,
-  StartPrompt,
+  OptimizerNodePrompt,
   PipelineView,
   PipelineViewEdge,
   PipelineViewNode,
@@ -97,11 +98,18 @@ export type {
   ForkPreviewResponse,
   MachineSlot,
   MachineStatusResponse,
+  KnobRef,
   KnobRow,
+  LibraryResponse,
+  LibrarySnippet,
   ManifestNodeOverlay,
-  OptimizerKnobsResponse,
+  NodeKnobs,
   OptimizerRoster,
   OptimizerSetup,
+  PackOffer,
+  PoolFill,
+  PoolOffer,
+  PoolRow,
   MeResponse,
   OriginEntry,
   OriginListResponse,
@@ -110,9 +118,7 @@ export type {
   WorkspaceStorageResponse,
   DraftCampaignWire,
   DraftDependency,
-  DraftListResponse,
   DraftReopenResponse,
-  DraftSummary,
   OriginLastResolution,
   OriginQuestion,
   RaisedCommand,
@@ -132,6 +138,7 @@ export type {
   SubtreeCampaign,
   SubtreeCourse,
   SubtreeCourseFacts,
+  UnstartedCampaign,
 } from "./types.generated";
 
 import type {
@@ -142,11 +149,16 @@ import type {
   HierarchyCampaign,
   HierarchyCandidate,
   HierarchyCourse,
+  HierarchyResponse,
   HierarchyRound,
   ServedDashboard,
   SubtreeCampaign,
   SubtreeCourse,
 } from "./types.generated";
+
+// served: `domain/hierarchy.py::ListedCampaign` — a started campaign, or an open check-in
+// (`level: "unstarted"`). Narrow on `level` once.
+export type ListedCampaign = HierarchyResponse["entries"][number];
 
 // What the forest and a bar draw: a run, or one candidate of one. Narrow on `level` once.
 export type LineageNode = SubtreeCourse | HierarchyCandidate;
@@ -159,7 +171,6 @@ export type SubtreeEntry = SubtreeCampaign | SubtreeCourse | HierarchyRound | Hi
 export type CourseKind = CourseFacts["mint"];
 
 export type DraftPatch = Partial<EditDraftPatch>;
-
 // served: `domain/cells.py::HeatmapScope`
 export type HardSamplesScope = CellsResponse["scope"];
 

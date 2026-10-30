@@ -13,7 +13,8 @@ import {
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
 import type { PipelineViewNode } from "@/lib/types";
-import { PromptFieldsEditor } from "./PromptFieldsEditor";
+import type { NodeScope } from "@/lib/SelectionContext";
+import { PromptWithLibrary } from "./PromptWithLibrary";
 import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";
 import { SchemaTreeEditor } from "./SchemaTreeEditor";
 
@@ -28,11 +29,17 @@ export function NodeSurface({
   compact,
   modelCapabilities,
   permittedModels,
+  promptScope = "target",
+  edited,
   onApply,
   onConfigChange,
   onNarrowing,
 }: {
   node: PipelineViewNode | null;
+  // Whose pipeline the prompt rows are: an optimizer node's edit is an optimizer override.
+  promptScope?: NodeScope;
+  // The fields a config sets over the optimizer's template.
+  edited?: readonly string[] | undefined;
   point: CandidateSearchPoint;
   // The draft's overlay (search-space) or the candidate's values — never `point.pipeline_overlay`.
   overlay: Record<string, unknown>;
@@ -125,9 +132,11 @@ export function NodeSurface({
 
       {promptNodes.length > 0 ? <hr className="setup-preview-divider" /> : null}
       {promptNodes.map(([name, params]) => (
-        <PromptFieldsEditor
+        <PromptWithLibrary
           key={name}
+          scope={promptScope}
           node={name}
+          edited={edited}
           prompts={point.origin_prompts}
           fields={params.map((p) => p.key)}
           readOnly={readOnly}

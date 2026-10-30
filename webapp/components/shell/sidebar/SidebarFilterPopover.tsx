@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { ListedLifecycle } from "@/lib/registry";
+import type { ListedLifecycle } from "@/lib/state/registry";
 
 interface Props {
   listedLifecycle: ListedLifecycle;
@@ -49,7 +49,6 @@ export function SidebarFilterPopover({
           className={cx("unit-library-filter-btn", (open || active) && "on")}
           onClick={toggle}
           aria-expanded={open}
-          aria-haspopup="dialog"
           aria-label="Filter campaigns"
           title="Filter campaigns"
         >
@@ -87,7 +86,7 @@ function FilterPanel({
   }, [datasetNames, q]);
 
   return (
-    <div className="sidebar-filter-panel" role="dialog" aria-label="Filter campaigns">
+    <div className="sidebar-filter-panel" role="group" aria-label="Filter campaigns">
       <SegmentedControl
         className="sidebar-filter-lifecycle"
         options={LIFECYCLE_SEGMENTS}

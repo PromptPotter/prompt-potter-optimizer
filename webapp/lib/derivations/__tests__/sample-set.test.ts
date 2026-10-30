@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   measuredUniverse,
+  orderAtStep,
   roundMeasuredSets,
   sameSampleSet,
+  seedFromOrder,
   toggleInSet,
-} from "@/lib/sample-set";
-import { orderAtStep, seedFromOrder } from "@/lib/derivations";
+} from "@/lib/derivations";
 import type { ServedRound } from "@/lib/api/types";
 import { summaryRound } from "@/lib/test-fixtures";
 

@@ -46,6 +46,7 @@ from factories import (
     sheet,
     workspace,
 )
+from offline_world import Router
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
@@ -55,6 +56,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     fork_edge,
     mint_operator_fork,
 )
+from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_reads import open_family_ray
@@ -82,6 +84,8 @@ from promptpotter.application.origin import (
     try_inherit_fork_origin,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
+from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
@@ -104,12 +108,14 @@ from promptpotter.domain.cycle_paths import (
     hierarchy_address,
 )
 from promptpotter.domain.hierarchy import (
+    HierarchyCampaign,
     HierarchyCandidate,
     HierarchyRound,
     SubtreeCampaign,
     SubtreeCourse,
     entries_under,
 )
+from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
@@ -120,11 +126,13 @@ from promptpotter.domain.run_records import (
     ArmRecord,
     ConfigOverrides,
     CycleSeed,
+    ForkDirection,
     ForkSpec,
     ForkTrigger,
     OriginSource,
     ResumeCheckpointRecord,
     RoundEnteredRecord,
+    RoundProposedRecord,
     RunPhaseRecord,
     SpawnedBy,
 )
@@ -134,6 +142,7 @@ from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import spending_under
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
@@ -677,7 +686,7 @@ def _emit_round(
 
 
 def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_inherits_them(
-    built_stores: Stores,
+    built_stores: Stores, offline: Router
 ) -> None:
     stores = built_stores
     # A replayer that cannot re-derive its decision is a named divergence, never a clean match.
@@ -1177,6 +1186,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         attached_only=False,
         depth=1,
     ).entries
+    assert isinstance(listed, HierarchyCampaign), "guard"
     assert listed.facts.line == hierarchy_address((), fork_hop.campaign_id, fork_hop.cycle_id), (
         "the campaign's line stayed on the cycle a supersede retired"
     )
@@ -1505,39 +1515,32 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     } == lines, "a candidate's line reads a round off a course that does not own it"
     courses = {e.address: e for e in entries_under(tree) if isinstance(e, SubtreeCourse)}
     hangs = {
-        family: (None, o, {0: None, 1: o, 2: None}),
-        kid: (first_pick, o, {2: first_pick}),
-        grand: (first_pick, o, {3: first_pick}),
-        great: (x, o, {4: x}),
-        # Round 2 lists only t3, re-run away: it re-read nothing its head still holds.
-        steered: (o, at(steered, 0, "s"), {0: None, 1: at(steered, 0, "s"), 2: None}),
-        rewound: (o, o, {1: o}),
-        redone: (first_pick, o, {3: first_pick}),
-        branched: (b, at(branched, 0, "p"), {0: None}),
+        family: (None, o),
+        kid: (first_pick, o),
+        grand: (first_pick, o),
+        great: (x, o),
+        steered: (o, at(steered, 0, "s")),
+        rewound: (o, o),
+        redone: (first_pick, o),
+        branched: (b, at(branched, 0, "p")),
         # A steer naming a round's re-read hangs from the candidate that round re-read, lifted or not.
-        rerun: (first_pick, at(rerun, 0, "r"), {0: None}),
-        relift: (o, at(relift, 0, "l"), {0: None}),
-        # It hangs from the parent line's arm; each re-read is its own round's, off its own crowns.
-        mended: (first_pick, o, {1: o, 3: at(mended, 1, "a")}),
-        carried: (at(rewound, 1, "w"), o, {2: at(rewound, 1, "w")}),
-        rival: (o, at(rival, 0, "c"), {0: None, 1: at(rival, 0, "c"), 2: at(rival, 1, "e")}),
-        first: (at(rival, 0, "c"), at(rival, 0, "c"), {1: at(rival, 0, "c"), 2: at(first, 1, "i")}),
+        rerun: (first_pick, at(rerun, 0, "r")),
+        relift: (o, at(relift, 0, "l")),
+        # It hangs from the parent line's arm.
+        mended: (first_pick, o),
+        carried: (at(rewound, 1, "w"), o),
+        rival: (o, at(rival, 0, "c")),
+        first: (at(rival, 0, "c"), at(rival, 0, "c")),
         # Cut on g, which its parent has since re-run away: the cut still names g.
-        second: (at(rival, 2, "g"), at(rival, 0, "c"), {3: at(rival, 2, "g")}),
-        glance: (at(steered, 0, "s"), at(glance, 0, "u"), {0: None}),
-        # The live round names its re-read only once it elects.
-        peek: (at(steered, 2, "t3"), at(peek, 0, "u2"), {0: None, live: None}),
+        second: (at(rival, 2, "g"), at(rival, 0, "c")),
+        glance: (at(steered, 0, "s"), at(glance, 0, "u")),
+        peek: (at(steered, 2, "t3"), at(peek, 0, "u2")),
     }
-    for hop, (cut_from, starts, references) in hangs.items():
+    for hop, hangs_from in hangs.items():
         course = courses[course_of(hop)]
-        assert (course.facts.from_candidate, course.facts.origin) == (cut_from, starts), (
+        assert (course.facts.from_candidate, course.facts.origin) == hangs_from, (
             f"{hop.cycle_id} hangs from, or starts at, a candidate its mint record does not name"
         )
-        assert {
-            rnd.facts.round: rnd.facts.reference
-            for rnd in course.children
-            if isinstance(rnd, HierarchyRound)
-        } == references, f"{hop.cycle_id} names a re-read its line did not stand on"
     by_addr = {e.address: e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)}
     assert {
         address: tag.value
@@ -1586,3 +1589,107 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert {cid for cid, _ in parted.divergent} == {
         h.cycle_id for h in (grand, great, rewound, redone, branched, rerun, mended, carried)
     }, "a parting dims a fork rooted before it, or keeps one proposed past it"
+
+    # A repair re-measures a holed round onto a branch, graded by whether any later round read the
+    # hole: its fingerprints decide EQUIVALENT against SUPERSEDE.
+    repair_bank = samples(4, "g")
+    repair_origin, holed = prompted(instruction="origin"), ArmKey(prompted(instruction="c1").id)
+    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
+
+    async def _answered(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
+        return MeasuredCell(
+            sample_key=sample.key, query=sample.query, ground_truth="g", predicted="g"
+        )
+
+    def repaired(cycle_id: str, *, consumed: bool) -> tuple[CycleHop, CycleHop]:
+        hop = CycleHop(campaign_id=f"{cycle_id}__20260101-000000", cycle_id=cycle_id)
+        stores.campaigns.create_campaign(
+            minted_campaign(hop, owner_user_id=str(stores.identity.user_id))
+        )
+        stores.campaigns.mint_cycle(hop)
+        drawn = partition_bank(repair_bank, DatasetSplit(bench=0), seed=0)
+        stores.campaigns.write_bank_partition(hop, drawn.record(dataset_hash="bank"))
+        rows = [
+            measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)
+        ]
+        running = seat(
+            stores,
+            hop=hop,
+            bank=repair_bank,
+            round_num=2,
+            origin=(repair_origin, lambda _s: sheet(rows)),
+        )
+        cycle, callbacks = running.cycle, running.callbacks
+        publish_inner_spawn_context(cycle.session)
+        run_init(cycle, callbacks)
+        # Round 1's arm ran to its end on cell 3 and came back with no measurement.
+        hole = measurement(
+            3, None, sample_key=repair_bank[3].key, error="boom", error_category="transient"
+        )
+        critiqued = Critique(readout={"priority_fix": "framing: as recorded"})
+        child = prompted(instruction="c1")
+        sp = cycle.session.points(cycle.framing).job(child)
+        c1 = arm_state(
+            "c1",
+            slot=ArmSlot(round=1, idx=0, total=1),
+            individual=child,
+            resolved_params=sp.config_params or {},
+            sp_hash=sp.sp_hash(cycle.session.pipeline_schema),
+        )
+        line = [
+            cycle.origin_round.model_copy(update={"optimizer_state": cycle.close_state(0)}),
+            _round(
+                round=1,
+                arms={holed: c1},
+                cells={holed: sheet([*rows[:3], hole])},
+                election=election(holed),
+                optimizer_state=cycle.close_state(1).holding(critiqued),
+            ),
+        ]
+        for n in range(len(line)):
+            close_round(callbacks.ledger, line[: n + 1], cycle=cycle)
+        if consumed:
+            callbacks.ledger.append(
+                RoundProposedRecord(round=2, consumed="", proposals=[], submitted=False)
+            )
+        set_cycle(cycle, line=line)
+        before = round_packages(cycle, line)
+        bound = set_cycle_ledger(callbacks.ledger)
+        try:
+            with (
+                mock.patch.object(query_loop, "measure_sample", _answered),
+                spending_under(cycle.session.state.control.book),
+            ):
+                branch_id = asyncio.run(
+                    apply_correction(
+                        stores.campaigns, hop, line, before, cycle.session, cycle, repair_bank
+                    )
+                )
+        finally:
+            reset_cycle_ledger(bound)
+        assert branch_id is not None, "a holed round was carried as it ran"
+        return hop, hop.model_copy(update={"cycle_id": branch_id})
+
+    def fork_direction(hop: CycleHop) -> ForkDirection:
+        index = stores.campaigns.load(hop, moment=None)
+        assert index is not None and index.fork is not None
+        return index.fork.resolved_direction
+
+    def critique_of(hop: CycleHop) -> str:
+        stood = stores.campaigns.standing_rounds(hop, moment=None).rounds[1]
+        readout = stood.close.optimizer_state.feedback()
+        assert readout is not None, "guard: round 1 banked a critique"
+        return readout["priority_fix"]
+
+    ran, unread_branch = repaired("cycle_unread", consumed=False)
+    assert fork_direction(unread_branch) is ForkDirection.EQUIVALENT, (
+        "a correction no later round read forked the line off its parent"
+    )
+    assert critique_of(unread_branch) == "framing: re-read the claim", (
+        "the branch kept a critique distilled from the cell the repair re-measured"
+    )
+    assert critique_of(ran) == "framing: as recorded", "the repair rewrote the round its parent ran"
+    _, read_branch = repaired("cycle_read", consumed=True)
+    assert fork_direction(read_branch) is ForkDirection.SUPERSEDE, (
+        "round 2's banked candidates were generated off the hole and carried across as equivalent"
+    )

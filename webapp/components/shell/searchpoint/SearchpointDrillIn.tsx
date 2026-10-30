@@ -3,11 +3,10 @@
 import type { ReactNode } from "react";
 import type { ArmReading, VerificationMark } from "@/lib/api/types";
 import type { NodeSchemaReading } from "@/lib/types";
-import { readPaired, type ObserveConfig } from "@/lib/derivations";
+import { NOT_SEPARABLE, readPaired, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
-import { NOT_SEPARABLE } from "@/lib/fitness";
 import { Term } from "@/components/ui";
-import { fmtFitness, fmtPct1, fmtSigned, fmtThetaSe, fmtTokens } from "@/lib/format";
+import { fmtInterval, fmtPct1, fmtThetaSe, fmtTokens, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 
 export function SearchpointDrillIn({
@@ -81,7 +80,7 @@ export function SearchpointDrillIn({
                     : benchPass != null
                     ? `${fmtPct1(benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
-                      ? `— of ${bench?.n}`
+                      ? `${PLACEHOLDER} of ${bench?.n}`
                       : `${fmtPct1(bench.level.value)} of ${bench.n}${
                           bench.level.ci_lo != null && bench.level.ci_hi != null
                             ? ` [${fmtPct1(bench.level.ci_lo)}, ${fmtPct1(bench.level.ci_hi)}]`
@@ -96,7 +95,7 @@ export function SearchpointDrillIn({
                 v={
                   paired.measurand.unit === "rate"
                     ? fmtPct1(paired.rate_a)
-                    : fmtFitness(paired.rate_a)
+                    : fmtUnit("score", paired.rate_a)
                 }
                 hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
@@ -107,7 +106,7 @@ export function SearchpointDrillIn({
                 hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                 v={
                   <>
-                    {fmtSigned(lift.value)} [{fmtSigned(lift.ci_lo)}, {fmtSigned(lift.ci_hi)}]
+                    {fmtUnit("delta", lift.value)} {fmtInterval("delta", lift.ci_lo, lift.ci_hi)}
                     {lift.side !== "spans" ? (
                       " clears 0"
                     ) : (
@@ -119,12 +118,12 @@ export function SearchpointDrillIn({
             )}
             {reading.ability?.theta != null && (
               <Fact
-                k="ability θ"
+                k="ability"
                 hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher accuracy."
                 v={fmtThetaSe(reading.ability.theta, reading.ability.se)}
               />
             )}
-            {composite != null && <Fact k="composite" v={composite.toFixed(4)} />}
+            {composite != null && <Fact k="composite" v={fmtUnit("composed", composite)} />}
             <Fact
               k="winner"
               v={

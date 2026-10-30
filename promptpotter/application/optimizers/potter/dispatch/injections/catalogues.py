@@ -5,8 +5,8 @@ from typing import Any
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     AXES_ENUM_PREVIEW,
-    DEMO_POOL_RENDER_CAP,
     DEMO_QUERY_STEM,
+    RECOMBINATION_VALUE_STEM,
     InjectionBundle,
     InjectionKind,
     Item,
@@ -150,7 +150,7 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     }
     current = list({s.id: s for rows in held.values() for s in rows}.values())
     others = [s for s in b.demo_pool if s not in current]
-    k = min(DEMO_POOL_RENDER_CAP, len(others))
+    k = min(b.pool_window, len(others))
     start = (b.cycle_slice.round_num - 1) * k % len(others) if others else 0
     window = (others[start:] + others[:start])[:k]
     shown = "; ".join(
@@ -172,6 +172,56 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
             for s in (*current, *window)
         ),
     ]
+
+
+def _pool_items(b: InjectionBundle, joins: str) -> list[Item]:
+    header = (
+        "RECOMBINATION POOL — the campaign's measured individuals, highest θ first, an unread "
+        f"θ last. `recombinations` writes up to {b.recombine} children {joins}: each continues a "
+        "`main`, an entry marked main (the current line), and takes from a `donor`, any other "
+        "entry of any round, only the few loci `from_donor` names; every other locus is the "
+        "main's, so a child invents nothing. Pick a donor measured strong where the main is "
+        "weak, and say in `changes_description` what it brings."
+    )
+    items = [Item(header)]
+    for entry in b.recombination_pool:
+        loci = entry.individual.loci()
+        main = " main" if entry.main else ""
+        own = " (the parent)" if entry.individual.id == b.parent.id else ""
+        theta = "unread" if entry.theta is None else f"{entry.theta:+.2f}"
+        lines = [f"{entry.id} θ {theta}{main}{own}"]
+        lines.extend(
+            f"  [{locus.name}] "
+            + (
+                " ".join(str(loci[locus]).split())[:RECOMBINATION_VALUE_STEM]
+                if locus in loci
+                else "(unset)"
+            )
+            for locus in b.recombination_loci
+        )
+        items.append(Item("\n".join(lines)))
+    return items
+
+
+@signal(
+    "recombination_pool",
+    kind=InjectionKind.DERIVED,
+    char_cap=None,
+    citable=False,
+)
+def _r_recombination_pool(b: InjectionBundle) -> list[Item]:
+    return _pool_items(b, "beside your variants") if b.recombines("l1_generate") else []
+
+
+# L2's own: a lever beside the layout and the overrides, its children L1's next round adds.
+@signal(
+    "l2_recombination_pool",
+    kind=InjectionKind.DERIVED,
+    char_cap=None,
+    citable=False,
+)
+def _r_l2_recombination_pool(b: InjectionBundle) -> list[Item]:
+    return _pool_items(b, "that join the next round's arms") if b.recombines("l2_context") else []
 
 
 @signal(

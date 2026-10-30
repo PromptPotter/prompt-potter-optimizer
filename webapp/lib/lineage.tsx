@@ -5,18 +5,16 @@ import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
 import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
-import { phaseIs } from "@/lib/run-phase";
-import { courseAt, indexLineage, type LineageIndex } from "@/lib/derivations";
+import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
+import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { shownData, useRead } from "@/lib/hooks/useRead";
-import { useRegistry } from "@/lib/registry";
+import { useRegistry } from "@/lib/state/registry";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
-
-const POLL_MS = 5000;
 
 const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
 
@@ -61,7 +59,7 @@ function useTree(
   // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
   const read = useRead(address ? subtreeRead(address, mask, moment) : null, {
     auth: true,
-    intervalMs: rests ? undefined : POLL_MS,
+    intervalMs: rests ? undefined : LINEAGE_POLL_MS,
   });
   const served = shownData(read);
   const root = served?.level === "campaign" ? served : null;
@@ -98,7 +96,7 @@ export function LineageProvider({
     [sampleSet],
   );
   const liveMaskLens = useMemo(() => (maskOpen ? lensOf(mask) : null), [maskOpen, mask]);
-  const maskLens = useDebounced(liveMaskLens, 250);
+  const maskLens = useDebounced(liveMaskLens, MASK_LENS_DEBOUNCE_MS);
   const lensParam = maskOpen ? maskLens : lens || null;
   const maskLabel = maskOpen ? "Scoring mask" : samples ? "Sample set" : (LENS_LABELS[lens] ?? "");
 
@@ -109,11 +107,11 @@ export function LineageProvider({
     [lensParam, samples],
   );
 
-  const { entries } = useRegistry();
+  const { started } = useRegistry();
   const resting = useMemo(
     () =>
       new Set(
-        entries
+        started
           .filter(
             (e) =>
               e.children.length > 0 &&
@@ -121,7 +119,7 @@ export function LineageProvider({
           )
           .map((e) => e.address),
       ),
-    [entries],
+    [started],
   );
 
   // The offset is the viewed LEAF's, which the campaign-keyed subtree is not addressed by.

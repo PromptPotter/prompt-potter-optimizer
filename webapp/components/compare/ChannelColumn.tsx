@@ -3,9 +3,9 @@
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { HeadToHeadRow, HierarchyCampaign, HierarchyCandidate } from "@/lib/api";
-import { useCompareSelection } from "@/lib/compare-selection";
+import { useCompareSelection } from "@/lib/state/compare-selection";
 import { cx } from "@/lib/cx";
-import { fmtDuration, fmtSigned, shortId } from "@/lib/format";
+import { fmtDuration, fmtSigned, PLACEHOLDER, shortId } from "@/lib/format";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { SegmentedControl, Term } from "@/components/ui";
 import {
@@ -120,7 +120,12 @@ export function ChannelColumn({
           </div>
         );
       case "optimizer":
-        return <span className="cmp-col-optimizer">{headline.optimizer}</span>;
+        return (
+          <span className="cmp-col-optimizer">
+            {headline.optimizer}
+            {headline.swapped_in.length > 0 && ` · ${headline.swapped_in.join(", ")}`}
+          </span>
+        );
       case "bench":
         return <Metric {...lead.score} />;
       case "lift":
@@ -130,7 +135,7 @@ export function ChannelColumn({
       case "spent":
         return <SpentReading metered={headline.spend_metered} />;
       case "worked":
-        return headline.worked_s === null ? "—" : fmtDuration(headline.worked_s);
+        return fmtDuration(headline.worked_s);
       case "standing":
         return <HeadlineBadges row={headline} />;
       case "reads":
@@ -199,7 +204,7 @@ function ColumnReads({
         />
       )}
       <span className="cmp-metric-band">
-        {selected ? `${selected.label} · round ${selected.facts.reading.arm.round}` : "—"}
+        {selected ? `${selected.label} · round ${selected.facts.reading.arm.round}` : PLACEHOLDER}
       </span>
     </div>
   );

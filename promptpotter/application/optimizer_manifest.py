@@ -14,11 +14,12 @@ from pydantic import Field
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
     INITIAL_POPULATION,
-    OPERATOR_SEAT,
     RUN_INIT,
     CountKnob,
     Initializer,
+    PanelSize,
     Reviewer,
+    RoundRole,
     RoundWalk,
     source_digest,
 )
@@ -30,7 +31,7 @@ from promptpotter.config.paths import (
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.domain.l4 import proxies
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -51,7 +52,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.nodes import (
         Adapter,
         Controller,
@@ -62,17 +62,17 @@ if TYPE_CHECKING:
         ReviewReading,
         Sampler,
         Selector,
+        Survivor,
     )
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.campaign_config import ArmGateMode
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pool import Access
+    from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.scoring import CellSheet
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 shapes_optimizer_prompt(__name__)
 
@@ -88,6 +88,8 @@ def _stamp(path: Path) -> int:
 class ManifestNode(FrozenModel):
     type: NodeKind
     description: str | None = None
+    # What a proposer's arms are, in plain words, as a setup surface names them; prose, so no treatment reads it.
+    makes: str | None = None
     # The backend-shaped menu of the node's searchable params (`pipeline_parsing.py`).
     optimizer: dict[str, Any] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
@@ -102,6 +104,8 @@ class PipelineManifest(FrozenModel):
     available_models: list[str]
     nodes: dict[str, ManifestNode]
     pipelines: dict[str, list[str]]
+    # `node.knob` refs a setup surface leads with, in order; presentation, so no treatment reads it.
+    main: list[str]
     # Whether `initial_population` is a round of its own or heads round 1 (`RoundPlan.walk`).
     initial_population_walks: Literal["alone", "before_default"] | None = None
     resolved_prompts: dict[str, OptimizerPromptTemplate] = Field(default_factory=dict)
@@ -130,6 +134,8 @@ class ManifestSwitch(FrozenModel):
     paper: str | None = None
     extends: str
     swap: dict[str, ManifestSwap]
+    # Its own, never what it extends: a swapped node takes its knobs with it.
+    main: list[str]
 
 
 @functools.lru_cache(maxsize=16)
@@ -178,21 +184,47 @@ class RoundPlan:
     proposers: tuple[Proposer, ...]
     eliminator: Eliminator | None
     selector: Selector
+    # Absent, the selector's `ranked` is the next population whole.
+    survivor: Survivor | None
     adapters: tuple[Adapter, ...]
     controller: Controller | None
+    gate: ArmGateMode
 
     @property
-    def round_walks(self) -> tuple[tuple[Proposer, ...], ...]:
-        """The proposers of each walk that is a round of its own: seeds heading round 1 are its."""
-        return (self.proposers, *((self.initial_population,) if self.seeds_alone else ()))
+    def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
+        """The proposers of each walk that is a round of its own, by pipeline: seeds heading round 1 are its."""
+        alone = {INITIAL_POPULATION: self.initial_population} if self.seeds_alone else {}
+        return {"default": self.proposers, **alone}
 
-    def walk(self, population: Sequence[OptSearchPoint]) -> RoundWalk:
+    def walk(self, *, stands: bool) -> RoundWalk:
         """A round seeds only where no population stands: a resumed one restores its own."""
-        if not self.initial_population or population:
-            return RoundWalk("default", (), self.proposers)
+        if not self.initial_population or stands:
+            return RoundWalk("default", (), self.proposers, self.gate)
         if self.seeds_alone:
-            return RoundWalk(INITIAL_POPULATION, (), self.initial_population)
-        return RoundWalk("default", self.initial_population, self.proposers)
+            return RoundWalk(INITIAL_POPULATION, (), self.initial_population, self.gate)
+        return RoundWalk("default", self.initial_population, self.proposers, self.gate)
+
+    def first_walk(self, role: RoundRole) -> tuple[NodeMember, ...]:
+        """*role*'s members as the first rounds walk them: seeds alone walk a round of their own, and the arms' proposers after it close as if it wrote nothing."""
+        match role:
+            case RoundRole.SAMPLER:
+                return (self.sampler,)
+            case RoundRole.PROPOSER:
+                first = self.walk(stands=False)
+                after = self.walk(stands=True).steps if first.pipeline == INITIAL_POPULATION else ()
+                return (*first.steps, *after)
+            case RoundRole.MEASUREMENT:
+                return () if self.eliminator is None else (self.eliminator,)
+            case RoundRole.SELECTOR:
+                return (self.selector,)
+            case RoundRole.SURVIVOR:
+                return () if self.survivor is None else (self.survivor,)
+            case RoundRole.ADAPTER:
+                return self.adapters
+            case RoundRole.CONTROLLER:
+                return () if self.controller is None else (self.controller,)
+            case unreachable:
+                assert_never(unreachable)
 
 
 def _walk_refused(name: str, why: str) -> PayloadInvalidError:
@@ -200,62 +232,71 @@ def _walk_refused(name: str, why: str) -> PayloadInvalidError:
 
 
 def _round_plan(
-    name: str, schema: PipelineSchema, seeds_walk: Literal["alone", "before_default"] | None
+    name: str,
+    schema: PipelineSchema,
+    seeds_walk: Literal["alone", "before_default"] | None,
+    gate: ArmGateMode,
 ) -> RoundPlan:
     walk = schema.pipelines["default"]
     declared = {n.name: n.kind for n in schema.declared_nodes}
     if undeclared := [n for n in walk if n not in declared]:
         raise _walk_refused(name, f"`default` walks {undeclared}, which it does not declare.")
-    kinds = [declared[n] for n in walk]
-    if NodeKind.GATEWAY not in kinds:
-        raise _walk_refused(name, f"`default` walks no {NodeKind.GATEWAY} node — it walks {walk}.")
-    measured_at = kinds.index(NodeKind.GATEWAY)
-    selected_at = next((i for i, kind in enumerate(kinds) if kind is NodeKind.SELECTOR), len(kinds))
-    samplers: list[Sampler] = []
-    proposers: list[Proposer] = []
-    eliminators: list[Eliminator] = []
-    selectors: list[Selector] = []
-    adapters: list[Adapter] = []
-    controllers: list[Controller] = []
-    for at, (node, kind) in enumerate(zip(walk, kinds, strict=True)):
-        if kind is NodeKind.GATEWAY:
-            continue
-        member = optimizers.NODE_MEMBERS.get(node)
-        if kind is NodeKind.SAMPLER and at < measured_at:
-            samplers.append(cast("Sampler", member))
-        elif kind in (NodeKind.LLM, NodeKind.ALGORITHM) and at < measured_at:
-            proposers.append(cast("Proposer", member))
-        elif kind is NodeKind.ELIMINATOR and at < measured_at:
-            eliminators.append(cast("Eliminator", member))
-        elif kind is NodeKind.SELECTOR and at > measured_at:
-            selectors.append(cast("Selector", member))
-        elif kind is NodeKind.LLM and at > selected_at:
-            adapters.append(cast("Adapter", member))
-        elif kind is NodeKind.CONTROLLER and at > measured_at:
-            controllers.append(cast("Controller", member))
-        else:
+    roles = list(RoundRole)
+    held: dict[RoundRole, list[str]] = {role: [] for role in roles}
+    at = 0
+    for node in walk:
+        kind = declared[node]
+        rank = next((i for i in range(at, len(roles)) if kind in roles[i].value), None)
+        if rank is None:
             raise _walk_refused(
                 name,
-                f"`default` walks {kind} node {node!r} where the bench has no role for it "
-                f"(the {NodeKind.GATEWAY} node is at {measured_at}).",
+                f"`default` walks {kind} node {node!r} after its {roles[at].name.lower()}, where "
+                f"the bench has no role for it: a round runs {[r.name.lower() for r in roles]}, "
+                "in that order.",
             )
-    if len(samplers) != 1 or len(selectors) != 1 or not proposers or len(eliminators) > 1:
+        at = rank
+        held[roles[at]].append(node)
+
+    gateways = [n for n in held[RoundRole.MEASUREMENT] if declared[n] is NodeKind.GATEWAY]
+
+    def members_of(role: RoundRole) -> list[Any]:
+        return [optimizers.NODE_MEMBERS.get(n) for n in held[role] if n not in gateways]
+
+    samplers: list[Sampler] = members_of(RoundRole.SAMPLER)
+    proposers: list[Proposer] = members_of(RoundRole.PROPOSER)
+    eliminators: list[Eliminator] = members_of(RoundRole.MEASUREMENT)
+    selectors: list[Selector] = members_of(RoundRole.SELECTOR)
+    survivors: list[Survivor] = members_of(RoundRole.SURVIVOR)
+    adapters: list[Adapter] = members_of(RoundRole.ADAPTER)
+    controllers: list[Controller] = members_of(RoundRole.CONTROLLER)
+    if (
+        len(gateways) != 1
+        or len(samplers) != 1
+        or len(selectors) != 1
+        or not proposers
+        or len(eliminators) > 1
+        or len(survivors) > 1
+        or len(controllers) > 1
+    ):
         raise _walk_refused(
             name,
-            "`default` must walk one sampler, at least one proposer and at most one eliminator "
-            f"before its measurement, and one selector after it — it walks {walk}.",
+            f"`default` must walk one sampler, at least one proposer, one {NodeKind.GATEWAY} "
+            "node raced by at most one eliminator, one selector, then at most one survival node "
+            f"and one controller — it walks {walk}.",
         )
     initial = [
         cast("Proposer", optimizers.NODE_MEMBERS.get(n))
         for n in schema.pipelines.get(INITIAL_POPULATION, ())
     ]
     for pipeline, walked in (("default", proposers), (INITIAL_POPULATION, initial)):
-        if misplaced := [p.name for at, p in enumerate(walked) if p.opens is not (at == 0)]:
+        if misplaced := [
+            p.name for at, p in enumerate(walked) if p.proposes == ("edits" if at == 0 else "opens")
+        ]:
             raise _walk_refused(
                 name,
-                f"`{pipeline}` must walk a proposer that makes the round's arms first and only "
-                f"ones editing them after — {misplaced} of {[p.name for p in walked]} are out of "
-                "place.",
+                f"`{pipeline}` must walk a proposer that makes or adds arms first, and only ones "
+                f"adding or editing arms after — {misplaced} of {[p.name for p in walked]} are "
+                "out of place.",
             )
     if bool(initial) != (seeds_walk is not None):
         raise _walk_refused(
@@ -272,15 +313,17 @@ def _round_plan(
         )
     return RoundPlan(
         initializers=tuple(cast("Initializer", m) for m in initializers),
-        measurement=walk[measured_at],
+        measurement=gateways[0],
         sampler=samplers[0],
         initial_population=tuple(initial),
         seeds_alone=seeds_walk == "alone",
         proposers=tuple(proposers),
         eliminator=eliminators[0] if eliminators else None,
         selector=selectors[0],
+        survivor=survivors[0] if survivors else None,
         adapters=tuple(adapters),
         controller=controllers[0] if controllers else None,
+        gate=gate,
     )
 
 
@@ -341,19 +384,33 @@ class SelectedOptimizer:
         return self.plan.sampler
 
     def round_cells(self, search: int) -> int:
-        return self.sampler.round_cells(self.knobs(self.sampler.name), search)
+        """Cells a round after the first asks for; 0 where the search split holds no panel."""
+        return self.sampler.drawn(self.knobs(self.sampler.name), search, "default").cells
 
     def round_cells_ceiling(self, search: int) -> int:
-        return self.sampler.round_cells_ceiling(self, search)
+        """The most cells one round buys: its arms on the walk's panel, then the parent's reads past theirs."""
+        return max(self._walk_ceiling(search, *walk) for walk in self.plan.round_walks.items())
+
+    def _walk_ceiling(self, search: int, pipeline: str, walk: tuple[Proposer, ...]) -> int:
+        asked = self.sampler.drawn(self.knobs(self.sampler.name), search, pipeline)
+        # An L4 size above the split still walks no more cells than the split holds.
+        panel = PanelSize(min(asked.cells, search), asked.block_size)
+        read = self.plan.selector.parent_read(panel) + sum(p.parent_read(panel) for p in walk)
+        # The selector's and proposers' parent reads are a union inside one panel, not a sum.
+        return self.walk_arms(walk) * panel.cells + min(read, panel.cells)
 
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)
 
     def call_config(self, name: str) -> dict[str, Any]:
-        """Less the member's knobs: a knob's edit is the diff classifier's to scope, never a prompt hash's."""
+        """Less the member's knobs and its prompt-field edits: a knob is the diff classifier's to scope, an edit ``running_prompt``'s."""
         table = optimizers.NODE_MEMBERS.table
         knobs = table[name].knobs.model_fields if name in table else {}
-        return {k: v for k, v in self.node_config(name).items() if k not in knobs}
+        return {
+            k: v
+            for k, v in self.node_config(name).items()
+            if k not in knobs and k not in PROMPT_FIELDS
+        }
 
     def file_config(self, name: str) -> dict[str, Any]:
         self.node(name)
@@ -433,6 +490,15 @@ class SelectedOptimizer:
     def declared_knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).kind, self.file_config(name))
 
+    def makes(self, proposer: Proposer) -> str:
+        """What *proposer*'s arms are, in plain words; the load refuses a `default` proposer declaring none."""
+        if (makes := self.manifest.nodes[proposer.name].makes) is None:
+            raise ValueError(
+                f"optimizer {self.name!r} walks proposer {proposer.name!r} in `default`, which "
+                "declares no `makes`."
+            )
+        return makes
+
     @property
     def members(self) -> tuple[NodeMember, ...]:
         return tuple(map(optimizers.NODE_MEMBERS.get, self.member_nodes))
@@ -442,7 +508,7 @@ class SelectedOptimizer:
 
     @property
     def arms_per_round(self) -> int:
-        return max(map(self.walk_arms, self.plan.round_walks))
+        return max(map(self.walk_arms, self.plan.round_walks.values()))
 
     @property
     def limits(self) -> tuple[OptimizerLimit, ...]:
@@ -454,25 +520,6 @@ class SelectedOptimizer:
     def refuse_origin(self, origin_results: CellSheet) -> None:
         for member in self.members:
             member.refuse_origin(origin_results)
-
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        out: dict[int, dict[str, str]] = {}
-        for member in self.members:
-            for round_num, packages in member.round_packages(cycle, rounds).items():
-                out.setdefault(round_num, {}).update(packages)
-        return out
-
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
-        rounds: list[RoundResult],
-        drifted: list[int],
-    ) -> list[RoundResult]:
-        for member in self.members:
-            rounds = await member.rederive(campaign_store, hop, cycle, rounds, drifted)
-        return rounds
 
     def review(
         self,
@@ -533,12 +580,15 @@ class SelectedOptimizer:
             cfg = {**cfg, "model": override.model}
             if override.provider:
                 cfg["provider"] = override.provider
-        body = prompt_body(self.manifest, cfg)
-        fields = override.prompt_fields
+        prompt = (
+            None
+            if prompt_key(cfg) is None
+            else running_prompt(node, self.node_config(node), self.manifest)
+        )
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return stable_hash(
             [
-                {**body, **fields} if body is not None and fields else body,
+                None if prompt is None else prompt.model_dump(exclude_unset=True),
                 override.schema_field_names,
                 _resolved_levers(node, declared_node_override(node)),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
@@ -546,13 +596,13 @@ class SelectedOptimizer:
             ]
         )
 
-    def treatment(self) -> Treatment:
-        """Under the bound L4 edit too: two inner cells under two arms are two treatments."""
+    def treatment(self, admits: frozenset[Presumption], shelf: PackShelf) -> Treatment:
+        """Under the bound L4 edit too: two inner cells under two arms are two treatments; *admits* is the run's admission (`nodes.py::admits`), *shelf* its account's packs."""
         return Treatment(
             optimizer=self.name,
             version=self.version,
             prompt_hashes=self.prompt_hashes(),
-            # Less its prose and `version`, which `Treatment` carries on its own.
+            # Less its prose, its `main` listing and `version`, which `Treatment` holds on its own.
             manifest=stable_hash(
                 [
                     self.manifest.laid_over(self.overlay).model_dump(
@@ -561,7 +611,8 @@ class SelectedOptimizer:
                             "resolved_prompts": True,
                             "version": True,
                             "paper": True,
-                            "nodes": {"__all__": {"description"}},
+                            "main": True,
+                            "nodes": {"__all__": {"description", "makes"}},
                         },
                     ),
                     {n: self.knobs(n).model_dump(mode="json") for n in self.member_nodes},
@@ -571,7 +622,10 @@ class SelectedOptimizer:
             source=stable_hash(
                 [
                     source_digest(self.members, proxies),
-                    {i.name: i.starting_content(self) for i in self.plan.initializers},
+                    {
+                        i.name: i.starting_content(self, admits, shelf)
+                        for i in self.plan.initializers
+                    },
                 ]
             ),
         )
@@ -588,35 +642,34 @@ def _resolved_key(family: object, version: object) -> str | None:
     return f"{family}/{version}" if version is not None else str(family)
 
 
-def _resolved_prompt(
-    manifest: PipelineManifest, config: Mapping[str, Any]
-) -> OptimizerPromptTemplate | None:
-    key = _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
-    return manifest.resolved_prompts.get(key) if key else None
+def prompt_key(config: Mapping[str, Any]) -> str | None:
+    """The `resolved_prompts` key a node's config names; ``None`` where it runs no prompt."""
+    return _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
 
 
-def prompt_body(manifest: PipelineManifest, config: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The fields as authored, never their defaults: a prompt hash reads only what the file says."""
-    held = _resolved_prompt(manifest, config)
-    return None if held is None else held.model_dump(exclude_unset=True)
+def prompt_edits(config: Mapping[str, Any]) -> dict[str, Any]:
+    """The prompt fields a config sets over its template, `optimization.nodes.{node}.config.{field}`."""
+    return {f: config[f] for f in PROMPT_FIELDS if f in config}
 
 
-def optimizer_prompt(
+def node_prompt(
     node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    template = _resolved_prompt(manifest, config)
-    if template is None:
+    """The template under the config's field edits, before any L4 override; fields set only where authored or edited."""
+    key = prompt_key(config)
+    if key is None or key not in manifest.resolved_prompts:
         raise KeyError(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
             f"(check nodes.{node}.config.prompt_family/version)."
         )
-    return template
+    return manifest.resolved_prompts[key].model_copy(update=prompt_edits(config))
 
 
 def running_prompt(
     node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    template = optimizer_prompt(node, config, manifest)
+    """The one text *node* runs, which its prompt hash reads: template, then config edits, then L4's bound override, which wins over both."""
+    template = node_prompt(node, config, manifest)
     if fields := resolve_node_override(node).prompt_fields:
         template = template.model_copy(update=fields)
     return template
@@ -629,16 +682,50 @@ _CALL_CONFIG_KEYS: frozenset[str] = (
 )
 
 
+def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
+    initializers = {initializer.name for initializer in selected.plan.initializers}
+    for ref in selected.manifest.main:
+        node, _, knob = ref.partition(".")
+        held = (
+            node in selected.member_nodes
+            and node not in initializers
+            and knob in optimizers.NODE_MEMBERS.get(node).knobs.model_fields
+        )
+        if not held:
+            raise ValueError(
+                f"optimizer {selected.name!r} leads with {ref!r} in `main`, which is no "
+                "`node.knob` of a member it walks, a pool initializer's aside: those are its pool's."
+            )
+
+
+def _refuse_unnamed_arms(selected: SelectedOptimizer) -> None:
+    # At load, so a setup surface never meets a proposer it cannot name.
+    for proposer in selected.plan.proposers:
+        selected.makes(proposer)
+    proposers = {proposer.name for proposer in selected.plan.proposers}
+    if strays := sorted(
+        n for n, node in selected.manifest.nodes.items() if node.makes and n not in proposers
+    ):
+        raise ValueError(
+            f"optimizer {selected.name!r} declares `makes` on {strays}, which `default` walks as "
+            "no proposer."
+        )
+
+
 def _refuse_unknown_llm_keys(selected: SelectedOptimizer) -> None:
     table = optimizers.NODE_MEMBERS.table
     for node in selected.llm_nodes:
+        config = selected.node_config(node)
         knobs = table[node].knobs.model_fields if node in table else {}
-        if unknown := sorted(set(selected.node_config(node)) - _CALL_CONFIG_KEYS - set(knobs)):
+        prompt = set(PROMPT_FIELDS) if prompt_key(config) is not None else set()
+        if unknown := sorted(set(config) - _CALL_CONFIG_KEYS - set(knobs) - prompt):
             raise ValueError(
                 f"optimizer {selected.name!r} node {node!r} names {unknown} in its config, which "
-                f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}) nor one of its knobs "
-                f"({sorted(knobs)})."
+                f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}), one of its knobs "
+                f"({sorted(knobs)}) nor, on a node running a prompt, a prompt field "
+                f"({list(PROMPT_FIELDS)})."
             )
+        OptimizerPromptTemplate.model_validate(prompt_edits(config))
     for target, keys in selected.steered_axes.items():
         if unheld := sorted(keys - set(selected.node_config(target))):
             raise ValueError(
@@ -662,13 +749,18 @@ def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     return shipped, authored_manifest(optimizer_manifest_path(shipped))
 
 
-def _stamps(name: str) -> tuple[tuple[Path, int], ...]:
-    """Of every file *name* resolves from, so an edit to what a switch extends re-resolves the switch."""
+def manifest_directories(name: str) -> tuple[Path, ...]:
+    """Every manifest directory *name* resolves from: its own, then what a switch extends and swaps from."""
     _, authored = _located(name)
     read = [name]
     if isinstance(authored, ManifestSwitch):
         read += [authored.extends, *(swap.of for swap in authored.swap.values())]
-    paths = [optimizer_manifest_path(_located(n)[0]) for n in read]
+    return tuple(_located(n)[0] for n in read)
+
+
+def _stamps(name: str) -> tuple[tuple[Path, int], ...]:
+    # Every file *name* resolves from, so an edit to what a switch extends re-resolves the switch.
+    paths = [optimizer_manifest_path(directory) for directory in manifest_directories(name)]
     return tuple((path, _stamp(path)) for path in paths)
 
 
@@ -718,6 +810,7 @@ def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
             "paper": authored.paper,
             "nodes": nodes,
             "pipelines": pipelines,
+            "main": authored.main,
             "resolved_prompts": prompts,
         }
     )
@@ -745,11 +838,11 @@ def _select(
         overlay=overlay,
         schema=schema,
         resolved_schemas=schemas,
-        plan=_round_plan(name, schema, manifest.initial_population_walks),
+        plan=_round_plan(name, schema, manifest.initial_population_walks, gate),
         member_nodes=_roster(schema),
     )
     # At load, never mid-round: an edge no roster member closes would raise inside round 1.
-    if open_ := _open_edges(selected, gate):
+    if open_ := _open_edges(selected):
         raise PayloadInvalidError(
             f"optimizer {name!r} names a roster whose edges do not close: " + "; ".join(open_),
             code="optimizer_roster_open",
@@ -761,6 +854,8 @@ def _select(
             or declared_node.name in optimizers.NODE_MEMBERS.table
         ):
             selected.knobs(declared_node.name)
+    _refuse_unknown_main(selected)
+    _refuse_unnamed_arms(selected)
     _refuse_unknown_llm_keys(selected)
     if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))
@@ -790,32 +885,19 @@ def _roster(schema: PipelineSchema) -> tuple[str, ...]:
     return tuple(n for n in declared if n in reached)
 
 
-def _walk(selected: SelectedOptimizer, gate: ArmGateMode) -> tuple[NodeMember, ...]:
-    """Every member in first-round order under *gate*, the bench's seat among them, then the members only a walked one reaches."""
+def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
+    """Every member in the order the first rounds walk it, then the members only a walked one reaches."""
     plan = selected.plan
-    pipelines = selected.schema.pipelines
-    default = [
-        optimizers.NODE_MEMBERS.get(n) for n in pipelines["default"] if n != plan.measurement
-    ]
-    seeds: list[NodeMember] = list(plan.initial_population)
-    match gate:
-        case "off":
-            pass
-        case "review":
-            default.insert(default.index(plan.proposers[-1]) + 1, OPERATOR_SEAT)
-        case "author":
-            opens = default.index(plan.proposers[0])
-            default = [m for m in default if m not in plan.proposers]
-            default.insert(opens, OPERATOR_SEAT)
-            seeds = [OPERATOR_SEAT] if seeds else []
-        case unreachable:
-            assert_never(unreachable)
-    named = {n for walk in _WALKS for n in pipelines.get(walk, ())}
+    named = {n for walk in _WALKS for n in selected.schema.pipelines.get(walk, ())}
     reached = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
-    return (*plan.initializers, *seeds, *default, *reached)
+    return (
+        *plan.initializers,
+        *(member for role in RoundRole for member in plan.first_walk(role)),
+        *reached,
+    )
 
 
-def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
+def _open_edges(selected: SelectedOptimizer) -> list[str]:
     members = {node: optimizers.NODE_MEMBERS.get(node) for node in selected.member_nodes}
     table = optimizers.NODE_MEMBERS.table
     open_ = [
@@ -840,7 +922,8 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
     # One closure: a part that holds no value until written is written earlier in the walk than
     # any member reading or drawing it, unless that member writes it itself.
     written: set[type[StatePart]] = set()
-    for member in _walk(selected, gate):
+    gate = selected.plan.gate
+    for member in _walk(selected):
         early = sorted(
             kind.kind
             for kind in {*member.reads, *selected.draws(member)}
@@ -852,9 +935,11 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
                 + (f" under `arm_gate: {gate}`" if gate == "author" else "")
             )
         written |= member.writes
-    for walk in selected.plan.round_walks:
+    for walk in selected.plan.round_walks.values():
         if not selected.walk_arms(walk):
             open_.append(f"{[p.name for p in walk]} add no arm: no member answers a round's arms")
+        if editors := [p.name for p in walk if p.proposes == "edits" and p.arms(selected)]:
+            open_.append(f"{editors} edit the arms they are handed and count arms of their own")
     if len(reviewers := sorted(n for n, m in members.items() if isinstance(m, Reviewer))) > 1:
         open_.append(f"{reviewers} each answer review.md's reading, which one member answers")
     return open_
@@ -904,9 +989,11 @@ _DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.Cont
 
 
 @contextlib.contextmanager
-def binding_optimizer(optimization: OptimizationConfig) -> Iterator[None]:
-    token = _BOUND.set(select_optimizer(optimization))
-    clamp = _DETERMINISM.set(optimization.determinism)
+def binding_optimizer(
+    selected: SelectedOptimizer, *, determinism: DeterminismClamp | None
+) -> Iterator[None]:
+    token = _BOUND.set(selected)
+    clamp = _DETERMINISM.set(determinism)
     try:
         yield
     finally:
@@ -918,8 +1005,8 @@ def bound_optimizer() -> SelectedOptimizer:
     selected = _BOUND.get()
     if selected is None:
         raise RuntimeError(
-            "no optimizer is bound to this task — the run seam binds "
-            "`select_optimizer(config.optimization)` before anything reads a node"
+            "no optimizer is bound to this task — the run seam binds the launch's "
+            "selection before anything reads a node"
         )
     return selected
 

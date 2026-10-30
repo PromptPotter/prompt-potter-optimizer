@@ -10,6 +10,7 @@ from promptpotter.application.bench.children import (
     DROPPED_MANDATORY_PLACEHOLDER,
     admission_failures,
     carried_writes,
+    overlay_failures,
     placeholder_failures,
 )
 from promptpotter.application.bench.llm_call import InjectionBreakdown, LLMCallContext, llm_call
@@ -21,7 +22,7 @@ from promptpotter.application.intelligence.earned_blocks import (
 from promptpotter.application.mask.backprop import select_rewind_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.optimizers.nodes import CycleRead, ReadArm
+from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
 from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -35,6 +36,7 @@ from promptpotter.domain.opt_search_point import (
     Variation,
     loci_of,
     node_source,
+    taken,
 )
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
@@ -51,6 +53,7 @@ from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRol
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.difficulty import DifficultyView
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -165,6 +168,13 @@ def _drawn(round_: RoundContext, member: NodeMember, kind: type[Pool]) -> tuple[
     return cycle.slices.get(kind).drawn({s.key: s for s in demo})
 
 
+def _parents(cycle: Cycle, child: OptSearchPoint) -> list[OptSearchPoint]:
+    """The individuals *child*'s lineage names: population members first, else arms a closed round measured."""
+    carried = {individual.id: individual for individual in cycle.population}
+    pool = cycle.measured_pool()
+    return [carried[pid] if pid in carried else pool[pid][0] for pid in child.lineage.parent_ids]
+
+
 class Lineage(CycleRead):
     @property
     def parent(self) -> OptSearchPoint:
@@ -177,6 +187,19 @@ class Lineage(CycleRead):
     @property
     def population(self) -> Sequence[OptSearchPoint]:
         return self._cycle.population
+
+    def parents(self, child: OptSearchPoint) -> list[OptSearchPoint]:
+        return _parents(self._cycle, child)
+
+    @property
+    def measured(self) -> tuple[OptSearchPoint, ...]:
+        """The campaign's measured individuals as a pool (`Cycle.measured_pool`): a resume holds the
+        pool its banked rounds name by holding them."""
+        return tuple(individual for individual, _ in self._cycle.measured_pool().values())
+
+    def theta(self, individual_id: str) -> float | None:
+        """θ on ONE scale over every cell the pool holds of it, so any two compare (`Cycle.pooled_theta`)."""
+        return self._cycle.pooled_theta(individual_id)
 
     @property
     def rounds(self) -> Sequence[RoundResult]:
@@ -326,6 +349,11 @@ class Target(CycleRead):
         """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
         return inner_cells()
 
+    def pack_entries(self, names: Sequence[str]) -> dict[str, PoolEntry]:
+        """The entries of packs *names* in the run's account that the run admits, by content id."""
+        admitted = admits(self.schema, self.matcher)
+        return self._cycle.session.store.block_packs.entries(names, admits=admitted)
+
     def runtime_failures(self) -> list[RuntimeFailure]:
         return self._cycle.runtime_failures()
 
@@ -431,9 +459,16 @@ class Children(CycleRead):
         prompt_loci: Mapping[Locus, Any] | None = None,
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
+        hosted_by: str | None = None,
     ) -> Proposal:
-        """*overlay* lays config over the FIRST parent's."""
+        """*overlay* lays config over the FIRST parent's. *hosted_by* names the LLM node whose reply
+        decided the child where another node writes it, so its lineage names who chose."""
         schema = self._cycle.session.pipeline_schema
+        variation = (
+            self._variation
+            if hosted_by is None
+            else Variation(node=node_source(self._cycle.optimizer.name, hosted_by), mode="llm")
+        )
         asked = overlay or {}
         prompts, config, carried = carried_writes(
             schema,
@@ -444,7 +479,7 @@ class Children(CycleRead):
         individual = OptSearchPoint.derive(
             parents,
             schema=schema,
-            variation=self._variation,
+            variation=variation,
             take=take,
             changes={**loci_of(config), **prompts},
             changes_description=changes_description,
@@ -461,24 +496,45 @@ class Children(CycleRead):
         self,
         proposal: Proposal,
         *,
-        prompt_loci: Mapping[Locus, Any],
+        prompt_loci: Mapping[Locus, Any] | None = None,
+        overlay: dict[str, dict[str, Any]] | None = None,
+        take: Mapping[Locus, int] | None = None,
         changes_description: str | None = None,
     ) -> Proposal:
+        """*overlay* lays config over the proposal's own, as ``child`` lays it over a first parent's;
+        *take* names each locus's donor by position in the proposal's parents, as ``child``'s does."""
         schema = self._cycle.session.pipeline_schema
-        prompts, _, carried = carried_writes(
-            schema, prompt_loci=prompt_loci, overlay={}, demo=self._demo_keys(prompt_loci)
+        asked = {node: dict(keyed) for node, keyed in (overlay or {}).items()}
+        prompt_loci = dict(prompt_loci or {})
+        donors = _parents(self._cycle, proposal.individual) if take else []
+        for locus, value in taken(donors, take or {}, schema).items():
+            if schema.locus_kind(*locus) == "config":
+                asked.setdefault(locus.node, {})[locus.key] = value
+            else:
+                prompt_loci[locus] = value
+        prompts, config, carried = carried_writes(
+            schema, prompt_loci=prompt_loci, overlay=asked, demo=self._demo_keys(prompt_loci)
         )
         individual = proposal.individual.edited(
-            self._variation, schema=schema, changes=prompts, changes_description=changes_description
+            self._variation,
+            schema=schema,
+            changes={**loci_of(config), **prompts},
+            changes_description=changes_description,
         )
-        failures = [*proposal.validation_failures, *carried]
+        failures = [
+            *proposal.validation_failures,
+            *carried,
+            *overlay_failures(config, schema, running=individual.pipeline_params),
+        ]
         if individual.prompts != proposal.individual.prompts:
             failures = [
                 *(f for f in failures if f.reason != DROPPED_MANDATORY_PLACEHOLDER),
                 *placeholder_failures(individual, schema),
             ]
+        held = proposal.overlay
+        merged = {n: {**held.get(n, {}), **asked.get(n, {})} for n in (*held, *asked)}
         return proposal.model_copy(
-            update={"individual": individual, "validation_failures": failures}
+            update={"individual": individual, "overlay": merged, "validation_failures": failures}
         )
 
     def _demo_keys(self, loci: Mapping[Locus, Any]) -> frozenset[str] | None:

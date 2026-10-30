@@ -1,18 +1,20 @@
 "use client";
 
 import { invalidateReads } from "@/lib/read-cache";
-import { AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
+import { AccountSection } from "./AccountSection";
 import {
   SegmentedControl,
   CommitInput,
   DataTable,
+  FailureLine,
+  ReadState,
   type Column,
   type Segment,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { billText, ratePricedText } from "@/lib/derivations";
-import { fmtAgo, fmtTokens, fmtUsd } from "@/lib/format";
-import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
+import { allowanceCaveats, billText } from "@/lib/derivations";
+import { cssPct, fmtAgo, fmtTokens, fmtUsd } from "@/lib/format";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import {
@@ -28,33 +30,31 @@ const SEGMENTED_MAX = 8;
 export function AccountUsageTab() {
   const read = useRead(quotaRead(), { auth: true });
   const machine = readyData(useMachineStatus());
-  const quota = shownData(read);
-
-  if (read.status === "failed" && quota === null) {
-    return <AccountFailure message={read.failure.message} subject="your usage" />;
-  }
-  if (quota === null) return <AccountLoading subject="your usage" />;
   return (
-    <>
-      <SpendSection quota={quota} />
-      <RunsSection quota={quota} machine={machine} />
-      <AccountSection
-        title="Campaigns today"
-        lede="An abuse limit, not an allowance. It resets at UTC midnight."
-      >
-        <p className="account-figure">
-          {quota.campaigns_today}
-          <span className="account-figure-of"> of {quota.max_campaigns_per_day}</span>
-        </p>
-      </AccountSection>
-    </>
+    <ReadState read={read} subject="your usage">
+      {(quota) => (
+        <>
+          <SpendSection quota={quota} />
+          <RunsSection quota={quota} machine={machine} />
+          <AccountSection
+            title="Campaigns today"
+            lede="An abuse limit, not an allowance. It resets at UTC midnight."
+          >
+            <p className="account-figure">
+              {quota.campaigns_today}
+              <span className="account-figure-of"> of {quota.max_campaigns_per_day}</span>
+            </p>
+          </AccountSection>
+        </>
+      )}
+    </ReadState>
   );
 }
 
 function Meter({ share, warn = false }: { share: number; warn?: boolean }) {
   return (
     <div className={cx("account-meter", warn && "warn")} aria-hidden="true">
-      <div className="account-meter-fill" style={{ width: `${share * 100}%` }} />
+      <div className="account-meter-fill" style={{ width: cssPct(share) }} />
     </div>
   );
 }
@@ -62,7 +62,6 @@ function Meter({ share, warn = false }: { share: number; warn?: boolean }) {
 function SpendSection({ quota }: { quota: QuotaStatus }) {
   const lifetime = quota.spend_lifetime;
   const blind = lifetime.bill_is_floor;
-  const priced = ratePricedText(lifetime.rate_priced_usd, lifetime.calls_rate_priced);
   const usdCap = quota.spend_budget_usd_total;
   const tokenCap = quota.token_budget_total;
   const usdShare = quota.spend_budget_used_share;
@@ -87,24 +86,11 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
             </span>
           </span>
           {usdShare !== null ? <Meter share={usdShare} warn={blind} /> : null}
-          {blind ? (
-            <span className="account-warn">
-              ⚠ USD cap inactive — {fmtTokens(lifetime.unpriced_tokens)} billed with no
-              resolvable rate, so this figure undercounts. The token ceiling is the one holding.
+          {allowanceCaveats(lifetime).map((line) => (
+            <span key={line} className="account-warn">
+              {line}
             </span>
-          ) : null}
-          {priced ? (
-            <span className="account-warn">
-              + {priced} — calls no provider reported a bill for. Not spent; the ceiling counts
-              it beside what was billed.
-            </span>
-          ) : null}
-          {lifetime.sends_unreported ? (
-            <span className="account-warn">
-              + up to {fmtUsd(lifetime.unreported_usd)} unreported — sends that ended with no
-              bill. Not spent, unknown; the ceiling holds it beside what was billed.
-            </span>
-          ) : null}
+          ))}
         </div>
         <div className="account-wallet-cell">
           <span className="account-kicker">Tokens</span>
@@ -289,7 +275,6 @@ function LimitControl({
   };
 
   const busy = cmd.pending !== null;
-  const error = cmd.failure?.message ?? null;
   const ceiling = machine?.ceiling ?? null;
   return (
     <div className="account-limit">
@@ -326,11 +311,7 @@ function LimitControl({
         )}
         {busy ? <span className="account-note">Saving…</span> : null}
       </div>
-      {error ? (
-        <p className="account-failure" role="alert">
-          {error}
-        </p>
-      ) : null}
+      <FailureLine failure={cmd.failure} />
       {quota.machine_binds !== null ? (
         <p className="account-warn">{quota.machine_binds}</p>
       ) : null}

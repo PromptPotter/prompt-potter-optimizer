@@ -5,8 +5,10 @@
 - **`cli/`** — each verb once in `commands/verbs.py`, whose docstring holds the launch-as-data rule.
 - **`terminal/`** prints only what a terminal alone prints; the readout and every renderer are
   `application/views/`'s, imported upward.
-- **`api/`** — dataset reads go through `infrastructure/store/dataset_access.py::resolve_dataset` (a
-  resolver, not a gate); what a campaign RUNS goes through
+- **`api/`** — **a router's gate is its mount's** (`main.py::API_ROUTERS`; `None` is public by
+  declaration), never a dependency each route remembers; **a request body is a `StrictModel` at
+  every depth**, asserted at import (`main.py::_open_request_objects`). Dataset reads go through
+  `infrastructure/store/dataset_access.py::resolve_dataset` (a resolver, not a gate); what a campaign RUNS goes through
   `application/pipeline_resolve.py::resolve_pipeline_for_campaign`, ownership-gated (`owned_campaign`,
   404 cross-user). **Authorization denies via `shared/identity.py::require_capability`** at host
   privilege (the operator-admin channel), the command-verb gate (`CommandDispatcher._applier`), and the

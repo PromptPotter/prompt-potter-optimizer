@@ -1,7 +1,7 @@
 "use client";
 
 import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
-import { createModuleStore } from "@/lib/module-store";
+import { createModuleStore } from "@/lib/state/module-store";
 
 // A dial at weight 0 is off, so the weights ARE the selection.
 export type ScoringMask =

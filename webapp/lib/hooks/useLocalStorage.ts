@@ -2,6 +2,31 @@
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
+export const STORAGE_KEYS = {
+  theme: "promptpotter.theme",
+  diagnostics: "promptpotter.diagnostics.incidents",
+  viewMemory: "promptpotter.view.byCampaign",
+  sidebarCollapsed: "promptpotter.sidebar.collapsed",
+  sidebarWidth: "promptpotter.sidebar.width",
+  treeShowCandidates: "promptpotter.tree.showCandidates",
+  runCardExpanded: "promptpotter.runCard.expanded",
+  allowanceExhaustedDismissed: "promptpotter.allowance-exhausted.dismissed",
+  chunkReloadAt: "promptpotter.chunk-reload-at",
+} as const;
+
+export const laneKey = (id: string) => `promptpotter.dash.lane.${id}` as const;
+export const sidePanelKey = (panelId: string) => `side-panel:${panelId}` as const;
+
+type StorageKey =
+  | (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]
+  | ReturnType<typeof laneKey>
+  | ReturnType<typeof sidePanelKey>;
+
+export const BOOL = {
+  serialize: (v: boolean) => (v ? "1" : "0"),
+  deserialize: (raw: string) => raw === "1",
+};
+
 const listeners = new Map<string, Set<() => void>>();
 // `useSyncExternalStore` needs a stable reference: re-parsing per read would loop.
 const snapCache = new Map<string, { raw: string | null; parsed: unknown }>();
@@ -16,7 +41,7 @@ interface Options<T> {
 }
 
 export function useLocalStorage<T>(
-  key: string,
+  key: StorageKey,
   initial: T,
   opts?: Options<T>,
 ): [T, (next: T | ((prev: T) => T)) => void] {

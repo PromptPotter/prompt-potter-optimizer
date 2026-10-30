@@ -17,11 +17,15 @@ import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import type {
   HierarchyCampaign,
   HierarchyCandidate,
+  ListedCampaign,
   SubtreeCampaign,
   SubtreeCourse,
+  UnstartedCampaign,
 } from "@/lib/api";
+import { useIngest } from "@/lib/ingest-flow";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
+import { PLACEHOLDER } from "@/lib/format";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -35,7 +39,7 @@ export interface TreeCtx {
   showCandidates: boolean;
 }
 
-export function ForestRows({ entries, ctx }: { entries: HierarchyCampaign[]; ctx: TreeCtx }) {
+export function ForestRows({ entries, ctx }: { entries: ListedCampaign[]; ctx: TreeCtx }) {
   const groups = useMemo(() => groupByRoot(entries), [entries]);
   return (
     <>
@@ -84,7 +88,7 @@ function GroupRow({
 
 function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
   const { rootCycleId, campaigns } = group;
-  if (campaigns.length === 1) return <RunRow campaign={campaigns[0]!} ctx={ctx} />;
+  if (campaigns.length === 1) return <ListedRow campaign={campaigns[0]!} ctx={ctx} />;
   return (
     <GroupRow
       addr={rootCycleId}
@@ -101,7 +105,7 @@ function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
     >
       {campaigns.map((campaign) => (
         <li key={campaign.address}>
-          <RunRow campaign={campaign} ctx={ctx} />
+          <ListedRow campaign={campaign} ctx={ctx} />
         </li>
       ))}
     </GroupRow>
@@ -110,6 +114,36 @@ function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
 
 function shortOrigin(originId: string): string {
   return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
+}
+
+function ListedRow({ campaign, ctx }: { campaign: ListedCampaign; ctx: TreeCtx }) {
+  return campaign.level === "unstarted" ? (
+    <UnstartedRow campaign={campaign} />
+  ) : (
+    <RunRow campaign={campaign} ctx={ctx} />
+  );
+}
+
+// No cycle, so no subtree to open and no line to compare: a tap reopens its check-in.
+function UnstartedRow({ campaign }: { campaign: UnstartedCampaign }) {
+  const { checkin } = useWorkspace();
+  const { openDraft } = useIngest();
+  const selected = checkin?.draftId === campaign.address;
+  return (
+    <RowHoverCard card={campaign}>
+      <div className={cx("unit-library-family", selected && "selected")}>
+        <button
+          type="button"
+          className="unit-library-item"
+          onClick={() => openDraft(campaign.address)}
+          aria-current={selected ? "true" : undefined}
+        >
+          <CampaignRowLabel campaign={campaign} />
+        </button>
+        <CampaignMenu campaign={campaign} />
+      </div>
+    </RowHoverCard>
+  );
 }
 
 function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: TreeCtx }) {
@@ -277,7 +311,7 @@ function CourseRowLabel({ course }: { course: SubtreeCourse }) {
       <span className="unit-library-name">{course.label}</span>
       <span className="unit-library-meta unit-library-meta-marked">
         <PhaseMark status={course.state.status} />
-        <span title={lift?.value}>{lift ? lift.value : "—"}</span>
+        <span title={lift?.value}>{lift ? lift.value : PLACEHOLDER}</span>
       </span>
     </span>
   );

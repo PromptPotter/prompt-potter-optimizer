@@ -863,11 +863,18 @@ def enumerable_truth_labels(cells: Sequence[GradedCell]) -> Counter[str] | None:
 
 
 @shapes_optimizer_prompt
+def graded_answer(facts: MeasuredCell, grade: Grade) -> str | None:
+    """What the formula compared to the truth, the whole reply where it reads no span; ``None`` is no answer."""
+    said = facts.predicted if grade.span is None else grade.span
+    return None if said in ("", NO_RESULT) else said
+
+
+@shapes_optimizer_prompt
 def modal_answer_share(cells: Sequence[GradedCell]) -> float | None:
     """Over PREDICTIONS; reports and never gates — below 1.0 it measures hedging."""
     if enumerable_truth_labels(cells) is None:
         return None
-    said = Counter(c.facts.predicted for c in cells if c.facts.predicted)
+    said = Counter(a for c in cells if (a := graded_answer(c.facts, c.grade)) is not None)
     total = sum(said.values())
     if total == 0:
         return None
@@ -877,8 +884,8 @@ def modal_answer_share(cells: Sequence[GradedCell]) -> float | None:
 def is_answer_collapsed(cells: Sequence[GradedCell]) -> bool:
     """The ABSENCE of a measurement, not a low score: θ fitted to a constant answer is an artifact."""
     answered = [c for c in cells if not c.facts.errored]
-    said = {c.facts.predicted for c in answered}
-    if len(said) != 1 or said & {"", NO_RESULT}:
+    said = {graded_answer(c.facts, c.grade) for c in answered}
+    if len(said) != 1 or None in said:
         return False
     truth = enumerable_truth_labels(answered)
     if truth is not None:

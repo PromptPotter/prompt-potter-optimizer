@@ -5,24 +5,16 @@ import { pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
 import {
+  MOVEMENT_CLASS,
   orderAtStep,
+  sameSampleSet,
   seedFromOrder,
-  type SampleMovement,
   type SelectMode,
   type StepOrder,
   unionFirstAppearance,
   type SortedRounds,
 } from "@/lib/derivations";
 import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types.generated";
-import { sameSampleSet } from "@/lib/sample-set";
-
-const CELL_CLASS: Record<SampleMovement, string> = {
-  new: "new",
-  readded: "new",
-  gained: "add",
-  lost: "lost",
-  kept: "kept",
-};
 
 interface HoverState {
   round: number;
@@ -95,7 +87,7 @@ export function SeriesView({
                   return (
                     <span
                       key={sid}
-                      className={cx("st-sq", CELL_CLASS[kind], "st-series-cell", isHovered && "hovered")}
+                      className={cx("st-sq", MOVEMENT_CLASS[kind], "st-series-cell", isHovered && "hovered")}
                       aria-label={`Sample ${sid}, round ${r.round}, position ${p} of ${total}. ${titleNote}. Hover for the sample order at this step; click to compare fitness on the samples up to here.`}
                       onMouseEnter={(e) =>
                         setHover({ round: r.round, sampleId: sid, position: p, total, x: e.clientX, y: e.clientY })
@@ -190,7 +182,7 @@ function Legend() {
   return (
     <div className="st-legend">
       {swatch("st-sq new", `${SAMPLE_MOVEMENT_LABELS.new} / ${SAMPLE_MOVEMENT_LABELS.readded}`)}
-      {swatch("st-sq add", SAMPLE_MOVEMENT_LABELS.gained)}
+      {swatch(cx("st-sq", MOVEMENT_CLASS.gained), SAMPLE_MOVEMENT_LABELS.gained)}
       {swatch("st-sq lost", SAMPLE_MOVEMENT_LABELS.lost)}
       {swatch("st-sq kept", SAMPLE_MOVEMENT_LABELS.kept)}
       {swatch("st-sq absent", "not in bank")}

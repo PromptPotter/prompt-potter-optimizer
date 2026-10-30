@@ -8,6 +8,7 @@ from pydantic import Field
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
 from promptpotter.application.datasets.loaders import cut_bank
+from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
@@ -19,7 +20,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     assert_origin_ready,
     commit_upload_definition,
     persist_origin_candidate_library,
-    upload_source,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
@@ -31,8 +31,9 @@ from promptpotter.application.jobs.mint import (
     relabel_minted,
     resolve_cycle_plan,
 )
-from promptpotter.application.jobs.quota import on_free_tier
+from promptpotter.application.jobs.quota import land_job, on_free_tier
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.connector import BackendUnreachableError
@@ -73,8 +74,8 @@ class CheckinStart:
     verb: ClassVar[str] = "start-checkin"
 
     claim: DraftClaim
-    # The queue's label alone; every decision reads the draft.
-    slug: str
+    # The queue's label alone (`DraftCampaign.dataset_name`); every decision reads the draft.
+    dataset_name: str
     budget: Budget
 
     @property
@@ -86,8 +87,8 @@ class CheckinStart:
         return None
 
     @property
-    def dataset_name(self) -> str:
-        return self.slug
+    def draft_id(self) -> str:
+        return self.claim.draft_id
 
     def backend_type(self, stores: Stores) -> str:
         return owned_draft(stores, self.claim.draft_id).connector
@@ -99,17 +100,21 @@ class CheckinStart:
 def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict[str, Any]) -> None:
     """Before the dataset lands, so a refused Start takes no slug and its retry is a Start like the first."""
     params, _rows, schema = draft_pipeline(stores, draft)
+    config = draft_config(stores, draft)
     refuse_unrunnable(
-        draft_config(stores, draft),
+        config,
+        select_optimizer(config.optimization),
         cut_bank(stores, source),
         params,
         schema,
         free=on_free_tier(stores),
+        shelf=stores.block_packs,
     )
 
 
 async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
     draft = start_ready_draft(stores, draft_id)
+    dataset_name = draft.dataset_name
     canonical = draft.source_dataset
     if canonical is None:
         if stores.tenant_datasets.slug_exists(draft.slug):
@@ -122,11 +127,9 @@ async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
         source = upload_source(draft, upload)
         _refuse_unrunnable_upload(stores, draft, source)
         commit_upload_definition(stores, draft, source=source)
-        dataset_name = draft.slug
         origin_override = None
     else:
         persist_origin_candidate_library(stores, canonical, draft)
-        dataset_name = canonical
         # An origin authored over an existing slug writes no dataset: only the override carries it.
         # `committed_prompts` rather than the raw map, or the label enumeration is lost.
         origin_override = (
@@ -167,7 +170,7 @@ async def hold_checkin_start(
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
         minted = await _commit_checkin(stores, request.claim.draft_id)
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        job_registry.update_target(job.job_id, hop=hop)
+        land_job(stores, job_registry, job.job_id, hop, held.share)
         claim_cycle(stores, job_registry, job, hop)
     except BaseException as exc:
         if isinstance(exc, BackendUnreachableError):
@@ -178,4 +181,4 @@ async def hold_checkin_start(
         request.claim.release()
 
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
-    return HeldRun.of(job_registry, job.job_id, minted.session, held)
+    return HeldRun.of(job_registry, job.job_id, minted, held)

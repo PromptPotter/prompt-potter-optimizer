@@ -5,11 +5,11 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
@@ -97,10 +97,10 @@ RUNTIME_FAILURE_RECENCY_WINDOW = 6
 VALIDATION_RENDER_CAP = 8
 ANSWER_LABEL_STEM = 40
 ANSWER_TALLY_ROWS = 5
-DEMO_POOL_RENDER_CAP = 12
 DEMO_QUERY_STEM = 80
-# Per field under `open`, earned blocks included; the rest rotate in by round. `closed` shows its enum whole.
-BLOCK_POOL_RENDER_CAP = 8
+RECOMBINATION_VALUE_STEM = 160
+# An id is shown, and answered, by its head, resolved over every individual the cycle measured.
+RECOMBINATION_ID_CHARS = 8
 BLOCK_ID_INSTRUCTION = (
     "Per prompt node, its pooled fields: {node: {field: the id of a block the PROMPT BLOCK POOL "
     "panel lists for that field}}."
@@ -166,6 +166,30 @@ class RoundDigest:
 
 
 @dataclass(frozen=True)
+class PoolParent:
+    """One recombination pool entry: a measured individual, its θ on the round's one scale (``None``
+    where that scale reads none of it), and whether it is in the population a main is drawn from."""
+
+    individual: OptSearchPoint
+    theta: float | None
+    main: bool
+
+    @property
+    def id(self) -> str:
+        return self.individual.id[:RECOMBINATION_ID_CHARS]
+
+
+class RecombinationOffer(NamedTuple):
+    """What a host's recombination slot is closed on: the children it may name, the id heads a main
+    and a donor may take, and the locus names a donor may give."""
+
+    children: int
+    mains: tuple[str, ...]
+    ids: tuple[str, ...]
+    loci: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class InjectionBundle:
     parent: OptSearchPoint
     l2: L2Memory
@@ -183,6 +207,8 @@ class InjectionBundle:
     shot_k_max: int
     # Each sample's slot in the cycle's bank: the `[#id]` a panel marks a row by.
     slot_of: Mapping[str, int]
+    # The most entries one call shows of each pool it reads (`L1GenerateKnobs.pool_window`).
+    pool_window: int
     origin_per_sample: CellSheet = field(default_factory=lambda: CellSheet(""))
     # Hits included: a pipeline collapsed onto one label shows only against the labels it is NOT emitting.
     trajectory_results: Sequence[GradedCell] = ()
@@ -203,10 +229,30 @@ class InjectionBundle:
     demo_split: tuple[Sample, ...] = ()
     # `None` off the L4 recursion; each outer node's manifest is `InnerCells.owners`'.
     inner_cells: InnerCells | None = None
+    # The children a host call may name, its parents and the loci a main can take; empty is off.
+    recombine: int = 0
+    recombination_host: str = ""
+    recombination_pool: tuple[PoolParent, ...] = ()
+    recombination_loci: tuple[Locus, ...] = ()
 
     @property
     def prompt_nodes(self) -> list[PipelineNode]:
         return [] if self.pipeline_schema is None else self.pipeline_schema.prompt_nodes()
+
+    def recombines(self, host: str) -> bool:
+        """Whether *host*'s call is shown the pool and offered the slot."""
+        return bool(self.recombination_pool) and self.recombination_host == host
+
+    def recombination_offer(self, host: str) -> RecombinationOffer | None:
+        """``None`` withdraws the slot."""
+        if not self.recombines(host):
+            return None
+        return RecombinationOffer(
+            self.recombine,
+            tuple(p.id for p in self.recombination_pool if p.main),
+            tuple(p.id for p in self.recombination_pool),
+            tuple(locus.name for locus in self.recombination_loci),
+        )
 
     @property
     def offers_shots(self) -> bool:
@@ -221,7 +267,7 @@ class InjectionBundle:
         for name, blocks in self.blocks.items():
             earned = [b for b in blocks if b.group[1] == EARNED_SOURCE]
             rest = [b for b in blocks if b.group[1] != EARNED_SOURCE]
-            k = min(max(BLOCK_POOL_RENDER_CAP - len(earned), 0), len(rest))
+            k = min(max(self.pool_window - len(earned), 0), len(rest))
             start = (self.cycle_slice.round_num - 1) * k % len(rest) if rest else 0
             if name in opened and (window := (*earned, *(rest[start:] + rest[:start])[:k])):
                 out[name] = window

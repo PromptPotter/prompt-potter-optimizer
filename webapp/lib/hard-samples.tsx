@@ -11,6 +11,7 @@ import type {
 } from "@/lib/api";
 import { useCycleStream } from "@/lib/poll";
 import { useCells, type SeriesTotals } from "@/lib/hooks/useCells";
+import type { ReadFailure } from "@/lib/hooks/useRead";
 import type { CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -33,10 +34,10 @@ interface HardSamples {
   setScope: (s: HardSamplesScope) => void;
   stale: boolean;
   /** Consumers MUST render it: an empty roster and a broken read spell `items` the same way. */
-  error: string | null;
+  failure: ReadFailure | null;
 }
 
-const Ctx = createContext<HardSamples | null>(null);
+const HardSamplesContext = createContext<HardSamples | null>(null);
 
 export function HardSamplesProvider({
   path,
@@ -67,7 +68,7 @@ export function HardSamplesProvider({
       scope,
       setScope,
       stale: p.isStale,
-      error: p.error,
+      failure: p.failure,
     }),
     [
       datasetName,
@@ -79,16 +80,16 @@ export function HardSamplesProvider({
       p.totals,
       p.order,
       p.isStale,
-      p.error,
+      p.failure,
       rankedByPick,
       scope,
     ],
   );
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <HardSamplesContext.Provider value={value}>{children}</HardSamplesContext.Provider>;
 }
 
 export function useHardSamples(): HardSamples {
-  const v = useContext(Ctx);
+  const v = useContext(HardSamplesContext);
   if (!v) throw new Error("useHardSamples must be used inside <HardSamplesProvider>");
   return v;
 }
@@ -113,7 +114,7 @@ type PresetCells = Pick<
   | "totals"
   | "rankedBy"
   | "stale"
-  | "error"
+  | "failure"
 >;
 
 const NO_PRESET: PresetCells = {
@@ -126,7 +127,7 @@ const NO_PRESET: PresetCells = {
   totals: null,
   rankedBy: null,
   stale: false,
-  error: null,
+  failure: null,
 };
 
 // Every list of measured cells reads here, so a pane and a host naming one preset share one flight.
@@ -166,6 +167,6 @@ export function usePresetCells(preset: CellsPreset | null, status?: CellStatus):
     totals: own.totals,
     rankedBy: own.order,
     stale: own.isStale,
-    error: own.error,
+    failure: own.failure,
   };
 }

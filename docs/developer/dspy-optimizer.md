@@ -64,7 +64,7 @@ loop = compile_loop(
 ```
 
 `optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and keeps everything around it; its
-`nodes` are that manifest's knobs (`GET /optimizers/{name}/knobs`), and one the manifest does not
+`nodes` are that manifest's knobs (`pipeline_resolve.py::OptimizerSetup.knobs`, served on a draft and a campaign's pipeline), and one the manifest does not
 take is refused when the loop is built. `compile_loop` returns the campaign's own
 `OptimizationConfig`, so any field of it is a keyword. The values above are an illustration:
 omitting `nodes` runs the manifest as declared, and a compile starts from

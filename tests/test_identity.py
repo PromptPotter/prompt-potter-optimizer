@@ -63,8 +63,8 @@ from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     declare,
     mint_framed_cycle,
-    refuse_drifted_resume,
     resolve_cycle_plan,
+    resolve_resume,
 )
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
@@ -72,11 +72,13 @@ from promptpotter.application.optimizer_manifest import (
     binding_optimizer,
     binding_prompt_overrides,
     resolve_optimizer,
+    running_prompt,
+    select_optimizer,
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
 from promptpotter.application.optimizers.gepa.state import ParetoScores
-from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals
+from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals, admits
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -95,6 +97,7 @@ from promptpotter.application.optimizers.potter.l1.population import parse_popul
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
 from promptpotter.application.pipeline_resolve import (
+    campaign_admits,
     dataset_pipeline_declaration,
     defaults_drift,
     draft_config,
@@ -113,7 +116,7 @@ from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
 )
-from promptpotter.config.paths import block_pack_path, install_datasets_root
+from promptpotter.config.paths import block_packs_root, install_datasets_root
 from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
@@ -154,10 +157,13 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
     ManifestNodeOverlay,
+    ModelCapability,
     NodeConfigParam,
     NodeKind,
     NodePromptInfo,
+    NodeRole,
     NodeSearchNarrowing,
+    ObservationMapping,
     ParamIntent,
     PipelineNode,
     PipelineSchema,
@@ -165,7 +171,7 @@ from promptpotter.domain.pipeline_schema import (
     narrowing_of,
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
-from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptBlock
+from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
@@ -321,10 +327,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
     potter = resolve_optimizer("potter", {}, gate="off")
+    every, shelf = frozenset(Presumption), built_stores.block_packs
     sent, capo_hashes, treated = (
         calls.fill(**values),
         capo.prompt_hashes(),
-        capo.treatment().digest,
+        capo.treatment(every, shelf).digest,
     )
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
@@ -332,7 +339,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         assert calls.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
             "the mutated CAPO prompt never reached the request it sends"
         )
-        assert capo.treatment().digest != treated, (
+        assert capo.treatment(every, shelf).digest != treated, (
             "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
         )
     # A valid layout edit on one node: `diagnostics` stays placed.
@@ -350,6 +357,30 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             k: v for k, v in hashes.items() if k != edited_node
         }, f"{edited_node}: an edit on one node moved other nodes' hashes"
     assert capo.prompt_hashes() == capo_hashes, "an override outlived the run that bound it"
+    # A drafted prompt edit rides the overlay: the node runs it, its hash reads it, L4's still wins.
+    drafted = resolve_optimizer(
+        "capo",
+        {"capo_mutate": ManifestNodeOverlay(config={"instruction": "Reword {{instruction}}"})},
+        gate="off",
+    )
+    drafted_hashes = drafted.prompt_hashes()
+
+    def runs(selected: SelectedOptimizer) -> str:
+        config = selected.node_config("capo_mutate")
+        return running_prompt("capo_mutate", config, selected.manifest).compile_prompt(**values)
+
+    assert runs(drafted) == "Reword Sort it.", "a drafted prompt edit never reached its node"
+    assert drafted_hashes["capo_mutate"] != capo_hashes["capo_mutate"], (
+        "a drafted prompt edit ran under the undrafted node's hash"
+    )
+    assert {k: v for k, v in drafted_hashes.items() if k != "capo_mutate"} == {
+        k: v for k, v in capo_hashes.items() if k != "capo_mutate"
+    }, "a prompt edit on one node moved other nodes' hashes"
+    with binding_prompt_overrides(mutated):
+        assert runs(drafted) == "Rephrase [Sort it.] to sort the list.", "a draft edit beat L4's"
+        assert drafted.prompt_hashes() == capo.prompt_hashes(), (
+            "one text under two declarations hashed apart: the hash reads a second door"
+        )
 
     # The inner campaign id separates two candidates, two seeds and two treatments.
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
@@ -364,7 +395,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ), "two seeds share one inner campaign"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
-        resolve_optimizer("potter", n, gate="off").treatment().digest for n in ({}, cut)
+        resolve_optimizer("potter", n, gate="off").treatment(every, shelf).digest for n in ({}, cut)
     )
     assert inner_campaign_id(
         _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
@@ -372,9 +403,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "a moved optimizer knob ran under the inner campaign of the unmoved one"
     )
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
-    assert replace(capo, manifest=rewalked).treatment().digest != capo.treatment().digest, (
-        "a manifest walking its initial population apart ran under the treatment of one racing it"
-    )
+    assert replace(capo, manifest=rewalked).treatment(every, shelf).digest != (
+        capo.treatment(every, shelf).digest
+    ), "a manifest walking its initial population apart ran under the treatment of one racing it"
     # A pool its readers could draw nothing from never runs: the silent outcome is a pool-less search.
     earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
@@ -391,38 +422,90 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         ]
     )
     assert named.pool_refusals(
-        mint=MintFacts([Sample(id=1, query="q", ground_truth="a")], unranked, None)
+        mint=MintFacts([Sample(id=1, query="q", ground_truth="a")], admits(unranked, None), shelf)
     ), "a demo pool naming a key its partition lacks reached a mint"
-    # A pack's blocks are starting content: campaigns on two packs merging under one treatment is silent.
+    # A pack's drawable snippets are starting content: two packs merging under one treatment is silent.
     made = Authored(
-        kind="authored", author="t", date=date(2026, 1, 1), experiment="t", version="0", notes=None
+        kind="authored",
+        author="t",
+        date=date(2026, 1, 1),
+        experiment="t",
+        version=1,
+        supersedes=None,
+        notes=None,
     )
     ranking = {"task_intent": "Pick the single best match.", "answer_format": "End on the answer."}
-    packs = {
-        "one": {"thinking_style": PromptBlock(text="Think it through.", provenance=made)},
-        "two": {
-            field: PromptBlock(text=ranking[field], presumes=frozenset({presumed}), provenance=made)
-            for field, presumed in (
-                ("task_intent", Presumption.RANKING),
-                ("answer_format", Presumption.LAST_LINE_ANSWER),
-            )
-        },
-    }
+
+    def snippet(part: str, text: str, *presumes: Presumption) -> Snippet:
+        return Snippet(
+            text=text,
+            suits=frozenset({PromptPart(part)}),
+            tags=(),
+            presumes=frozenset(presumes),
+            provenance=made,
+        )
+
+    def install(name: str, *snippets: Snippet) -> None:
+        file = block_packs_root() / name / "pack.json"
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(BlockPack(works={}, snippets=snippets).model_dump_json(), "utf-8")
+
+    ranked = (
+        snippet("task_intent", ranking["task_intent"], Presumption.RANKING),
+        snippet("answer_format", ranking["answer_format"], Presumption.LAST_LINE_ANSWER),
+    )
     with monkeypatch.context() as home:
         home.setenv("PROMPTPOTTER_HOME", str(tmp_path / "packs-home"))
-        for name, blocks in packs.items():
-            file = block_pack_path(name)
-            file.parent.mkdir(parents=True)
-            held: dict[str, tuple[PromptBlock, ...]] = {f: (b,) for f, b in blocks.items()}
-            file.write_text(BlockPack(works={}, prompt_fields=held).model_dump_json(), "utf-8")
+        install("one", snippet("thinking_style", "Think it through."))
+        install("two", *ranked)
 
         def drawing(names: list[str], active: list[str]) -> SelectedOptimizer:
             overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
             return resolve_optimizer("potter", {"block_pool": overlay}, gate="off")
 
-        assert drawing(["one"], ["*"]).treatment().source != (
-            drawing(["two"], ["*"]).treatment().source
+        assert drawing(["one"], ["*"]).treatment(every, shelf).source != (
+            drawing(["two"], ["*"]).treatment(every, shelf).source
         ), "campaigns seeded from two different block packs share one treatment"
+        # Only what `active` keeps reaches a prompt, so only its edit re-keys the run.
+        intent_only = drawing(["two"], ["task_intent"]).treatment(every, shelf).digest
+        install("two", ranked[0], snippet("answer_format", "Close on the answer."))
+        assert drawing(["two"], ["task_intent"]).treatment(every, shelf).digest == intent_only, (
+            "an edit to a snippet `active` excludes split one treatment in two"
+        )
+        install("two", snippet("task_intent", "Pick the best match."), ranked[1])
+        assert drawing(["two"], ["task_intent"]).treatment(every, shelf).digest != intent_only, (
+            "an edit to a drawable snippet ran under the treatment of the unedited one"
+        )
+        # Only what the campaign's chain admits is drawn, so only its edit re-keys that campaign.
+        ranker = PipelineNode(
+            name="rank",
+            kind=NodeKind.LLM,
+            role=NodeRole.RANKER,
+            observation_mappings=[ObservationMapping(pipeline_key="ranking")],
+            current_config={"model": "m"},
+            tunes_llm=False,
+        )
+        admitted_by = {
+            "unranked": admits(unranked, "label_match"),
+            "ranked": admits(pipeline_schema([ranker]), "label_match"),
+        }
+        install("two", *ranked)
+        unedited = {
+            k: drawing(["two"], ["*"]).treatment(a, shelf).digest for k, a in admitted_by.items()
+        }
+        install(
+            "two", snippet("task_intent", "Pick the best match.", Presumption.RANKING), ranked[1]
+        )
+        edited = {
+            k: drawing(["two"], ["*"]).treatment(a, shelf).digest for k, a in admitted_by.items()
+        }
+        assert edited["unranked"] == unedited["unranked"], (
+            "an edit to a ranking snippet a non-ranking campaign can never draw re-keyed its treatment"
+        )
+        assert edited["ranked"] != unedited["ranked"], (
+            "an edit to a ranking snippet a ranking campaign draws ran under the unedited treatment"
+        )
+        install("two", *ranked)
         # A block presuming what the run lacks is noise in its prompt: naming one refuses the mint.
         ranks = entry_id("task_intent", ranking["task_intent"])
         last_line = entry_id("answer_format", ranking["answer_format"])
@@ -431,7 +514,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             (last_line, "list_rr", False),
             (last_line, "label_match", True),
         ):
-            refused = drawing(["two"], [path]).pool_refusals(mint=MintFacts((), unranked, matcher))
+            refused = drawing(["two"], [path]).pool_refusals(
+                mint=MintFacts((), admits(unranked, matcher), shelf)
+            )
             assert (not refused) == admitted, (
                 f"{path} under {matcher}: admission missed a presumption"
             )
@@ -450,7 +535,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         async def entered() -> None:
             set_cycle_ledger(CycleEventLog(tmp_path / "asked.jsonl"))
             with (
-                binding_optimizer(OptimizationConfig(degradation_threshold=0.0, determinism=clamp)),
+                binding_optimizer(
+                    select_optimizer(OptimizationConfig(degradation_threshold=0.0)),
+                    determinism=clamp,
+                ),
                 spending_under(unbounded_spend_book()),
             ):
                 await call_mod.llm_call(
@@ -734,11 +822,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "a recorded cut was not held"
     )
 
-    for recipe, runs, why in (
+    for recipe, imported, why in (
         ("table", {loaders, tabular_ingest}, "a recipe's identity missed code it imports"),
         ("columns", {loaders}, "a recipe's identity took code it does not run"),
     ):
-        assert set(loaders.recipe_modules(recipe)) == runs, why
+        assert set(loaders.recipe_modules(recipe)) == imported, why
 
 
 # 2. The config a campaign runs
@@ -962,7 +1050,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     for hop, rungs in ((steered.root_hop, ["low", "high"]), (fork, ["low", "high", "xhigh"])):
         stores.campaigns.mint_cycle(hop)
-        stores.campaigns.write_resolved_run(hop, declaration=declaring(rungs), experiment=None)
+        stores.campaigns.write_resolved_run(
+            hop,
+            declaration=declaring(rungs),
+            experiment=None,
+            model_capabilities={},
+            backend_revision=None,
+        )
     fork_seed = parse_cycle_seed(
         ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
         resolve_campaign_config(stores, steered, None),
@@ -1129,7 +1223,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ),
     )
     opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
-    refuse_drifted_resume(opened, held_campaign, rows_30)
+    resolve_resume(opened, held_campaign, rows_30)
     wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
@@ -1140,20 +1234,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stale = held_campaign.model_copy(
         update={"declaration": declared.model_copy(update={"bench_defaults_pin": "older"})}
     )
-    drift = defaults_drift(stale)
+    running = select_optimizer(effective_config(declared).optimization)
+    runs_under = running.treatment(
+        campaign_admits(effective_config(declared), opened.pipeline_schema), stores.block_packs
+    )
+    drift = defaults_drift(stale, running=runs_under)
     assert drift is not None and drift.moved() == ["bench"], (
         "a moved bench defaults pin drifted nothing, or blamed another part"
     )
     for on_disk, served_drift in ((stale, drift), (held_campaign, None)):
         write_json(manifest_path, on_disk.model_dump(mode="json"))
-        declare_run_wiring(opened, effective_config(declared), wired_ledger, tracing=None)
+        declare_run_wiring(
+            opened, effective_config(declared), wired_ledger, selected=running, tracing=None
+        )
         served = fold_at(root_cut)
         assert served is not None and served.defaults_drift == served_drift, (
             "a launch past moved bench defaults served no drift, or one on its own served one"
         )
     # The optimizer's defaults are its whole treatment: a part moved under one declaration is named.
     reshipped = held_campaign.treatment.model_copy(update={"manifest": "older"})
-    reshipped_drift = defaults_drift(held_campaign.model_copy(update={"treatment": reshipped}))
+    reshipped_drift = defaults_drift(
+        held_campaign.model_copy(update={"treatment": reshipped}), running=runs_under
+    )
     assert reshipped_drift is not None and reshipped_drift.moved() == ["manifest"], (
         "an optimizer whose manifest moved under one declaration drifted nothing, or blamed "
         "another part"
@@ -1167,7 +1269,41 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     # A resume over an edited bank never runs on an origin other than its rounds stand on.
     with pytest.raises(ConfigDriftError):
-        refuse_drifted_resume(recut, held_campaign, rows_30[:-1])
+        resolve_resume(recut, held_campaign, rows_30[:-1])
+    # The candidates a ranker reads beside the bank's answers are origin content too.
+    with pytest.raises(ConfigDriftError):
+        resolve_resume(
+            replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
+        )
+    # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
+    steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
+    stores.campaigns.mint_cycle(steered_hop)
+    partition = stores.campaigns.read_bank_partition(held_campaign.root_hop)
+    assert partition is not None, "the held campaign banked no partition"
+    stores.campaigns.write_bank_partition(steered_hop, partition)
+    stores.campaigns.write_cycle_seed(
+        steered_hop, CycleSeed(pipeline_overlay={"solve": {"temperature": 0.3}})
+    )
+    steered_fork = opened.bound(steered_hop, purpose=Optimize())
+    resolve_resume(steered_fork, held_campaign, rows_30)
+    with pytest.raises(ConfigDriftError):
+        resolve_resume(steered_fork, held_campaign, rows_30[:-1])
+    # The capability menu the origin hashed under is on record: a moved one is the cause named.
+    floored = ModelCapability(
+        model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
+    )
+    stores.campaigns.write_resolved_run(
+        held_campaign.root_hop,
+        declaration={},
+        experiment=None,
+        model_capabilities={"": {"m": floored}},
+        backend_revision=None,
+    )
+    with pytest.raises(ConfigDriftError) as refused:
+        resolve_resume(recut, held_campaign, rows_30[:-1])
+    assert refused.value.details["capabilities_moved"] == ["/m"], (
+        "a resume past a moved capability snapshot blamed only the dataset"
+    )
 
     # Answering in TEXT sends no contract to answer INTO.
     text_pipeline = read_dataset_pipeline(_DATASETS / "justlogic" / "d234")
@@ -1328,8 +1464,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"persona": "x"}, "ghost": {"rubric": "x"}},
         changes_description="off roster",
     )
-    refused = author_arm(reflected_on, origin, stray)
-    assert len(refused.validation_failures) == 2, "an arm writing off the roster was measured"
+    off_roster = author_arm(reflected_on, origin, stray)
+    assert len(off_roster.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = resolve_optimizer("capo", {}, gate="off")
     assert optimizers.unfit_pipeline(capo, two) is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
@@ -1386,7 +1522,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         reflecting = NodeContext(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
         no_cells = Panel(cells=[], order=[], block_size=0)
         with (
-            binding_optimizer(reflected_on.cycle.config.optimization),
+            binding_optimizer(
+                reflected_on.cycle.optimizer,
+                determinism=reflected_on.cycle.config.optimization.determinism,
+            ),
             spending_under(unbounded_spend_book()),
             verb_ledger(built_stores, reflected_on.cycle.session.hop),
         ):
@@ -1756,6 +1895,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         schema_field_rename=False,
         shot_k_max=0,
         slot_of={},
+        pool_window=8,
     )
     rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", bundle))
     shown = {

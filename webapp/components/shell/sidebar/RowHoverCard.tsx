@@ -8,6 +8,7 @@ import {
   type ConfigKnob,
   type ConfigMapResponse,
   type HierarchyEntry,
+  type UnstartedCampaign,
 } from "@/lib/api";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { entryAlone } from "@/lib/derivations";
@@ -33,7 +34,7 @@ export function RowHoverCard({
   card,
   children,
 }: {
-  card: HierarchyEntry;
+  card: HierarchyEntry | UnstartedCampaign;
   children: ReactNode;
 }) {
   return (
@@ -56,7 +57,7 @@ function Facts({ facts }: { facts: [string, string][] }) {
   );
 }
 
-function EntryBody({ entry }: { entry: HierarchyEntry }) {
+function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
   const campaign = entry.level === "campaign" ? entry : null;
   // Storage and config are routed by a top-level campaign id; an inner run's sandbox has neither.
   const campaignId = campaign && campaign.parent === null ? campaign.address : null;
@@ -82,7 +83,7 @@ function EntryBody({ entry }: { entry: HierarchyEntry }) {
   ];
   const size = (n: number | undefined) => (error ? "—" : n === undefined ? "…" : fmtBytes(n));
   // A round and a candidate have no run of their own, so no span.
-  const span = entry.level === "campaign" || entry.level === "course" ? entry.span : null;
+  const span = entry.level === "candidate" ? null : entry.span;
   const reading = entry.level === "candidate" ? entry.facts.reading : null;
   const facts: [string, string][] = span
     ? [

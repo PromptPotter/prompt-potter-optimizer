@@ -8,9 +8,10 @@ import type {
   SubtreeCampaign,
   SubtreeCourse,
 } from "@/lib/api";
-import { candidatesOf, tagValue } from "@/lib/derivations";
+import { candidatesOf, descentOf, tagValue } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { pathOfAddress } from "@/lib/ids";
+import { fmtUnit } from "@/lib/format";
 
 export interface Density {
   colW: number;
@@ -98,8 +99,6 @@ export interface LaneLayout {
   // The course's address, which is its `CyclePath` on the wire.
   coursePathKey: string;
   candidates: HierarchyCandidate[];
-  // Each round's reference — the candidate its arms were measured against.
-  references: ReadonlyMap<number, string>;
   electsOn: ReadonlyMap<number, RoundFacts["elects_on"]>;
   expanded: boolean;
   // In LANE_H units.
@@ -220,18 +219,14 @@ export function layout(
     nextRow += laneSpan;
     const rightmost = cands.length > 0 ? baseCol + Math.max(...cands.map(roundOf)) : baseCol;
     if (rightmost > maxCol) maxCol = rightmost;
-    const references = new Map<number, string>();
     const electsOn = new Map<number, RoundFacts["elects_on"]>();
     for (const rnd of course.children) {
-      if (rnd.level !== "round") continue;
-      electsOn.set(rnd.facts.round, rnd.facts.elects_on);
-      if (rnd.facts.reference) references.set(rnd.facts.round, rnd.facts.reference);
+      if (rnd.level === "round") electsOn.set(rnd.facts.round, rnd.facts.elects_on);
     }
     laneByKey.set(key, {
       course,
       coursePathKey: key,
       candidates: cands,
-      references,
       electsOn,
       expanded: isExpanded,
       laneOffset,
@@ -298,7 +293,11 @@ interface BranchSeg {
   y1: number;
   x2: number;
   y2: number;
-  variant: "chain" | "fork";
+  // `chain`: the main it descends from. `donor`: the declared donor that gave it loci. `gene`:
+  // where a locus no declared parent explains may have come from.
+  variant: "chain" | "fork" | "donor" | "gene";
+  // What a donor or gene link says on hover.
+  note?: string;
 }
 
 function bandCenterY(l: LaneLayout): number {
@@ -370,7 +369,8 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
         const node = placedNode(laneKey, l, stand, colX(round), y, false, winner?.label ?? "");
         nodes.push(node);
         spineByKeyRound.set(`${laneKey}::r${round}`, node);
-        if (winner) nodeByCandidate.set(winner.address, node);
+        // A collapsed round is drawn as one node, so every candidate of it is drawn there.
+        for (const c of cands) nodeByCandidate.set(c.address, node);
         if (round === lastRound) node.isLastInLane = true;
         if (prev) {
           segs.push({ x1: prev.x, y1: prev.y, x2: node.x - d.stub, y2: node.y, variant: "chain" });
@@ -388,19 +388,12 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       const topRow = (l.laneSpan - cands.length) / 2;
       const x = colX(round);
       const roundNodes: RoundNodePos[] = [];
-      // Chained from the round's reference where it is drawn, else the last winner.
-      const reference = l.references.get(round);
-      const parent = (reference ? nodeByCandidate.get(reference) : undefined) ?? lastWinnerNode;
       cands.forEach((cand, i) => {
         const y = TOP_PAD + (l.laneOffset + topRow + i) * LANE_H;
         const node = placedNode(laneKey, l, cand, x, y, true, cand.label);
         nodes.push(node);
         roundNodes.push(node);
-        if (!retiredBy(cand)) nodeByCandidate.set(cand.address, node);
-        // The stub itself is drawn by the node group, so emit only the slant.
-        if (parent) {
-          segs.push({ x1: parent.x, y1: parent.y, x2: x - d.candStub, y2: y, variant: "chain" });
-        }
+        nodeByCandidate.set(cand.address, node);
       });
       const winner = pickWinner(cands);
       const winnerNode = winner ? roundNodes.find((n) => n.candKey === winner.address) : undefined;
@@ -411,6 +404,29 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       } else if (lastWinnerNode) {
         spineByKeyRound.set(`${laneKey}::r${round}`, lastWinnerNode);
         if (round === lastRound) lastWinnerNode.isLastInLane = true;
+      }
+    }
+  }
+
+  // Every node is placed before any edge, so a parent in a later lane is drawn from too. The stub
+  // itself is drawn by the node group, so each edge is only the slant to it.
+  for (const n of nodes) {
+    if (!n.isExpanded) continue;
+    const { parent, donor, donated, genes } = descentOf(n.node);
+    const from = parent === null ? undefined : nodeByCandidate.get(parent);
+    const to = { x2: n.x - d.candStub, y2: n.y };
+    if (from) segs.push({ x1: from.x, y1: from.y, ...to, variant: "chain" });
+    const giver = donor === null ? undefined : nodeByCandidate.get(donor);
+    if (giver && giver !== from) {
+      const gave = donated.length > 0 ? donated.join(", ") : "no locus verbatim";
+      const note = `donor ${giver.candidateLabel} gave ${gave}`;
+      segs.push({ x1: giver.x, y1: giver.y, ...to, variant: "donor", note });
+    }
+    for (const gene of genes) {
+      const source = nodeByCandidate.get(gene.source);
+      if (source && source !== from && source !== giver) {
+        const note = `${gene.locus} resembles ${source.candidateLabel} (${fmtUnit("rate", gene.similarity)} alike)`;
+        segs.push({ x1: source.x, y1: source.y, ...to, variant: "gene", note });
       }
     }
   }

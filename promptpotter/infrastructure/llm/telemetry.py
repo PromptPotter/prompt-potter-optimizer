@@ -14,8 +14,10 @@ from promptpotter.domain.run_records import (
     BackendWarningRecord,
     CommandAckRecord,
     CommandAckStatus,
+    CommandEffect,
     CommandRecord,
     CycleRecord,
+    NoEffect,
     PricedKeyRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
@@ -328,10 +330,15 @@ def emit_command_ack(
     command_id: str,
     status: CommandAckStatus,
     detail: str = "",
-    effect: dict[str, Any] | None = None,
+    effect: CommandEffect | None = None,
 ) -> None:
     _append_record(
-        CommandAckRecord(command_id=command_id, status=status, detail=detail, effect=effect or {})
+        CommandAckRecord(
+            command_id=command_id,
+            status=status,
+            detail=detail,
+            effect=NoEffect() if effect is None else effect,
+        )
     )
 
 

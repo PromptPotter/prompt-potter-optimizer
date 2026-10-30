@@ -3,7 +3,7 @@
 
 import { useRef, useState } from "react";
 import { ApiError, failureKind, operatorMessage, type FailureKind } from "@/lib/api";
-import { useAuthGate } from "@/lib/auth-context";
+import { useAuthGate } from "@/lib/state/auth";
 import { reportIncident } from "@/lib/diagnostics";
 import { invalidateReads } from "@/lib/read-cache";
 
@@ -11,14 +11,18 @@ export interface CommandFailure {
   kind: FailureKind;
   message: string;
   errorId: string | null;
+  // The refusal's served `code` and `details`, for a caller whose next step is the refusal itself.
+  code: string | null;
+  details: Record<string, unknown> | null;
 }
 
-type CommandResult<R> = { ok: true; value: R } | { ok: false };
+// `failure` is null for an abort and for a send refused while another is in flight.
+type CommandResult<R> = { ok: true; value: R } | { ok: false; failure: CommandFailure | null };
 
 interface CommandSlot<V extends string> {
   pending: V | null;
   failure: (CommandFailure & { verb: V }) | null;
-  /** Never throws. A send while another is in flight is refused as `{ ok: false }`. */
+  /** Never throws. A send while another is in flight is refused as `{ ok: false, failure: null }`. */
   run<R>(verb: V, send: () => Promise<R>, then?: (r: R) => void): Promise<CommandResult<R>>;
   clear(): void;
 }
@@ -53,7 +57,7 @@ export function useCommand<V extends string>(
     send: () => Promise<R>,
     then?: (r: R) => void,
   ): Promise<CommandResult<R>> => {
-    if (inFlight.current) return { ok: false };
+    if (inFlight.current) return { ok: false, failure: null };
     inFlight.current = true;
     setPending(verb);
     setFailure(null);
@@ -63,18 +67,21 @@ export function useCommand<V extends string>(
       if (revalidate) invalidateReads();
       return { ok: true, value };
     } catch (e) {
-      if (!isAbort(e)) {
-        onAuthError(e);
-        reportIncident(e, { surface: `${surface}:${verb}` });
-        const kind = failureKind(e);
-        const f: CommandFailure = {
-          kind,
-          message: operatorMessage(e, kind),
-          errorId: e instanceof ApiError ? e.errorId : null,
-        };
-        setFailure({ ...f, message: describe?.(f, verb) ?? f.message, verb });
-      }
-      return { ok: false };
+      if (isAbort(e)) return { ok: false, failure: null };
+      onAuthError(e);
+      reportIncident(e, { surface: `${surface}:${verb}` });
+      const kind = failureKind(e);
+      const api = e instanceof ApiError ? e : null;
+      const f: CommandFailure = {
+        kind,
+        message: operatorMessage(e, kind),
+        errorId: api?.errorId ?? null,
+        code: api?.code ?? null,
+        details: api?.details ?? null,
+      };
+      const described = { ...f, message: describe?.(f, verb) ?? f.message };
+      setFailure({ ...described, verb });
+      return { ok: false, failure: described };
     } finally {
       inFlight.current = false;
       setPending(null);

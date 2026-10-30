@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
 from promptpotter.application.bench.node_context import Calls, Children, Lineage, Target
+from promptpotter.application.optimizers.potter.dispatch.bundle import RECOMBINATION_ID_CHARS
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -24,11 +25,12 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     build_l1_response_model,
 )
 from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
-from promptpotter.application.optimizers.potter.records import Ladder
+from promptpotter.application.optimizers.potter.records import Ladder, Recombination
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_blocks_in_pool,
     l1_shots_in_demo_pool,
 )
+from promptpotter.application.optimizers.variation.members import crossable, most_donated
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, loci_of
 from promptpotter.domain.optimizer_state import (
@@ -41,7 +43,10 @@ from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.bench.node_context import NodeContext
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.wounds import ValidationFailure
 
 import logging
@@ -111,6 +116,7 @@ async def l1_generate(
         schema_field_rename=schema_field_rename,
         n_variants=n_variants,
         pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},
+        recombination=bundle.recombination_offer("l1_generate"),
     )
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in bundle.demo_pool}
@@ -215,5 +221,57 @@ async def l1_generate(
                 evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
             )
         )
+    lineage = ctx.read(Lineage)
+    if bundle.recombines("l1_generate"):
+        own = [
+            Recombination.model_validate(spec.model_dump())
+            for spec in generated.recombinations[: bundle.recombine]
+        ]
+        population.extend(_recombined(children, own, lineage, pipeline_schema, host=None))
+    # What L2's last fire named for this round, L1 the node that adds it.
+    if bundle.l2.for_round == bundle.cycle_slice.round_num:
+        population.extend(
+            _recombined(
+                children, bundle.l2.recombinations, lineage, pipeline_schema, host="l2_context"
+            )
+        )
 
     return L1Generation(population, None, citable, budget)
+
+
+def _recombined(
+    children: Children,
+    specs: Sequence[Recombination],
+    lineage: Lineage,
+    schema: PipelineSchema,
+    *,
+    host: str | None,
+) -> list[Proposal]:
+    """Each spec a child of its main, a population member, and its donor, any other measured
+    individual, both by id head, the donor giving the loci it names: from one to `most_donated` of
+    those the two differ on. A spec failing any of these is dropped and warned."""
+    by_id = {individual.id[:RECOMBINATION_ID_CHARS]: individual for individual in lineage.measured}
+    mains = {individual.id for individual in lineage.population}
+    out: list[Proposal] = []
+    dropped: list[str] = []
+    for spec in specs:
+        main, donor = by_id.get(spec.main), by_id.get(spec.donor)
+        parents = [] if main is None or donor is None or main.id not in mains else [main, donor]
+        loci = crossable(parents, schema) if parents else []
+        take = {locus: 1 for locus in loci if locus.name in spec.from_donor}
+        if not 0 < len(take) <= most_donated(len(loci)):
+            dropped.append(spec.changes_description)
+            continue
+        out.append(
+            children.child(
+                parents, take=take, changes_description=spec.changes_description, hosted_by=host
+            )
+        )
+    if dropped:
+        emit_round_warning(
+            kind="offspring_dropped",
+            message=f"{len(dropped)} recombination(s) dropped: each named no population main and "
+            "other measured donor, or a donor giving none or over half the loci the two differ on.",
+            detail={"pairs": dropped},
+        )
+    return out

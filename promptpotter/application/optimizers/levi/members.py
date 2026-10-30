@@ -38,7 +38,6 @@ from promptpotter.shared.statistics import greedy_column_subset, logistic
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
@@ -129,19 +128,12 @@ class ProxyCss(nodes.Sampler):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration})
     size_knob: ClassVar[str | None] = None
 
-    def round_cells(self, knobs: ProxyCssKnobs, search: int) -> int:
+    def drawn(self, knobs: ProxyCssKnobs, search: int, pipeline: str) -> nodes.PanelSize:
         # The proxy is chosen among the discovery set, which the search split must hold whole.
-        return knobs.size if knobs.discovery <= search else 0
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        # The calibration round reads its seeds and the origin on the discovery set.
-        if not (proxy := selected.round_cells(search)):
-            return 0
-        discovery = selected.knobs_of(self.name, ProxyCssKnobs).discovery
-        seeds = selected.walk_arms(selected.plan.initial_population)
-        return max(
-            (seeds + 1) * discovery, (selected.walk_arms(selected.plan.proposers) + 1) * proxy
-        )
+        if knobs.discovery > search:
+            return nodes.PanelSize(cells=0, block_size=0)
+        cells = knobs.discovery if pipeline == nodes.INITIAL_POPULATION else knobs.size
+        return nodes.PanelSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         calibration = ctx.slice(DescriptorCalibration).calibration
@@ -321,6 +313,9 @@ class MapElites(nodes.Selector):
     ) -> list[Sample]:
         return panel.cells
 
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.cells
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         knobs = ctx.knobs(MapElitesKnobs)
         offered = [
@@ -378,7 +373,7 @@ class MapElites(nodes.Selector):
             selected=selected,
             leading=selected or max(placed_scores, key=placed_scores.__getitem__, default=None),
             verdict_reason=verdict,
-            population=[held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)],
+            ranked=[held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)],
         )
 
 
@@ -408,7 +403,7 @@ class LeviSeed(nodes.Proposer):
     name: ClassVar[str] = "levi_seed"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
@@ -417,8 +412,8 @@ class LeviSeed(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
 
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        return nodes.rows_read_packages(rounds, [self.name])
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
+        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         origin = ctx.read(Lineage).origin
@@ -440,7 +435,7 @@ class LeviParadigmShift(nodes.Proposer):
     name: ClassVar[str] = "levi_paradigm_shift"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[nodes.Proposing] = "adds"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviParadigmShiftKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
@@ -452,8 +447,8 @@ class LeviParadigmShift(nodes.Proposer):
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
 
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        return nodes.rows_read_packages(rounds, [self.name])
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
+        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -539,7 +534,7 @@ class LeviRefine(nodes.Proposer):
     name: ClassVar[str] = "levi_refine"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviRefineKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
@@ -552,8 +547,8 @@ class LeviRefine(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
 
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        return nodes.rows_read_packages(rounds, [self.name])
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
+        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         calibration = ctx.slice(DescriptorCalibration).calibration

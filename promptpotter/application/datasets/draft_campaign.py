@@ -74,6 +74,8 @@ class DraftCampaign:
     # Non-empty routes the check-in's Start through the ``origin_override`` seed.
     reused_origin_id: str = ""
     scoring_dials: str = ""
+    # A resolver turn has run on it: an edit keeps it, so a reopen reviews, never re-resolves.
+    resolver_ran: bool = False
 
     def to_disk(self) -> dict[str, Any]:
         return {
@@ -102,6 +104,7 @@ class DraftCampaign:
             "candidate_library": list(self.candidate_library),
             "backend_nodes": dict(self.backend_nodes),
             "reused_origin_id": self.reused_origin_id,
+            "resolver_ran": self.resolver_ran,
         }
 
     @classmethod
@@ -141,6 +144,21 @@ class DraftCampaign:
             candidate_library=tuple(data.get("candidate_library", ())),
             backend_nodes=dict(data.get("backend_nodes", {})),
             reused_origin_id=data.get("reused_origin_id", ""),
+            resolver_ran=data.get("resolver_ran", False),
+        )
+
+    @property
+    def dataset_name(self) -> str:
+        """The dataset it runs on: the one it was cut from, or an upload's, minted under its slug."""
+        return self.source_dataset or self.slug
+
+    def resolution_pending(self) -> bool:
+        """The task is on file and no resolver turn ever set it up: a reopen resolves, while an
+        origin's or the operator's authored prompts are never re-proposed over."""
+        return (
+            bool(self.raw_task_description.strip())
+            and not self.resolver_ran
+            and not self.authored_prompts()
         )
 
     def answer_space(self) -> tuple[str, ...] | None:

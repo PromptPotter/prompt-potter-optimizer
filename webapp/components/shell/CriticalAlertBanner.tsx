@@ -7,8 +7,8 @@ import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { readyData } from "@/lib/hooks/useRead";
-import { useCycleStream, type StatusKind } from "@/lib/poll";
-import { useActivePointer, useRegistry } from "@/lib/registry";
+import { GONE, OFFLINE, useCycleStream, type StatusKind } from "@/lib/poll";
+import { useActivePointer, useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 
 export function CriticalAlertBanner() {
@@ -26,12 +26,12 @@ export function CriticalAlertBanner() {
   let bannerHint = statusHint;
   if (goneAddress) {
     // The workspace's verdict wins: the dashboard has already reset onto another address.
-    bannerStatus = "gone";
-    bannerText = "This campaign no longer exists";
-    bannerHint = "It was deleted, or its store was reset — returning to the active run.";
+    bannerStatus = GONE.status;
+    bannerText = GONE.statusText;
+    bannerHint = GONE.statusHint;
   } else if (noUnit && netDown) {
-    bannerStatus = "offline";
-    bannerText = "Server unreachable — retrying";
+    bannerStatus = OFFLINE.status;
+    bannerText = OFFLINE.statusText;
     bannerHint = netFailure.message;
   }
 

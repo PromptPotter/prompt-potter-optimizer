@@ -4,9 +4,9 @@ import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction"
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
-import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
+import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { searchpointCopyChoices, selectedNodeOf, type CompareItem } from "@/lib/derivations";
-import { fmtUsd, shortId } from "@/lib/format";
+import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";
 import { CopyButton, SegmentedControl } from "@/components/ui";
 import { ChannelMap } from "./ChannelMap";
 import { CellMeans } from "./channel-parts";
@@ -65,23 +65,19 @@ export function ChannelDetail({
             </div>
             <div>
               <dt>bench reads</dt>
-              <dd>{headline.bench.status.reads_before ?? "—"}</dd>
+              <dd>{headline.bench.status.reads_before ?? PLACEHOLDER}</dd>
             </div>
           </>
         )}
         <div>
           <dt>{spentTo !== null ? `spent to ${selected?.label}` : "branch spend"}</dt>
           <dd>
-            {spentTo !== null
-              ? fmtUsd(spentTo)
-              : reading.cycle_spend_usd != null
-                ? fmtUsd(reading.cycle_spend_usd)
-                : "—"}
+            {fmtUnit("usd", spentTo ?? reading.cycle_spend_usd)}
           </dd>
         </div>
         <div>
           <dt>dataset</dt>
-          <dd title={reading.dataset_name}>{reading.dataset_name || "—"}</dd>
+          <dd title={reading.dataset_name}>{reading.dataset_name || PLACEHOLDER}</dd>
         </div>
         <div>
           <dt>campaign</dt>
@@ -111,11 +107,11 @@ export function ChannelDetail({
         </div>
         <div>
           <dt>authored by</dt>
-          <dd title={reading.authorship}>{reading.authorship || "—"}</dd>
+          <dd title={reading.authorship}>{reading.authorship || PLACEHOLDER}</dd>
         </div>
         <div>
           <dt>replayed cells</dt>
-          <dd>{reading.cached_samples ?? "—"}</dd>
+          <dd>{reading.cached_samples ?? PLACEHOLDER}</dd>
         </div>
       </dl>
       {rulerNote && headline && <p className="note-warn">{reading.comparable_note}</p>}

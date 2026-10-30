@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import random
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -112,6 +113,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     LayerCounters,
 )
+from promptpotter.application.optimizers.variation.members import donor_take, most_donated
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import declare_gate
 from promptpotter.application.run_phase_control import RunControl
@@ -187,7 +189,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
-from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -228,6 +230,7 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.run_records import (
     CommandAckRecord,
+    ComparisonExit,
     PhaseRecord,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -874,7 +877,9 @@ def _peer_cycle(
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             publish_inner_spawn_context(cycle.session)
-            with binding_optimizer(cycle.config.optimization):
+            with binding_optimizer(
+                cycle.optimizer, determinism=cycle.config.optimization.determinism
+            ):
                 run_init(cycle, callbacks)
                 with spending_under(cycle.session.state.control.book):
                     yield cycle, callbacks
@@ -1056,7 +1061,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "capo_init": {"config": {"size": 3, "k_max": 0}},
         "mating": {"config": {"offspring": 2}},
         "few_shot": {"config": {"k_max": 0}},
-        "population": {"config": {"size": 3}},
+        "survival": {"config": {"size": 3}},
     }
 
     def cut_by_budget(
@@ -1115,7 +1120,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     )
                 )
             else:
-                _, uncut = asyncio.run(execute_round(cycle, 1, callbacks))
+                uncut = asyncio.run(execute_round(cycle, 1, callbacks)).cut
                 assert uncut is None, f"{case}: round 1 ran inside its budget"
             paid.clear()
             parent = ArmKey(cycle.parent.id)
@@ -1131,7 +1136,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     f"{case}: an arm was crowned on a holed panel"
                 )
                 return
-            closed, cut = asyncio.run(cut_walk)
+            closed, cut, _ = asyncio.run(cut_walk)
             assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
             rows = {key: closed.rows(key) for key in closed.panel}
             assert sum(len(closed.rows(key)) for key in closed.arms) == (
@@ -1166,6 +1171,56 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         for panel_gate in ("strict", "off"):
             cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
 
+    # CAPO races block after block while more than μ arms stand (App. B), and stops at μ.
+    def raced(failing: str) -> RoundResult:
+        minted: list[str] = []
+
+        def capo_says(body: dict[str, Any]) -> str:
+            if "Create overall 15 prompts" in _asked(body):
+                return json.dumps(
+                    ["Solve the task, A.", "Solve the task, B.", "Solve the task, C."]
+                )
+            minted.append(f"Go {len(minted)}.")
+            return f"<prompt>{minted[-1]}</prompt>"
+
+        def misses_after_block_one(prompt: str, sample: Sample) -> bool:
+            block = _PEER_READ_ORDER[sample.id] // 4
+            return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
+
+        with _peer_cycle(
+            workspace(tmp_path / f"race-{failing}"),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            capo_nodes,
+            misses_after_block_one,
+        ) as (cycle, callbacks):
+            offline.llm.says = capo_says
+            return asyncio.run(execute_round(cycle, 1, callbacks)).result
+
+    def fates(closed: RoundResult) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for key in closed.panel:
+            arm = closed.arms[key]
+            state = (
+                arm.kind
+                if isinstance(arm, Cut)
+                else "locked_in"
+                if isinstance(arm, Measured) and arm.locked_in is not None
+                else "measured"
+            )
+            out.setdefault(state, []).append(len(closed.rows(key)))
+        return out
+
+    # Five arms, μ 3: nobody falls on block 1; C falls on block 2, and four still race block 3.
+    assert fates(raced("C")) == {"eliminated": [8], "measured": [12] * 4}, (
+        "a survivor set above μ stopped racing before max_blocks"
+    )
+    # B and C fall together on block 2, which leaves μ: the race is settled there.
+    assert fates(raced("BC")) == {"eliminated": [8, 8], "locked_in": [8] * 3}, (
+        "a race at μ survivors walked on, or settled before its cut"
+    )
+
     # A survey round's K starts and its reference are arms, and its banked matrix is their cells.
     starts = {ArmKey(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
         PARENT: sheet(measurements([0.0] * 3))
@@ -1195,13 +1250,14 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         manifest_dir.mkdir(parents=True)
         # The demo pool's initializer is the shared pools package's, a third registrant beside the two.
         init = ["demo_pool"]
-        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk)}
+        nodes = {n: (potter["nodes"] | capo["nodes"])[n] for n in (*init, *seed, *walk)}
         (manifest_dir / "pipeline.yaml").write_text(
             yaml.safe_dump(
                 {
                     "name": name,
                     "version": "v0",
                     "available_models": capo["available_models"],
+                    "main": [],
                     "nodes": nodes,
                     "pipelines": {
                         "run_init": init,
@@ -1260,7 +1316,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         offline.llm.says = crossover_says
         session = cycle.session
         assert not cycle.population
-        closed, cut = asyncio.run(execute_round(cycle, 1, callbacks))
+        closed, cut, _ = asyncio.run(execute_round(cycle, 1, callbacks))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
         "a crossover saw one parent"
@@ -1284,6 +1340,22 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     assert cycle.population[0].id == winner, (
         "the individual the next round mutates from does not lead the population the run carries"
     )
+
+    # A crossover child continues its main: its donor gives a minority of the loci the two differ on.
+    solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
+    for differing in range(1, len(PROMPT_FIELDS) + 1):
+        pair = [prompted(**dict.fromkeys(PROMPT_FIELDS[:differing], side)) for side in "md"]
+        sizes = Counter(
+            None if (take := donor_take(pair, solve, random.Random(seed))) is None else len(take)
+            for seed in range(40)
+        )
+        most = most_donated(differing)
+        assert set(sizes) == ({None} if differing < 2 else set(range(1, most + 1))), (
+            f"over {differing} differing loci the donor gave {dict(sizes)}"
+        )
+        assert differing < 2 or 2 * most < differing or (differing, most) == (2, 1), (
+            f"over {differing} differing loci the donor may give {most}: the main is no longer major"
+        )
 
     # A cut θ round reads its cold parent on the cells the archive holds GRADED, guard and election alike.
     replies = iter(["Merged.", "Other."])
@@ -1359,7 +1431,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "capo_init": {"config": {"size": 2, "k_max": 0}},
         "mating": {"config": {"offspring": 1}},
         "few_shot": {"config": {"k_max": 0}},
-        "population": {"config": {"size": 2}},
+        "survival": {"config": {"size": 2}},
     }
     root = tmp_path / "bench"
     with _peer_cycle(
@@ -1374,7 +1446,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ) as (cycle, callbacks):
         offline.llm.says = bench_says
         session = cycle.session
-        picked = asyncio.run(execute_round(cycle, 1, callbacks))[0]
+        picked = asyncio.run(execute_round(cycle, 1, callbacks)).result
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.accuracy is not None
         assert picked.election is not None
@@ -1678,8 +1750,10 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             ], "round 0's critique composed before the block pool was seeded"
             l1 = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("l1_generate"))
             seed = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("mating"))
-            seeded = node_contract.RoundWalk("default", (seed,), (l1,))
-            assert announce_opening(at_origin, seeded) == l1.opening(at_origin, seeded), (
+            seeded = node_contract.RoundWalk("default", (seed,), (l1,), "author")
+            blank = node_contract.RoundOpening("", "", None, "", replayed=False)
+            stated = l1.opening(NodeContext(at_origin, l1), blank)
+            assert announce_opening(at_origin, seeded) == stated != blank, (
                 "a seed walking ahead of L1 stated the round's standing and arms in L1's place"
             )
             measured.clear()
@@ -1703,7 +1777,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     )
                     await submit("arms-at-the-hold")
 
-                (held_round, held_cut), _ = await asyncio.gather(
+                (held_round, held_cut, _), _ = await asyncio.gather(
                     execute_round(cycle, 1, callbacks), answer()
                 )
                 assert held_cut is None
@@ -1867,6 +1941,21 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     ]
     signal = collapse(labelled)
     assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED
+    reasoned = [
+        GradedCell.from_wire(
+            {**cell.wire(), "predicted": f"step {i}: **Uncertain**", "span": "Uncertain"}
+        )
+        for i, cell in enumerate(labelled)
+    ]
+    signal = collapse(reasoned)
+    assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED, (
+        "two replies reasoning apart to one graded answer were counted as two answers"
+    )
+    spanless = [
+        GradedCell.from_wire({**cell.wire(), "span": "" if i == 5 else "Uncertain"})
+        for i, cell in enumerate(labelled)
+    ]
+    assert collapse(spanless) is None, "a reply with no graded span was counted as the answer"
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
     def uncharged(*values: float) -> list[PairedGrade]:
@@ -3480,9 +3569,12 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "levi": ("levi", 13),
         "waiting": ("capo", 14),
         "capped": ("capo", 15),
+        "rewound": ("capo", 16),
     }
     for h2h_id, arms, verdict, guards in (
         ("real4", ("potter", "capo"), True, ["controlled"] * 2),
+        # An arm a launch rewound in place stays admitted, and leaves the comparison as that event.
+        ("real4", ("potter", "rewound"), True, ["controlled", "uncontrolled"]),
         ("real4", ("potter", "capo", "gepa", "levi"), True, ["controlled"] * 3 + ["uncontrolled"]),
         (
             "real6",
@@ -3511,6 +3603,12 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         if "capped" in arms:
             capped = f"capo_capped_{h2h_id}"
             h2h_stores.campaigns.update_campaign(capped, standing_budget=Budget(usd=1.0))
+        if "rewound" in arms:
+            rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
+            assert rewound is not None
+            h2h_stores.campaigns.record_left_comparison(
+                h2h_stores.campaigns.line_holder(rewound.root_hop), act=ComparisonExit.REWIND
+            )
         h2h = subject_evidence(h2h_stores, arm_subjects).head_to_head
         assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case
         assert [r.guard.state.value for r in h2h.rows] == guards, (

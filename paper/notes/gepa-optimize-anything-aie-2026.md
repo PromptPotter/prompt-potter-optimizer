@@ -117,8 +117,7 @@ the pelican SVG demo is the same shape (6 aspects, Gemini 3 Flash VLM, 150 calls
 
 **Why we care: representation change.** The image is not optimized; the program that renders it is.
 That is the umbrella's invariant (behaviour steered through a text artifact, model frozen) made
-visible to a non-technical reader in one picture. Roadmap entry: [`../../docs/specs/roadmap.md`](../../docs/specs/roadmap.md)
-§ Captured — pending triage, *Render-and-judge demo*.
+visible to a non-technical reader in one picture.
 
 ## 5. Claimed in the talk, not checked
 

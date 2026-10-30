@@ -3,9 +3,8 @@ import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, getCss, lineLook, lineMotion, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
-import { liftOf } from "@/lib/derivations";
-import { fmtSigned, fmtTheta, unitCount } from "@/lib/format";
-import { NOT_SEPARABLE } from "@/lib/fitness";
+import { liftOf, NOT_SEPARABLE } from "@/lib/derivations";
+import { fmtInterval, fmtLogits, fmtSigned, fmtUnit, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 import {
   CANDIDATE_SERIES,
@@ -660,19 +659,19 @@ export const FitnessChart = memo(function FitnessChart({
             if (typeof theta === "number") {
               const se = reading?.ability?.se;
               // Named "se", not ±: the drawn whisker is the wider 95% band.
-              const tail = typeof se === "number" ? `, se ${se.toFixed(2)}` : "";
-              lines.push(`ability θ ${fmtTheta(theta)}${tail} (elected on θ, not accuracy)`);
+              const tail = typeof se === "number" ? `, se ${fmtLogits(se)}` : "";
+              lines.push(`ability ${fmtUnit("theta", theta)}${tail} (elected on θ, not accuracy)`);
             }
             const ciLo = reading?.own?.accuracy?.ci_lo;
             const ciHi = reading?.own?.accuracy?.ci_hi;
             if (typeof ciLo === "number" && typeof ciHi === "number") {
-              lines.push(`accuracy 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
+              lines.push(`accuracy 95% CI ${fmtInterval("level", ciLo, ciHi)}`);
             }
             const lift = liftOf(reading?.vs_reference ?? null);
             if (lift != null) {
               const flat = lift.side === "spans" ? ` — ${NOT_SEPARABLE}` : "";
               lines.push(
-                `accuracy lift vs parent ${fmtSigned(lift.value)} [${fmtSigned(lift.ci_lo)}, ${fmtSigned(lift.ci_hi)}]${flat}`,
+                `accuracy lift vs parent ${fmtUnit("delta", lift.value)} ${fmtInterval("delta", lift.ci_lo, lift.ci_hi)}${flat}`,
               );
             }
             if (bar?.reading && !bar.reading.election.held) {

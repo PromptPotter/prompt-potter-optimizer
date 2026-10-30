@@ -147,6 +147,12 @@ class CampaignFacts(FrozenModel):
     )
 
 
+class UnstartedFacts(FrozenModel):
+    """An open check-in's typed facts: it has no cycle, so no course, line or run."""
+
+    spend_lifetime: LifetimeSpend = Field(description="What its check-in has cost so far.")
+
+
 class CourseSpawn(FrozenModel):
     """Where a fork was born on its parent's time line: the cut, as an event."""
 
@@ -244,18 +250,23 @@ class MainLineStep(FrozenModel):
 
 
 class RoundFacts(FrozenModel):
-    """A round's typed facts: what its election declared and what it measured against."""
+    """A round's typed facts: what its election declared."""
 
     round: int
     elects_on: DisplayMetric | None = Field(
         description="The column the round's election elected on (`Election.elects_on`); null on "
         "a round never elected. `ability`: the round is won on θ, not on accuracy."
     )
-    reference: str | None = Field(
-        description="The address of the candidate the round measured its arms against — the "
-        "individual its `parent`-role arm re-read, as the pick this course's line stood on going "
-        "into the round. Never a child of the round: a reference is not re-listed. Null at round "
-        "0, where none was read, and where the re-read individual is not the line's pick."
+
+
+class GeneSource(FrozenModel):
+    """A candidate one locus of a child may have come from, other than the parent it descends from."""
+
+    locus: str = Field(description="The locus the child moved off its parent, as `node.key`.")
+    source: str = Field(description="The address of the candidate whose value it resembles.")
+    similarity: float = Field(
+        description="How alike the child's value and the source's are, 0 to 1: a verbatim copy "
+        "is 1. Always above the child's similarity to its parent on that locus."
     )
 
 
@@ -294,6 +305,24 @@ class CandidateFacts(FrozenModel):
         "course hangs from (a fork's from-candidate, an inner course's host) up to the cut, each elected round of its course before it with the "
         "candidates crowned, then this candidate, then any later round that crowned nobody up to "
         "the next crown. Read off crowns, never `parent_ids`."
+    )
+    descends_from: str | None = Field(
+        description="The address of the candidate its first parent, its main, was last measured as "
+        "before it: the ONE edge a lineage view draws it from. Null at an origin, and where no "
+        "candidate of its campaign measured that parent."
+    )
+    donor: str | None = Field(
+        description="The address of the candidate its second parent, the donor of a crossover, was "
+        "last measured as before it, of any round. Null without a second parent or a main, and "
+        "where no candidate of its campaign measured it."
+    )
+    donated_loci: list[str] = Field(
+        description="The loci, as `node.key`, it moved off its main to the donor's value verbatim: "
+        "what the donor gave. Empty without a donor."
+    )
+    gene_sources: list[GeneSource] = Field(
+        description="Per other locus it moved off its main, the earlier candidates whose value there "
+        "is closer to its own than the main's: most similar first, then most recently measured."
     )
     lens_value: float | None = Field(
         description="This candidate's composite fitness under the request's `score:` lens. Null "
@@ -457,9 +486,26 @@ def entries_under(entry: HierarchyEntry) -> Iterator[HierarchyEntry]:
         yield from entries_under(child)
 
 
-class HierarchyResponse(StrictModel):
-    """Every campaign in one store, root-major and newest first."""
+class UnstartedCampaign(_HierarchyEntry):
+    """An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course,
+    line or run. Its `address` is the draft id Start mints from and `discard-draft` deletes."""
 
-    entries: list[HierarchyCampaign] = Field(
-        description="Campaigns sharing a root cycle sit together, the group of the newest first."
+    level: Literal["unstarted"] = "unstarted"
+    span: HierarchySpan
+    facts: UnstartedFacts
+
+
+# What a listing filter picks: a stored lifecycle, or the open check-ins no manifest holds.
+type ListingLifecycle = Literal["unstarted", "active", "archived", "deleted", "all"]
+
+ListedCampaign = Annotated[HierarchyCampaign | UnstartedCampaign, Field(discriminator="level")]
+
+
+class HierarchyResponse(StrictModel):
+    """Every campaign in one store: the unstarted first, then root-major and newest first."""
+
+    entries: list[ListedCampaign] = Field(
+        description="Unstarted campaigns lead, most recently edited first; then campaigns sharing "
+        "a root cycle sit together, the group of the newest first. A `campaign` or `attached` "
+        "filter asks after runs, so it serves no unstarted one."
     )

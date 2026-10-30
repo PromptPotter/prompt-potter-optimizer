@@ -102,7 +102,7 @@ async def _termnorm_preflight(backend_url: str) -> str | None:
                 f"{str(exc).strip() or 'connection refused'} at {backend_url}.\n\n"
                 "The TermNorm backend ships in a sibling repo. Clone it beside "
                 "this checkout, then start it:\n"
-                "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
+                "  TermNorm-excel\\start-server-py-LLMs.bat\n\n"
                 "Install guide: docs/manual/02-install.md"
             )
         except httpx.ConnectTimeout:

@@ -82,6 +82,34 @@ class L1GenerateKnobs(StrictModel):
             "the shot slot and its panel, as does a campaign declaring no demo pool."
         ),
     )
+    pool_window: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        ge=1,
+        description=(
+            "The most entries one call shows of each pool it reads — per field for the block pool, "
+            "earned blocks first — the rest rotating in by round, so a large active subset costs "
+            "no context. A ``closed`` block pool shows its subset whole, its wire's enum."
+        ),
+    )
+    recombine: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        ge=0,
+        description=(
+            "The children a host call may name per call by recombination, ``l1_generate`` adding "
+            "them beside its variants: from the RECOMBINATION POOL (the campaign's measured "
+            "individuals, highest θ first) a main of the population, the line the child continues, "
+            "and a donor of any round giving it a minority of loci, every value a parent's. "
+            "``0`` is off: it withdraws the panel and the slot, so the prompt is bit-for-bit a "
+            "no-recombination run."
+        ),
+    )
+    recombination_host: Annotated[
+        Literal["l1_generate", "l2_context"], Knob(Scope.POLICY, Estimand.SEARCH)
+    ] = Field(
+        description=(
+            "Which call writes those children, the pool panel and the reply slot moving with it. "
+            "``l1_generate``: the call that writes this round's variants. ``l2_context``: a fire, "
+            "its children joining the next round's arms."
+        ),
+    )
     block_access: Annotated[Access, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         description=(
             "How ``l1_generate`` takes the ``block_pool`` node's pool — the entries of the block "

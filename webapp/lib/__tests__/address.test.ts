@@ -12,6 +12,23 @@ describe("formatAddress", () => {
     expect(EMPTY_ADDRESS).toBe("#/");
   });
 
+  it("addresses a check-in by its draft id, and a fresh one as new", () => {
+    expect(formatAddress({ kind: "checkin", draftId: "d_6553261b89ac48e0" })).toBe(
+      "#/d/d_6553261b89ac48e0",
+    );
+    expect(formatAddress({ kind: "checkin", draftId: null })).toBe("#/new");
+    expect(roundTrip({ kind: "checkin", draftId: "d_6553261b89ac48e0" })).toEqual({
+      kind: "checkin",
+      draftId: "d_6553261b89ac48e0",
+    });
+    expect(roundTrip({ kind: "checkin", draftId: null })).toEqual({
+      kind: "checkin",
+      draftId: null,
+    });
+    expect(parseAddress("#/d")).toBeNull();
+    expect(parseAddress("#/new/chat")).toBeNull();
+  });
+
   it("names a non-default view while following", () => {
     expect(formatAddress({ kind: "follow", tab: "dashboard", cell: null })).toBe("#/dashboard");
   });

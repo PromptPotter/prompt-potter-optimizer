@@ -2,6 +2,7 @@
 
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { failureKind, operatorMessage } from "@/lib/api";
+import { COPIED_FLASH_MS, COPY_FAILURE_NOTICE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
 import { reportIncident } from "@/lib/diagnostics";
 import { Button } from "./Button";
@@ -34,7 +35,7 @@ export function CopyButton({ data, title = "Copy as JSON", choices, children, di
   };
   const fail = (message: string) => {
     setFailure(message);
-    window.setTimeout(() => setFailure(null), 5000);
+    window.setTimeout(() => setFailure(null), COPY_FAILURE_NOTICE_MS);
   };
   const copy = async (payload: unknown) => {
     let text: string;
@@ -51,7 +52,7 @@ export function CopyButton({ data, title = "Copy as JSON", choices, children, di
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
+      window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
     } catch {
       fail("The clipboard refused the copy.");
     }

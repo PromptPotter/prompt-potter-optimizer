@@ -8,6 +8,7 @@ import { healthRead } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
 import { cx } from "@/lib/cx";
+import { PLACEHOLDER } from "@/lib/format";
 
 export function AboutUnit() {
   const [showHow, setShowHow] = useState(false);
@@ -57,7 +58,7 @@ export function AboutUnit() {
       <div className="account-row">
         <span className="account-label">Version</span>
         <div className="account-row-main">
-          <span className="about-unit-mono">{version ?? "—"}</span>
+          <span className="about-unit-mono">{version ?? PLACEHOLDER}</span>
           <p className="account-muted">Reported live by the server.</p>
         </div>
       </div>

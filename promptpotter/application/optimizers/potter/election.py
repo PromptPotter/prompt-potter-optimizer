@@ -108,7 +108,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     return Selection(
         selected=selected,
         leading=leading,
-        population=[lineage.parent if selected is None else measured.arms[selected].individual],
+        ranked=[lineage.parent if selected is None else measured.arms[selected].individual],
         verdict_reason=_verdict_reason(
             winner=selected,
             leading=leading,

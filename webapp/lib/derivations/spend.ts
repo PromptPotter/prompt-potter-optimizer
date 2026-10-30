@@ -1,4 +1,4 @@
-import type { Budget, KindSpend, MeteredSpend } from "@/lib/api/types";
+import type { Budget, KindSpend, MeteredSpend, QuotaStatus } from "@/lib/api/types";
 import type { ServedDashboard } from "@/lib/api";
 import {
   CEILING_METER_LABELS,
@@ -6,7 +6,7 @@ import {
   SPEND_KINDS,
   type SpendKind,
 } from "@/lib/api/types.generated";
-import { fmtPct0, fmtTokens, fmtUsd } from "@/lib/format";
+import { fmtTokens, fmtUnit, fmtUsd } from "@/lib/format";
 
 export interface SpendLine {
   key: SpendKind;
@@ -37,10 +37,32 @@ export function ratePricedText(usd: number, callsRatePriced: boolean): string | 
   return callsRatePriced ? `${fmtUsd(usd)} ${RATE_PRICED_LABEL}` : null;
 }
 
+// What the account's lifetime bill does not count, worded once for every surface that reads `QuotaStatus`.
+export function allowanceCaveats(l: QuotaStatus["spend_lifetime"]): string[] {
+  const lines: string[] = [];
+  if (l.bill_is_floor) {
+    lines.push(
+      `${fmtTokens(l.unpriced_tokens)} were billed by a model with no known price, so the dollar figure undercounts and the token allowance is the one holding.`,
+    );
+  }
+  const priced = ratePricedText(l.rate_priced_usd, l.calls_rate_priced);
+  if (priced) {
+    lines.push(
+      `${priced} beside it — calls no provider reported a bill for. Not spent; the allowance counts it anyway.`,
+    );
+  }
+  if (l.sends_unreported) {
+    lines.push(
+      `Up to ${fmtUsd(l.unreported_usd)} more is unreported — sends that ended with no bill (cancelled, timed out, killed). Not spent, unknown; the allowance holds it anyway.`,
+    );
+  }
+  return lines;
+}
+
 export function replayShareLine(m: MeteredSpend): string {
   return m.replay_share == null
     ? "The search incurred nothing, so no share of it replayed"
-    : `${fmtPct0(m.replay_share)} of the search replayed`;
+    : `${fmtUnit("rate", m.replay_share)} of the search replayed`;
 }
 
 export function meteredBucketsLine(m: MeteredSpend): string {

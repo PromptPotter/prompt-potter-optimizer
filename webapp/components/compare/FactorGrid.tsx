@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
-import { cx } from "@/lib/cx";
-import { fmtMetricInterval, fmtMetricValue } from "@/lib/format";
+import { fmtInterval, fmtUnit } from "@/lib/format";
 
 function clip(value: string, width: number): string {
   return value.length <= width ? value : `${value.slice(0, width - 1)}…`;
@@ -66,10 +65,10 @@ export function FactorGrid({
   if (factors.length === 0) {
     return (
       <CardFrame title="Factor grid">
-        <p className="note-empty">
+        <Empty>
           Nothing varies across these subjects — they ran the same way on the same dataset, which
           makes them replicates rather than a grid. The spread between them is the noise reading.
-        </p>
+        </Empty>
       </CardFrame>
     );
   }
@@ -136,70 +135,16 @@ export function FactorGrid({
       ) : (
         <>
           {served.note && <p className="note-warn">{served.note}</p>}
-          <div className="l4-table-wrap">
-            <table className="l4-table l4-factor-grid">
-              <thead>
-                <tr>
-                  <th scope="col">
-                    {served.row_key} \ {served.col_key}
-                  </th>
-                  {(col?.levels ?? []).map((lv) => (
-                    <th key={lv.level} scope="col" title={lv.level}>
-                      {clip(lv.level, 22)}
-                    </th>
-                  ))}
-                  <th scope="col" className="l4-margin">
-                    row marginal
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {(row?.levels ?? []).map((rlv) => (
-                  <tr key={rlv.level}>
-                    <th scope="row" title={rlv.level}>
-                      {clip(rlv.level, 22)}
-                    </th>
-                    {(col?.levels ?? []).map((clv) => {
-                      const cell = at.get(cellKey(rlv.level, clv.level));
-                      return (
-                        <td key={clv.level} className={cx(!cell && "l4-cell-empty")}>
-                          {!cell ? (
-                            <span title="No subject in this selection ran that combination.">—</span>
-                          ) : (
-                            <span title={fmtMetricInterval(unit, cell.ci_lo, cell.ci_hi)}>
-                              {fmtMetricValue(unit, cell.value)}
-                              <span className="l4-cell-n">
-                                {" "}
-                                · {cell.n_cells} cells, {cell.subjects.length} subj
-                              </span>
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="l4-margin" title={fmtMetricInterval(unit, rlv.ci_lo, rlv.ci_hi)}>
-                      {fmtMetricValue(unit, rlv.value)}
-                    </td>
-                  </tr>
-                ))}
-                <tr>
-                  <th scope="row" className="l4-margin">
-                    column marginal
-                  </th>
-                  {(col?.levels ?? []).map((clv) => (
-                    <td
-                      key={clv.level}
-                      className="l4-margin"
-                      title={fmtMetricInterval(unit, clv.ci_lo, clv.ci_hi)}
-                    >
-                      {fmtMetricValue(unit, clv.value)}
-                    </td>
-                  ))}
-                  <td />
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            ariaLabel={`${served.row_key} by ${served.col_key}`}
+            className="l4-factor-grid"
+            columns={gridColumns(served.row_key, served.col_key, col?.levels ?? [], at, unit)}
+            rows={[
+              ...(row?.levels ?? []).map((level): GridRow => ({ kind: "level", level })),
+              { kind: "margin" },
+            ]}
+            getRowId={(r) => (r.kind === "margin" ? "margin" : `level:${r.level.level}`)}
+          />
 
           {served.marginalised.length > 0 && (
             <p className="note-info">
@@ -212,4 +157,70 @@ export function FactorGrid({
       )}
     </CardFrame>
   );
+}
+
+type Level = FactorReading["levels"][number];
+type Cell = NonNullable<Evidence["grid"]>["cells"][number];
+type Unit = Evidence["metric"]["spec"]["unit"];
+// The last row is the column marginals.
+type GridRow = { kind: "level"; level: Level } | { kind: "margin" };
+
+function gridColumns(
+  rowKey: string,
+  colKey: string,
+  colLevels: readonly Level[],
+  at: ReadonlyMap<string, Cell>,
+  unit: Unit,
+): Column<GridRow>[] {
+  const margin = (lv: Level) => (
+    <span className="l4-margin" title={fmtInterval(unit, lv.ci_lo, lv.ci_hi)}>
+      {fmtUnit(unit, lv.value)}
+    </span>
+  );
+  return [
+    {
+      id: "row",
+      label: `${rowKey} \\ ${colKey}`,
+      width: "minmax(14ch, 1fr)",
+      cell: (r) =>
+        r.kind === "margin" ? (
+          <span className="l4-margin">column marginal</span>
+        ) : (
+          <span className="l4-factor-level" title={r.level.level}>
+            {clip(r.level.level, 22)}
+          </span>
+        ),
+    },
+    ...colLevels.map(
+      (clv, i): Column<GridRow> => ({
+        id: `col:${i}`,
+        label: <span title={clv.level}>{clip(clv.level, 22)}</span>,
+        width: "minmax(16ch, 1fr)",
+        cell: (r) => {
+          if (r.kind === "margin") return margin(clv);
+          const cell = at.get(cellKey(r.level.level, clv.level));
+          return !cell ? (
+            <span className="l4-cell-empty" title="No subject in this selection ran that combination.">
+              —
+            </span>
+          ) : (
+            <span title={fmtInterval(unit, cell.ci_lo, cell.ci_hi)}>
+              {fmtUnit(unit, cell.value)}
+              <span className="l4-cell-n">
+                {" "}
+                · {cell.n_cells} cells, {cell.subjects.length} subj
+              </span>
+            </span>
+          );
+        },
+      }),
+    ),
+    {
+      id: "row-margin",
+      label: "row marginal",
+      width: "12ch",
+      align: "end",
+      cell: (r) => (r.kind === "margin" ? null : margin(r.level)),
+    },
+  ];
 }

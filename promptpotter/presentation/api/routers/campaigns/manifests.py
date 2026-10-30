@@ -6,8 +6,6 @@ from pydantic import Field
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
-    DraftListResponse,
-    draft_list,
     draft_wire,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -16,6 +14,7 @@ from promptpotter.application.datasets.origin_readiness import (
     RaisedCommand,
     load_resolution,
 )
+from promptpotter.application.hierarchy import queued_drafts
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     ForkPreviewRequest,
@@ -42,12 +41,15 @@ class DraftReopenResponse(StrictModel):
         description="Proposals the last turn left unclicked, so a re-opened check-in keeps the "
         "operator's outstanding actions."
     )
-
-
-@campaigns_router.get("/drafts", response_model=DraftListResponse)
-def list_drafts(stores: StoresDep) -> DraftListResponse:
-    """The caller's open check-ins. A draft is no campaign: Start mints one and closes it."""
-    return draft_list(stores)
+    resolution_pending: bool = Field(
+        description="Its task is on file but no resolver turn ever set it up "
+        "(`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
+        "revisit never re-buys a turn or re-proposes over authored prompts."
+    )
+    queued: bool = Field(
+        description="A Start on it waits on a machine slot: it is minted once one frees, so a "
+        "reopen offers no second Start (the same fact as its listing's `queued` lifecycle)."
+    )
 
 
 @campaigns_router.get("/drafts/{draft_id}", response_model=DraftReopenResponse)
@@ -59,6 +61,8 @@ def get_draft(stores: StoresDep, draft_id: str) -> DraftReopenResponse:
         draft=draft_wire(stores, draft),
         resolution=block.last_resolution,
         raised=block.raised,
+        resolution_pending=draft.resolution_pending(),
+        queued=draft_id in queued_drafts(stores),
     )
 
 

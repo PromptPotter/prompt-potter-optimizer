@@ -16,6 +16,14 @@ available_models:
   - openai/gpt-oss-120b:nitro
   - anthropic/claude-haiku-5.5
   - z-ai/glm-5.3-flash
+# The knobs a setup screen leads with, in order; presentation alone, outside the treatment.
+main:
+  - l1_generate.n_variants
+  - l1_generate.recombine
+  - mating.offspring
+  - adaptive_queue.sp_budget_round
+  - pobb.epsilon
+  - escalation.escalation_ladder
 nodes:
   # Run init's, both: the pools `l1_generate` draws from, seeded once before round 0's critique
   # reads them. The block pool leads with what earlier runs on this answer space earned.
@@ -39,6 +47,7 @@ nodes:
       strata: none
   l1_generate:
     type: llm
+    makes: rewrites
     # Menus the operator picks from; they open no search axis (`param_keys` stays empty, and
     # L2's reach is its own member's `steers`). `model` falls back to `available_models`.
     optimizer: &node_menus
@@ -59,6 +68,10 @@ nodes:
       model: qwen/qwen3.7-flash
       n_variants: 5
       k_max: 5
+      pool_window: 8
+      # Recombination by an LLM host, off at 0; `mating` + `locus_crossover` host it by a draw.
+      recombine: 0
+      recombination_host: l1_generate
       block_access: open
       schema_field_rename: false
     # Every llm node runs `qwen/qwen3.7-flash` on OpenRouter's plain route. Never point a
@@ -66,6 +79,19 @@ nodes:
     # of the schema: Cerebras behind `gpt-oss-120b:nitro` silently returned the schema itself.
     description: >-
       L1 Generate: produces N candidate prompts from current framing + critique.
+  # Crossover, off at 0: after L1's variants, each a main (higher θ of two from the population)
+  # given a minority of its differing loci by a donor drawn alike from every round's measured.
+  mating:
+    type: algorithm
+    makes: crossovers
+    config:
+      offspring: 0
+      donor_from: measured
+      tournament: 2
+  locus_crossover:
+    type: algorithm
+    makes: donor sections
+    config: {}
   # Runs the campaign pipeline against the panel; it makes no optimizer call, so no config.
   l1_score:
     type: measurement
@@ -148,6 +174,8 @@ pipelines:
   default:
     - adaptive_queue
     - l1_generate
+    - mating
+    - locus_crossover
     - pobb
     - l1_score
     - theta_election
@@ -266,7 +294,7 @@ resolved_prompts:
       influence on the next round is what L1 is shown, and how far it may roam.
     task_intent: >-
       Decide what L1 LOOKS AT next round and how hard it explores. Your levers are l1_layout and
-      l1_overrides — nothing else.
+      l1_overrides, and recombinations where a RECOMBINATION POOL is shown — nothing else.
     problem_description: ''
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
@@ -430,7 +458,8 @@ resolved_prompts:
       author the edits.
     task_intent: >-
       Decide what L1 LOOKS AT next round and how hard it explores. You do not write the task framing — it
-      is operator-authored and frozen. Your levers are l1_layout and l1_overrides.
+      is operator-authored and frozen. Your levers are l1_layout and l1_overrides, and
+      recombinations where a RECOMBINATION POOL is shown.
     problem_description: ''
     instruction: |-
       PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).

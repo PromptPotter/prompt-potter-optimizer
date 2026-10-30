@@ -8,10 +8,10 @@ import {
   candidateBars,
   candidatesAtPath,
   courseAt,
+  measuredUniverse,
   type LineageIndex,
 } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/workspace";
-import { measuredUniverse } from "@/lib/sample-set";
 import type { CandidateBar } from "@/lib/types";
 
 export function useCandidateBars(index: LineageIndex) {

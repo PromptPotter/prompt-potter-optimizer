@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, NamedTuple, assert_never
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals
@@ -12,13 +12,15 @@ from promptpotter.application.bench.round_analysis import compute_round_diagnost
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
+    INITIAL_POPULATION,
     Proposals,
     RoundContext,
     RoundOpening,
+    RoundRole,
     RoundWalk,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.runner.arm_gate import arm_gate_mode, operator_arms
+from promptpotter.application.runner.arm_gate import operator_arms
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
 from promptpotter.application.runner.inner.spawn_context import pin_inner_ruler
 from promptpotter.application.runner.measurement import measure_population
@@ -46,7 +48,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
-from promptpotter.domain.run_standing import line_reference, stalls_left
+from promptpotter.domain.run_standing import line_reference, rounds_without_advance, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -63,6 +65,7 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.domain.arm_reading import DisplayMetric
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -287,7 +290,14 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
-    opening = walk.lead.opening(ctx, walk)
+    bench = RoundOpening(
+        standing=f"no advance {rounds_without_advance(cycle.rounds)}",
+        note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+        arms=None if walk.pipeline == INITIAL_POPULATION else cycle.optimizer.arms_per_round,
+        proposer=walk.proposer,
+        replayed=False,
+    )
+    opening = walk.lead.opening(NodeContext(ctx, walk.lead), bench)
     fold = cycle.parent_fold
     node = walk.proposer
     cb = ctx.callbacks
@@ -372,21 +382,16 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
         bank_proposals(ctx, proposals, submitted=False)
 
 
-async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
-    gate = arm_gate_mode(ctx)
-    walk = plan.walk(ctx.cycle.population)
-    if gate == "author":
-        population = Proposals([])
-    else:
-        if walk.seeds:
-            seeded = await _walk(ctx, walk.seeds, panel)
-            ctx.cycle.population = [p.individual for p in seeded.proposals if not p.refused]
-        population = await _walk(ctx, walk.proposers, panel)
-        bank_walk(ctx, population.proposals)
+async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals:
+    seeds, proposers, seated = walk.walked
+    if seeds:
+        seeded = await _walk(ctx, seeds, panel)
+        ctx.cycle.population = [p.individual for p in seeded.proposals if not p.refused]
+    population = await _walk(ctx, proposers, panel)
+    bank_walk(ctx, population.proposals)
     arms = _one_arm_each(ctx, population.proposals)
-    if gate == "off":
-        return replace(population, proposals=arms)
-    arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
+    if seated:
+        arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
     return replace(population, proposals=arms)
 
 
@@ -401,82 +406,152 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
+class RoundWalked(NamedTuple):
+    result: RoundResult
+    cut: StopReason | None
+    # What the controller observed of the round, acted on once it closes (`post_round`).
+    rule: str | None
+
+
+@dataclass
+class _Walking:
+    """One round's walk, role by role in `RoundRole`'s order: each role reads what the one before it left."""
+
+    ctx: RoundContext
+    pool: list[Sample]
+    is_final_round: bool
+    panel: Panel | None = None
+    population: Proposals | None = None
+    measured: MeasuredRound | None = None
+    selection: Selection | None = None
+    result: RoundResult | None = None
+    rule: str | None = None
+
+    async def take(self, role: RoundRole) -> None:
+        ctx = self.ctx
+        cycle, callbacks, round_num = ctx.cycle, ctx.callbacks, ctx.round_num
+        plan = cycle.optimizer.plan
+        match role:
+            case RoundRole.SAMPLER:
+                self.panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), self.pool)
+            case RoundRole.PROPOSER:
+                assert self.panel is not None
+                walk = plan.walk(stands=bool(cycle.population))
+                opening = announce_opening(ctx, walk)
+                self.population = await propose_population(ctx, walk, self.panel)
+                announce_population(ctx, opening, self.population)
+            case RoundRole.MEASUREMENT:
+                assert self.panel is not None and self.population is not None
+                callbacks.on_phase(
+                    CampaignPhase.MEASURE,
+                    "enter",
+                    round=round_num,
+                    view=MeasureEnterView(
+                        node=plan.measurement,
+                        n_candidates=len(self.population.proposals),
+                        n_samples=len(self.panel.cells),
+                    ),
+                )
+                self.measured = await measure_population(
+                    ctx, self.population, self.panel, self.pool, plan.eliminator, plan.selector
+                )
+                callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
+            case RoundRole.SELECTOR:
+                assert self.measured is not None
+                callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
+                self.selection = plan.selector.select(
+                    NodeContext(ctx, plan.selector), self.measured
+                )
+            case RoundRole.SURVIVOR:
+                assert self.measured is not None and self.selection is not None
+                survivor, ranked = plan.survivor, self.selection.ranked
+                cycle.population = list(
+                    ranked
+                    if survivor is None
+                    else survivor.survive(NodeContext(ctx, survivor), ranked)
+                )
+                result = _round_result(
+                    ctx, self.measured, self.selection, elects_on=plan.selector.elects_on
+                )
+                callbacks.on_phase(
+                    CampaignPhase.SELECT,
+                    "exit",
+                    round=round_num,
+                    view=select_exit(callbacks.view_context, result),
+                )
+                _panel_gate(ctx, result, self.measured.cut)
+                # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
+                assert result.election is not None
+                callbacks.on_election(round_num, result.election)
+                cycle.absorb_round(result)
+                self.result = result
+            case RoundRole.ADAPTER:
+                assert self.result is not None and self.measured is not None
+                assert self.population is not None
+                self.result = await self._adapt_beside_overlap(
+                    self.result, self.measured, self.population
+                )
+            case RoundRole.CONTROLLER:
+                assert self.result is not None
+                if (controller := plan.controller) is not None:
+                    seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
+                    self.rule = controller.observe(NodeContext(seat, controller), self.result)
+            case unreachable:
+                assert_never(unreachable)
+
+    async def _adapt_beside_overlap(
+        self, round_result: RoundResult, measured: MeasuredRound, population: Proposals
+    ) -> RoundResult:
+        ctx = self.ctx
+        cycle = ctx.cycle
+        overlap = asyncio.create_task(
+            measure_overlap(cycle, round_result, self.pool, measured.origin_panel_slots)
+        )
+        try:
+            # An adapter writes for the NEXT round, so none runs when no round follows.
+            lives = cycle.config.optimization.lives
+            will_stop = (
+                self.is_final_round
+                or measured.cut is not None
+                or (lives is not None and stalls_left(cycle.rounds, lives.bank) == 0)
+            )
+            if population.proposals and round_result.results and not will_stop:
+                await _adapt(ctx, cycle.optimizer.plan)
+        except BaseException:
+            overlap.cancel()
+            raise
+        reading, bought = await overlap
+        # Re-read: an adapter emits onto the round it adapts to.
+        round_result = cycle.seat(
+            cycle.rounds[-1].model_copy(update={"overlap": reading, "overlap_results": bought})
+        )
+        _warn_not_advanced(round_result)
+        return round_result
+
+    @property
+    def walked(self) -> RoundWalked:
+        assert self.result is not None and self.measured is not None
+        return RoundWalked(self.result, self.measured.cut, self.rule)
+
+
 async def execute_round(
     cycle: Cycle,
     round_num: int,
     callbacks: RunCallbacks,
     *,
     is_final_round: bool = False,
-) -> tuple[RoundResult, StopReason | None]:
-    plan = cycle.optimizer.plan
+) -> RoundWalked:
     # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
     pool = list(cycle.session.state.scoring.require_partition().search)
-    ctx = RoundContext(
-        cycle=cycle, round_num=round_num, callbacks=callbacks, is_final_round=is_final_round
-    )
+    ctx = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
     await settle_owed_outputs(ctx)
-
     # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
     cycle.difficulty.open_round(cycle.rounds)
     pin_inner_ruler(cycle.difficulty.stamp.reach)
-    panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)
-    opening = announce_opening(ctx, plan.walk(cycle.population))
-    population = await propose_population(ctx, plan, panel)
-    announce_population(ctx, opening, population)
-
-    callbacks.on_phase(
-        CampaignPhase.MEASURE,
-        "enter",
-        round=round_num,
-        view=MeasureEnterView(
-            node=plan.measurement,
-            n_candidates=len(population.proposals),
-            n_samples=len(panel.cells),
-        ),
-    )
-    measured = await measure_population(
-        ctx, population, panel, pool, plan.eliminator, plan.selector
-    )
-    callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
-    callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
-    selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
-    cycle.population = list(selection.population)
-    round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
-    callbacks.on_phase(
-        CampaignPhase.SELECT,
-        "exit",
-        round=round_num,
-        view=select_exit(callbacks.view_context, round_result),
-    )
-    _panel_gate(ctx, round_result, measured.cut)
-    # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
-    assert round_result.election is not None
-    callbacks.on_election(round_num, round_result.election)
-    cycle.absorb_round(round_result)
-
-    overlap = asyncio.create_task(
-        measure_overlap(cycle, round_result, pool, measured.origin_panel_slots)
-    )
-    try:
-        # An adapter writes for the NEXT round, so none runs when no round follows.
-        lives = cycle.config.optimization.lives
-        will_stop = (
-            is_final_round
-            or measured.cut is not None
-            or (lives is not None and stalls_left(cycle.rounds, lives.bank) == 0)
-        )
-        if population.proposals and round_result.results and not will_stop:
-            await _adapt(ctx, plan)
-    except BaseException:
-        overlap.cancel()
-        raise
-    reading, bought = await overlap
-    # Re-read: an adapter emits onto the round it adapts to.
-    round_result = cycle.seat(
-        cycle.rounds[-1].model_copy(update={"overlap": reading, "overlap_results": bought})
-    )
-    _warn_not_advanced(round_result)
-    return round_result, measured.cut
+    walking = _Walking(ctx, pool, is_final_round)
+    for role in RoundRole:
+        await walking.take(role)
+    return walking.walked
 
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
@@ -539,25 +614,14 @@ async def close_round(
 
 async def post_round(
     cycle: Cycle,
-    round_result: RoundResult,
+    walked: RoundWalked,
     round_num: int,
     session: Session,
     cb: RunCallbacks,
     *,
     is_final_round: bool = False,
 ) -> None:
-    controller = cycle.optimizer.plan.controller
-    rule: str | None = None
-    if controller is not None:
-        ctx = NodeContext(
-            RoundContext(
-                cycle=cycle, round_num=round_num, callbacks=cb, is_final_round=is_final_round
-            ),
-            controller,
-        )
-        rule = controller.observe(ctx, round_result)
-
-    round_result = await close_round(cycle, round_result, round_num, session, cb)
+    round_result = await close_round(cycle, walked.result, round_num, session, cb)
 
     # Before the stop below, so a perfect round that also ends the campaign still gets its check.
     fold, election = round_result.fold, round_result.election
@@ -574,6 +638,8 @@ async def post_round(
 
     if (stop := standing_tripped(cycle)) is not None:
         raise StopLoop(stop)
-    if rule is not None and not is_final_round:
-        assert controller is not None
-        await controller.act(ctx, rule)
+    if walked.rule is not None and not is_final_round:
+        controller = cycle.optimizer.plan.controller
+        assert controller is not None, "only a controller observes a rule"
+        seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
+        await controller.act(NodeContext(seat, controller), walked.rule)

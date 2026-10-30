@@ -38,7 +38,7 @@ Their prompt in, the winner back as the next version of *their* prompt (today th
 `application/origin.py::resolve_origin_opt_search_point`.
 
 - **Fetched once, at mint, pinned in the seed** — a resume re-resolves from the seed
-  (`application/jobs/mint.py::refuse_drifted_resume`), so a moved alias cannot change a running campaign's identity.
+  (`application/jobs/mint.py::resolve_resume`), so a moved alias cannot change a running campaign's identity.
 - **A new `OriginSource` member** with its sentence in `application/origin.py::_SEED_ORIGIN_LINEAGE` (its
   import-time assert fails without it); the seed records the prompt's name and version.
 - **One string into named fields**: a foreign prompt lands whole in `instruction`; a version *we* wrote restores

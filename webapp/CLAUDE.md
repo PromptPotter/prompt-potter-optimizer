@@ -41,7 +41,7 @@ if (key !== prevKey) {
 
 **Never a `useEffect` reset** — it paints one stale frame. A single-state hook may instead stamp data with its fetch key and return `EMPTY` until it matches.
 
-**A reset may seed from `lib/view-memory.tsx`** (per-campaign, TTL + LRU in the codec, `useSyncExternalStore`). **A display preference is not view memory** — per device, permanent, `useLocalStorage` under one key (`lib/theme.ts`, `lib/tree-prefs.ts`), never a `UserSettings` field. **View memory holds ids, flags and UI keys, never a measurement or a mask.**
+**A reset may seed from `lib/state/view-memory.tsx`** (per-campaign, TTL + LRU in the codec, `useSyncExternalStore`). **A display preference is not view memory** — per device, permanent, `useLocalStorage` under one `STORAGE_KEYS` entry (`lib/hooks/useLocalStorage.ts`; `lib/prefs/`), never a `UserSettings` field. **View memory holds ids, flags and UI keys, never a measurement or a mask.**
 
 ## Testing posture
 

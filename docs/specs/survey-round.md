@@ -94,8 +94,8 @@ the verdict, so a `strict` gate holds on `below_floor`, `collapsed` or `saturate
 (`optimizers/potter/knobs.py`), whose injection renders empty when off. Handled in
 `optimizers/potter/escalation/firing.py` after terminate and before fork; accepted, it writes a **pending survey**
 on the `l3_memory` slice (restated on the ledger, so resume and fork keep it), raises no `StopLoop`, mints no
-cycle; the next round's `RoundPlan.walk(population, survey_pending)` consumes it. It is an LLM proposal, not a
-rule in `escalation/rules.py` — rules route, never diagnose. A `flat` or `saturated` verdict reaches L2 as a
+cycle; the next round's `RoundPlan.walk(stands=…)` takes it as a second input and consumes it. It is an
+LLM proposal, not a rule in `escalation/rules.py` — rules route, never diagnose. A `flat` or `saturated` verdict reaches L2 as a
 decision-frame fact; `escalation_ladder: l1` suppresses it.
 
 **The setting.** `at_init`, `candidates` (K), `races_offspring`, `share` and the thresholds sit on the `survey`

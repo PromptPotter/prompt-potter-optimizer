@@ -889,6 +889,35 @@
         "title": "ArmSlot",
         "type": "object"
       },
+      "ArmedCeilingEffect": {
+        "additionalProperties": false,
+        "description": "``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands.",
+        "properties": {
+          "armed": {
+            "$ref": "#/components/schemas/Budget"
+          }
+        },
+        "required": [
+          "armed"
+        ],
+        "title": "ArmedCeilingEffect",
+        "type": "object"
+      },
+      "ArmsTakenEffect": {
+        "additionalProperties": false,
+        "description": "``submit-arms``: how many arms the round banked.",
+        "properties": {
+          "arms": {
+            "title": "Arms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "arms"
+        ],
+        "title": "ArmsTakenEffect",
+        "type": "object"
+      },
       "BackendWarningRecord": {
         "additionalProperties": false,
         "description": "An attempt that failed and will be retried: a transport fault or a 5xx, never a 429.",
@@ -1884,9 +1913,33 @@
             "type": "string"
           },
           "effect": {
-            "additionalProperties": true,
-            "title": "Effect",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoEffect"
+              },
+              {
+                "$ref": "#/components/schemas/PausedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/SkippedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/GateDecidedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/ArmsTakenEffect"
+              },
+              {
+                "$ref": "#/components/schemas/LookaheadTakenEffect"
+              },
+              {
+                "$ref": "#/components/schemas/ArmedCeilingEffect"
+              },
+              {
+                "$ref": "#/components/schemas/OriginEditedEffect"
+              }
+            ],
+            "title": "Effect"
           },
           "record_type": {
             "const": "command_ack",
@@ -1958,6 +2011,16 @@
         ],
         "title": "CommandRecord",
         "type": "object"
+      },
+      "ComparisonExit": {
+        "description": "A launch act that runs an arm off the comparison its head-to-head declared.",
+        "enum": [
+          "rewind",
+          "fork_on_divergence",
+          "no_divergence_check"
+        ],
+        "title": "ComparisonExit",
+        "type": "string"
       },
       "ConfigOverrides": {
         "additionalProperties": false,
@@ -2415,6 +2478,7 @@
             "cycle_final": "#/components/schemas/CycleFinalRecord",
             "cycle_minted": "#/components/schemas/CycleMintedRecord",
             "cycle_seed": "#/components/schemas/CycleSeedRecord",
+            "cycle_share": "#/components/schemas/CycleShareRecord",
             "cycle_superseded": "#/components/schemas/CycleSupersededRecord",
             "decision": "#/components/schemas/ResumeCheckpointRecord",
             "election": "#/components/schemas/ElectionRecord",
@@ -2426,6 +2490,7 @@
             "launch_claim": "#/components/schemas/LaunchClaimRecord",
             "launch_clock": "#/components/schemas/LaunchClockRecord",
             "launch_released": "#/components/schemas/LaunchReleasedRecord",
+            "left_comparison": "#/components/schemas/LeftComparisonRecord",
             "llm_call": "#/components/schemas/LLMCallRecord",
             "llm_call_progress": "#/components/schemas/LLMCallProgressRecord",
             "llm_call_start": "#/components/schemas/LLMCallStartRecord",
@@ -2490,6 +2555,9 @@
             "$ref": "#/components/schemas/CycleSeedRecord"
           },
           {
+            "$ref": "#/components/schemas/CycleShareRecord"
+          },
+          {
             "$ref": "#/components/schemas/CycleSupersededRecord"
           },
           {
@@ -2515,6 +2583,9 @@
           },
           {
             "$ref": "#/components/schemas/LaunchReleasedRecord"
+          },
+          {
+            "$ref": "#/components/schemas/LeftComparisonRecord"
           },
           {
             "$ref": "#/components/schemas/LLMCallProgressRecord"
@@ -2655,6 +2726,30 @@
           "seed"
         ],
         "title": "CycleSeedRecord",
+        "type": "object"
+      },
+      "CycleShareRecord": {
+        "additionalProperties": false,
+        "description": "The cycle's share of its campaign's ceiling, LAST wins and never inherited: its ONE store, which\nthe book spending on the cycle and every sibling's admission read. Every move lands through\n`jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`).",
+        "properties": {
+          "allotment": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "record_type": {
+            "const": "cycle_share",
+            "default": "cycle_share",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "allotment"
+        ],
+        "title": "CycleShareRecord",
         "type": "object"
       },
       "CycleSupersededRecord": {
@@ -3591,6 +3686,26 @@
         "title": "ForkTrigger",
         "type": "string"
       },
+      "GateDecidedEffect": {
+        "additionalProperties": false,
+        "description": "``origin-gate-decision``, taken by the loop.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "GateDecidedEffect",
+        "type": "object"
+      },
       "HealthRecord": {
         "additionalProperties": false,
         "description": "On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one.",
@@ -3651,7 +3766,7 @@
             "default": null
           },
           "parent_ids": {
-            "description": "Every individual this one derives from — one for a mutation, several for a crossover; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
+            "description": "Every individual this one derives from — one for a mutation, several for a crossover, its main first and its donor second; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
             "items": {
               "type": "string"
             },
@@ -4200,6 +4315,30 @@
         "title": "LaunchReleasedRecord",
         "type": "object"
       },
+      "LeftComparisonRecord": {
+        "additionalProperties": false,
+        "description": "Appended on an arm's cycle as the act runs: from it on, the arm's line reads uncontrolled.",
+        "properties": {
+          "act": {
+            "$ref": "#/components/schemas/ComparisonExit"
+          },
+          "record_type": {
+            "const": "left_comparison",
+            "default": "left_comparison",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "act"
+        ],
+        "title": "LeftComparisonRecord",
+        "type": "object"
+      },
       "LevelSeries": {
         "additionalProperties": false,
         "description": "Every round's ended-on individual read on ONE δ scale, so any two of its levels difference.",
@@ -4375,6 +4514,26 @@
           "spent"
         ],
         "title": "LivesReading",
+        "type": "object"
+      },
+      "LookaheadTakenEffect": {
+        "additionalProperties": false,
+        "description": "``set-sample-lookahead``, spent by the round that took it.",
+        "properties": {
+          "auto": {
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "cells": {
+            "title": "Cells",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cells",
+          "auto"
+        ],
+        "title": "LookaheadTakenEffect",
         "type": "object"
       },
       "ManifestNodeOverlay": {
@@ -4769,6 +4928,151 @@
         "title": "MemberAddress",
         "type": "object"
       },
+      "ModelCapability": {
+        "additionalProperties": false,
+        "description": "What one model accepts and what it costs on one provider, resolved server-side.\n\n`reasoning_efforts` `None` is UNKNOWN, never \"unsupported\": keep the node's declared ladder.\n`reasoning_note` is populated in every arm. Card fields are optional and a third party's claim,\nexcept the two prices, which are the rate table's for `provider`.",
+        "properties": {
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Context Length"
+          },
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "fetched_at": {
+            "default": "",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "indistinct_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Indistinct Efforts"
+          },
+          "input_usd_per_mtok": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Input Usd Per Mtok"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Output Tokens"
+          },
+          "modality": {
+            "default": "",
+            "title": "Modality",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output_usd_per_mtok": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Usd Per Mtok"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "reasoning_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Efforts"
+          },
+          "reasoning_note": {
+            "title": "Reasoning Note",
+            "type": "string"
+          },
+          "refused_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refused Efforts",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "unsupported_params": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unsupported Params"
+          }
+        },
+        "required": [
+          "model",
+          "provider",
+          "reasoning_efforts",
+          "reasoning_note",
+          "source"
+        ],
+        "title": "ModelCapability",
+        "type": "object"
+      },
       "NearMiss": {
         "description": "A query whose ground truth landed in candidates rank 2-10.",
         "properties": {
@@ -4794,6 +5098,13 @@
           }
         },
         "title": "NearMiss",
+        "type": "object"
+      },
+      "NoEffect": {
+        "additionalProperties": false,
+        "description": "An ack whose command names no effect beyond having happened.",
+        "properties": {},
+        "title": "NoEffect",
         "type": "object"
       },
       "NodePrompt": {
@@ -5120,6 +5431,22 @@
           "audit"
         ],
         "title": "OptimizerStepExitView",
+        "type": "object"
+      },
+      "OriginEditedEffect": {
+        "additionalProperties": {
+          "additionalProperties": true,
+          "propertyNames": {
+            "enum": [
+              "from",
+              "to"
+            ]
+          },
+          "type": "object"
+        },
+        "description": "A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new.",
+        "minProperties": 1,
+        "title": "OriginEditedEffect",
         "type": "object"
       },
       "OriginSource": {
@@ -5499,6 +5826,22 @@
         "title": "PauseCause",
         "type": "string"
       },
+      "PausedEffect": {
+        "additionalProperties": false,
+        "description": "``pause-cycle``, taken by the loop.",
+        "properties": {
+          "run_phase": {
+            "const": "paused",
+            "title": "Run Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_phase"
+        ],
+        "title": "PausedEffect",
+        "type": "object"
+      },
       "PhaseRecord": {
         "additionalProperties": false,
         "properties": {
@@ -5720,6 +6063,7 @@
               "cycle_final",
               "cycle_minted",
               "cycle_seed",
+              "cycle_share",
               "cycle_superseded",
               "election",
               "error",
@@ -5730,6 +6074,7 @@
               "launch_claim",
               "launch_clock",
               "launch_released",
+              "left_comparison",
               "llm_call_progress",
               "llm_call",
               "llm_call_start",
@@ -6097,6 +6442,18 @@
         "additionalProperties": false,
         "description": "What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST.",
         "properties": {
+          "backend_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Backend Revision"
+          },
           "declaration": {
             "additionalProperties": true,
             "title": "Declaration",
@@ -6113,6 +6470,16 @@
               }
             ],
             "title": "Experiment"
+          },
+          "model_capabilities": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/ModelCapability"
+              },
+              "type": "object"
+            },
+            "title": "Model Capabilities",
+            "type": "object"
           },
           "record_type": {
             "const": "resolved_run",
@@ -6889,7 +7256,7 @@
       },
       "RoundWarningRecord": {
         "additionalProperties": false,
-        "description": "A mid-round SELF-HEAL the run continued past; never re-add a kind with no emitter.",
+        "description": "A SELF-HEAL the run continued past, mid-round or at its start; never re-add a kind with no emitter.",
         "properties": {
           "detail": {
             "additionalProperties": true,
@@ -6907,7 +7274,9 @@
               "layer_rebase_dropped",
               "adapter_output_unavailable",
               "critique_cluster_dropped",
-              "round_not_advanced"
+              "round_not_advanced",
+              "offspring_dropped",
+              "trace_sink_failed"
             ],
             "title": "Kind",
             "type": "string"
@@ -7874,6 +8243,21 @@
           }
         },
         "title": "Skipped",
+        "type": "object"
+      },
+      "SkippedEffect": {
+        "additionalProperties": false,
+        "description": "``skip-sample``, taken by the loop.",
+        "properties": {
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "skipped"
+        ],
+        "title": "SkippedEffect",
         "type": "object"
       },
       "SpDiffView": {

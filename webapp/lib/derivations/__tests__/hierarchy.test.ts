@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { groupByRoot, runningCourses } from "@/lib/derivations";
+import { dockPriority, groupByRoot, runningCourses } from "@/lib/derivations";
 import type { HierarchyCampaign } from "@/lib/api";
-import { dockPriority } from "@/lib/run-phase";
 import { subtreeCampaign, subtreeCourse, hierarchyState } from "@/lib/test-fixtures";
 
 function rootedAt(address: string, rootCycle: string): HierarchyCampaign {

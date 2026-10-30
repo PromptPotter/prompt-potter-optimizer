@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { SignInPrompt } from "@/components/ui";
-import { useAuth } from "@/lib/auth-context";
+import { Empty, FailureLine, Loading, SignInPrompt } from "@/components/ui";
+import { useAuth } from "@/lib/state/auth";
 import { tagValue } from "@/lib/derivations";
-import { useActivePointer, useRegistry } from "@/lib/registry";
-import { useShowCandidates } from "@/lib/tree-prefs";
-import { useNodeToggle } from "@/lib/view-memory";
+import { useActivePointer, useRegistry } from "@/lib/state/registry";
+import { useShowCandidates } from "@/lib/prefs/tree";
+import { useNodeToggle } from "@/lib/state/view-memory";
 import { useWorkspace } from "@/lib/workspace";
 import { ForestRows, type TreeCtx } from "./ForestRows";
 import { SidebarFilterPopover } from "./SidebarFilterPopover";
@@ -54,7 +54,6 @@ export function SidebarContent() {
     [nodes, viewedPath, viewedCandidateId, showCandidates],
   );
 
-  const error = failure?.message ?? null;
   const filtered = listedLifecycle === "archived" || datasetFilter != null;
   const clearFilters = () => {
     setListedLifecycle("active");
@@ -92,7 +91,7 @@ export function SidebarContent() {
       )}
       {status !== "authed" ? (
         status === "loading" ? (
-          <div className="unit-library-note">loading…</div>
+          <Loading className="unit-library-note">loading…</Loading>
         ) : (
           <SignInPrompt
             className="unit-library-note"
@@ -100,27 +99,24 @@ export function SidebarContent() {
           />
         )
       ) : (
-        !loaded && (
-          <div className="unit-library-note">{error ?? "loading…"}</div>
-        )
+        !loaded &&
+        (failure !== null ? (
+          <FailureLine failure={failure} className="unit-library-note" />
+        ) : (
+          <Loading className="unit-library-note">loading…</Loading>
+        ))
       )}
       {loaded && shown.length === 0 && listedLifecycle === "archived" && (
-        <div className="unit-library-empty">
-          <div className="empty-headline">No archived campaigns</div>
-          <div className="empty-body">
-            Archive a campaign from its <code>⋯</code> menu to declutter the
-            active list. Archives are reversible from this tab.
-          </div>
-        </div>
+        <Empty className="unit-library-note" title="No archived campaigns">
+          Archive a campaign from its <code>⋯</code> menu to declutter the active list. Archives
+          are reversible from this tab.
+        </Empty>
       )}
       {loaded && shown.length === 0 && listedLifecycle !== "archived" && (
-        <div className="unit-library-empty">
-          <div className="empty-headline">No campaigns yet</div>
-          <div className="empty-body">
-            Hit <strong>+ New campaign</strong> above. Bring the data your pipeline gets
-            wrong — the Potter reads it, sets up the first run, and starts improving.
-          </div>
-        </div>
+        <Empty className="unit-library-note" title="No campaigns yet">
+          Hit <strong>+ New campaign</strong> above. Bring the data your pipeline gets wrong — the
+          Potter reads it, sets up the first run, and starts improving.
+        </Empty>
       )}
       {loaded && shown.length > 0 && (
         <ul className="unit-library-list">

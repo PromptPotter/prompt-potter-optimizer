@@ -9,9 +9,13 @@ import enum
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
+from pydantic import Field
+
 from promptpotter.domain.optimizer_state import StateSlice
+from promptpotter.domain.prompt_block import AUTHORED_SOURCE, snippet_id
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -37,7 +41,7 @@ class PoolSource(enum.StrEnum):
 @shapes_optimizer_prompt
 def entry_id(field: str, text: str) -> str:
     """A block's id is its content: an edited text is a new entry, never the old id re-pointed."""
-    return f"{field}.{stable_hash(text, length=10)}"
+    return f"{field}.{snippet_id(text)}"
 
 
 class PoolEntry(FrozenModel):
@@ -47,6 +51,66 @@ class PoolEntry(FrozenModel):
     text: str
 
 
+OfferKind = Literal["all", "part", "source", "entry"]
+
+_LABEL_CHARS = 72
+
+
+class PoolOffer(FrozenModel):
+    """One path an initializer's `active` knob may name, with what it keeps."""
+
+    path: str = Field(description="The value to write into `active`")
+    kind: OfferKind = Field(
+        description="`all` is `*`, `part` a block's field, `source` the run of that field from one "
+        "source, `entry` one entry by id"
+    )
+    label: str = Field(
+        description="What the path reads as: a part's field key, labelled as a fill's part is; a "
+        "source in plain words; an entry's text cut short"
+    )
+    entries: int = Field(description="How many entries the path keeps")
+
+
+def _source_words(source: str) -> str:
+    """A block's source in plain words: a cited work's source is its arXiv id."""
+    if source == AUTHORED_SOURCE:
+        return "Written by hand"
+    if source == EARNED_SOURCE:
+        return "Earned in past runs"
+    return f"arXiv {source}"
+
+
+def offers(entries: Sequence[PoolEntry]) -> list[PoolOffer]:
+    """``*``, then each group run under its parent in first-seen order, each entry under its group; none over none."""
+    if not entries:
+        return []
+    out = [PoolOffer(path="*", kind="all", label="All entries", entries=len(entries))]
+    runs: dict[tuple[str, ...], list[PoolEntry]] = {}
+    for entry in entries:
+        for depth in range(1, len(entry.group) + 1):
+            runs.setdefault(entry.group[:depth], []).append(entry)
+    placed: set[tuple[str, ...]] = set()
+    for entry in entries:
+        for depth in range(1, len(entry.group) + 1):
+            run = entry.group[:depth]
+            if run not in placed:
+                placed.add(run)
+                part = depth == 1
+                out.append(
+                    PoolOffer(
+                        path="/".join(run),
+                        kind="part" if part else "source",
+                        label=run[0] if part else _source_words(run[-1]),
+                        entries=len(runs[run]),
+                    )
+                )
+        text = " ".join(entry.text.split())
+        label = text if len(text) <= _LABEL_CHARS else text[: _LABEL_CHARS - 1] + "…"
+        out.append(PoolOffer(path=entry.id, kind="entry", label=label, entries=1))
+    return out
+
+
+@shapes_optimizer_prompt
 def _in_play(path: str, entry: str, group: Sequence[str]) -> bool:
     if path in ("*", entry):
         return True
@@ -54,6 +118,7 @@ def _in_play(path: str, entry: str, group: Sequence[str]) -> bool:
     return parts == tuple(group[: len(parts)])
 
 
+@shapes_optimizer_prompt
 def kept(paths: Sequence[str], entries: Iterable[tuple[str, Sequence[str]]]) -> tuple[str, ...]:
     """The ``(id, group)`` entries some path keeps — ``*``, the id, or a leading run of its group — in source order."""
     return tuple(i for i, group in entries if any(_in_play(p, i, group) for p in paths))
@@ -73,6 +138,11 @@ class Pool(StateSlice, kind=None):
     def drawn(self, demo: Mapping[str, Sample], /) -> tuple[object, ...]:
         """Its entries in draw order, read off this slice and the cycle's demo split alone."""
 
+    @classmethod
+    @abstractmethod
+    def part(cls, entry: PoolEntry) -> str:
+        """The part of a candidate the entry lands in: a prompt field, or the shots."""
+
 
 class BlockPool(Pool, kind="block_pool"):
     source: ClassVar[PoolSource] = PoolSource.LIBRARY
@@ -82,6 +152,10 @@ class BlockPool(Pool, kind="block_pool"):
     def drawn(self, _demo: Mapping[str, Sample]) -> tuple[PoolEntry, ...]:
         return self.entries
 
+    @classmethod
+    def part(cls, entry: PoolEntry) -> str:
+        return entry.group[0]
+
 
 class DemoPool(Pool, kind="demo_pool"):
     source: ClassVar[PoolSource] = PoolSource.PARTITION
@@ -89,3 +163,7 @@ class DemoPool(Pool, kind="demo_pool"):
 
     def drawn(self, demo: Mapping[str, Sample]) -> tuple[Sample, ...]:
         return tuple(demo[key] for key in self.keys)
+
+    @classmethod
+    def part(cls, _entry: PoolEntry) -> str:
+        return SHOTS_KEY

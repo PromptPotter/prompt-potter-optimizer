@@ -2,11 +2,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { HOVER_CLOSE_GRACE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
 import s from "./HoverCard.module.css";
 
-// REACHABLE, hence `role="note"` rather than tooltip; WCAG 1.4.13 applies.
-const CLOSE_GRACE_MS = 160;
 const GAP = 8;
 
 // Trigger geometry only — nothing measures the card, so late-arriving content can't strand it.
@@ -54,7 +53,7 @@ export function HoverCard({
 
   // Never immediate: a pointer crossing the GAP is over neither half for a moment.
   const hide = useCallback(() => {
-    timer.current = window.setTimeout(() => setAt(null), CLOSE_GRACE_MS);
+    timer.current = window.setTimeout(() => setAt(null), HOVER_CLOSE_GRACE_MS);
   }, []);
 
   // A held button is a drag-select in flight, so the release below closes it instead of this.

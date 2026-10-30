@@ -8,7 +8,7 @@ import { fmtDuration, fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/workspace";
 import { Modal } from "@/components/shell/Modal";
-import { Button } from "@/components/ui";
+import { Button, FailureLine } from "@/components/ui";
 
 type Axis = keyof Budget;
 
@@ -188,9 +188,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
           : "Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins. Spend and token caps are the campaign's, one book its live cycles share; the round cap is this cycle's; the wall clock bounds one launch and restarts at the next, cutting a remote cell still open at its edge. A spend raise is also clamped by your account allowance (Account → Security)."}
       </small>
       {note ? <small className="run-limits-control-note">{note}</small> : null}
-      {cmd.failure ? (
-        <small className="new-campaign-error">{cmd.failure.message}</small>
-      ) : null}
+      <FailureLine failure={cmd.failure} />
       <Modal
         open={confirmingHalt}
         title="Halt this run?"

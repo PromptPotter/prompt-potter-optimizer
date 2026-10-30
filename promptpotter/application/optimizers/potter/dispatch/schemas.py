@@ -17,6 +17,7 @@ from promptpotter.application.bench.llm_call import OptimizerResponseModel
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L3_PLAN_MAX_CHARS,
     LAYOUT_SCHEMA_INSTRUCTION,
+    RecombinationOffer,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -120,8 +121,26 @@ class L1Variant(OptimizerResponseModel):
     )
 
 
+class L1Recombination(OptimizerResponseModel):
+    """A recombination spec: ids and loci only, so a child carries no text of L1's own."""
+
+    main: str = Field(
+        description="A RECOMBINATION POOL id marked main: the line the child continues, giving "
+        "every locus `from_donor` omits."
+    )
+    donor: str = Field(description="Another pool id, of any round: it gives the `from_donor` loci.")
+    from_donor: list[str] = Field(
+        description="The loci, as `node.field`, the donor gives: fewer than half of those the two "
+        "differ on, one where they differ on two; more drops the child mechanically."
+    )
+    changes_description: Annotated[str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX))] = (
+        Field(max_length=VARIANT_PROSE_MAX)
+    )
+
+
 class L1GenerateOutput(OptimizerResponseModel):
     variants: list[L1Variant]
+    recombinations: list[L1Recombination] = Field(default_factory=list)
 
 
 def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
@@ -264,18 +283,63 @@ class L2ContextOutput(OptimizerResponseModel):
     terminate_proposal: TerminateProposal | None = None
 
 
+class L2RecombiningOutput(L2ContextOutput):
+    recombinations: list[L1Recombination] = Field(default_factory=list)
+
+
+def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
+    """The slot's wire shape, closed on the pool's id heads and the loci a main can take."""
+    described = L1Recombination.model_fields
+    spec = {
+        "type": "object",
+        "properties": {
+            "main": {
+                "type": "string",
+                "enum": list(offer.mains),
+                "description": described["main"].description,
+            },
+            "donor": {
+                "type": "string",
+                "enum": list(offer.ids),
+                "description": described["donor"].description,
+            },
+            "from_donor": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(offer.loci)},
+                "minItems": 1,
+                "description": described["from_donor"].description,
+            },
+            "changes_description": {"type": "string", "maxLength": VARIANT_PROSE_MAX},
+        },
+        "required": ["main", "donor", "from_donor", "changes_description"],
+        "additionalProperties": False,
+    }
+    return {"type": "array", "items": spec, "maxItems": offer.children}
+
+
 @functools.lru_cache(maxsize=4)
-def build_l2_response_model(withheld: frozenset[str]) -> type[L2ContextOutput]:
-    if not withheld:
+def build_l2_response_model(
+    withheld: frozenset[str], recombination: RecombinationOffer | None = None
+) -> type[L2ContextOutput]:
+    """``None`` *recombination* offers no slot."""
+    fields: dict[str, Any] = {}
+    if withheld:
+        schema = layout_json_schema(
+            NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION, withheld=withheld
+        )
+        fields["l1_layout"] = (
+            Annotated[dict[str, list[str]], WithJsonSchema(schema)],
+            Field(default_factory=dict),
+        )
+    if recombination is not None:
+        fields["recombinations"] = (
+            Annotated[list[L1Recombination], WithJsonSchema(recombinations_schema(recombination))],
+            Field(default_factory=list),
+        )
+        return create_model("L2ContextOutput", __base__=L2RecombiningOutput, **fields)
+    if not fields:
         return L2ContextOutput
-    schema = layout_json_schema(
-        NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION, withheld=withheld
-    )
-    layout: Any = (
-        Annotated[dict[str, list[str]], WithJsonSchema(schema)],
-        Field(default_factory=dict),
-    )
-    return create_model("L2ContextOutput", __base__=L2ContextOutput, l1_layout=layout)
+    return create_model("L2ContextOutput", __base__=L2ContextOutput, **fields)
 
 
 class L3PlanOutput(OptimizerResponseModel):

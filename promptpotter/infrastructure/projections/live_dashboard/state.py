@@ -130,17 +130,8 @@ class DashboardFacts(StrictModel):
     current_query_payload: str | None = None
     open_positions: list[int] = Field(default_factory=list)
 
-    sample_lookahead_discards: int = 0
-    in_flight: int = 0
-    lookahead_allowed: int = 0
-    # Between phases it is the NEXT round's.
-    lookahead_most: int = 0
-    # ``None``: no book binds.
-    cell_reserve_usd: float | None = None
     waiting_on: str | None = None
     backpressure: BackpressureReading | None = None
-    # `1` says the look-ahead control does not apply.
-    max_cells_in_flight: int
     measured_unit: MeasuredUnit
 
     # ``None`` = no time recorded; a cached replay's 0.0 is a real reading.
@@ -181,8 +172,17 @@ class LiveDashboardState(DashboardFacts):
 
     waiting_since: float | None = None
 
+    # The look-ahead gauge, served only as `ServedDashboard.lookahead`.
+    sample_lookahead_discards: int = 0
+    in_flight: int = 0
+    lookahead_allowed: int = 0
+    # Between phases it is the NEXT round's.
+    lookahead_most: int = 0
     # ``None``: no book binds.
     lookahead_affordable: int | None = None
+    cell_reserve_usd: float | None = None
+    # `1` says the look-ahead control does not apply.
+    max_cells_in_flight: int
 
     spend: SpendRollup = Field(default_factory=SpendRollup)
 

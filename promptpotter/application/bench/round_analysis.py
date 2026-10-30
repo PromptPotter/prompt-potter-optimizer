@@ -8,6 +8,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.round_diagnostics import NearMiss, RoundDiagnostics, SampleDiag
+from promptpotter.domain.scoring import graded_answer
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -52,17 +53,17 @@ def _rank_analysis(
     ranks = [r.grade.ground_truth_rank for r in ranked]
     buckets: dict[str, int] = dict.fromkeys(_RANK_BUCKET_KEYS, 0)
     near_misses: list[NearMiss] = []
-    for facts, rank in zip((r.facts for r in ranked), ranks, strict=True):
+    for r, rank in zip(ranked, ranks, strict=True):
         if rank == 1:
             buckets["1"] += 1
         elif rank is not None and rank <= 10:
             buckets["2-5" if rank <= 5 else "6-10"] += 1
             near_misses.append(
                 NearMiss(
-                    query=facts.query[:80],
-                    ground_truth=facts.ground_truth[:60],
+                    query=r.facts.query[:80],
+                    ground_truth=r.facts.ground_truth[:60],
                     rank=rank,
-                    predicted=tail(facts.predicted or "?", 60),
+                    predicted=tail(graded_answer(r.facts, r.grade) or "?", 60),
                 )
             )
         elif rank is not None and rank <= 20:
@@ -107,7 +108,7 @@ def _sample_diagnostics(
             SampleDiag(
                 query=facts.query[:80],
                 ground_truth=facts.ground_truth[:60],
-                predicted=tail(facts.predicted or "?", 60),
+                predicted=tail(graded_answer(facts, r.grade) or "?", 60),
                 rank=r.grade.ground_truth_rank,
                 terminal_node=terminal_node(facts) or UNKNOWN_STEP,
                 gt_in_source=(sd or {}).get("gt_in_source"),

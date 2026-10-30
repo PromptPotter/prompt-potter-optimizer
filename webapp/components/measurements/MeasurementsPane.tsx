@@ -2,21 +2,21 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import type { CellCandidate, CellRow, CellStatus, DatasetItem } from "@/lib/api";
 import type { CellAddress } from "@/lib/address";
-import { fmtPct0 } from "@/lib/format";
+import { fmtLogits, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples, usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useWorkspace } from "@/lib/workspace";
 import {
   DataTable,
-  ErrorNote,
+  FailureLine,
   SegmentedControl,
   Toolbar,
   ToolbarSpacer,
   type Column,
   type RowGroup,
 } from "@/components/ui";
-import { CellPanel } from "@/components/shell/cell/CellPanel";
+import { CellPanel } from "./CellPanel";
 
 type GroupBy = "sample" | "candidate" | "none";
 
@@ -44,7 +44,7 @@ function Fitness({ value }: { value: number | null | undefined }) {
   if (value == null) return <span className="ms-dim">—</span>;
   return (
     <span className="ms-fit" style={fitnessStyle(value)}>
-      {fmtPct0(value)}
+      {fmtUnit("rate", value)}
     </span>
   );
 }
@@ -62,7 +62,7 @@ function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
       </span>
       <Fitness value={it.mean_fitness} />
       <span className="ms-dim" title="Difficulty δ on the ruler (higher = harder)">
-        {it.delta == null ? it.delta_label : `δ ${it.delta.toFixed(2)}`}
+        {it.delta == null ? it.delta_label : `δ ${fmtLogits(it.delta)}`}
       </span>
     </span>
   );
@@ -98,7 +98,7 @@ export function MeasurementsPane({
   useEffect(() => () => releaseCell(paneId), [releaseCell, paneId]);
 
   const data = usePresetCells(preset, status === "all" ? undefined : status);
-  const { datasetName, error, stale } = data;
+  const { datasetName, failure, stale } = data;
 
   const candidateOf = useMemo(() => {
     const m = new Map<string, CellCandidate>();
@@ -113,7 +113,7 @@ export function MeasurementsPane({
         id: "candidate",
         label: "Candidate",
         width: "minmax(72px, 1fr)",
-        cell: (c) => candidateOf.get(c.candidate)?.label ?? "—",
+        cell: (c) => candidateOf.get(c.candidate)?.label ?? PLACEHOLDER,
       },
       {
         id: "status",
@@ -134,14 +134,14 @@ export function MeasurementsPane({
         id: "predicted",
         label: "Predicted",
         width: "minmax(160px, 3fr)",
-        cell: (c) => <span title={c.predicted}>{c.predicted || "—"}</span>,
+        cell: (c) => <span title={c.predicted}>{c.predicted || PLACEHOLDER}</span>,
       },
       {
         id: "seconds",
         label: "Seconds",
         width: "72px",
         align: "end",
-        cell: (c) => (c.seconds == null ? "—" : c.seconds.toFixed(1)),
+        cell: (c) => fmtUnit("seconds", c.seconds),
       },
       {
         id: "tokens",
@@ -150,7 +150,7 @@ export function MeasurementsPane({
         align: "end",
         cell: (c) =>
           c.input_tokens == null && c.output_tokens == null
-            ? "—"
+            ? PLACEHOLDER
             : `${c.input_tokens ?? "–"}/${c.output_tokens ?? "–"}`,
       },
       { id: "cached", label: "", width: "24px", cell: (c) => (c.cached ? "↺" : "") },
@@ -200,7 +200,7 @@ export function MeasurementsPane({
   const summary = [
     `${data.items.length} samples`,
     totals ? `${totals.total_measurements} graded cells` : null,
-    totals?.mean_fitness != null ? `${fmtPct0(totals.mean_fitness)} mean fitness` : null,
+    totals?.mean_fitness != null ? `${fmtUnit("rate", totals.mean_fitness)} mean fitness` : null,
     `${data.measuredCount} measured · ${data.unmeasuredCount} unmeasured`,
   ]
     .filter(Boolean)
@@ -253,8 +253,8 @@ export function MeasurementsPane({
         {datasetName ? `${datasetName} · ` : ""}
         {summary}
       </p>
-      {error ? (
-        <ErrorNote>Couldn’t read the measurements: {error}</ErrorNote>
+      {failure !== null ? (
+        <FailureLine failure={failure} lead="Couldn’t read the measurements." />
       ) : (
         <DataTable
           ariaLabel="Measured cells"

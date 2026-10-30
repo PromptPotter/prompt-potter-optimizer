@@ -1,6 +1,6 @@
 import type { CandidateFacts, LensShift } from "@/lib/api";
 import type { CandidateBar } from "@/lib/types";
-import { fmtNum } from "@/lib/format";
+import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 
 const MOVE_MARK: Record<NonNullable<CandidateFacts["lens_rank_move"]>, { glyph: string; cls: string }> = {
   up: { glyph: "▲", cls: "rank-up" },
@@ -34,7 +34,7 @@ export function FitnessRankSummary({
     );
   }
   const labelOf = (address: string | null): string =>
-    views.find((v) => v.key === address)?.label ?? "—";
+    views.find((v) => v.key === address)?.label ?? PLACEHOLDER;
   return (
     <>
       {shift && (
@@ -52,11 +52,11 @@ export function FitnessRankSummary({
       <div style={{ marginTop: 6 }}>
         candidates: {views.map((b, i) => {
           const move = b.reading ? b.node.facts.lens_rank_move : null;
-          const mark = move ? MOVE_MARK[move] : { glyph: "—", cls: "rank-flat" };
+          const mark = move ? MOVE_MARK[move] : { glyph: PLACEHOLDER, cls: "rank-flat" };
           return (
             <span key={b.key}>
               {i > 0 && " · "}
-              {b.label} {fmtNum(b.reading?.own?.composite?.value ?? null, 3)}→{fmtNum(b.reading ? b.node.facts.lens_value : null, 3)}{" "}
+              {b.label} {fmtUnit("composed", b.reading?.own?.composite?.value)}→{fmtUnit("composed", b.reading ? b.node.facts.lens_value : null)}{" "}
               <span className={mark.cls}>{mark.glyph}</span>
             </span>
           );

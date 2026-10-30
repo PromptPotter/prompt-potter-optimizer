@@ -34,6 +34,7 @@ from promptpotter.domain.pipeline_schema import (
     NodeSearchNarrowing,
     PipelineNode,
 )
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
@@ -168,7 +169,8 @@ class InnerTasks(FrozenModel):
                     cfg.inner_depth_nodes,
                     n_samples=cfg.n_samples_per_inner_round,
                 ),
-                treatment=identity.treatment().digest,
+                # Keyed before the cell's chain resolves: every admission, so no drawable edit hides.
+                treatment=identity.treatment(frozenset(Presumption), stores.block_packs).digest,
             )
         return InnerCells(
             cells=tuple(self.tasks),

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { failureKind, operatorMessage, type FailureKind } from "@/lib/api";
-import { useAuthGate } from "@/lib/auth-context";
+import { useAuthGate } from "@/lib/state/auth";
 import { reportIncident } from "@/lib/diagnostics";
 import {
   cachedRead,

@@ -14,10 +14,11 @@ from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     declare,
     mint,
-    refuse_drifted_resume,
     resolve_cycle_plan,
+    resolve_resume,
 )
 from promptpotter.application.optimizer_manifest import (
+    SelectedOptimizer,
     binding_prompt_overrides,
     resolved_overrides,
 )
@@ -341,7 +342,7 @@ def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
 
 def _continue_inner_campaign(
     session: Session, campaign: Campaign, train_data: Sequence[Sample]
-) -> Session:
+) -> tuple[Session, SelectedOptimizer]:
     """``stop_reason_outcome`` governs scoring, never resumption."""
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
@@ -361,7 +362,7 @@ def _continue_inner_campaign(
         )
     bound = session.bound(hop, purpose=campaign.declaration.purpose)
     try:
-        refuse_drifted_resume(bound, campaign, train_data)
+        optimizer = resolve_resume(bound, campaign, train_data)
     except ConfigDriftError as drift:
         raise CellUnscoreableError(str(drift), spent={}) from drift
 
@@ -373,7 +374,7 @@ def _continue_inner_campaign(
         _banked_inner_rounds(store, campaign.root_hop),
         run.run_phase,
     )
-    return configure_and_apply_pipeline(bound, effective_config(campaign.declaration))
+    return configure_and_apply_pipeline(bound, effective_config(campaign.declaration)), optimizer
 
 
 def _cells(ctx: InnerSpawnContext) -> InnerCells:
@@ -387,6 +388,7 @@ class _Opened(NamedTuple):
     train_data: list[Sample]
     # The constant-answer floor over the bank the seat drew.
     bank_floor: float | None
+    optimizer: SelectedOptimizer
 
 
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
@@ -429,11 +431,17 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     # reaches the drift refusal rather than a fresh root.
     campaign = session.store.campaigns.load_campaign(cell.campaign_id)
     if campaign is None:
-        plan = resolve_cycle_plan(session, declaration, train_data)
-        session = mint(plan, campaign_id=cell.campaign_id, billed=None).session
+        minted = mint(
+            resolve_cycle_plan(session, declaration, train_data),
+            campaign_id=cell.campaign_id,
+            billed=None,
+        )
+        session, optimizer = minted.session, minted.optimizer
     else:
-        session = _continue_inner_campaign(session, campaign, train_data)
-    return _Opened(session, effective_config(declaration), train_data, class_floor(search))
+        session, optimizer = _continue_inner_campaign(session, campaign, train_data)
+    return _Opened(
+        session, effective_config(declaration), train_data, class_floor(search), optimizer
+    )
 
 
 async def _run_inner_campaign(
@@ -465,6 +473,7 @@ async def _run_inner_campaign(
                     observers=observers,
                     budget=held,
                     mode=RunMode(),
+                    optimizer=opened.optimizer,
                 )
         finally:
             # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut one down.

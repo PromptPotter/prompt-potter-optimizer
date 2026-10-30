@@ -13,8 +13,10 @@ import asyncio
 import dataclasses
 import logging
 import os
+import re
 import sys
 import types
+from datetime import date
 from pathlib import Path
 from typing import Any, override
 
@@ -28,6 +30,8 @@ from factories import (
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from offline_world import Router
 from pydantic import SecretStr
 
@@ -42,6 +46,7 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import CampaignLaunch, JobRegistry
+from promptpotter.application.library import library
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -53,14 +58,26 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import load_opt
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
-from promptpotter.config.paths import default_projects_root
+from promptpotter.config.paths import block_packs_root, default_projects_root
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
-from promptpotter.domain.command_kinds import CancelQueuedRunPayload, CommandKind
+from promptpotter.domain.command_kinds import (
+    BankSnippetPayload,
+    CancelQueuedRunPayload,
+    CommandKind,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import ProducerAlert, ProducerState, RunPhase, StopReason
+from promptpotter.domain.prompt_block import (
+    ACCOUNT_PACK,
+    Authored,
+    BlockPack,
+    PromptPart,
+    Snippet,
+    snippet_id,
+)
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import CommandRecord, RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
@@ -96,6 +113,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.site_records import SiteRecord, SiteRecordStore
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.deps import require_site_records_token
 from promptpotter.presentation.api.middleware.oidc import (
     SESSION_COOKIE_NAME,
@@ -243,6 +261,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         schema_field_rename=False,
         shot_k_max=0,
         slot_of={},
+        pool_window=8,
         runtime_failures=(runtime_failure,),
         measured_rounds=[
             round_result(
@@ -363,6 +382,64 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         ], why
     monkeypatch.setattr(settings_mod.settings, "MACHINE_STATUS_SCOPE", "all")
     assert machine_status(registry, identity=who("eve-id")).running, "`all` still hid the slot"
+
+    # An account's own block pack is its alone: an edit banked in one is no snippet of another's.
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
+    installed = block_packs_root() / "shared" / "pack.json"
+    installed.parent.mkdir(parents=True)
+    seed = Snippet(
+        text="Think it through.",
+        suits=frozenset({PromptPart.THINKING_STYLE}),
+        tags=(),
+        provenance=Authored(
+            kind="authored",
+            author="host",
+            date=date(2026, 1, 1),
+            experiment="setup",
+            version=1,
+            supersedes=None,
+            notes=None,
+        ),
+    )
+    installed.write_text(BlockPack(works={}, snippets=(seed,)).model_dump_json(), "utf-8")
+    ada, eve = (
+        workspace(tmp_path, dataclasses.replace(who(u), capabilities=OWNER_COMMAND_CAPABILITIES))
+        for u in ("ada-id", "eve-id")
+    )
+    ada.campaigns.create_campaign(minted_campaign(ada_hop, owner_user_id="ada-id"))
+    edit = "Think it through, one step at a time."
+    banked = BankSnippetPayload(
+        supersedes=snippet_id(seed.text), text=edit, experiment=ada_hop.campaign_id
+    )
+    asyncio.run(CommandDispatcher(ada).dispatch(CommandCall(banked)))
+    by_ada = {s.text: s for s in library(ada.block_packs).snippets}
+    assert (by_ada[edit].supersedes, by_ada[edit].version) == (snippet_id(seed.text), 2), (
+        "a banked edit lost the snippet it supersedes"
+    )
+    assert [s.text for s in library(eve.block_packs).snippets] == [seed.text], (
+        "one account's edit reached another account's library"
+    )
+    assert eve.block_packs.missing([ACCOUNT_PACK]) == [ACCOUNT_PACK], (
+        "a run naming its account's pack drew another account's"
+    )
+
+    # A stranger reaches only the routers mounted public; a route added under a gated one inherits its gate.
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "on")
+    public = {
+        f"/api/v1{route.path}"
+        for router, gate in API_ROUTERS
+        if gate is None
+        for route in router.routes
+        if isinstance(route, APIRoute)
+    }
+    anonymous = TestClient(app)
+    assert anonymous.get("/api/v1/health").status_code == 200, (
+        "the health probe asked for a session"
+    )
+    for path, operations in app.openapi()["paths"].items():
+        for method in operations if path not in public else ():
+            answer = anonymous.request(method, re.sub(r"\{[^}]+\}", "x", path))
+            assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
 
 
 # 2. Delegation

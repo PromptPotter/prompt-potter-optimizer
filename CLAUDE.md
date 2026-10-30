@@ -59,6 +59,17 @@ Zero released versions, zero data worth keeping. **The most-ignored rule here.**
 - **planning, scoping, reviewing or ranking any change** → `<next-change>`: the target is the cost of the next changes; state that direction first. Score by sites a probe change touches before → after (rename a served field, add a prompt node field, add an optimizer member) and by test churn; lines are reported, never the goal.
 - **changed what the engine DECIDES, added a capability at one entry point, or caught one rule implemented twice** → `<entry-point-parity>`: five entry points — CLI, `/potter-run`, the embedded launch (`application/embedded_run.py`), REST API, webapp — share one orchestration layer. Parity is part of done; a new value reaches the operator taught on an existing channel, never dumped. A rule spelled twice across adapters is urgent: move the shared piece down into `application/`, leave thin shells. Sample look-ahead is browser-only by design ([`presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) § Sample look-ahead).
 - **reaching for the shell, a sub-agent, or a wait** → `<wall-clock>`: one batched call, N sub-agents in ONE message, never a sleep-poll; iterate on `gate.py --changed` / `--only NAME`.
+- **opening ANY file, for any reason** → `<situational-awareness>`: read it critically, never only for the
+  task. A shape that feels wrong gets one line in that turn's reply and an entry in
+  [`code-debt-cleanup.md`](docs/specs/code-debt-cleanup.md), on-task or not; the operator judges it:
+  - a global standing in for a keyed subject;
+  - a flag keeping two concepts apart;
+  - two doors into one state;
+  - a comment explaining a workaround;
+  - an error swallowed into a log.
+
+  Filed early, a debt gathers evidence until its canonical shape is clear; noticed and kept silent, it
+  grows. A sub-agent reports what it noticed beside what it did. It proposes, never widens the diff.
 - **opening a file you'll WORK in, or searching >3 files** → `<read-once>`: read it whole once, independent calls in ONE message; a lookup that missed fixes the pointer that should have answered it.
 
 ## Commands

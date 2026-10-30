@@ -5,8 +5,9 @@ from dataclasses import dataclass, replace
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.admission import open_spend_book
-from promptpotter.application.jobs.quota import move_campaign_money
+from promptpotter.application.jobs.quota import cycle_share, land_job, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.origin import (
     CampaignOrigin,
     establish_campaign_origin,
@@ -28,6 +29,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -71,12 +73,19 @@ async def prepare_run(
     )
     session.state.held = budget
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
-    observers.tracing.start(
+    for failure in observers.tracing.start(
         config_snapshot=campaign_config.model_dump(mode="json"),
         dataset=dataset,
         langfuse_session_id=langfuse_session_id,
+    ):
+        emit_round_warning(kind="trace_sink_failed", message=failure)
+    declare_run_wiring(
+        session,
+        campaign_config,
+        cb.ledger,
+        selected=bound_optimizer(),
+        tracing=observers.tracing,
     )
-    declare_run_wiring(session, campaign_config, cb.ledger, tracing=observers.tracing)
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
     move_campaign_money(
         budget.standing,
@@ -146,13 +155,12 @@ def rebase_held(session: Session, parent: CycleHop) -> None:
         job = job_registry.get(held.job_id)
         if job is None:
             raise RuntimeError(f"a run rebases only on its own job, and {held.job_id} is gone")
-        live = job.allotment
+        live = cycle_share(session.store, job)
         allotment = Budget(
             usd=None if live.usd is None else max(0.0, live.usd - spent.usd_amount),
             tokens=None if live.tokens is None else max(0, live.tokens - spent.token_amount),
         )
-        job_registry.update_target(job.job_id, hop=session.hop)
-        job_registry.set_held(job.job_id, job.reserve, allotment)
+        land_job(session.store, job_registry, job.job_id, session.hop, allotment)
     stand_held_budget(session.store, session.hop, held)
 
 

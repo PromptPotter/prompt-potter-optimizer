@@ -22,34 +22,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.l4-table-wrap {
-  overflow-x: auto;
-}
-.l4-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size:var(--text-base);
-  font-variant-numeric: tabular-nums;
-}
-.l4-table th {
-  text-align: left;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  font-size:var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: var(--space-4) var(--space-10);
-  border-bottom: 1px solid var(--color-border);
-  white-space: nowrap;
-}
-.l4-table td {
-  padding: var(--space-6) var(--space-10);
-  border-bottom: 1px solid var(--color-border);
-  vertical-align: baseline;
-}
 .l4-rank {
   color: var(--color-text-secondary);
-  width: 2ch;
 }
 
 .l4-effect {
@@ -83,10 +57,6 @@
 
 .l4-label {
   color: var(--color-text-secondary);
-  max-width: 40ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ov-forest {

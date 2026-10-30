@@ -1,5 +1,6 @@
 "use client";
 
+import { FailureLine } from "@/components/ui";
 import { useDashboardAt } from "@/lib/poll";
 import { postCommand } from "@/lib/api/commands";
 import { benchStat } from "@/lib/derivations";
@@ -32,7 +33,7 @@ export function BenchAction({ path }: { path: CyclePath }) {
       >
         {busy ? "Grading…" : "Grade bench"}
       </button>
-      {cmd.failure ? <span className="chip chip-warn">{cmd.failure.message}</span> : null}
+      <FailureLine failure={cmd.failure} />
     </>
   );
 }

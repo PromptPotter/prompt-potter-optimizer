@@ -1342,6 +1342,41 @@
         "title": "BandedValue",
         "type": "object"
       },
+      "BankSnippetPayload": {
+        "additionalProperties": false,
+        "description": "Bank an edited library snippet into this account's own block pack as the next version of\nthe one it was edited from; a text the library already holds is that snippet.",
+        "properties": {
+          "experiment": {
+            "description": "The campaign or check-in draft it was written in.",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Experiment",
+            "type": "string"
+          },
+          "supersedes": {
+            "description": "The id of the snippet the text was edited from.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Supersedes",
+            "type": "string"
+          },
+          "text": {
+            "description": "The edited text.",
+            "maxLength": 16384,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supersedes",
+          "text",
+          "experiment"
+        ],
+        "title": "BankSnippetPayload",
+        "type": "object"
+      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -2161,6 +2196,17 @@
             "title": "Dataset Name",
             "type": "string"
           },
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
           "kind": {
             "const": "campaign_launch",
             "default": "campaign_launch",
@@ -2447,6 +2493,18 @@
             "title": "Course Latest",
             "type": "boolean"
           },
+          "descends_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the candidate its first parent, its main, was last measured as before it: the ONE edge a lineage view draws it from. Null at an origin, and where no candidate of its campaign measured that parent.",
+            "title": "Descends From"
+          },
           "divergence": {
             "anyOf": [
               {
@@ -2462,6 +2520,34 @@
             "description": "Inside the counterfactual below a divergence — the client dims it.",
             "title": "Divergent",
             "type": "boolean"
+          },
+          "donated_loci": {
+            "description": "The loci, as `node.key`, it moved off its main to the donor's value verbatim: what the donor gave. Empty without a donor.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Donated Loci",
+            "type": "array"
+          },
+          "donor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the candidate its second parent, the donor of a crossover, was last measured as before it, of any round. Null without a second parent or a main, and where no candidate of its campaign measured it.",
+            "title": "Donor"
+          },
+          "gene_sources": {
+            "description": "Per other locus it moved off its main, the earlier candidates whose value there is closer to its own than the main's: most similar first, then most recently measured.",
+            "items": {
+              "$ref": "#/components/schemas/GeneSource"
+            },
+            "title": "Gene Sources",
+            "type": "array"
           },
           "individual": {
             "description": "`OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one individual again.",
@@ -2558,6 +2644,10 @@
           "course_latest",
           "answers_for_id",
           "main_line",
+          "descends_from",
+          "donor",
+          "donated_loci",
+          "gene_sources",
           "lens_value",
           "lens_rank_move",
           "sample_set_accuracy",
@@ -3252,7 +3342,7 @@
       },
       "ChangeRunLimitsPayload": {
         "additionalProperties": false,
-        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance, so read the armed value off the dashboard.",
+        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance; the command's ack on the cycle's ledger carries the ceiling it armed.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget"
@@ -5262,30 +5352,17 @@
         "title": "DraftDependency",
         "type": "object"
       },
-      "DraftListResponse": {
-        "additionalProperties": false,
-        "description": "The caller's open check-ins, most recently edited first.",
-        "properties": {
-          "drafts": {
-            "items": {
-              "$ref": "#/components/schemas/DraftSummary"
-            },
-            "title": "Drafts",
-            "type": "array"
-          }
-        },
-        "required": [
-          "drafts"
-        ],
-        "title": "DraftListResponse",
-        "type": "object"
-      },
       "DraftReopenResponse": {
         "additionalProperties": false,
         "description": "A re-opened check-in: its draft and what the last resolver turn left.",
         "properties": {
           "draft": {
             "$ref": "#/components/schemas/DraftCampaignWire"
+          },
+          "queued": {
+            "description": "A Start on it waits on a machine slot: it is minted once one frees, so a reopen offers no second Start (the same fact as its listing's `queued` lifecycle).",
+            "title": "Queued",
+            "type": "boolean"
           },
           "raised": {
             "description": "Proposals the last turn left unclicked, so a re-opened check-in keeps the operator's outstanding actions.",
@@ -5305,43 +5382,21 @@
               }
             ],
             "description": "The last resolver turn's output; null when none ran."
+          },
+          "resolution_pending": {
+            "description": "Its task is on file but no resolver turn ever set it up (`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes over authored prompts.",
+            "title": "Resolution Pending",
+            "type": "boolean"
           }
         },
         "required": [
           "draft",
           "resolution",
-          "raised"
+          "raised",
+          "resolution_pending",
+          "queued"
         ],
         "title": "DraftReopenResponse",
-        "type": "object"
-      },
-      "DraftSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "draft_id": {
-            "title": "Draft Id",
-            "type": "string"
-          },
-          "n_samples": {
-            "title": "N Samples",
-            "type": "integer"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "draft_id",
-          "slug",
-          "n_samples",
-          "updated_at"
-        ],
-        "title": "DraftSummary",
         "type": "object"
       },
       "EditDraftCampaignPayload": {
@@ -6828,6 +6883,34 @@
         "title": "ForkTrigger",
         "type": "string"
       },
+      "GeneSource": {
+        "additionalProperties": false,
+        "description": "A candidate one locus of a child may have come from, other than the parent it descends from.",
+        "properties": {
+          "locus": {
+            "description": "The locus the child moved off its parent, as `node.key`.",
+            "title": "Locus",
+            "type": "string"
+          },
+          "similarity": {
+            "description": "How alike the child's value and the source's are, 0 to 1: a verbatim copy is 1. Always above the child's similarity to its parent on that locus.",
+            "title": "Similarity",
+            "type": "number"
+          },
+          "source": {
+            "description": "The address of the candidate whose value it resembles.",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locus",
+          "source",
+          "similarity"
+        ],
+        "title": "GeneSource",
+        "type": "object"
+      },
       "GradeBenchPayload": {
         "additionalProperties": false,
         "description": "Grade the campaign's origin and its selection on the held-out bench rows.",
@@ -6901,10 +6984,6 @@
             "title": "Notes",
             "type": "array"
           },
-          "optimizers_differ": {
-            "title": "Optimizers Differ",
-            "type": "boolean"
-          },
           "pairs": {
             "items": {
               "$ref": "#/components/schemas/SelectionPair"
@@ -6928,6 +7007,14 @@
               "$ref": "#/components/schemas/HeadToHeadRow"
             },
             "title": "Rows",
+            "type": "array"
+          },
+          "swapped": {
+            "description": "The members some arm's optimizer walks and another's does not: what the arms' optimizers differ by. Empty where every arm walks one roster, whatever its knobs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Swapped",
             "type": "array"
           },
           "verdict": {
@@ -6959,7 +7046,7 @@
         "required": [
           "rows",
           "covers_selection",
-          "optimizers_differ",
+          "swapped",
           "guard",
           "headline",
           "verdict",
@@ -7113,6 +7200,14 @@
             "title": "Subject",
             "type": "string"
           },
+          "swapped_in": {
+            "description": "The members this arm's optimizer walks and some other arm's does not: what it was swapped in for. Empty where every arm walks the members it does.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Swapped In",
+            "type": "array"
+          },
           "treatment_digest": {
             "title": "Treatment Digest",
             "type": "string"
@@ -7144,6 +7239,7 @@
           "subject",
           "campaign_id",
           "optimizer",
+          "swapped_in",
           "optimizer_models",
           "purpose",
           "guard",
@@ -7497,12 +7593,26 @@
       },
       "HierarchyResponse": {
         "additionalProperties": false,
-        "description": "Every campaign in one store, root-major and newest first.",
+        "description": "Every campaign in one store: the unstarted first, then root-major and newest first.",
         "properties": {
           "entries": {
-            "description": "Campaigns sharing a root cycle sit together, the group of the newest first.",
+            "description": "Unstarted campaigns lead, most recently edited first; then campaigns sharing a root cycle sit together, the group of the newest first. A `campaign` or `attached` filter asks after runs, so it serves no unstarted one.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyCampaign"
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "unstarted": "#/components/schemas/UnstartedCampaign"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/UnstartedCampaign"
+                }
+              ]
             },
             "title": "Entries",
             "type": "array"
@@ -7792,7 +7902,7 @@
             ]
           },
           "parent_ids": {
-            "description": "Every individual this one derives from — one for a mutation, several for a crossover; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
+            "description": "Every individual this one derives from — one for a mutation, several for a crossover, its main first and its donor second; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
             "items": {
               "type": "string"
             },
@@ -7939,12 +8049,38 @@
         "title": "KindSpend",
         "type": "object"
       },
+      "KnobRef": {
+        "additionalProperties": false,
+        "description": "One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`.",
+        "properties": {
+          "knob": {
+            "description": "The knob's name under `nodes.{node}.config`",
+            "title": "Knob",
+            "type": "string"
+          },
+          "node": {
+            "description": "The manifest node that owns the knob",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "knob"
+        ],
+        "title": "KnobRef",
+        "type": "object"
+      },
       "KnobRow": {
         "additionalProperties": false,
-        "description": "One knob of one optimizer node, as a settings surface offers it.",
+        "description": "One knob of one optimizer node, as every surface offers it: its only served row.",
         "properties": {
+          "declared": {
+            "description": "The value the manifest declares — a campaign's floor",
+            "title": "Declared"
+          },
           "description": {
-            "description": "What the knob does — its field description",
+            "description": "What the knob does — its field description, as plain text (RST literals unmarked)",
             "title": "Description",
             "type": "string"
           },
@@ -8001,6 +8137,14 @@
             "description": "The least legal value, itself legal; null when none",
             "title": "Minimum"
           },
+          "movable_by": {
+            "description": "The agents that may move it within a run, as a config row's `movable_by` reads; `optimizer` where another member steers it, empty where only the operator does",
+            "items": {
+              "$ref": "#/components/schemas/MovableAgent"
+            },
+            "title": "Movable By",
+            "type": "array"
+          },
           "nullable": {
             "description": "Whether null is a legal value (an opt-in knob, off)",
             "title": "Nullable",
@@ -8021,6 +8165,11 @@
             "description": "The closed set a string knob takes, in declared order; null when open",
             "title": "Options"
           },
+          "summary": {
+            "description": "The description's first sentence, cut at its first clause where that runs long: the one line a setup surface shows before the whole text",
+            "title": "Summary",
+            "type": "string"
+          },
           "type": {
             "description": "JSON Schema type the value takes",
             "enum": [
@@ -8035,13 +8184,14 @@
             "type": "string"
           },
           "value": {
-            "description": "The value the manifest declares — a campaign's floor",
+            "description": "The value this config runs, the manifest's under its overlays",
             "title": "Value"
           }
         },
         "required": [
           "key",
           "description",
+          "summary",
           "type",
           "options",
           "nullable",
@@ -8049,30 +8199,11 @@
           "exclusive_minimum",
           "maximum",
           "exclusive_maximum",
-          "value"
+          "declared",
+          "value",
+          "movable_by"
         ],
         "title": "KnobRow",
-        "type": "object"
-      },
-      "KnobSwitch": {
-        "additionalProperties": false,
-        "properties": {
-          "knob": {
-            "description": "That knob, under `nodes.{node}.config`",
-            "title": "Knob",
-            "type": "string"
-          },
-          "node": {
-            "description": "The node whose knob sets a reader's access",
-            "title": "Node",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "knob"
-        ],
-        "title": "KnobSwitch",
         "type": "object"
       },
       "LensShift": {
@@ -8132,14 +8263,192 @@
         "title": "LensShift",
         "type": "object"
       },
-      "LifecycleFilter": {
-        "enum": [
-          "active",
-          "archived",
-          "deleted",
-          "all"
+      "LibraryResponse": {
+        "additionalProperties": false,
+        "description": "Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike.",
+        "properties": {
+          "parts": {
+            "description": "The closed set `suits` draws from, in `PROMPT_FIELDS` order",
+            "items": {
+              "$ref": "#/components/schemas/PromptPart"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "snippets": {
+            "description": "By pack name, then each pack's own order",
+            "items": {
+              "$ref": "#/components/schemas/LibrarySnippet"
+            },
+            "title": "Snippets",
+            "type": "array"
+          },
+          "sources": {
+            "description": "Every source a snippet names, once, in first-named order",
+            "items": {
+              "$ref": "#/components/schemas/LibrarySource"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parts",
+          "sources",
+          "snippets"
         ],
-        "type": "string"
+        "title": "LibraryResponse",
+        "type": "object"
+      },
+      "LibrarySnippet": {
+        "additionalProperties": false,
+        "description": "One snippet of one pack the account reads, as a library surface lists it.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote an authored snippet; absent for a cited one",
+            "title": "Author"
+          },
+          "id": {
+            "description": "Its content id, the suffix of each pool entry `{part}.{id}` it expands into; one text in two packs is two rows under one id",
+            "title": "Id",
+            "type": "string"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cited technique's family as its pack records it; absent for an authored snippet",
+            "title": "Method"
+          },
+          "pack": {
+            "description": "The pack holding it, as a `packs` knob names it",
+            "title": "Pack",
+            "type": "string"
+          },
+          "source": {
+            "description": "A `sources` id: its cited work's arXiv id, or `authored`",
+            "title": "Source",
+            "type": "string"
+          },
+          "suits": {
+            "description": "The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part is allowed and shown as such",
+            "items": {
+              "$ref": "#/components/schemas/PromptPart"
+            },
+            "title": "Suits",
+            "type": "array"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `id` of the snippet it was edited from; absent for a cited snippet and one written from nothing",
+            "title": "Supersedes"
+          },
+          "tags": {
+            "description": "Free labels for search alone; nothing else reads them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version": {
+            "description": "0 for a cited snippet; an authored one's is one past the snippet it supersedes",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "suits",
+          "tags",
+          "source",
+          "method",
+          "pack",
+          "version",
+          "supersedes",
+          "author"
+        ],
+        "title": "LibrarySnippet",
+        "type": "object"
+      },
+      "LibrarySource": {
+        "additionalProperties": false,
+        "description": "One source a snippet names: a cited work as its pack declares it, or the authored one.",
+        "properties": {
+          "first_author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent for `authored`",
+            "title": "First Author"
+          },
+          "id": {
+            "description": "A snippet's `source`: the work's arXiv id, or `authored`",
+            "title": "Id",
+            "type": "string"
+          },
+          "short_title": {
+            "description": "The title up to its first colon, for a chip",
+            "title": "Short Title",
+            "type": "string"
+          },
+          "title": {
+            "description": "The work's title; for `authored`, the word itself",
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent for `authored`",
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "short_title",
+          "first_author",
+          "year"
+        ],
+        "title": "LibrarySource",
+        "type": "object"
       },
       "LifecycleStatus": {
         "enum": [
@@ -8366,6 +8675,16 @@
         "title": "LineageDivergence",
         "type": "object"
       },
+      "ListingLifecycle": {
+        "enum": [
+          "unstarted",
+          "active",
+          "archived",
+          "deleted",
+          "all"
+        ],
+        "type": "string"
+      },
       "LiveCandidate": {
         "additionalProperties": false,
         "description": "A candidate of the round in flight, with its searchpoint, sample tape and rejection reason.",
@@ -8491,6 +8810,49 @@
           "spent"
         ],
         "title": "LivesReading",
+        "type": "object"
+      },
+      "LookaheadDepth": {
+        "additionalProperties": false,
+        "description": "One depth the look-ahead control offers: that many calls held in flight.",
+        "properties": {
+          "cells": {
+            "title": "Cells",
+            "type": "integer"
+          },
+          "fill": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "part"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`full` where that many calls are out now, `part` where the gauge allows that many; null past both.",
+            "title": "Fill"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "pickable": {
+            "description": "Whether a press of this depth is admitted now: the control applies, the run admits `set-sample-lookahead` and the next walk can take that many.",
+            "title": "Pickable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cells",
+          "label",
+          "fill",
+          "pickable"
+        ],
+        "title": "LookaheadDepth",
         "type": "object"
       },
       "LoopWarning": {
@@ -9706,6 +10068,13 @@
             "title": "Reasoning Note",
             "type": "string"
           },
+          "refused_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refused Efforts",
+            "type": "array"
+          },
           "source": {
             "title": "Source",
             "type": "string"
@@ -10567,37 +10936,6 @@
         "title": "OptimizerFact",
         "type": "object"
       },
-      "OptimizerKnobsResponse": {
-        "additionalProperties": false,
-        "description": "Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`.",
-        "properties": {
-          "nodes": {
-            "description": "Every node taking a knob, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/NodeKnobs"
-            },
-            "title": "Nodes",
-            "type": "array"
-          },
-          "optimizer": {
-            "description": "The manifest name, as `optimization.optimizer` names it",
-            "title": "Optimizer",
-            "type": "string"
-          },
-          "version": {
-            "description": "The manifest's own version",
-            "title": "Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "optimizer",
-          "version",
-          "nodes"
-        ],
-        "title": "OptimizerKnobsResponse",
-        "type": "object"
-      },
       "OptimizerLimit": {
         "additionalProperties": false,
         "description": "One knob an optimizer declares as bounding its run, which a fork may reconcile.",
@@ -10640,9 +10978,49 @@
         "title": "OptimizerLimit",
         "type": "object"
       },
+      "OptimizerNodePrompt": {
+        "additionalProperties": false,
+        "description": "The prompt an optimizer node runs under a config, before any L4 override.",
+        "properties": {
+          "edited": {
+            "description": "The fields this config sets over the template, each written to `optimization.nodes.{node}.config.{field}`",
+            "items": {
+              "type": "string"
+            },
+            "title": "Edited",
+            "type": "array"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Every prompt field by name, its edits laid on",
+            "title": "Fields",
+            "type": "object"
+          },
+          "version": {
+            "description": "The `prompt_version` the node's config names",
+            "title": "Version",
+            "type": "string"
+          },
+          "versions_declared": {
+            "description": "How many versions the manifest declares for the node's prompt family — a surface showing this one says so where there are more",
+            "title": "Versions Declared",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fields",
+          "edited",
+          "version",
+          "versions_declared"
+        ],
+        "title": "OptimizerNodePrompt",
+        "type": "object"
+      },
       "OptimizerPipelineResponse": {
         "additionalProperties": false,
-        "description": "What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw\nmanifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``.",
+        "description": "An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`.",
         "properties": {
           "measurement_node": {
             "anyOf": [
@@ -10674,7 +11052,7 @@
               },
               "type": "array"
             },
-            "description": "Per-node typed config rows, so the node detail renders the optimizer's own knobs through the canonical config element rather than a chip and a JSON dump",
+            "description": "Per-node typed config rows of what is no member's knob — an llm node's call config and prompt fields; a knob's one row is `OptimizerSetup.knobs`",
             "title": "Node Config Schema",
             "type": "object"
           },
@@ -10696,16 +11074,8 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeReach"
             },
-            "description": "Where the search reaches per node, summed off the rows above rather than in the browser — the same reading a campaign pipeline serves",
+            "description": "Where the search reaches per node, summed off every param it carries — the rows above and its knobs — rather than in the browser, the same reading a campaign pipeline serves",
             "title": "Reach",
-            "type": "object"
-          },
-          "start_prompts": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/StartPrompt"
-            },
-            "description": "The prompt each node STARTS from, by node, as the run resolves it off the node's `prompt_family`/`prompt_version` — the floor under a searchpoint carrying no evolved delta for that node. A node declaring no prompt has no entry.",
-            "title": "Start Prompts",
             "type": "object"
           },
           "view": {
@@ -10726,8 +11096,7 @@
           "node_config_schema",
           "node_output_schema",
           "model_capabilities",
-          "reach",
-          "start_prompts"
+          "reach"
         ],
         "title": "OptimizerPipelineResponse",
         "type": "object"
@@ -10767,13 +11136,20 @@
             "type": "integer"
           },
           "knobs": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
+            "description": "Every member taking a knob, in declared order, but a pool initializer: its knobs are its `pools` row",
+            "items": {
+              "$ref": "#/components/schemas/NodeKnobs"
             },
-            "description": "Every member's knob values, the manifest's under the config's overlays",
             "title": "Knobs",
-            "type": "object"
+            "type": "array"
+          },
+          "main": {
+            "description": "The knobs a setup surface leads with, in order",
+            "items": {
+              "$ref": "#/components/schemas/KnobRef"
+            },
+            "title": "Main",
+            "type": "array"
           },
           "pools": {
             "description": "What the members draw from",
@@ -10783,17 +11159,27 @@
             "title": "Pools",
             "type": "array"
           },
+          "prompts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OptimizerNodePrompt"
+            },
+            "description": "By node, each node running a prompt; a node naming no `prompt_family` has no entry",
+            "title": "Prompts",
+            "type": "object"
+          },
           "proposers": {
-            "description": "The nodes making each round's arms, in walk order",
+            "description": "The nodes making each round's arms under this config, in walk order: one that opens or adds arms and adds none here is off, and absent",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ProposerRow"
             },
             "title": "Proposers",
             "type": "array"
           }
         },
         "required": [
+          "main",
           "knobs",
+          "prompts",
           "arms_per_round",
           "proposers",
           "pools"
@@ -10847,9 +11233,9 @@
       },
       "OriginEntry": {
         "additionalProperties": false,
+        "description": "A MINTED origin, its id the mint's hash; a dataset no campaign ran is a `DatasetIndexEntry`.",
         "properties": {
           "created_at": {
-            "default": "",
             "description": "ISO 8601 — earliest campaign on this origin",
             "title": "Created At",
             "type": "string"
@@ -10866,8 +11252,7 @@
             "type": "string"
           },
           "n_campaigns": {
-            "default": 0,
-            "description": "Active campaigns minted from this origin (0 = prepared, not yet run)",
+            "description": "Active campaigns minted from this origin",
             "title": "N Campaigns",
             "type": "integer"
           },
@@ -10896,20 +11281,16 @@
             "title": "Origin Accuracy"
           },
           "origin_id": {
-            "description": "Origin content identity — a campaign's root_content_hash (or the dataset's prospective origin hash for a prepared origin)",
+            "description": "Origin content identity — its campaigns' root_content_hash",
             "title": "Origin Id",
             "type": "string"
-          },
-          "prepared": {
-            "default": false,
-            "description": "True = a ready dataset config with no campaign yet",
-            "title": "Prepared",
-            "type": "boolean"
           }
         },
         "required": [
           "origin_id",
-          "dataset_name"
+          "dataset_name",
+          "n_campaigns",
+          "created_at"
         ],
         "title": "OriginEntry",
         "type": "object"
@@ -11247,6 +11628,34 @@
           "n"
         ],
         "title": "OwnLevel",
+        "type": "object"
+      },
+      "PackOffer": {
+        "additionalProperties": false,
+        "description": "One block pack this account reads, as a pool's `packs` knob names it.",
+        "properties": {
+          "entries": {
+            "description": "The pool entries it holds that this run admits, one per part a snippet suits",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The value `packs` holds for it",
+            "title": "Name",
+            "type": "string"
+          },
+          "on": {
+            "description": "Whether `packs` names it under this config",
+            "title": "On",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "entries",
+          "on"
+        ],
+        "title": "PackOffer",
         "type": "object"
       },
       "PairGuard": {
@@ -11766,9 +12175,10 @@
       },
       "PoolDraw": {
         "additionalProperties": false,
+        "description": "The nodes that read a pool under one knob: one knob, one access, however many readers.",
         "properties": {
           "access": {
-            "description": "How it draws under this config: `off` not at all, `open` a window to suggest from, `closed` an entry's id only",
+            "description": "How they draw under this config: `off` not at all, `open` a window to suggest from, `closed` an entry's id only",
             "enum": [
               "off",
               "open",
@@ -11777,22 +12187,100 @@
             "title": "Access",
             "type": "string"
           },
-          "node": {
-            "description": "A node drawing from the pool, in walk order",
-            "title": "Node",
-            "type": "string"
+          "nodes": {
+            "description": "Every node reading the pool as this knob sets it, in walk order; potter's critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what L1 sees",
+            "items": {
+              "type": "string"
+            },
+            "title": "Nodes",
+            "type": "array"
           },
           "switch": {
-            "$ref": "#/components/schemas/KnobSwitch",
+            "$ref": "#/components/schemas/KnobRef",
             "description": "The knob that sets `access`"
           }
         },
         "required": [
-          "node",
+          "switch",
           "access",
-          "switch"
+          "nodes"
         ],
         "title": "PoolDraw",
+        "type": "object"
+      },
+      "PoolFill": {
+        "additionalProperties": false,
+        "description": "One part of a candidate a pool's entries in play reach: the place a surface draws the pool.",
+        "properties": {
+          "entries": {
+            "description": "How many entries in play land there",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "most": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most one candidate carries there: the shots any member writing them may attach; null for a field, whose text a candidate takes or adapts",
+            "title": "Most"
+          },
+          "part": {
+            "description": "A prompt field a target prompt node opens to search, or `shots`",
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "entries",
+          "most"
+        ],
+        "title": "PoolFill",
+        "type": "object"
+      },
+      "PoolOffer": {
+        "additionalProperties": false,
+        "description": "One path an initializer's `active` knob may name, with what it keeps.",
+        "properties": {
+          "entries": {
+            "description": "How many entries the path keeps",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "`all` is `*`, `part` a block's field, `source` the run of that field from one source, `entry` one entry by id",
+            "enum": [
+              "all",
+              "part",
+              "source",
+              "entry"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "What the path reads as: a part's field key, labelled as a fill's part is; a source in plain words; an entry's text cut short",
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "description": "The value to write into `active`",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "label",
+          "entries"
+        ],
+        "title": "PoolOffer",
         "type": "object"
       },
       "PoolRow": {
@@ -11813,10 +12301,34 @@
             "title": "Drawn By",
             "type": "array"
           },
+          "fills": {
+            "description": "The candidate parts its entries in play reach under this config, in render order, shots last: empty where no member draws it or nothing is in play, and then a surface draws the pool nowhere",
+            "items": {
+              "$ref": "#/components/schemas/PoolFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
           "initializer": {
             "description": "The run-init node writing it once, before round 0",
             "title": "Initializer",
             "type": "string"
+          },
+          "offered": {
+            "description": "Every path `active` may name — `*` first, each leading run of an entry's group before what it holds, each entry id — with what it reads as and the entries it keeps; a demo pool's are the split its Start draws, none before that split is known",
+            "items": {
+              "$ref": "#/components/schemas/PoolOffer"
+            },
+            "title": "Offered",
+            "type": "array"
+          },
+          "packs": {
+            "description": "The block packs it may draw from, the install's and the account's, in name order; none for a pool no pack feeds or no member draws, and none before the facts a Start mints against are known",
+            "items": {
+              "$ref": "#/components/schemas/PackOffer"
+            },
+            "title": "Packs",
+            "type": "array"
           },
           "pool": {
             "description": "The pool's state kind, e.g. `block_pool`",
@@ -11833,7 +12345,10 @@
           "source",
           "initializer",
           "active",
-          "drawn_by"
+          "offered",
+          "drawn_by",
+          "fills",
+          "packs"
         ],
         "title": "PoolRow",
         "type": "object"
@@ -12040,6 +12555,7 @@
               "cycle_final",
               "cycle_minted",
               "cycle_seed",
+              "cycle_share",
               "cycle_superseded",
               "election",
               "error",
@@ -12050,6 +12566,7 @@
               "launch_claim",
               "launch_clock",
               "launch_released",
+              "left_comparison",
               "llm_call_progress",
               "llm_call",
               "llm_call_start",
@@ -12102,6 +12619,19 @@
         ],
         "title": "ProjectionEnvelope",
         "type": "object"
+      },
+      "PromptPart": {
+        "description": "A prompt field a snippet suits, one name for a target and an optimizer prompt alike: a drop elsewhere is shown, never refused.",
+        "enum": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
+        "title": "PromptPart",
+        "type": "string"
       },
       "Proposed": {
         "additionalProperties": false,
@@ -12156,6 +12686,27 @@
           "individual"
         ],
         "title": "Proposed",
+        "type": "object"
+      },
+      "ProposerRow": {
+        "additionalProperties": false,
+        "properties": {
+          "makes": {
+            "description": "What its arms are, in plain words: the manifest node's `makes`",
+            "title": "Makes",
+            "type": "string"
+          },
+          "node": {
+            "description": "The manifest node making the arms",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "makes"
+        ],
+        "title": "ProposerRow",
         "type": "object"
       },
       "Provenance": {
@@ -12660,7 +13211,7 @@
       },
       "RoundFacts": {
         "additionalProperties": false,
-        "description": "A round's typed facts: what its election declared and what it measured against.",
+        "description": "A round's typed facts: what its election declared.",
         "properties": {
           "elects_on": {
             "anyOf": [
@@ -12679,18 +13230,6 @@
             "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on accuracy.",
             "title": "Elects On"
           },
-          "reference": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The address of the candidate the round measured its arms against — the individual its `parent`-role arm re-read, as the pick this course's line stood on going into the round. Never a child of the round: a reference is not re-listed. Null at round 0, where none was read, and where the re-read individual is not the line's pick.",
-            "title": "Reference"
-          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -12698,8 +13237,7 @@
         },
         "required": [
           "round",
-          "elects_on",
-          "reference"
+          "elects_on"
         ],
         "title": "RoundFacts",
         "type": "object"
@@ -13291,6 +13829,117 @@
         "title": "RuntimeFailure",
         "type": "object"
       },
+      "SampleLookahead": {
+        "additionalProperties": false,
+        "description": "The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its\ncontrol offers. A replay takes no armed control, so it reads depth 1 and nothing armed.",
+        "properties": {
+          "allowed": {
+            "description": "Calls the gauge admits out now; 0 with `in_flight`.",
+            "title": "Allowed",
+            "type": "integer"
+          },
+          "auto": {
+            "description": "Whether that depth outlives its round — the operator's auto-arm.",
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "auto_refusal": {
+            "description": "Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A mode, not a press, so a paused run takes it for its relaunch; empty where offered.",
+            "title": "Auto Refusal",
+            "type": "string"
+          },
+          "ceiling": {
+            "description": "The backend's `max_cells_in_flight`; 1 says the control does not apply.",
+            "title": "Ceiling",
+            "type": "integer"
+          },
+          "cell_reserve_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What each call out holds of the ceiling; null where no book binds.",
+            "title": "Cell Reserve Usd"
+          },
+          "depth": {
+            "description": "The depth IN FORCE — how many cells the walk holds in flight: the armed request bounded by `ceiling`.",
+            "title": "Depth",
+            "type": "integer"
+          },
+          "depths": {
+            "description": "Each depth the control draws, 1 to `ceiling`.",
+            "items": {
+              "$ref": "#/components/schemas/LookaheadDepth"
+            },
+            "title": "Depths",
+            "type": "array"
+          },
+          "explained": {
+            "description": "What the armed depth does, as the control explains itself: the mode in force, its bound and the calls discarded so far — or `unavailable`.",
+            "title": "Explained",
+            "type": "string"
+          },
+          "in_flight": {
+            "description": "Calls out now; 0 once no producer is appending.",
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "money_hold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many more cells the spend limits admit, in words, where money and not the armed depth holds the walk; null where it does not.",
+            "title": "Money Hold"
+          },
+          "most": {
+            "description": "The most calls the stop rules allow out; between phases, the next round's.",
+            "title": "Most",
+            "type": "integer"
+          },
+          "pick_max": {
+            "description": "The deepest press the next walk can take.",
+            "title": "Pick Max",
+            "type": "integer"
+          },
+          "scoring_now": {
+            "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
+            "title": "Scoring Now",
+            "type": "boolean"
+          },
+          "unavailable": {
+            "description": "Why holding calls ahead does not apply to this backend at all (`ceiling` of 1); empty where it applies.",
+            "title": "Unavailable",
+            "type": "string"
+          }
+        },
+        "required": [
+          "depth",
+          "auto",
+          "ceiling",
+          "in_flight",
+          "allowed",
+          "most",
+          "scoring_now",
+          "pick_max",
+          "money_hold",
+          "cell_reserve_usd",
+          "unavailable",
+          "explained",
+          "auto_refusal",
+          "depths"
+        ],
+        "title": "SampleLookahead",
+        "type": "object"
+      },
       "SampleWalk": {
         "additionalProperties": false,
         "description": "The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the\ncursor is declared, never promised — an eliminator can stop the arm before its tail.",
@@ -13649,17 +14298,6 @@
             "title": "Catch Up Log",
             "type": "array"
           },
-          "cell_reserve_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cell Reserve Usd"
-          },
           "composite_fitness_anchors": {
             "anyOf": [
               {
@@ -13770,11 +14408,6 @@
             ],
             "description": "What an offshoot of this cycle starts under; null on a replay."
           },
-          "in_flight": {
-            "default": 0,
-            "title": "In Flight",
-            "type": "integer"
-          },
           "langfuse_trace_url": {
             "anyOf": [
               {
@@ -13797,46 +14430,8 @@
             ],
             "title": "Last Query Elapsed S"
           },
-          "lookahead_allowed": {
-            "default": 0,
-            "title": "Lookahead Allowed",
-            "type": "integer"
-          },
-          "lookahead_explained": {
-            "description": "What the armed depth does, as the control explains itself: the mode in force, its bound and the calls discarded so far — or `lookahead_unavailable`.",
-            "title": "Lookahead Explained",
-            "type": "string"
-          },
-          "lookahead_money_hold": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How many more cells the spend limits admit, in words, where money and not the armed depth holds the walk; null where it does not.",
-            "title": "Lookahead Money Hold"
-          },
-          "lookahead_most": {
-            "default": 0,
-            "title": "Lookahead Most",
-            "type": "integer"
-          },
-          "lookahead_pick_max": {
-            "description": "The deepest press the next walk can take.",
-            "title": "Lookahead Pick Max",
-            "type": "integer"
-          },
-          "lookahead_unavailable": {
-            "description": "Why holding calls ahead does not apply to this backend at all (`max_cells_in_flight` of 1); empty where it applies.",
-            "title": "Lookahead Unavailable",
-            "type": "string"
-          },
-          "max_cells_in_flight": {
-            "title": "Max Cells In Flight",
-            "type": "integer"
+          "lookahead": {
+            "$ref": "#/components/schemas/SampleLookahead"
           },
           "measured_unit": {
             "enum": [
@@ -13964,21 +14559,6 @@
             "$ref": "#/components/schemas/RunPhase",
             "description": "The cycle's phase, derived at the read (`derive_run_state`) — never the runner's own `declared_phase`, which says `running` forever after a kill."
           },
-          "sample_lookahead": {
-            "description": "The depth IN FORCE — how many cells the walk holds in flight: the armed request bounded by `max_cells_in_flight`. 1 on a replay, which takes no armed control.",
-            "title": "Sample Lookahead",
-            "type": "integer"
-          },
-          "sample_lookahead_auto": {
-            "description": "Whether that depth outlives its round — the operator's auto-arm.",
-            "title": "Sample Lookahead Auto",
-            "type": "boolean"
-          },
-          "sample_lookahead_discards": {
-            "default": 0,
-            "title": "Sample Lookahead Discards",
-            "type": "integer"
-          },
           "spend_metered": {
             "anyOf": [
               {
@@ -14069,7 +14649,6 @@
           "rounds",
           "display_metric",
           "backpressure",
-          "max_cells_in_flight",
           "measured_unit",
           "at_time",
           "round_cells_ceiling",
@@ -14084,12 +14663,7 @@
           "overlap_line_n",
           "composite_fitness_weights",
           "composite_fitness_anchors",
-          "sample_lookahead",
-          "sample_lookahead_auto",
-          "lookahead_money_hold",
-          "lookahead_pick_max",
-          "lookahead_unavailable",
-          "lookahead_explained",
+          "lookahead",
           "spend_metered",
           "spend_metered_by_round",
           "campaign_metered_usd",
@@ -14724,34 +15298,6 @@
           "hop"
         ],
         "title": "StartCheckinResponse",
-        "type": "object"
-      },
-      "StartPrompt": {
-        "additionalProperties": false,
-        "properties": {
-          "fields": {
-            "additionalProperties": true,
-            "description": "The prompt body, by decomposition field",
-            "title": "Fields",
-            "type": "object"
-          },
-          "version": {
-            "description": "The `prompt_version` the node's config names",
-            "title": "Version",
-            "type": "string"
-          },
-          "versions_declared": {
-            "description": "How many versions the manifest declares for the node's prompt family — a surface showing this one says so where there are more",
-            "title": "Versions Declared",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "fields",
-          "version",
-          "versions_declared"
-        ],
-        "title": "StartPrompt",
         "type": "object"
       },
       "StartRunPayload": {
@@ -16060,6 +16606,113 @@
           "campaign_id"
         ],
         "title": "UnarchiveCampaignPayload",
+        "type": "object"
+      },
+      "UnstartedCampaign": {
+        "additionalProperties": false,
+        "description": "An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course,\nline or run. Its `address` is the draft id Start mints from and `discard-draft` deletes.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/UnstartedFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "unstarted",
+            "default": "unstarted",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
+            "title": "Parent"
+          },
+          "span": {
+            "$ref": "#/components/schemas/HierarchySpan"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/EntryStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "stats",
+          "span",
+          "facts"
+        ],
+        "title": "UnstartedCampaign",
+        "type": "object"
+      },
+      "UnstartedFacts": {
+        "additionalProperties": false,
+        "description": "An open check-in's typed facts: it has no cycle, so no course, line or run.",
+        "properties": {
+          "spend_lifetime": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "What its check-in has cost so far."
+          }
+        },
+        "required": [
+          "spend_lifetime"
+        ],
+        "title": "UnstartedFacts",
         "type": "object"
       },
       "UserSettings": {
@@ -17962,6 +18615,66 @@
           }
         },
         "summary": "Archive Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/bank-snippet": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "bank_snippet_api_v1_commands_bank_snippet_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankSnippetPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Bank Snippet",
         "tags": [
           "Commands"
         ]
@@ -19988,38 +20701,6 @@
         ]
       }
     },
-    "/api/v1/drafts": {
-      "get": {
-        "description": "The caller's open check-ins. A draft is no campaign: Start mints one and closes it.",
-        "operationId": "list_drafts_api_v1_drafts_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "List Drafts",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/drafts/{draft_id}": {
       "get": {
         "description": "Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded.",
@@ -20255,14 +20936,14 @@
             }
           },
           {
-            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'",
+            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'unstarted' — the open check-ins; or 'all'",
             "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/LifecycleFilter",
+              "$ref": "#/components/schemas/ListingLifecycle",
               "default": "active",
-              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'"
+              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'unstarted' — the open check-ins; or 'all'"
             }
           },
           {
@@ -20540,6 +21221,38 @@
         ]
       }
     },
+    "/api/v1/library": {
+      "get": {
+        "description": "Every snippet the caller's library holds, the install's packs beside its own, for a target or an optimizer prompt alike.",
+        "operationId": "get_library_api_v1_library_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Library",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
     "/api/v1/machine-status": {
       "get": {
         "description": "Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see.",
@@ -20650,52 +21363,9 @@
         ]
       }
     },
-    "/api/v1/optimizers/{name}/knobs": {
-      "get": {
-        "description": "Every knob the manifest's nodes take, each with its type, closed options, bounds and declared value.\n\n404 when no such optimizer is registered.",
-        "operationId": "get_optimizer_knobs_api_v1_optimizers__name__knobs_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OptimizerKnobsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Get Optimizer Knobs",
-        "tags": [
-          "Optimizer"
-        ]
-      }
-    },
     "/api/v1/origins": {
       "get": {
-        "description": "Every runnable origin in the caller's tenant: prepared datasets with no campaign yet, then campaign-backed ones, newest first.\n\nTenant-scoped, not owner-filtered.",
+        "description": "Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is `GET /datasets`'.\n\nTenant-scoped, not owner-filtered.",
         "operationId": "get_origins_api_v1_origins_get",
         "responses": {
           "200": {

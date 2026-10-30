@@ -12,6 +12,13 @@ from promptpotter.domain.phases import (
     RunPhase,
     StopReason,
 )
+from promptpotter.domain.run_records import (
+    ArmsTakenEffect,
+    GateDecidedEffect,
+    LookaheadTakenEffect,
+    PausedEffect,
+    SkippedEffect,
+)
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import emit_command_ack
 from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
@@ -98,7 +105,7 @@ class RunControl:
             emit_command_ack(
                 command_id=asked.command_id,
                 status="applied",
-                effect={"run_phase": RunPhase.PAUSED.value},
+                effect=PausedEffect(run_phase=RunPhase.PAUSED),
             )
             return PauseCause.COMMAND, f"pause-cycle by {asked.issued_by.display}"
         for outer in reversed(self.enclosing):
@@ -113,16 +120,19 @@ class RunControl:
         skips = self._inbox().skips
         if not skips:
             return False
-        emit_command_ack(command_id=skips[0], status="applied", effect={"skipped": 1})
+        emit_command_ack(command_id=skips[0], status="applied", effect=SkippedEffect(skipped=1))
         return True
 
     def take_gate_decision(self) -> GateDecision | None:
         standing = self._inbox().gate_decisions
         if not standing:
             return None
-        command_id, decision = standing[0]
-        emit_command_ack(command_id=command_id, status="applied", effect={"decision": decision})
-        return cast("GateDecision", decision)
+        command_id, asked = standing[0]
+        decision = cast("GateDecision", asked)
+        emit_command_ack(
+            command_id=command_id, status="applied", effect=GateDecidedEffect(decision=decision)
+        )
+        return decision
 
     def standing_submission(self) -> tuple[str, SubmitArmsPayload] | None:
         """Read, not taken: the round's arms are banked before `take_submission` acks them."""
@@ -130,7 +140,7 @@ class RunControl:
         return standing[0] if standing else None
 
     def take_submission(self, command_id: str, *, arms: int) -> None:
-        emit_command_ack(command_id=command_id, status="applied", effect={"arms": arms})
+        emit_command_ack(command_id=command_id, status="applied", effect=ArmsTakenEffect(arms=arms))
 
     def sample_lookahead(self) -> int:
         if self.held_lookahead is not None:
@@ -146,7 +156,7 @@ class RunControl:
             emit_command_ack(
                 command_id=asked.command_id,
                 status="applied",
-                effect={"cells": asked.cells, "auto": asked.auto},
+                effect=LookaheadTakenEffect(cells=asked.cells, auto=asked.auto),
             )
 
     def budget_tripped(self) -> StopReason | None:

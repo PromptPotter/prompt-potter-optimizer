@@ -5,23 +5,37 @@ import { useHardSamples } from "@/lib/hard-samples";
 import { useViewedCourse } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { entryAlone } from "@/lib/derivations";
+import { encodeCyclePath } from "@/lib/ids";
+import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
 import type { HierarchyCourse } from "@/lib/api";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { useSelection } from "@/lib/SelectionContext";
-import { useCycleEvents } from "@/lib/chat/useCycleEvents";
-import { useThread, type ThreadItem } from "@/lib/chat/thread";
+import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
+import {
+  checkinThreadKey,
+  runThreadKey,
+  useThreads,
+  type ThreadItem,
+} from "@/lib/chat/thread";
 import { Thread } from "@/components/chat/Thread";
 import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 
+// The pane renders ONE subject's conversation: the viewed check-in's, or the viewed run's.
 export function ChatPane() {
   const { datasetName } = useHardSamples();
   const { viewedPath, cycleId, leafCycleId } = useWorkspace();
-  const { composing } = useIngest();
-  const thread = useThread<HierarchyCourse>();
+  const { subject } = useIngest();
+  const threads = useThreads<HierarchyCourse>();
+  const runKey = viewedPath ? runThreadKey(encodeCyclePath(viewedPath)) : null;
+  const threadKey =
+    subject === null && runKey !== null
+      ? runKey
+      : checkinThreadKey(subject === null || subject === NEW_CHECKIN ? null : subject);
+  const stored = threads.of(threadKey);
 
   const course = useViewedCourse();
 
@@ -32,16 +46,15 @@ export function ChatPane() {
   if (liveCourse !== prevLiveCourse) {
     setPrevLiveCourse(liveCourse);
     // The identity check stops a course switch filing another course under this one's ending.
-    if (prevLiveCourse && !liveCourse && course?.address === prevLiveCourse) {
+    if (runKey && prevLiveCourse && !liveCourse && course?.address === prevLiveCourse) {
       // Read under a mask or a moment, the served caveat already names which.
-      thread.appendRun(course.address, entryAlone(course));
+      threads.appendRun(runKey, course.address, entryAlone(course));
     }
   }
 
   const live = useCycleEvents(viewedPath);
-  // `composing` drops both, so a fresh thread is not drawn over the bound cycle's run.
   const mounted: ThreadItem<HierarchyCourse>[] = [];
-  if (!composing && leafCycleId) {
+  if (subject === null && leafCycleId) {
     mounted.push({
       id: "live",
       kind: "block",
@@ -56,20 +69,18 @@ export function ChatPane() {
       ),
     });
   }
-  if (!composing && cycleId) {
+  if (subject === null && cycleId) {
     mounted.push({
       id: "run-card",
       kind: "block",
       node: <RunCard />,
     });
   }
-  const ingestItems = useIngestItems(thread.items.length === 0 && mounted.length === 0);
-  const items: ThreadItem<HierarchyCourse>[] = [
-    ...ingestItems.head,
-    ...thread.items,
-    ...ingestItems.tail,
-    ...mounted,
-  ];
+  const ingestItems = useIngestItems(stored.length === 0);
+  const items: ThreadItem<HierarchyCourse>[] =
+    subject === null
+      ? [...stored, ...mounted]
+      : [...ingestItems.head, ...stored, ...ingestItems.tail];
 
   const { node: selectedNode, setSelectionForNode } = useSelection();
   // The remote floats above the composer, so its height is published to the shell the remote hangs off.

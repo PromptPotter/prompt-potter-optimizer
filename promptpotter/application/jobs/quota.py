@@ -58,8 +58,8 @@ logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(PotterError):
-    """A user-scoped abuse limit blocked a launch — 429, as against ``LaunchError``'s 422 for a malformed
-    or unowned request. Both map to one HTTP response through the ``PotterError`` seam."""
+    """A user-scoped abuse limit refused a request — 429, as against ``LaunchError``'s 422 for a malformed
+    or unowned one. Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 429
 
@@ -72,19 +72,37 @@ class QuotaExceededError(PotterError):
 _rate_buckets: dict[str, tuple[float, float]] = {}  # bucket key → (tokens, last_refill_ts)
 _rate_lock = threading.Lock()
 
+# Sized above a person opening every tab in a row, each mount firing its reads at once
+# (`e2e/cold/first-run.spec.ts`'s tab sweep is the probe), then two tabs of `webapp/lib/cadence.ts`'s polls.
+_READ_BURST = 300.0
+_READ_PER_S = 20.0
 
-def _consume_rate_token(bucket: str) -> bool:
+
+def _consume_rate_token(bucket: str, *, burst: float, per_s: float) -> bool:
     now = time.monotonic()
-    burst = float(settings.USER_RATE_BURST)
-    refill_per_sec = settings.USER_RATE_PER_MIN / 60.0
     with _rate_lock:
         tokens, last = _rate_buckets.get(bucket, (burst, now))
-        tokens = min(burst, tokens + (now - last) * refill_per_sec)
+        tokens = min(burst, tokens + (now - last) * per_s)
         if tokens < 1.0:
             _rate_buckets[bucket] = (tokens, now)
             return False
         _rate_buckets[bucket] = (tokens - 1.0, now)
         return True
+
+
+def _consume_launch_token(bucket: str) -> bool:
+    return _consume_rate_token(
+        bucket, burst=settings.USER_RATE_BURST, per_s=settings.USER_RATE_PER_MIN / 60.0
+    )
+
+
+def refuse_read_rate(principal_id: str) -> None:
+    """Only a read is metered here: it is what a poll repeats."""
+    if not _consume_rate_token(f"read:{principal_id}", burst=_READ_BURST, per_s=_READ_PER_S):
+        raise QuotaExceededError(
+            code="rate_limited",
+            message="Too many reads, faster than the dashboard polls; slow down and retry shortly.",
+        )
 
 
 def check_launch_quotas(
@@ -93,7 +111,7 @@ def check_launch_quotas(
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, not this one."""
     # A fresh mint, a check-in's Start included, names no cycle yet.
     rate_limited = not spends_the_hosts_own_key(stores) and hop == UNRESOLVED_HOP
-    if rate_limited and not _consume_rate_token(user.user_id):
+    if rate_limited and not _consume_launch_token(f"launch:{user.user_id}"):
         raise QuotaExceededError(
             code="rate_limited",
             message="Too many campaign launches; slow down and retry shortly.",
@@ -391,9 +409,17 @@ def _allotment(left: Budget, *, own: Budget) -> Budget:
     )
 
 
-def _held(job: Job, own: Budget) -> Budget:
+def cycle_share(stores: Stores, job: Job) -> Budget:
+    """A live job's share, off its cycle: admission lands it there before the job is on the campaign."""
+    record = stores.campaigns.read_cycle_share(job.hop)
+    if record is None:
+        raise RuntimeError(f"job {job.job_id} holds spend on {job.hop} with no share landed there")
+    return record.allotment
+
+
+def _held(share: Budget, own: Budget) -> Budget:
     """A sibling's share less what its cycle has metered, which the campaign's spend counts."""
-    usd, tokens = job.allotment.usd, job.allotment.tokens
+    usd, tokens = share.usd, share.tokens
     return Budget.amount(
         0.0 if usd is None else max(0.0, usd - own.usd_amount),
         0 if tokens is None else max(0, tokens - own.token_amount),
@@ -406,7 +432,8 @@ def _held_by_siblings(
     held = NOTHING_METERED
     for job in _live_on(stores, job_registry, hop.campaign_id):
         if job.hop != hop:
-            held = held.plus(_held(job, stores.campaigns.cycle_metered(job.hop, meter)))
+            own = stores.campaigns.cycle_metered(job.hop, meter)
+            held = held.plus(_held(cycle_share(stores, job), own))
     return held
 
 
@@ -435,8 +462,9 @@ def _refuse_unshared(
             if (other.created_at, other.job_id) < mine:
                 raise _contended("this campaign's ceiling")
             continue
+        held = cycle_share(stores, other)
         for axis in sorted(MONEY_AXES):
-            ours, theirs = getattr(money, axis), getattr(other.allotment, axis)
+            ours, theirs = getattr(money, axis), getattr(held, axis)
             if (ours is None) != (theirs is None):
                 unbounded = f"cycle {other.cycle_id}" if theirs is None else "this launch"
                 raise QuotaExceededError(
@@ -460,15 +488,32 @@ def _reshare_campaign_ceiling(
     meter = stores.campaigns.ceiling_meter_of(campaign_id)
     spent = stores.campaigns.metered_spend(campaign_id, meter)
     own = {job.job_id: stores.campaigns.cycle_metered(job.hop, meter) for job in jobs}
+    # Read before any moves: each cycle is re-shared from what the rest held going in.
+    held = {job.job_id: cycle_share(stores, job) for job in jobs}
     for job in jobs:
         beside = NOTHING_METERED
         for other in jobs:
             if other.job_id != job.job_id:
-                beside = beside.plus(_held(other, own[other.job_id]))
+                beside = beside.plus(_held(held[other.job_id], own[other.job_id]))
         share = _allotment(_left(moved, spent=spent, beside=beside), own=own[job.job_id])
-        job.allotment = job.allotment.over(share.only(moved.named))
-        # A run's book reads its hold off the job file, live.
-        job_registry.set_held(job.job_id, job.reserve, job.allotment)
+        hold_moved(stores, job.hop, held[job.job_id].over(share.only(moved.named)))
+
+
+def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
+    """THE move of a cycle's share: its record is the one store, which its running book reads live."""
+    held = stores.campaigns.read_cycle_share(hop)
+    if held is not None and held.allotment == allotment:
+        return
+    stores.campaigns.write_cycle_share(hop, allotment)
+
+
+def land_job(
+    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
+) -> None:
+    """A job onto the cycle it now spends on, its share with it, together under the gate."""
+    with job_registry.admission_gate():
+        hold_moved(stores, hop, allotment)
+        job_registry.update_target(job_id, hop=hop)
 
 
 def move_campaign_money(
@@ -510,7 +555,9 @@ def launch_usd_bound(stores: Stores) -> float | None:
 
 def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
     # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
-    if not spends_the_hosts_own_key(stores) and not _consume_rate_token(f"{bucket}:{user.user_id}"):
+    if not spends_the_hosts_own_key(stores) and not _consume_launch_token(
+        f"{bucket}:{user.user_id}"
+    ):
         raise QuotaExceededError(
             code="rate_limited",
             message=f"Too many {bucket} requests; slow down and retry shortly.",
@@ -655,7 +702,7 @@ def hold_budget_change(
     with job_registry.admission_gate():
         job = job_registry.running_job_for(stores.campaigns.workspace, hop)
         if job is not None:
-            job_registry.set_held(job.job_id, job.reserve.over(reserve), job.allotment)
+            job_registry.set_reserve(job.job_id, job.reserve.over(reserve))
         move_campaign_money(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )

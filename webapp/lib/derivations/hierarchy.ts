@@ -5,21 +5,28 @@ import type {
   HierarchyEntry,
   HierarchyStat,
   HierarchyTag,
+  ListedCampaign,
 } from "@/lib/api";
 import { decodeCyclePath } from "@/lib/ids";
-import { dockPriority } from "@/lib/run-phase";
+import { dockPriority } from "./run-phase";
 
 export interface RootGroup {
   rootCycleId: string;
-  campaigns: HierarchyCampaign[];
+  campaigns: ListedCampaign[];
 }
 
-// The server serves `entries` root-major, so a group is a run of consecutive campaigns.
-export function groupByRoot(entries: readonly HierarchyCampaign[]): RootGroup[] {
+// The server serves `entries` root-major, so a group is a run of consecutive campaigns. An
+// unstarted campaign has no root cycle: it stands alone, keyed by its own address.
+export function groupByRoot(entries: readonly ListedCampaign[]): RootGroup[] {
   const groups: RootGroup[] = [];
   for (const campaign of entries) {
-    const rootCycleId = decodeCyclePath(campaign.facts.root)?.at(-1)?.cycleId;
-    if (rootCycleId === undefined) throw new Error(`undecodable root ${campaign.facts.root}`);
+    if (campaign.level === "unstarted") {
+      groups.push({ rootCycleId: campaign.address, campaigns: [campaign] });
+      continue;
+    }
+    const { root } = campaign.facts;
+    const rootCycleId = decodeCyclePath(root)?.at(-1)?.cycleId;
+    if (rootCycleId === undefined) throw new Error(`undecodable root ${root}`);
     const last = groups.at(-1);
     if (last?.rootCycleId === rootCycleId) last.campaigns.push(campaign);
     else groups.push({ rootCycleId, campaigns: [campaign] });

@@ -18,7 +18,11 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     layout_json_schema,
 )
-from promptpotter.application.optimizers.potter.dispatch.schemas import L1GenerateOutput, L1Variant
+from promptpotter.application.optimizers.potter.dispatch.schemas import (
+    L1GenerateOutput,
+    L1Variant,
+    recombinations_schema,
+)
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
@@ -29,6 +33,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
+    from promptpotter.application.optimizers.potter.dispatch.bundle import RecombinationOffer
     from promptpotter.application.runner.inner.tasks import InnerCells
 
 shapes_optimizer_prompt(__name__)
@@ -106,8 +111,10 @@ def build_l1_response_schema(
     schema_field_rename: bool = False,
     n_variants: int | None = None,
     pooled_fields: Mapping[str, Sequence[str]] | None = None,
+    recombination: RecombinationOffer | None = None,
 ) -> dict[str, Any]:
-    """Returns the BARE schema: an envelope nests it where the provider reads no ``type`` and every constraint goes inert."""
+    """Returns the BARE schema: an envelope nests it where the provider reads no ``type`` and every constraint goes inert.
+    ``None`` *recombination* withdraws the slot."""
     raw_schema = L1GenerateOutput.model_json_schema()
     defs = raw_schema.pop("$defs", {})
     inlined = _inline_refs(raw_schema, defs)
@@ -115,6 +122,10 @@ def build_l1_response_schema(
     # Without `maxItems` an over-generating model is BILLED for every variant the slice then discards.
     if n_variants is not None:
         inlined["properties"]["variants"]["maxItems"] = n_variants
+    if recombination is None:
+        del inlined["properties"]["recombinations"]
+    else:
+        inlined["properties"]["recombinations"] = recombinations_schema(recombination)
 
     variant_items = inlined["properties"]["variants"]["items"]
     variant_props = variant_items["properties"]

@@ -4,7 +4,7 @@ import type { ServedRound } from "@/lib/api/types";
 import { CardFrame, SegmentedControl } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import {
-  type SampleMovement,
+  MOVEMENT_CLASS,
   type SelectMode,
   buildSorted,
   unionFirstAppearance,
@@ -20,14 +20,6 @@ type ViewKind = "delta" | "series";
 
 // `adaptive_queue_mechanism.py` has a single objective; a variant needs a ServedRound field.
 const OBJECTIVE_LABEL = "by decision_information_gain";
-
-const MINI_CELL_CLASS: Record<SampleMovement, string> = {
-  new: "new",
-  readded: "new",
-  gained: "gained",
-  lost: "lost",
-  kept: "kept",
-};
 
 // 57x22px `.hs-mini-btn` minus its 3px padding.
 const MINI_BOX_W = 51;
@@ -83,7 +75,7 @@ export function SampleTrajectoryMiniButton({
             return (
               <span
                 key={`${r.round}-${sid}`}
-                className={cx("hs-mini-cell", kind === undefined ? "absent" : MINI_CELL_CLASS[kind])}
+                className={cx("hs-mini-cell", kind === undefined ? "absent" : MOVEMENT_CLASS[kind])}
               />
             );
           });
@@ -172,7 +164,7 @@ function DeltaView({ sorted }: { sorted: SortedRounds }) {
               <span key={`d-${sid}`} className="st-sq drop" title={`dropped ${sid}`}>−{sid}</span>
             ))}
             {adds.map((sid) => (
-              <span key={`a-${sid}`} className="st-sq add" title={`added ${sid}`}>+{sid}</span>
+              <span key={`a-${sid}`} className={cx("st-sq", MOVEMENT_CLASS.gained)} title={`added ${sid}`}>+{sid}</span>
             ))}
           </Row>
         );

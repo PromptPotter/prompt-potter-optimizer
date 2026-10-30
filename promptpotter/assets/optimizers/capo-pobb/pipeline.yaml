@@ -10,3 +10,9 @@ swap:
   paired_t:
     node: pobb
     of: potter
+# Its own lead knobs, never capo's: the swapped race brings its own.
+main:
+  - blocks.block_size
+  - mating.offspring
+  - pobb.epsilon
+  - capo_init.length_penalty

@@ -10,7 +10,12 @@ from promptpotter.domain.dashboard_rows import (
     sample_status,
 )
 from promptpotter.domain.results_health import terminal_node
-from promptpotter.domain.scoring import SampleStatus, ground_truth_text, is_verifier_graded
+from promptpotter.domain.scoring import (
+    SampleStatus,
+    graded_answer,
+    ground_truth_text,
+    is_verifier_graded,
+)
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.live_dashboard.state import RacingBlock
 from promptpotter.shared.composite import inline_short_formula_values
@@ -44,7 +49,7 @@ def sample_row(s: WalkedSample) -> DashboardSample:
         terminal_node=terminal_node(facts),
         cached=facts.cached,
         cost_s=None if cost_s is None else round(cost_s, 2),
-        predicted="" if graded_by_verifier else _trim(facts.predicted, 28),
+        predicted="" if graded_by_verifier else _trim(graded_answer(facts, grade) or "", 28),
         ground_truth=ground_truth,
         ground_truth_text=ground_truth_text(ground_truth),
         query=_trim(facts.query, 42),

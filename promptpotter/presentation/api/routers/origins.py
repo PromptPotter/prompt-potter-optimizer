@@ -19,7 +19,7 @@ class OriginListResponse(StrictModel):
 
 @origins_router.get("", response_model=OriginListResponse)
 def get_origins(stores: StoresDep) -> OriginListResponse:
-    """Every runnable origin in the caller's tenant: prepared datasets with no campaign yet, then campaign-backed ones, newest first.
+    """Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is `GET /datasets`'.
 
     Tenant-scoped, not owner-filtered.
     """

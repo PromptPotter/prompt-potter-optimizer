@@ -1,6 +1,6 @@
 "use client";
 import { cx } from "@/lib/cx";
-import { Popover, Switch } from "@/components/ui";
+import { FailureLine, Popover, Switch } from "@/components/ui";
 import { useRunControl } from "@/lib/hooks/useRunControl";
 
 const THINK_ICON = (
@@ -86,11 +86,7 @@ export function ComposerTools() {
             locked={optimizeLocked}
             lockedNote={optimizeNote ?? "unavailable"}
           />
-          {run?.err ? (
-            <p className="chat-tools-err" role="alert">
-              {run.err}
-            </p>
-          ) : null}
+          {run ? <FailureLine failure={run.failure} /> : null}
         </div>
       )}
     </Popover>

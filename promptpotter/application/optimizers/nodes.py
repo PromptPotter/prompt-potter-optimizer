@@ -9,6 +9,7 @@ import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -19,19 +20,21 @@ from typing import (
     Literal,
     NamedTuple,
     Protocol,
+    assert_never,
     cast,
     runtime_checkable,
 )
 
 from pydantic import Field
 
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.arms import ArmSlot, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import DemoPool
-from promptpotter.domain.run_standing import rounds_without_advance
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
@@ -52,23 +55,23 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
     from promptpotter.domain.arms import Concluded, Elimination, Proposal
+    from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.cell_fold import ScoreSummary
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Access, Pool
+    from promptpotter.domain.pool import Access, Pool, PoolEntry
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule, StopSignal
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
     # (the call already started, the commit writing its row once a walk takes the cell, the discard).
     CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
@@ -211,22 +214,13 @@ class NodeMember(Protocol):
         """Raise where the origin's measurement holds what this member cannot start from."""
         return None
 
-    def round_packages(
-        self, _cycle: Cycle, _rounds: list[RoundResult]
-    ) -> dict[int, dict[str, str]]:
-        """``{round: {node: fingerprint}}`` of what the nodes it speaks for were handed; a repair moving one forks the rounds after it."""
+    def round_packages(self, _ctx: NodeContext) -> dict[str, str]:
+        """``{node: fingerprint}`` of what the nodes it speaks for were handed in *ctx*'s round; a repair moving one forks the rounds after it."""
         return {}
 
-    async def rederive(
-        self,
-        _campaign_store: CampaignStore,
-        _hop: CycleHop,
-        _cycle: Cycle,
-        rounds: list[RoundResult],
-        _drifted: list[int],
-    ) -> list[RoundResult]:
-        """Re-derives what it wrote in each *drifted* round and restates it on *hop*'s ledger."""
-        return rounds
+    async def rederive(self, _ctx: NodeContext) -> tuple[StatePart, ...]:
+        """What it wrote in *ctx*'s round, re-derived off the repaired rows; the bench restates it on the branch."""
+        return ()
 
     def complete(self) -> None:
         """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
@@ -337,17 +331,50 @@ INITIAL_POPULATION = "initial_population"
 RUN_INIT = "run_init"
 
 
+class RoundRole(Enum):
+    """The ONE order a round's members run in, each role by the node kinds it admits: ``_round_plan`` admits a `default` walk in it, ``runner/round.py::execute_round`` walks it."""
+
+    SAMPLER = frozenset({NodeKind.SAMPLER})
+    PROPOSER = frozenset({NodeKind.LLM, NodeKind.ALGORITHM})
+    # The gateway's walk, raced by the eliminator.
+    MEASUREMENT = frozenset({NodeKind.ELIMINATOR, NodeKind.GATEWAY})
+    SELECTOR = frozenset({NodeKind.SELECTOR})
+    SURVIVOR = frozenset({NodeKind.ALGORITHM})
+    ADAPTER = frozenset({NodeKind.LLM})
+    CONTROLLER = frozenset({NodeKind.CONTROLLER})
+
+
 @dataclass(frozen=True)
 class RoundWalk:
-    """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads."""
+    """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads; ``gate`` says what of it walks."""
 
     pipeline: str
     seeds: tuple[Proposer, ...]
     proposers: tuple[Proposer, ...]
+    gate: ArmGateMode
 
     @property
     def members(self) -> tuple[Proposer, ...]:
         return (*self.seeds, *self.proposers)
+
+    @property
+    def walked(self) -> tuple[tuple[Proposer, ...], tuple[Proposer, ...], bool]:
+        """The seeds and proposers that walk, and whether the operator's seat takes the arms after them: under ``author``, in their place."""
+        match self.gate:
+            case "off":
+                return self.seeds, self.proposers, False
+            case "review":
+                return self.seeds, self.proposers, True
+            case "author":
+                return (), (), True
+            case unreachable:
+                assert_never(unreachable)
+
+    @property
+    def steps(self) -> tuple[NodeMember, ...]:
+        """``walked`` in the order ``runner/round.py::propose_population`` walks it."""
+        seeds, proposers, seated = self.walked
+        return (*seeds, *proposers, *((OPERATOR_SEAT,) if seated else ()))
 
     @property
     def seeding(self) -> bool:
@@ -402,14 +429,12 @@ def _source_digest(
     return module_source_digest(*spoken, *own, *shapers)
 
 
-def rows_read_packages(
-    rounds: Sequence[RoundResult], proposers: Sequence[str]
-) -> dict[int, dict[str, str]]:
-    """A round's package digests all rows before it, so a repair drifts every round after the one it hit."""
-    out: dict[int, dict[str, str]] = {}
+def rows_read(rounds: Sequence[RoundResult], round_num: int) -> str:
+    """Every row of the rounds before *round_num*, so a repair drifts every round after the one it hit."""
     digest = hashlib.sha256()
     for rr in sorted(rounds, key=lambda r: r.round):
-        out[rr.round] = dict.fromkeys(proposers, digest.hexdigest()[:16])
+        if rr.round >= round_num:
+            break
         for sheet in rr.cells.values():
             seen = [
                 [
@@ -421,7 +446,7 @@ def rows_read_packages(
                 for cell in sheet
             ]
             digest.update(json.dumps(seen, default=str).encode("utf-8"))
-    return out
+    return digest.hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -431,7 +456,6 @@ class RoundContext:
     cycle: Cycle
     round_num: int
     callbacks: RunCallbacks
-    is_final_round: bool = False
     # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
     walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
 
@@ -459,8 +483,16 @@ class Panel:
 
 
 @dataclass(frozen=True)
+class PanelSize:
+    """A walk's ``Panel`` as counted BEFORE any round runs: no ``cells`` where the search split holds none."""
+
+    cells: int
+    block_size: int
+
+
+@dataclass(frozen=True)
 class Proposals:
-    """The round's ARMS; the population carried between rounds is ``Selection.population``."""
+    """The round's ARMS; the population carried between rounds is ``Selection.ranked``, a ``Survivor`` cutting it."""
 
     proposals: list[Proposal]
 
@@ -554,8 +586,9 @@ class Selection:
     selected: ArmKey | None
     leading: ArmKey | None
     verdict_reason: str
-    # What the next round's walk reads as the population, which the bench seats.
-    population: Sequence[OptSearchPoint]
+    # What the selector keeps, best first: the next population, cut by a survival node where the
+    # walk names one (`Survivor`), else whole.
+    ranked: Sequence[OptSearchPoint]
 
 
 class Sampler(NodeMember, Protocol):
@@ -564,23 +597,24 @@ class Sampler(NodeMember, Protocol):
         """What a caller sizing the panel from outside (an L4 per-round count) writes; ``None`` where no one knob does."""
         ...
 
-    def round_cells(self, knobs: Any, search: int) -> int:
-        """Cells a round after the first asks for under its own *knobs*, read BEFORE any round runs; 0 where the search split holds no panel."""
+    def drawn(self, knobs: Any, search: int, pipeline: str) -> PanelSize:
+        """The panel a walk of *pipeline* asks for under *knobs*; ``SelectedOptimizer.round_cells_ceiling`` prices each walk off it."""
         ...
 
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        """The most cells one round's walks read, the parent's among them; 0 where ``round_cells`` is."""
-        return (selected.arms_per_round + 1) * selected.round_cells(search)
-
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
+
+
+# What a proposer does with the proposals it is handed: `opens` ignores them and makes the round's
+# arms, so it walks first alone; `adds` appends arms to them; `edits` rewrites them and adds none.
+Proposing = Literal["opens", "adds", "edits"]
 
 
 class Proposer(NodeMember, Protocol):
     """Each takes the proposals the one before it returned; the walk's first is handed none."""
 
     @property
-    def opens(self) -> bool:
-        """True of a walk's first proposer and of no other, which a manifest is refused on at load."""
+    def proposes(self) -> Proposing:
+        """A manifest is refused at load on a walk whose first neither opens nor adds, or that opens later."""
         ...
 
     @property
@@ -592,17 +626,13 @@ class Proposer(NodeMember, Protocol):
         """The arms it adds to its walk, whose arms are the sum and a round's the most of any walk it runs alone; an editor of arms another made adds none."""
         return 0
 
-    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        """Asked of the walk's ``lead``."""
-        return RoundOpening(
-            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-            arms=None
-            if walk.pipeline == INITIAL_POPULATION
-            else ctx.cycle.optimizer.arms_per_round,
-            proposer=walk.proposer,
-            replayed=False,
-        )
+    def parent_read(self, _panel: PanelSize) -> int:
+        """The cells of *panel* it reads the parent on (``Frontier.measure_parent``)."""
+        return 0
+
+    def opening(self, _ctx: NodeContext, bench: RoundOpening) -> RoundOpening:
+        """Asked of the walk's ``lead``: the bench's own, *bench*, unless it keeps a reading of its own."""
+        return bench
 
     async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
 
@@ -695,16 +725,33 @@ class Selector(NodeMember, Protocol):
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
         ...
 
+    def parent_read(self, panel: PanelSize) -> int:
+        """The most of *panel*'s cells ``parent_cells`` names that no arm's walk buys."""
+        ...
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
+
+
+class Survivor(NodeMember, Protocol):
+    """Survival, walked after the selector: what of its ranking the next round carries."""
+
+    def survive(
+        self, ctx: NodeContext, ranked: Sequence[OptSearchPoint]
+    ) -> Sequence[OptSearchPoint]: ...
+
+
+def admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumption]:
+    """The one admission rule: what a run's chain and its cell's matcher (`matchers.py::matcher_of`) let a block presume."""
+    ranking = {Presumption.RANKING} if schema.emits_ranking else set()
+    return frozenset(ranking) | (frozenset() if matcher is None else MATCHERS[matcher].admits)
 
 
 class MintFacts(NamedTuple):
     """What a pool is refused against before a mint, and nothing at load knows."""
 
     demo: Sequence[Sample]
-    schema: PipelineSchema
-    # The cell's matcher, as `matchers.py::matcher_of` reads the per-sample formula.
-    matcher: str | None
+    admits: frozenset[Presumption]
+    shelf: PackShelf
 
 
 @runtime_checkable
@@ -714,11 +761,17 @@ class Initializer(NodeMember, Protocol):
     @property
     def pool(self) -> type[Pool]: ...
 
-    def starting_content(self, selected: SelectedOptimizer) -> object:
-        """What it seeds from beside the run's own data, which ``Treatment.source`` hashes."""
+    def starting_content(
+        self, selected: SelectedOptimizer, admits: frozenset[Presumption], shelf: PackShelf
+    ) -> object:
+        """What it can seed from beside the run's own data, which ``Treatment.source`` hashes: only what ``active`` keeps of what *admits* lets in off *shelf*."""
         ...
 
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
+
+    def held(self, selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
+        """The entries an ``active`` path may name: at load with no *mint*, every one any run admits."""
+        ...
 
     def refusal(
         self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None

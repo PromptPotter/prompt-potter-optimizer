@@ -1,11 +1,16 @@
 "use client";
 
-import { CardFrame } from "@/components/ui";
-import type { MetricReading, MetricSpec, PairwiseComparison } from "@/lib/api/types";
+import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
+import type {
+  MeasuredLift,
+  MetricReading,
+  MetricSpec,
+  PairwiseComparison,
+} from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { readPaired } from "@/lib/derivations";
 import { PairedLift } from "@/components/shell/PairedLift";
-import { fmtMetricInterval, fmtMetricValue, fmtPValue, shortId, sideTone } from "@/lib/format";
+import { PLACEHOLDER, fmtInterval, fmtPValue, fmtUnit, shortId, sideTone } from "@/lib/format";
 
 export function PairwisePanel({
   reading,
@@ -20,37 +25,19 @@ export function PairwisePanel({
   return (
     <CardFrame title="Pairwise comparisons">
       {rows.length === 0 ? (
-        <p className="note-empty">
+        <Empty>
           {nRead < 2
             ? "One subject read — a pairwise comparison needs two."
             : "Fewer than two subjects here carry a cell this metric scored, so there is no pair to list. A metric only some of them carry leaves the rest with none."}
-        </p>
+        </Empty>
       ) : (
         <>
-          <div className="l4-table-wrap">
-            <table className="l4-table">
-              <thead>
-                <tr>
-                  <th scope="col">pair</th>
-                  <th scope="col">lift · 95% CI</th>
-                  <th scope="col">cells</th>
-                  <th scope="col">p</th>
-                  <th scope="col">p (Holm)</th>
-                  <th scope="col">p floor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <Row
-                    key={`${row.subject_a}|${row.subject_b}`}
-                    row={row}
-                    unit={reading.spec.unit}
-                    names={names}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            ariaLabel="Pairwise comparisons"
+            columns={pairColumns(reading.spec.unit, names)}
+            rows={rows.map(pairRow)}
+            getRowId={({ row }) => `${row.subject_a}|${row.subject_b}`}
+          />
           <p className="note-lede">
             Each lift is the mean of <code>b − a</code> over the cells both subjects scored —
             pairing removes cell difficulty rather than carrying it as noise. Holm corrects across
@@ -71,46 +58,75 @@ export function PairwisePanel({
   );
 }
 
-function Row({
-  row,
-  unit,
-  names,
-}: {
+interface PairRow {
   row: PairwiseComparison;
-  unit: MetricSpec["unit"];
-  names: ReadonlyMap<string, string>;
-}) {
+  // Null where the pair was not read; its sentence fills the lift column.
+  lift: MeasuredLift | null;
+  cells: number | null;
+}
+
+function pairRow(row: PairwiseComparison): PairRow {
   const read = readPaired(row.reading);
-  const pair = (
-    <td>
-      <code title={row.subject_a}>{names.get(row.subject_a) ?? shortId(row.subject_a)}</code> →{" "}
-      <code title={row.subject_b}>{names.get(row.subject_b) ?? shortId(row.subject_b)}</code>
-    </td>
-  );
-  if (!read.read) {
-    return (
-      <tr className="l4-row">
-        {pair}
-        <td className="l4-dim" colSpan={5}>
-          <PairedLift reading={row.reading} unread="sentence" />
-        </td>
-      </tr>
-    );
-  }
-  const { estimate, family } = read.lift;
-  return (
-    <tr className="l4-row">
-      {pair}
-      <td className={cx("l4-effect", sideTone(estimate.side))}>
-        <span className="l4-effect-mean">{fmtMetricValue(unit, estimate.value)}</span>
-        <span className="l4-effect-ci">
-          {fmtMetricInterval(unit, estimate.ci_lo, estimate.ci_hi)}
-        </span>
-      </td>
-      <td className="l4-num">{read.cells}</td>
-      <td className="l4-num">{fmtPValue(estimate.p_value)}</td>
-      <td className="l4-num">{fmtPValue(family?.p_adjusted ?? null)}</td>
-      <td className="l4-num">{estimate.p_floor.toPrecision(2)}</td>
-    </tr>
-  );
+  return read.read
+    ? { row, lift: read.lift, cells: read.cells }
+    : { row, lift: null, cells: null };
+}
+
+function pairColumns(
+  unit: MetricSpec["unit"],
+  names: ReadonlyMap<string, string>,
+): Column<PairRow>[] {
+  const subject = (key: string) => <code title={key}>{names.get(key) ?? shortId(key)}</code>;
+  const num = (
+    id: string,
+    label: string,
+    value: (lift: MeasuredLift) => string,
+  ): Column<PairRow> => ({
+    id,
+    label,
+    width: "12ch",
+    align: "end",
+    cell: ({ lift }) => <span className="l4-num">{lift ? value(lift) : PLACEHOLDER}</span>,
+  });
+  return [
+    {
+      id: "pair",
+      label: "pair",
+      width: "minmax(16ch, 1fr)",
+      cell: ({ row }) => (
+        <>
+          {subject(row.subject_a)} → {subject(row.subject_b)}
+        </>
+      ),
+    },
+    {
+      id: "lift",
+      label: "lift · 95% CI",
+      width: "minmax(20ch, 1.5fr)",
+      wrap: true,
+      cell: ({ row, lift }) =>
+        lift ? (
+          <span className={cx("l4-effect", sideTone(lift.estimate.side))}>
+            <span className="l4-effect-mean">{fmtUnit(unit, lift.estimate.value)}</span>
+            <span className="l4-effect-ci">
+              {fmtInterval(unit, lift.estimate.ci_lo, lift.estimate.ci_hi)}
+            </span>
+          </span>
+        ) : (
+          <span className="l4-dim">
+            <PairedLift reading={row.reading} unread="sentence" />
+          </span>
+        ),
+    },
+    {
+      id: "cells",
+      label: "cells",
+      width: "7ch",
+      align: "end",
+      cell: ({ cells }) => <span className="l4-num">{cells ?? PLACEHOLDER}</span>,
+    },
+    num("p", "p", (lift) => fmtPValue(lift.estimate.p_value)),
+    num("p-holm", "p (Holm)", (lift) => fmtPValue(lift.family?.p_adjusted ?? null)),
+    num("p-floor", "p floor", (lift) => lift.estimate.p_floor.toPrecision(2)),
+  ];
 }

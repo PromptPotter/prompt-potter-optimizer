@@ -28,9 +28,11 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.run_observers import check_every_record_reported
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
@@ -58,11 +60,12 @@ logger = logging.getLogger(__name__)
 async def _verify_connector_revision(
     client: BackendClient,
     connector: Connector,
-) -> None:
+) -> str | None:
+    """The revision the backend reported, which each launch records (`ResolvedRunRecord`)."""
     expected = connector.expected_revision
     check = connector.version_check
     if not expected or check is None:
-        return
+        return None
     try:
         actual = await check(client.http, client.base_url)
     except (httpx.HTTPError, ValueError) as exc:
@@ -72,21 +75,21 @@ async def _verify_connector_revision(
             exc,
             expected,
         )
-        return
+        return None
     if actual is None:
         logger.warning(
             "connector[%s]: backend did not report a revision — expected %s",
             connector.name,
             expected,
         )
-        return
-    if actual != expected:
+    elif actual != expected:
         logger.warning(
             "connector[%s]: backend revision drift — expected %s, got %s",
             connector.name,
             expected,
             actual,
         )
+    return actual
 
 
 def _warn_if_labels_have_no_ranker(
@@ -220,7 +223,9 @@ def complete_registries(*, every_treatment: bool = True) -> None:
         member.complete()
     # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
     for name in optimizers.MANIFESTS.table if every_treatment else ():
-        resolve_optimizer(name, {}, gate="off").treatment()
+        resolve_optimizer(name, {}, gate="off").treatment(
+            frozenset(Presumption), PackShelf(account=None)
+        )
     replayers()
     check_every_record_reported()
     for connector in connectors.CONNECTORS.table.values():
@@ -268,7 +273,7 @@ async def init_services(
         experiment=experiment,
     )
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
-    await _verify_connector_revision(client, connector)
+    backend_revision = await _verify_connector_revision(client, connector)
     bank, candidate_library = _session_bank(
         stores, dataset, connector=connector, experiment=experiment
     )
@@ -283,6 +288,7 @@ async def init_services(
         backend_client=client,
         pipeline_schema=pipeline_schema,
         pipeline_declaration=pipeline_declaration,
+        backend_revision=backend_revision,
         bank=bank,
         candidate_library=candidate_library,
         dataset_name=dataset_name,

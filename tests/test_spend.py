@@ -80,7 +80,9 @@ from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     admit_launch,
     clamp_budget_change,
+    cycle_share,
     hold_budget_change,
+    hold_moved,
     on_free_tier,
     paid_call,
     spends_the_hosts_own_key,
@@ -93,6 +95,7 @@ from promptpotter.application.jobs.registry import (
     JobRegistry,
 )
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -156,10 +159,12 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
+    ArmedCeilingEffect,
     BankedSubject,
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
+    CycleShareRecord,
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
@@ -291,13 +296,12 @@ def _held(
         hop=UNRESOLVED_HOP,
         holder=EmbeddedRun("ds1"),
     )
-    registry.mark_admitted(
-        job.job_id, Budget() if reserve is None else reserve, admitted.only(MONEY_AXES)
-    )
+    registry.mark_admitted(job.job_id, Budget() if reserve is None else reserve)
     return HeldBudget(
         admitted=admitted,
         standing=Budget() if standing is None else standing,
         job_id=job.job_id,
+        share=admitted.only(MONEY_AXES),
         step_rounds=step_rounds,
     )
 
@@ -305,7 +309,10 @@ def _held(
 def _armed(
     stores: Stores, hop: CycleHop | None, held: HeldBudget, registry: JobRegistry
 ) -> SpendBook:
-    """A run's book, live on its job and its cycle's standing record where it has one."""
+    """A run's book, live on its job and its cycle's records where it has one; its share lands
+    there first, as admission lands it, unless one already stands."""
+    if hop is not None and stores.campaigns.read_cycle_share(hop) is None:
+        hold_moved(stores, hop, held.share)
     return open_spend_book(
         held,
         stores=stores,
@@ -323,18 +330,23 @@ def _budgeted(budget: Budget) -> CampaignConfig:
     return config.model_copy(update={"optimization": optimization})
 
 
-def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> None:
+def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> Budget:
+    """The ceiling the change armed, as its ack's effect states it."""
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
-    campaign = minted_campaign(hop)
+    applier = change_run_limits(DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop))
 
     async def apply() -> None:
-        ran = change_run_limits(DispatchedToCycle(dispatcher, payload, campaign, hop)).run()
+        ran = applier.run()
         assert inspect.isawaitable(ran)
         await ran
 
     asyncio.run(apply())
+    assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
+    effect = applier.effect_fn()
+    assert isinstance(effect, ArmedCeilingEffect), f"a limits change acked {effect!r}"
+    return effect.armed
 
 
 # 1. What a call costs
@@ -900,12 +912,14 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert Budget(usd=1.0).only(MONEY_AXES).named == {"usd"}, "only() named an axis self did not"
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
     mode = RunMode(from_round=2, diag=True)
+    launched_config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
     launched = HeldRun(
         job_registry=spawned,
         job_id=held.job_id,
         session=loop_session(stores, pipeline_schema([]), [], hop=hop),
-        campaign_config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+        campaign_config=launched_config,
         budget=held,
+        optimizer=select_optimizer(launched_config.optimization),
     )
     spec = launched.job_spec(mode)
     book = _armed(stores, None, spec.budget, spawned)
@@ -1439,9 +1453,9 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     declared = _held(jobs, Budget())
 
     def declare(budget: Budget) -> None:
-        # Money binds on the cycle's share, held on its job; the rest on its own axes: both live.
+        # Money binds on the cycle's share, the rest on its own axes: both records, both live.
         campaigns.write_standing_budget(hop, budget.only(CYCLE_AXES), pause_at_round=None)
-        jobs.set_held(declared.job_id, Budget(), budget.only(MONEY_AXES))
+        hold_moved(built_stores, hop, budget.only(MONEY_AXES))
 
     CycleEventLog.open(CycleDir(cycle_dir)).append(billed_call(1.0, input_tokens=9_000))
     control = RunControl(book=_armed(built_stores, hop, declared, jobs))
@@ -1462,10 +1476,8 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         "a mid-run round cap reached no loop"
     )
     assert control.budget_tripped() is None, "a lifted ceiling still governed the run"
-    # Another PROCESS's reshare lands on the job file, behind this process's own write of it.
-    JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1).set_held(
-        declared.job_id, Budget(), Budget(usd=0.50)
-    )
+    # Another PROCESS's reshare lands on the cycle's ledger, behind this process's own write of it.
+    CycleEventLog.open(CycleDir(cycle_dir)).append(CycleShareRecord(allotment=Budget(usd=0.50)))
     assert control.budget_tripped() == StopReason.SPEND_BUDGET, (
         "a share another process moved was hidden from the running book"
     )
@@ -1490,20 +1502,22 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         holder=CampaignLaunch("ds1"),
         hop=moved,
     )
-    registry.mark_admitted(
-        job.job_id, Budget(usd=0.30, tokens=5_000_000), Budget(usd=0.30, tokens=210_000)
-    )
+    registry.mark_admitted(job.job_id, Budget(usd=0.30, tokens=5_000_000))
     caps = HeldBudget(
         admitted=Budget(usd=0.30, tokens=210_000),
         standing=Budget(),
         job_id=job.job_id,
+        share=Budget(usd=0.30, tokens=210_000),
         step_rounds=None,
     )
     moved_book = _armed(built_stores, moved, caps, registry)
     control = RunControl(book=moved_book)
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
     dispatcher = CommandDispatcher(built_stores, registry)
-    _change_run_limits(dispatcher, moved, Budget(usd=0.50))
+    armed = _change_run_limits(dispatcher, moved, Budget(usd=0.50))
+    assert armed.usd == pytest.approx(0.50), (
+        "the trace holds no ceiling a replay could stop the run at"
+    )
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, (
         "a USD raise lifted the token ceiling"
     )
@@ -1597,7 +1611,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     def share(held: HeldBudget) -> float | None:
         job = shared.get(held.job_id)
         assert job is not None
-        return job.allotment.usd
+        return cycle_share(built_stores, job).usd
 
     _, held_a = launch(fork_a, 0.5)
     assert share(held_a) == pytest.approx(0.25), (
@@ -1633,7 +1647,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         ) as (_, held):
             assert held.admitted.usd == pytest.approx(1.0)
             run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
-            assert run is not None and run.allotment.usd == pytest.approx(0.5), (
+            assert run is not None and cycle_share(built_stores, run).usd == pytest.approx(0.5), (
                 "an embedded run held no share, or another one"
             )
             assert fork_c not in {j.hop for j in shared.list_running()}, (
@@ -1661,8 +1675,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         "two live cycles were admitted more than their campaign's ceiling between them"
     )
     _change_run_limits(CommandDispatcher(built_stores, shared), pair[0], Budget(usd=3.0))
-    shares = {job.job_id: job.allotment.usd for job in shared.list_holding_spend()}
-    assert (book_a.allotment.usd, shares[job_a.job_id], shares[job_b6.job_id]) == (1.0, 1.0, 2.0), (
+    assert (book_a.allotment.usd, share(held_a), share(held_b6)) == (1.0, 1.0, 2.0), (
         "a raised ceiling handed one cycle what its sibling holds: the two may spend past it"
     )
     assert book_a.fits(eighth, eighth) == 8, "A's live book binds on another share than it holds"
@@ -1726,7 +1739,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         raiser.join(timeout=60)
         launcher.join(timeout=60)
     racing = [
-        job.allotment.usd or 0.0
+        cycle_share(built_stores, job).usd or 0.0
         for job in shared.list_holding_spend()
         if job.on_campaign(built_stores.campaigns.workspace, "camp-8")
     ]
@@ -1782,7 +1795,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         step_rounds=None,
     )
     claim_held = shared.get(claim.job_id)
-    assert claim_held is not None and claim_held.allotment.usd == pytest.approx(7.0), (
+    assert claim_held is not None and cycle_share(delegate, claim_held).usd == pytest.approx(7.0), (
         "a $2 delegate's share was cut from its account's claim, not the campaign's $7 left"
     )
     assert claim_held.reserve.usd == pytest.approx(2.0), "the delegate's claim did not bind it"
@@ -2466,9 +2479,9 @@ def _running(registry: JobRegistry, *, admitted: bool, reserve: Budget) -> None:
         holder=CampaignLaunch(dataset_name="d"),
         stage=RunPhase.RUNNING,
     )
-    registry.set_held(held.job_id, reserve, Budget())
+    registry.set_reserve(held.job_id, reserve)
     if admitted:
-        registry.mark_admitted(held.job_id, reserve, Budget())
+        registry.mark_admitted(held.job_id, reserve)
 
 
 async def _paid_door(door: str, stores: Any) -> None:
@@ -2669,7 +2682,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         (optimizer_on("high"), "low", ["llm_only"], 1),
     ):
         params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
-        off = free_tier.outside_free_tier(run, params, schema)
+        off = free_tier.outside_free_tier(run, select_optimizer(run.optimization), params, schema)
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)
@@ -2774,9 +2787,8 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         hop=hop,
     )
     assert job.holds_slot, "an empty box must hand out a slot, not a place in line"
-    registry.mark_admitted(
-        job.job_id, Budget(usd=0.30, tokens=5_000_000), Budget(usd=0.15, tokens=2_500_000)
-    )
+    registry.mark_admitted(job.job_id, Budget(usd=0.30, tokens=5_000_000))
+    hold_moved(metered, hop, Budget(usd=0.15, tokens=2_500_000))
     dispatcher = CommandDispatcher(metered, registry)
     _change_run_limits(dispatcher, hop, Budget(rounds=3))
     _change_run_limits(dispatcher, hop, Budget(tokens=1_000))
@@ -2785,7 +2797,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "the untouched USD reservation was released, or the token one did not move with its "
         "ceiling: as much again for the calls out"
     )
-    assert held.allotment == Budget(usd=0.15, tokens=1_000), (
+    assert cycle_share(metered, held) == Budget(usd=0.15, tokens=1_000), (
         "the moved token ceiling was not re-shared, or the untouched USD share moved with it"
     )
     standing = metered.campaigns.read_standing_budget(hop)
@@ -2797,14 +2809,18 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a money ceiling landed on one cycle, not the campaign every cycle shares"
     )
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
-    _change_run_limits(dispatcher, hop, Budget(usd=None))
+    armed = _change_run_limits(dispatcher, hop, Budget(usd=None))
+    assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
+        "the ack's ceiling is not what a stop fires at: the campaign's money and the cycle's own"
+    )
     lifted, held = metered.campaigns.load_campaign("camp-3"), registry.get(job.job_id)
     assert lifted is not None and lifted.standing_budget == Budget(usd=None, tokens=1_000), (
         "an uncapped campaign ceiling was stored as the account's headroom"
     )
-    assert held is not None and held.allotment.usd is None and held.reserve.usd is not None, (
-        "an uncap became a bounded share, or left the account nothing held back for the run"
+    assert held is not None and cycle_share(metered, held).usd is None, (
+        "an uncap became a bounded share"
     )
+    assert held.reserve.usd is not None, "an uncap left the account nothing held back for the run"
     granted = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     caps, _ = clamp_budget_change(
         requested=Budget(tokens=1_000),
@@ -2854,7 +2870,8 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         holder=CampaignLaunch("ds1"),
         hop=fork,
     )
-    registry.mark_admitted(job.job_id, Budget(usd=0.8), Budget(usd=0.8))
+    registry.mark_admitted(job.job_id, Budget(usd=0.8))
+    hold_moved(forker, fork, Budget(usd=0.8))
     allowance = User(
         user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01", spend_budget_usd_total=1.0
     )

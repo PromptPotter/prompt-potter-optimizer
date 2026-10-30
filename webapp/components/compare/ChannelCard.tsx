@@ -3,14 +3,15 @@
 import type { SubjectReading } from "@/lib/api";
 import { SUBJECT_KIND_LABELS } from "@/lib/api/types.generated";
 import type { CladogramChannel } from "@/components/candidates/Forest";
-import { useCompareSelection } from "@/lib/compare-selection";
+import { useCompareSelection } from "@/lib/state/compare-selection";
 import type { HierarchyCampaign } from "@/lib/api";
 import type { CompareItem } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { ChannelColumn, type ColumnPlace } from "./ChannelColumn";
 import { ChannelDetail } from "./ChannelDetail";
 import { CostFacts, HeadlineBadges, Metric, Swatch, benchLead } from "./channel-parts";
-import { useChannelModel, type ChannelModel, type MetricUnit } from "./useChannelModel";
+import type { MetricUnit } from "@/lib/format";
+import { useChannelModel, type ChannelModel } from "./useChannelModel";
 
 export function ChannelCard({
   item,

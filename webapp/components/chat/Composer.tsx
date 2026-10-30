@@ -33,16 +33,17 @@ export function Composer({
   return (
     <div
       className={cx("chat-input-row", dragging && "is-dragover")}
+      // A disabled attach refuses a drop too: the browser's own drop would open the file instead.
       onDragOver={(e) => {
         e.preventDefault();
-        setDragging(true);
+        setDragging(!attachDisabled);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
         const f = e.dataTransfer.files[0];
-        if (f) onFile(f);
+        if (f && !attachDisabled) onFile(f);
       }}
     >
       <input

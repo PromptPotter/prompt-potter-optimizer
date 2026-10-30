@@ -6,19 +6,30 @@ Any new endpoint is multi-tenant by default.
 
 ## Sequence
 
-**Arc order, auto-dev runs it top to bottom** (each arc closes on the operator's word):
+**Waves, auto-dev runs them top to bottom** (each arc its own branch, closed on the operator's word).
+Every wave pairs $0 code arcs (up to three agents at once) with paid runs supervised beside them, so
+neither waits on the other. A wave's paid runs need only what an earlier wave landed.
 
-1. **Reset and shrink.** Docs and rules cut to what governs: shallow modules, knowledge at the
-   caller, the deletion test, name what varies, test through the interface. Pytest consolidated;
-   the URGENT items of [`code-debt-cleanup.md`](code-debt-cleanup.md) closed. Every `CLAUDE.md` rule is in scope.
-2. **Recombination at $0** (C9, § Variation and pools): pools; recombination on a host; parent
-   choice and survival as members; `pair_guard` naming the swapped member; the three surfaces.
-3. **The optimizer climbs** (§ Optimizer tuning — the standing board):
-   - L1 quality: answer_format is never edited; a held leader is never re-scored; whole-reply counting.
-   - L4 validation (~$1).
-   - Early stop when C1.1 clearly beats C0.
-   - Δ per time, per candidate and per $, served in chat.
-   - Then recombination's paid comparability run.
+1. **Trust the instrument.** Code: crossover main/donor; per-account snippet packs; the check-in
+   address leftovers; then the inputs that change a run but leave no event, and the three probed
+   invariants ([`code-debt-cleanup.md`](code-debt-cleanup.md) § URGENT — shapes that hide the backbone
+   from a reshape). Paid: the CAPO head-to-head
+   on `hotpotqa-closedbook`, closing M13 (§ The bench (M13)); L4 validation (~$1).
+2. **Recombination at $0** (C9): the member backbone (code-debt § The member backbone). Paid: the
+   mode head-to-head (§ Variation and pools, item 1).
+3. **The optimizer climbs** (§ Optimizer tuning — the standing board): L1 quality (answer_format is
+   never edited, a held leader is never re-scored); early stop when C1.1 clearly beats C0; Δ per time,
+   per candidate and per $ served in chat. Paid: the board's path, steps (1)–(4).
+4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
+   partition; third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
+   the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
+5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A2 host
+   coupon + BYO keys; A3 anonymous preview.
+6. **Capability (Lane C), by dependency:** C2 composite fitness → C4 cross-user panel; C2b judged
+   scoring; C3 L4 closure; SIFT S1; the PUCT selector (§ Selector members — parent choice as one acquisition); C5, C6, C8, C10; C7 after v1.
+
+**Rides whenever it unblocks:** the webapp vanilla pass (code-debt § NEXT ARC), once the run-card
+session's files land; the operator's picked renames.
 
 Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
 the rest of Lane C.
@@ -37,16 +48,14 @@ the rest of Lane C.
 - **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
 - **C4** Cross-user measurement panel, after P3.
 - **C5** MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
-- **C6** Public-service hardening: Docker, metrics, app-level rate limit, billing; a bound on the NUMBER of accounts.
+- **C6** Public-service hardening: Docker, metrics, a rate on unpaid writes (reads are metered), billing; a bound on the NUMBER of accounts.
 - **C7** Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal; all but harnesses after v1.
 - **C8** Mask abstraction — the sample-set half (§ Lineage mask).
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
 **M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
-zero-signal-filter; competitor and L4 numbers after C3; **endpoint hardening P0** (auth dependency on
-every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll rate limit) before any
-non-localhost open. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
+zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
 ## The bench (M13)
 
@@ -71,7 +80,7 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
    the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
    re-ingested with a bench partition wider than 100 rows; an N-arm mint verb over
-   `application/jobs/mint.py::_join_head_to_head`; the h2h-3 re-run (§ Optimizer tuning) first.
+   `application/jobs/mint.py::_join_head_to_head`.
    Price it in dollars and wall clock before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
    budget-matched Pareto comparison reviewers ask for first.
@@ -142,11 +151,6 @@ misses; (2) screen library blocks without the optimizer — authored arms, origi
 
 **Defects** are [`code-debt-cleanup.md`](code-debt-cleanup.md) § Open — optimizer tuning.
 
-**Owed re-run** — the h2h-3 pair on `hotpotqa-closedbook`, the ruler fix's proof:
-`new hotpotqa-closedbook --arm hotpotqa-cb-h2h-4:levi --set optimizer=levi --set
-nodes.levi_refine.model=openai/gpt-oss-20b:nitro --set nodes.proxy_css.discovery=40 --set
-nodes.proxy_css.size=20 --max-rounds 30 --max-usd 0.2`, and the same `:potter --set optimizer=potter`.
-*Closes when* C0 reads near its ~21% on potter's round panels.
 
 ## Variation and pools
 
@@ -156,20 +160,13 @@ The contract is [`variation-and-pools.md`](variation-and-pools.md); why is
 `optimization.nodes`, a pool written by a file edit, or a credit model steering before a reading
 shows it informative.
 
-2. **Pools** — owed: the campaign's measured individuals as a pool. *Closes when* a manifest declares
-   it and a resumed run hands its reader the pool its banked round names.
-3. **Recombination on a host** (`l1_generate`, `l2_context`, an `algorithm` node). *Closes when* the
-   offline leg produces arms under each host from the same pools and a two-parent child carries both edges.
-4. **Parent choice and survival as members.** *Closes when* `capo` is re-expressed on them, offline leg unchanged.
-5. **The three surfaces**, the terminal's `--set` writing the same draft. *Closes when* the cold
-   browser walk switches a host, narrows a pool and reads both back, equal to the terminal's draft.
-6. **The mode head-to-head** (PAID), the host the only difference, matched on USD and cells.
-7. **L4 reach** — the mix as an outer-arm lever, on the inner cell's overlay and identity.
-8. **A pool fed while a campaign runs** — refused by a controlled arm, applied at the next round
+1. **The mode head-to-head** (PAID), the host the only difference, matched on USD and cells.
+2. **L4 reach** — the mix as an outer-arm lever, on the inner cell's overlay and identity.
+3. **A pool fed while a campaign runs** — refused by a controlled arm, applied at the next round
    boundary, replayed on resume.
-9. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
+4. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
 
-Stages 5, 7, 8 and 9 share no seam once 3 lands.
+Stages 2, 3 and 4 share no seam.
 
 ## Probe rounds
 

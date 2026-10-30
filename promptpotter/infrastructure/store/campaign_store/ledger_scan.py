@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast, get_args
@@ -25,6 +26,7 @@ from promptpotter.domain.phase_views import (
     VerifyGradedView,
 )
 from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
+from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.results import RoundCells
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
@@ -32,10 +34,12 @@ from promptpotter.domain.run_records import (
     ArmRecord,
     CommandAckRecord,
     CommandRecord,
+    ComparisonExit,
     CycleFinalRecord,
     CycleMintedRecord,
     CycleRecord,
     CycleSeedRecord,
+    CycleShareRecord,
     CycleSupersededRecord,
     ElectionRecord,
     ForkDirection,
@@ -45,6 +49,7 @@ from promptpotter.domain.run_records import (
     LaunchClaimRecord,
     LaunchClockRecord,
     LaunchReleasedRecord,
+    LeftComparisonRecord,
     PhaseRecord,
     PricedKeyRecord,
     RaceCatchUpRecord,
@@ -106,11 +111,14 @@ def _last(record: type[StrictModel]) -> type[_Last]:
     return type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
 
 
-class ResolvedRun(NamedTuple):
+@dataclass(frozen=True)
+class ResolvedRun:
     declaration: dict[str, Any] | None = None
     experiment: dict[str, Any] | None = None
     # The cycle whose ledger landed the roster that stands.
     experiment_cycle_id: str | None = None
+    model_capabilities: CapabilityMenu = field(default_factory=dict)
+    backend_revision: str | None = None
 
     def then(self, later: ResolvedRun) -> ResolvedRun:
         first = self if self.experiment else later
@@ -118,6 +126,8 @@ class ResolvedRun(NamedTuple):
             declaration=later.declaration or self.declaration,
             experiment=first.experiment,
             experiment_cycle_id=first.experiment_cycle_id,
+            model_capabilities=later.model_capabilities or self.model_capabilities,
+            backend_revision=later.backend_revision or self.backend_revision,
         )
 
 
@@ -128,10 +138,30 @@ class _ResolvedRun:
         self._found = ResolvedRun()
 
     def feed(self, record: ResolvedRunRecord) -> None:
-        self._found = self._found.then(ResolvedRun(record.declaration, record.experiment))
+        self._found = self._found.then(
+            ResolvedRun(
+                record.declaration,
+                record.experiment,
+                model_capabilities=record.model_capabilities,
+                backend_revision=record.backend_revision,
+            )
+        )
 
     def value(self) -> ResolvedRun:
         return self._found
+
+
+class _LeftComparison:
+    records: ClassVar[RecordClasses] = (LeftComparisonRecord,)
+
+    def __init__(self) -> None:
+        self._found: list[ComparisonExit] = []
+
+    def feed(self, record: LeftComparisonRecord) -> None:
+        self._found.append(record.act)
+
+    def value(self) -> list[ComparisonExit]:
+        return list(self._found)
 
 
 class _LaunchClocks:
@@ -833,6 +863,7 @@ LEDGER_FOLDS = (
         _last,
         (
             CycleSeedRecord,
+            CycleShareRecord,
             PartitionRecord,
             StandingBudgetRecord,
             RunPhaseRecord,
@@ -841,6 +872,7 @@ LEDGER_FOLDS = (
         ),
     ),
     _ResolvedRun,
+    _LeftComparison,
     _LaunchClocks,
     _CycleFacts,
     _Controls,
@@ -874,9 +906,18 @@ def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:
     for span in spans:
         own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_ResolvedRun, span.until)
         if own.experiment is not None:
-            own = own._replace(experiment_cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name)
+            own = replace(own, experiment_cycle_id=CycleLayout.of_ledger(span.path).cycle_dir.name)
         resolved = resolved.then(own)
     return resolved
+
+
+def scan_left_comparison(spans: Iterable[LedgerSpan]) -> list[ComparisonExit]:
+    """Every act that ran the line off its declared comparison, oldest first."""
+    return [
+        act
+        for span in spans
+        for act in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_LeftComparison, span.until)
+    ]
 
 
 def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
@@ -889,6 +930,11 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
 
 def scan_ledger_controls(ledger_path: Path) -> Controls:
     return _view(ledger_path, _Controls)
+
+
+def scan_cycle_share(ledger_path: Path) -> CycleShareRecord | None:
+    """The cycle's own share, never inherited: a fork's ledger alone."""
+    return scan_last([LedgerSpan(ledger_path)], CycleShareRecord)
 
 
 def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:

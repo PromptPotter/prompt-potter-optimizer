@@ -1,94 +1,22 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from pydantic import Field
 
-from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.datasets.loaders import resolve_bank
-from promptpotter.application.datasets.prompts import has_dataset_prompts
 from promptpotter.application.datasets.startability import dataset_reading, offered
-from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.pipeline_resolve import (
-    dataset_pipeline_declaration,
-    experiment_outside_run,
-    resolve_pipeline_config_params,
-)
-from promptpotter.application.runner.campaign_ids import origin_content_hash
-from promptpotter.domain.arms import PointContext
-from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import DatasetStartBlock
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetTier,
-    ResolvedDataset,
     list_readable_datasets,
     resolve_dataset,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import (
-    DatasetAccessError,
-    NotFoundError,
-    PayloadInvalidError,
-    StoredConfigInvalidError,
-)
+from promptpotter.shared.errors import DatasetAccessError
 
 logger = logging.getLogger(__name__)
-
-
-def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | None:
-    """Not ``resolve_pipeline_for_campaign``: a dataset with no campaign has no manifest to freeze."""
-    dataset_dir = dataset.directory
-    try:
-        experiment = experiment_outside_run(stores, dataset)
-        declared = dataset_pipeline_declaration(stores, dataset, experiment)
-        if declared is None:
-            return None
-        schema = parse_pipeline_response(declared)
-        cfg = load_dataset_campaign_config(dataset_dir)
-        active = schema.active_steps_excluding(cfg.exclude_nodes)
-        if not active:
-            return None
-        base_pp = resolve_pipeline_config_params(
-            active,
-            cfg.pipeline_overlay,
-            dataset,
-            schema,
-            judges=cfg.judges,
-            experiment=experiment,
-            stores=stores,
-            workspace=stores.base_dir,
-        )
-        opt_sp = resolve_origin_opt_search_point(
-            dataset_dir=dataset_dir,
-            pipeline_params=base_pp,
-            schema=schema,
-        )
-        bank = resolve_bank(stores, dataset)
-        if not bank.samples:
-            return None
-        partition = partition_bank(bank.samples, cfg.dataset_split, seed=cfg.run_seed)
-        points = PointContext(
-            schema=schema, framing=campaign_framing(stores, cfg, dataset), demo=partition.demo
-        )
-        return origin_content_hash(opt_sp, points, list(partition.search))
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        TypeError,
-        json.JSONDecodeError,
-        StoredConfigInvalidError,
-        NotFoundError,
-        PayloadInvalidError,
-    ):
-        # A SURVEY: an unreadable neighbour drops itself, never the list. Direct reads still raise.
-        logger.exception("origins: prospective origin id failed for %s", dataset.name)
-        return None
 
 
 class DatasetIndexEntry(StrictModel):
@@ -140,27 +68,20 @@ def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
 
 
 class OriginEntry(StrictModel):
-    origin_id: str = Field(
-        description="Origin content identity — a campaign's root_content_hash (or the "
-        "dataset's prospective origin hash for a prepared origin)"
-    )
+    """A MINTED origin, its id the mint's hash; a dataset no campaign ran is a `DatasetIndexEntry`."""
+
+    origin_id: str = Field(description="Origin content identity — its campaigns' root_content_hash")
     dataset_name: str = Field(description="Dataset this origin starts from")
     label: str = Field(default="", description="Operator-supplied label, if any")
     n_samples: int | None = Field(
         default=None, description="Dataset sample count; ``null`` if unmaterialized"
     )
-    n_campaigns: int = Field(
-        default=0,
-        description="Active campaigns minted from this origin (0 = prepared, not yet run)",
-    )
+    n_campaigns: int = Field(description="Active campaigns minted from this origin")
     origin_accuracy: float | None = Field(
         default=None,
         description="The origin's C0 score, as the root cycle's standing round 0 closed",
     )
-    prepared: bool = Field(
-        default=False, description="True = a ready dataset config with no campaign yet"
-    )
-    created_at: str = Field(default="", description="ISO 8601 — earliest campaign on this origin")
+    created_at: str = Field(description="ISO 8601 — earliest campaign on this origin")
 
 
 def _campaigns_by_origin(stores: Stores) -> dict[str, list[Campaign]]:
@@ -176,12 +97,15 @@ def _canonical(group: list[Campaign]) -> Campaign:
 
 
 def canonical_origin_campaign(stores: Stores, origin_id: str) -> Campaign | None:
-    """``None`` for a *prepared* origin, which has no campaign yet."""
     group = _campaigns_by_origin(stores).get(origin_id)
     return _canonical(group) if group else None
 
 
-def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -> list[OriginEntry]:
+def list_origins(stores: Stores) -> list[OriginEntry]:
+    n_samples = {
+        r.dataset.name: dataset_reading(stores, r.dataset.name).n_held
+        for r in list_readable_datasets(stores)
+    }
     out: list[OriginEntry] = []
     for origin_id, group in _campaigns_by_origin(stores).items():
         canonical = _canonical(group)
@@ -214,30 +138,3 @@ def _campaign_backed_origins(stores: Stores, n_samples: dict[str, int | None]) -
             )
         )
     return sorted(out, key=lambda o: o.created_at, reverse=True)
-
-
-def list_origins(stores: Stores) -> list[OriginEntry]:
-    datasets = list_readable_datasets(stores)
-    n_held = {r.dataset.name: dataset_reading(stores, r.dataset.name).n_held for r in datasets}
-    campaign_backed = _campaign_backed_origins(stores, n_held)
-    taken = {o.origin_id for o in campaign_backed}
-    prepared: list[OriginEntry] = []
-    for ref in datasets:
-        dataset = ref.dataset
-        if dataset.tier != "yours" or not n_held[dataset.name]:
-            continue
-        if not has_dataset_prompts(dataset.directory):
-            continue
-        origin_id = prospective_origin_id(stores, dataset)
-        if origin_id is None or origin_id in taken:
-            continue
-        prepared.append(
-            OriginEntry(
-                origin_id=origin_id,
-                dataset_name=dataset.name,
-                label=ref.title or "",
-                n_samples=n_held[dataset.name],
-                prepared=True,
-            )
-        )
-    return [*prepared, *campaign_backed]

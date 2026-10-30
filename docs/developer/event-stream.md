@@ -75,5 +75,5 @@ A client applies the leading `stream_snapshot`, then requires each subsequent `s
 one past the last; any other value is a gap and the recovery is to close and re-subscribe for a fresh
 snapshot. Clients **MUST NOT** assume a mutation succeeded before the corresponding `command_ack` frame
 arrives — a Profile B contract enforced from this stream. The webapp's implementation is
-`webapp/lib/chat/useCycleEvents.ts`; smoke-test with
+`webapp/lib/hooks/useCycleEvents.ts`; smoke-test with
 `curl -N http://localhost:8001/api/v1/campaigns/{cid}/cycles/{cyid}/events:subscribe`.

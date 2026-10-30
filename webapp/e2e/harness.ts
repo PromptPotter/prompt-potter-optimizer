@@ -6,13 +6,11 @@ import {
   STOP_REASON_OUTCOMES,
   type CommandKind,
   type CommandPayloads,
-  type DraftListResponse,
   type HierarchyResponse,
   type ServedRound,
 } from "@/lib/api/types.generated";
-import { tagValue } from "@/lib/derivations";
+import { isStopReason, tagValue } from "@/lib/derivations";
 import { decodeCyclePath } from "@/lib/ids";
-import { isStopReason } from "@/lib/run-phase";
 
 const API = "/api/v1";
 
@@ -25,6 +23,8 @@ const EXPECTED_4XX: [RegExp, number][] = [
   [/\/evidence\b/, 400],
   // A campaign with no completed round 404s round 0; its audit twin answers `200 null`, so a 4xx on `/audit` is reported.
   [/\/rounds\/\d+(\?|$)/, 404],
+  // The throwaway world holds no provider key, so a check-in's resolver turn is refused `provider_unkeyed`.
+  [/\/commands\/resolve-origin\b/, 409],
 ];
 
 type Problem = { kind: string; text: string };
@@ -143,7 +143,7 @@ export async function campaigns(
   expect(res.ok(), `GET ${API}/hierarchy → ${res.status()}`).toBeTruthy();
   const { entries } = (await res.json()) as HierarchyResponse;
   return entries.flatMap((c) => {
-    const root = decodeCyclePath(c.facts.root)?.[0];
+    const root = c.level === "campaign" ? decodeCyclePath(c.facts.root)?.[0] : undefined;
     if (!root) return [];
     // The `cycle_` prefix is stripped in the address and nowhere else (`lib/address.ts`).
     return [
@@ -160,10 +160,10 @@ export async function campaigns(
 export type Draft = { draftId: string; slug: string };
 
 export async function drafts(request: APIRequestContext): Promise<Draft[]> {
-  const res = await request.get(`${API}/drafts`);
-  expect(res.ok(), `GET ${API}/drafts → ${res.status()}`).toBeTruthy();
-  const { drafts: rows } = (await res.json()) as DraftListResponse;
-  return rows.map((d) => ({ draftId: d.draft_id, slug: d.slug }));
+  const res = await request.get(`${API}/hierarchy?depth=0&lifecycle=unstarted`);
+  expect(res.ok(), `GET ${API}/hierarchy → ${res.status()}`).toBeTruthy();
+  const { entries } = (await res.json()) as HierarchyResponse;
+  return entries.map((d) => ({ draftId: d.address, slug: d.label }));
 }
 
 /** Never the newest campaign: it is often a cycle with no round yet, whose empty panes pass whatever the chart code does. */

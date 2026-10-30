@@ -52,8 +52,9 @@ class RandomDraw(nodes.Sampler):
     sees = frozenset({Replay})
     size_knob: ClassVar[str | None] = "size"
 
-    def round_cells(self, knobs: DrawKnobs, search: int) -> int:
-        return min(knobs.size, search)
+    def drawn(self, knobs: DrawKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+        cells = min(knobs.size, search)
+        return nodes.PanelSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         cells = ctx.read(Replay).rng().sample(pool, min(ctx.knobs(DrawKnobs).size, len(pool)))
@@ -70,7 +71,7 @@ class Propose(nodes.Proposer):
     name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     sees = frozenset({Calls, Children, Lineage, Target})
@@ -104,12 +105,20 @@ class Keep(nodes.Selector):
     ) -> list[Sample]:
         return panel.cells
 
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.cells
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         folds = measured.folds
-        fitness = {key: folds[key].composite_fitness or 0.0 for key in measured.electable}
-        ranked = sorted(measured.electable, key=lambda key: -fitness[key])
-        bar = folds[measured.parent.key].composite_fitness or 0.0
-        selected = ranked[0] if ranked and fitness[ranked[0]] > bar else None
+        # An arm with no composite is unread, never ranked; a parent with none sets no bar.
+        fitness = {
+            key: value
+            for key in measured.electable
+            if (value := folds[key].composite_fitness) is not None
+        }
+        ranked = sorted(fitness, key=lambda key: -fitness[key])
+        bar = folds[measured.parent.key].composite_fitness
+        selected = ranked[0] if ranked and (bar is None or fitness[ranked[0]] > bar) else None
         ctx.read(Replay).decide(
             "example_kept", {"round_num": ctx.round_num, "ranked": ranked}, selected or ""
         )
@@ -117,7 +126,7 @@ class Keep(nodes.Selector):
             selected=selected,
             leading=ranked[0] if ranked else None,
             verdict_reason=f"kept {selected[:8] if selected else 'the parent'}",
-            population=list(ctx.read(Lineage).population),
+            ranked=list(ctx.read(Lineage).population),
         )
 
 

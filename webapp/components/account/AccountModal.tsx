@@ -3,13 +3,12 @@
 
 import { useEffect, useRef } from "react";
 import { AboutUnit } from "./AboutUnit";
-import { AccountFailure, AccountLoading } from "./AccountSection";
 import { AccountProfileTab } from "./AccountProfileTab";
 import { AccountUsageTab } from "./AccountUsageTab";
 import { AccountActivityTab } from "./AccountActivityTab";
 import { AccountPreferencesTab } from "./AccountPreferencesTab";
 import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
-import { Button, Dialog, IconClose } from "@/components/ui";
+import { Button, Dialog, IconClose, ReadState } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { meRead } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
@@ -84,13 +83,9 @@ export function AccountModal() {
           </header>
           <div className="account-pane-body">
             {tab === "profile" ? (
-              profile.status === "failed" ? (
-                <AccountFailure message={profile.failure.message} subject="your profile" />
-              ) : me ? (
-                <AccountProfileTab me={me} />
-              ) : (
-                <AccountLoading subject="your profile" />
-              )
+              <ReadState read={profile} subject="your profile">
+                {(data) => <AccountProfileTab me={data} />}
+              </ReadState>
             ) : null}
             {tab === "usage" ? <AccountUsageTab /> : null}
             {tab === "activity" ? <AccountActivityTab /> : null}

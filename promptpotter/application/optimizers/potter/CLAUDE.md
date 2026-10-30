@@ -34,7 +34,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 **L2 fires on L1 stall, yield drought or evidence starvation; the rule set in `escalation/rules.py` is the policy.** A fact about one node lives on its member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
 
 - **Deterministic rules route; they never diagnose or stop.** L2 judges recoverability, and `terminate_proposal` is its exit for a backend fault.
-- **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params`. Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
+- **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params` — **and, as the recombination host, `recombinations`** (`L2Memory.recombinations`, ids and loci only, which the next round's `l1_generate` adds). Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
 - **No layer writes `task_context`** — no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
 
 ## L3 — what `l3_plan` may write
@@ -56,7 +56,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## Editing a renderer's PROSE is a measurement change
 
-**`nodes.py::source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data (`nodes.py::Initializer.starting_content`).
+**`nodes.py::source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data, only the entries its `active` keeps of what the campaign admits (`nodes.py::Initializer.starting_content`, `nodes.py::admits`).
 **A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else**, and its module is in the hashed set or carries `shared/hashing.py::shapes_optimizer_prompt`.
 
 ## A validator either REJECTS or SCORES — never both

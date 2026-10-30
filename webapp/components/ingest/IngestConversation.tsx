@@ -1,20 +1,18 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type {
-  Budget,
-  DatasetIndexEntry,
-  DraftSummary,
-  OriginEntry,
-  StartCheckinOptions,
-} from "@/lib/api";
+import type { Budget, StartCheckinOptions } from "@/lib/api";
+import { ELAPSED_TICK_MS } from "@/lib/cadence";
 import { budgetAxis } from "@/lib/derivations";
+import { useCollection } from "@/lib/hooks/useCollection";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
+import { useRegistry } from "@/lib/state/registry";
 import type { BlockItem } from "@/lib/chat/thread";
 import { useIngest } from "@/lib/ingest-flow";
 import { Composer } from "@/components/chat/Composer";
 import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
+import { FailureLine } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { ORIGIN_KEY } from "@/lib/origin-readiness";
 import { DatasetPreview } from "./DatasetPreview";
@@ -36,7 +34,7 @@ import { DatasetPickList } from "./DatasetPickList";
 function CheckinLoadingWindow({ model }: { model: string }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setSecs((s) => s + 1), 1000);
+    const id = setInterval(() => setSecs((s) => s + 1), ELAPSED_TICK_MS);
     return () => clearInterval(id);
   }, []);
   return (
@@ -52,19 +50,23 @@ function CheckinLoadingWindow({ model }: { model: string }) {
 
 function EntryList({
   flow,
-  drafts,
-  origins,
-  datasets,
+  onReopenDraft,
   open,
 }: {
   flow: IngestFlow;
-  drafts: DraftSummary[];
-  origins: OriginEntry[];
-  datasets: DatasetIndexEntry[];
+  onReopenDraft: (draftId: string) => void;
   // React writes `open` only when the PROP changes, so a poll tick leaves a hand-opened list alone.
   open: boolean;
 }) {
   const follow = useThreadFollow();
+  const drafts = useRegistry().unstarted;
+  // Read only while the list is on screen: a run viewed never waits on, or polls, either.
+  const collection = useCollection();
+  if (collection.kind === "needsAuth") return null;
+  const counts =
+    collection.kind === "ready"
+      ? `${collection.origins.length} origins · ${collection.entries.length} datasets`
+      : "origins and datasets";
   return (
     <details
       open={open}
@@ -75,14 +77,13 @@ function EntryList({
       <summary>
         Start a campaign —{" "}
         {drafts.length > 0 ? `${drafts.length} open check-ins · ` : ""}
-        {origins.length} origins · {datasets.length} datasets
+        {counts}
       </summary>
       <DatasetPickList
         drafts={drafts}
-        origins={origins}
-        datasets={datasets}
-        onReopenDraft={flow.reopenDraft}
-        onDiscardDraft={flow.discardDraft}
+        collection={collection}
+        onReopenDraft={onReopenDraft}
+        onDiscarded={flow.discarded}
         onOpenOrigin={flow.openOrigin}
         onPick={flow.pickDataset}
         busy={flow.busy}
@@ -104,7 +105,8 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
       {phase.stage === "collision" ? (
         <CollisionCard flow={flow} existingSlug={phase.existingSlug} suggestedSlug={phase.suggestedSlug} />
       ) : null}
-      {phase.stage === "ready" ? <ReadyBlock flow={flow} /> : null}
+      {/* Review prints its refusal beside Start; every other stage prints it here. */}
+      {phase.stage === "ready" ? <ReadyBlock flow={flow} /> : <FailureLine failure={flow.failure} />}
 
       {flow.awaitingContext ? (
         <div role="note">
@@ -113,9 +115,9 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
             cases the model must respect — a few sentences is plenty.
           </p>
           {!flow.inputText.trim() ? (
-            <p className="new-campaign-error" role="alert">
-              Context can’t be empty — the check-in needs it to set things up.
-            </p>
+            <FailureLine
+              failure={{ message: "Context can’t be empty — the check-in needs it to set things up." }}
+            />
           ) : null}
         </div>
       ) : null}
@@ -123,23 +125,16 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
   );
 }
 
+// The check-in's own blocks; the pane mounts them only while a check-in is the subject.
 export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail: BlockItem[] } {
-  const { flow, collection } = useIngest();
+  const { flow, openDraft } = useIngest();
   const head: BlockItem[] =
-    flow.phase.stage === "idle" && collection.kind === "ready"
+    flow.phase.stage === "idle"
       ? [
           {
             id: "ingest-entry",
             kind: "block",
-            node: (
-              <EntryList
-                flow={flow}
-                drafts={collection.drafts}
-                origins={collection.origins}
-                datasets={collection.entries}
-                open={threadEmpty}
-              />
-            ),
+            node: <EntryList flow={flow} onReopenDraft={openDraft} open={threadEmpty} />,
           },
         ]
       : [];
@@ -149,16 +144,18 @@ export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail:
   return { head, tail };
 }
 
+// Off a check-in it takes only a file, which opens a fresh one: a run's chat never answers a check-in.
 export function IngestComposer() {
-  const { flow } = useIngest();
+  const { flow, subject } = useIngest();
+  const asking = subject !== null && flow.awaitingContext;
   return (
     <Composer
-      value={flow.inputText}
+      value={asking ? flow.inputText : ""}
       onChange={flow.setInputText}
       onSubmit={flow.submitContext}
-      canSend={flow.awaitingContext}
-      placeholder={flow.awaitingContext ? "Describe the task…" : "Drop a dataset file…"}
-      onFile={flow.onDatasetFile}
+      canSend={asking}
+      placeholder={asking ? "Describe the task…" : "Drop a dataset file…"}
+      onFile={flow.attachFile}
       accept=".csv,.tsv,.tab,.txt,.json,.jsonl,.ndjson,.xlsx,.xlsm,.xls,.ods,text/csv,application/json"
       attachLabel="Attach a dataset file"
       attachDisabled={flow.busy}
@@ -201,10 +198,10 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   }
   // Start sits right below the refusal, so scrolling to it shows both.
   const startRef = useRef<HTMLButtonElement>(null);
-  const problem = flow.phase.stage === "ready" ? flow.phase.problem : null;
+  const failure = flow.failure;
   useEffect(() => {
-    if (problem) startRef.current?.scrollIntoView({ block: "nearest" });
-  }, [problem]);
+    if (failure) startRef.current?.scrollIntoView({ block: "nearest" });
+  }, [failure]);
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, raised, degradedCause } = flow.phase;
   // `blocked` mirrors the server gate alone — never AND in `gaps.length`.
@@ -241,6 +238,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           onApply={flow.applyPatch}
         />
       ) : null}
+
+      {/* The backbone leads, open: its knobs and prompts frame every step after it. */}
+      <SetupStep title="Optimizer" answer={draft.optimization_overrides.optimizer} open>
+        <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
+      </SetupStep>
 
       <SetupStep
         title="Data"
@@ -282,10 +284,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </PipelineSetupSection>
       </SetupStep>
 
-      <SetupStep title="Optimizer" answer={draft.optimization_overrides.optimizer} open={false}>
-        <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
-      </SetupStep>
-
       <SetupStep title="Run bounds" answer={boundsLabel(launch, draft.optimization_overrides.budget)} open={gapped.has("run")}>
         {steps.run ? (
           <SchemaFields schema={steps.run} values={{ ...draft, ...launch }} onCommit={commit} />
@@ -306,11 +304,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </ul>
       ) : null}
 
-      {problem ? (
-        <p className="new-campaign-error" role="alert">
-          {problem}
-        </p>
-      ) : null}
+      <FailureLine failure={failure} />
 
       {/* `saving` never disables Start: that would eat the tap whose blur committed the field. */}
       <button

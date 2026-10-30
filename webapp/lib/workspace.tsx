@@ -33,9 +33,10 @@ import {
   type CampaignTab,
   type Tab,
 } from "./view-tab";
+import { GONE_NOTICE_MS } from "./cadence";
 import { hasTag, tagValue } from "./derivations/hierarchy";
-import { useActivePointer, useEntry, useRegistry } from "./registry";
-import { useViewMemory } from "./view-memory";
+import { useActivePointer, useEntry, useRegistry } from "./state/registry";
+import { useViewMemory } from "./state/view-memory";
 
 interface NavigateOptions {
   candidate?: string | null;
@@ -44,8 +45,16 @@ interface NavigateOptions {
   view?: Tab;
 }
 
+// An unstarted campaign viewed: its check-in, by draft id; null is a fresh one not yet minted.
+export interface ViewedCheckin {
+  draftId: string | null;
+}
+
 interface WorkspaceState {
+  // Null while a check-in is viewed: an unstarted campaign has no cycle, so nothing of a run shows.
   viewedPath: CyclePath | null;
+  checkin: ViewedCheckin | null;
+  openCheckin: (draftId: string | null) => void;
   cycleId: string | null;
   campaignId: string | null;
   leafCampaignId: string | null;
@@ -110,8 +119,6 @@ function urlAddress(): Address | null {
   return parseAddress(window.location.hash);
 }
 
-const GONE_NOTICE_MS = 8000;
-
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [pinnedPath, setPinnedPath] = useState<CyclePath | null>(null);
   // Every write below sets it with `pinnedPath`, so a candidate never outlives its course.
@@ -131,6 +138,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [listScreen, setListScreen] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [goneAddress, setGoneAddress] = useState<string | null>(null);
+  const [checkin, setCheckin] = useState<ViewedCheckin | null>(null);
 
   const { byAddress } = useRegistry();
   const active = useActivePointer();
@@ -143,6 +151,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
     setAccountPane(null);
+    if (a.kind === "checkin") {
+      setCheckin({ draftId: a.draftId });
+      setFollowing(false);
+      setPinnedPath(null);
+      setViewedCandidateId(null);
+      setMoment(null);
+      setCellState(null);
+      setTab(DEFAULT_TAB);
+      return;
+    }
+    setCheckin(null);
     setTab(a.tab);
     setCellState(a.cell ? { cell: a.cell, owner: null } : null);
     if (a.kind === "follow") {
@@ -195,12 +214,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Memoized: consumers key reads and chart `options` on its identity.
   const viewedPath: CyclePath | null = useMemo(
     () =>
-      following
-        ? active.campaignId && active.cycleId
-          ? [{ campaignId: active.campaignId, cycleId: active.cycleId }]
-          : null
-        : pinnedPath,
-    [following, active.campaignId, active.cycleId, pinnedPath],
+      checkin !== null
+        ? null
+        : following
+          ? active.campaignId && active.cycleId
+            ? [{ campaignId: active.campaignId, cycleId: active.cycleId }]
+            : null
+          : pinnedPath,
+    [checkin, following, active.campaignId, active.cycleId, pinnedPath],
   );
 
   const rootHop = viewedPath ? pathRoot(viewedPath) : null;
@@ -220,7 +241,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const want = formatAddress(
       accountPane != null
         ? { kind: "account", pane: accountPane }
-        : following || !pinnedPath
+        : checkin !== null
+          ? { kind: "checkin", draftId: checkin.draftId }
+          : following || !pinnedPath
           ? { kind: "follow", tab, cell: openCell }
           : {
               kind: "cycle",
@@ -240,7 +263,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       "",
       bare ? window.location.pathname + window.location.search : want,
     );
-  }, [initialized, following, pinnedPath, viewedCandidateId, tab, at, openCell, accountPane]);
+  }, [
+    initialized,
+    checkin,
+    following,
+    pinnedPath,
+    viewedCandidateId,
+    tab,
+    at,
+    openCell,
+    accountPane,
+  ]);
 
   useEffect(() => {
     if (!campaignId || !viewedAddress) return;
@@ -297,6 +330,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!path[0]) return;
       const [to, candidate] =
         opts.resume && !opts.candidate ? resumed(path) : [path, opts.candidate ?? null];
+      setCheckin(null);
       setFollowing(false);
       setPinnedPath(to);
       setViewedCandidateId(candidate);
@@ -324,12 +358,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const followActive = useCallback(
     (view?: Tab) => {
+      setCheckin(null);
       setFollowing(true);
       setPinnedPath(null);
       setViewedCandidateId(null);
       setMoment(null);
       setCellState(null);
       if (view) openView(view);
+    },
+    [openView],
+  );
+
+  // The check-in IS the conversation: its chat, never a run's beside it.
+  const openCheckin = useCallback(
+    (draftId: string | null) => {
+      setCheckin((prev) => (prev?.draftId === draftId ? prev : { draftId }));
+      setFollowing(false);
+      setPinnedPath(null);
+      setViewedCandidateId(null);
+      setMoment(null);
+      setCellState(null);
+      openView(DEFAULT_TAB);
     },
     [openView],
   );
@@ -384,6 +433,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<WorkspaceState>(
     () => ({
       viewedPath,
+      checkin,
+      openCheckin,
       cycleId,
       campaignId,
       leafCampaignId,
@@ -413,6 +464,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }),
     [
       viewedPath,
+      checkin,
+      openCheckin,
       cycleId,
       campaignId,
       leafCampaignId,

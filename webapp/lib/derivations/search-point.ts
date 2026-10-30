@@ -9,7 +9,7 @@ import type {
   RunStanding,
 } from "@/lib/api/types";
 import type { ArmRow, RoundView, SelectedCandidate } from "@/lib/types";
-import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
+import { armSearchpoint, type ArmSearchpoint } from "./candidate-search-point";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
 

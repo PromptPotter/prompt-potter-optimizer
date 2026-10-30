@@ -12,19 +12,20 @@ import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
 import type { NodePrompt, ParamIntent } from "@/lib/api/types";
 import { useRound } from "@/lib/hooks/useRound";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/state/auth";
 import { encodeCyclePath, pathRoot, type CyclePath } from "@/lib/ids";
 import { useDashboardAt } from "@/lib/poll";
-import { useEntry } from "@/lib/registry";
-import { phaseWalks } from "@/lib/run-phase";
+import { useEntry } from "@/lib/state/registry";
 import {
   candidateSearchPoint,
+  phaseWalks,
   liveCandidateSearchPoint,
   permittedModels as permittedModelsOf,
   searchPoint,
 } from "@/lib/derivations";
 import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
+import { FailureLine } from "@/components/ui";
 import { LimitReconcile } from "./LimitReconcile";
 
 export function SteerForkPanel({
@@ -166,9 +167,7 @@ export function SteerForkPanel({
 
       <LimitReconcile path={path} onChange={(l) => (limits.current = l)} />
 
-      {cmd.failure && (
-        <span className="steer-fork-err" role="alert">fork: {cmd.failure.message}</span>
-      )}
+      <FailureLine failure={cmd.failure} lead="fork:" />
 
       <div className="steer-fork-actions">
         <button type="button" className="steer-fork-cancel" onClick={onCancel} disabled={pending}>

@@ -18,6 +18,12 @@ available_models:
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
+# The knobs a setup screen leads with, in order; presentation alone, outside the treatment.
+main:
+  - blocks.block_size
+  - mating.offspring
+  - paired_t.alpha
+  - capo_init.length_penalty
 nodes:
   # Run init's: the demo rows `capo_init` and `few_shot` draw shots from, the whole partition.
   demo_pool:
@@ -30,16 +36,22 @@ nodes:
     config:
       block_size: 30
       max_blocks: 10
-  # c = 4 crossovers per round (App. C.4), each one's two parents drawn at random (§4).
+  # c = 4 crossovers per round (App. C.4), each one's two parents drawn at random (§4) from the
+  # population: a tournament of 1 draws by no score. The paper's merge is symmetric, so which one
+  # is main is only the order `capo_crossover` names them in.
   mating:
     type: algorithm
+    makes: crossovers
     config:
       offspring: 4
+      donor_from: population
+      tournament: 1
   # The paper runs one model as optimizer and target (§5); set `config.model` to the target's to
   # match it. The paper states no decoding temperature; 1.0 is the vLLM sampling default it ran
   # under (App. C.1).
   capo_crossover:
     type: llm
+    makes: merged prompts
     config:
       prompt_family: capo_crossover
       prompt_version: 1
@@ -54,9 +66,11 @@ nodes:
   # A child's shots are a sample of its parents' union, as many as their mean count (§4).
   shot_crossover:
     type: algorithm
+    makes: mixed examples
     config: {}
   capo_mutate:
     type: llm
+    makes: mutations
     config:
       prompt_family: capo_mutate
       prompt_version: 1
@@ -70,11 +84,13 @@ nodes:
   # k_max = 5 (App. C.4); the shot mutation adds, drops or keeps one shot, then shuffles (§4).
   few_shot:
     type: algorithm
+    makes: example tweaks
     config:
       k_max: 5
   # The race runs over the population and its offspring together (Alg. 1 line 12).
   population_rejoin:
     type: algorithm
+    makes: the standing population
     config: {}
   # α = 0.2 (App. C.4); a paired t-test, uncorrected (§4).
   paired_t:
@@ -84,9 +100,13 @@ nodes:
   score:
     type: measurement
     config: {}
-  # μ = 10 (App. C.4): the population kept, and the arms the `paired_t` race keeps.
+  # The race's survivors ranked on CAPO's objective (§4), best first.
   population:
     type: selector
+    config: {}
+  # μ = 10 (App. C.4): the population kept, and the arms the `paired_t` race keeps.
+  survival:
+    type: algorithm
     config:
       size: 10
   # The initial instructions (App. D.2, Table 7), generated once from the task description: μ of
@@ -121,6 +141,7 @@ pipelines:
     - paired_t
     - score
     - population
+    - survival
   initial_population:
     - capo_init
 # Alg. 1 races the initial population together with the first offspring (lines 3-12): round 1

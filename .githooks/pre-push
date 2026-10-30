@@ -1,0 +1,8 @@
+#!/bin/sh
+# Block a push whose tip would fail CI: `scripts/gate.py --push` reads the refs git hands on
+# stdin and runs every check CI runs in a clean checkout of each pushed tip, whatever the
+# working tree holds. A check whose inputs already ran green is a stamp read.
+#
+# Enabled with pre-commit, by `git config core.hooksPath .githooks`.
+
+exec python scripts/gate.py --push

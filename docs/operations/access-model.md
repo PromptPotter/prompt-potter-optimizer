@@ -86,6 +86,13 @@ second `build_stores` under another identity crosses freely — the two delibera
 shell. **Through the served API the isolation holds absolutely** (`deps.py::resolve_identity` builds
 only from the session); the shell is the boundary § loop ↔ everything concedes.
 
+**A block pack is the install's or one account's, and only an account's is written.** The install's
+(`config/paths.py::block_packs_root`) is read-only to every account, beside which each reads its own
+under its tenant (`Stores.block_packs`, a `config/prompt_blocks.py::PackShelf`); a name both hold is
+refused, never shadowed. `bank-snippet` writes the account's own pack alone, at the
+`campaign.create` rung, so an anonymous caller (401) and a blocked one (404) write nothing, and a
+`packs` knob resolves in its run's account, so naming `account` draws the run's own.
+
 **Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it
 exists and is the caller's, else `NotFoundError` — missing and cross-owner collapse to one 404.
 **One deliberate exception:** `routers/origins.py` is tenant-scoped, not owner-scoped, because a
@@ -134,6 +141,10 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   issuer vouched for it (`identity/verifier.py` requires `email_verified`; `identity/github.py` reads
   the verified list only). Missing session → 401 at `deps.py::resolve_identity`. The session cookie
   is httponly / secure / samesite=lax, opaque — no JWT past the middleware.
+- **Every router is mounted behind its gate** (`main.py::API_ROUTERS`), so a route added under one
+  inherits it. **Public is declared there, by `None`:** `/health` and the sign-in flow
+  (`auth.py::auth_flow_router`). Outside `/api/v1` only the static webapp and `/docs` +
+  `/openapi.json` answer a stranger, the latter the contract the repo already publishes.
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
   the lifetime ceilings `Settings.FREE_TIER_SPEND_CAP_USD` and `FREE_TIER_TOKEN_CAP`, composed at
   `quota.py::admit_launch`. **Both units, because the USD one can go blind** on an unpriced call
@@ -156,6 +167,8 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   alone, outside every tenant.
 - **Blocklist edits never have an inbound door** — the on-box, outbound-only bot
   ([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)).
+- **CORS answers `Settings.ALLOWED_ORIGINS` alone**, exact origins; a `*`, path or pattern refuses
+  to load (`settings.py::Settings._exact_origins`), since the app serves credentialed requests.
 - **Response headers** — one middleware, `presentation/api/middleware/headers.py::ResponseHeadersMiddleware`.
 - **PP↔TermNorm** — a shared bearer token plus TermNorm's IP allowlist
   ([`backend-integration.md`](backend-integration.md) § Connection security).
@@ -173,6 +186,7 @@ rate limit and the host's wallet — are external and singular, so cost is bound
 | Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | Yes — least-served tenant next |
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | No |
 | What an account may ever spend | the free-tier ceilings, both units | No |
+| Reads one principal may poll | `quota.py::refuse_read_rate`, a token bucket sized above the webapp's polls, at `deps.py::admit_session` (429 `rate_limited`) | No |
 
 **The first gate WAITS; the third refuses.** A full machine queues the launch
 (`JobRegistry.request_slot`), drained least-served-first — the provider window's rule, so one idea —

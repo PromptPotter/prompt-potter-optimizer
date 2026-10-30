@@ -1,12 +1,10 @@
-import os from "node:os";
-import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { COLD_HOME } from "./e2e/world";
 
 // Two servers: cold and spend share a throwaway PROMPTPOTTER_HOME, which binds at import; walk reads the operator's workspace.
 
 const WALK_PORT = process.env.PP_E2E_PORT || "8123";
 const COLD_PORT = process.env.PP_E2E_COLD_PORT || "8124";
-const COLD_HOME = process.env.PP_E2E_COLD_HOME || path.join(os.tmpdir(), "promptpotter-e2e");
 
 // Set to walk a server already up; the walk server then never starts.
 const WALK_URL = process.env.PP_E2E_BASE_URL || `http://127.0.0.1:${WALK_PORT}`;

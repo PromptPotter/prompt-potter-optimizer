@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
@@ -66,7 +66,10 @@ def free_task_models() -> frozenset[str]:
 
 
 def outside_free_tier(
-    config: CampaignConfig, pipeline_params: Mapping[str, Any], schema: PipelineSchema
+    config: CampaignConfig,
+    selected: SelectedOptimizer,
+    pipeline_params: Mapping[str, Any],
+    schema: PipelineSchema,
 ) -> list[str]:
     """What the run could send, at launch or by searching, that the tier does not list."""
     tier = free_tier()
@@ -89,7 +92,6 @@ def outside_free_tier(
                 if declared is not None and param in searched:
                     values += space.param_options(declared, param, model=m) or ["any"]
                 out += [f"{param} {v} on {m}" for v in values if v not in admitted]
-    selected = select_optimizer(config.optimization)
     for name in selected.llm_nodes:
         cfg = selected.node_config(name)
         if (bounds := tier.optimizer_models.get(model := str(cfg.get("model")))) is None:

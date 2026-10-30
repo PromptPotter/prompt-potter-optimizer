@@ -66,14 +66,8 @@ export interface ServedDashboard {
   total_backend_calls: number;
   current_query_payload: string | null;
   open_positions: number[];
-  sample_lookahead_discards: number;
-  in_flight: number;
-  lookahead_allowed: number;
-  lookahead_most: number;
-  cell_reserve_usd: number | null;
   waiting_on: string | null;
   backpressure: ServedBackpressure | null;
-  max_cells_in_flight: number;
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   at_time: string;
@@ -114,23 +108,7 @@ export interface ServedDashboard {
   composite_fitness_weights: Record<string, number> | null;
   /** The level each anchored dial in it is read against, by term. */
   composite_fitness_anchors: Record<string, number> | null;
-  /** The depth IN FORCE — how many cells the walk holds in flight: the armed
-   * request bounded by `max_cells_in_flight`. 1 on a replay, which takes no
-   * armed control. */
-  sample_lookahead: number;
-  /** Whether that depth outlives its round — the operator's auto-arm. */
-  sample_lookahead_auto: boolean;
-  /** How many more cells the spend limits admit, in words, where money and not the
-   * armed depth holds the walk; null where it does not. */
-  lookahead_money_hold: string | null;
-  /** The deepest press the next walk can take. */
-  lookahead_pick_max: number;
-  /** Why holding calls ahead does not apply to this backend at all
-   * (`max_cells_in_flight` of 1); empty where it applies. */
-  lookahead_unavailable: string;
-  /** What the armed depth does, as the control explains itself: the mode in force,
-   * its bound and the calls discarded so far — or `lookahead_unavailable`. */
-  lookahead_explained: string;
+  lookahead: SampleLookahead;
   /** The cycle's spend under the campaign's ceiling meter, a manifest fact no
    * ledger record carries; null where the campaign's manifest is gone. */
   spend_metered: MeteredSpend | null;
@@ -1008,6 +986,57 @@ export interface PauseReading {
   at: string;
 }
 
+/** The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its */
+export interface SampleLookahead {
+  /** The depth IN FORCE — how many cells the walk holds in flight: the armed
+   * request bounded by `ceiling`. */
+  depth: number;
+  /** Whether that depth outlives its round — the operator's auto-arm. */
+  auto: boolean;
+  /** The backend's `max_cells_in_flight`; 1 says the control does not apply. */
+  ceiling: number;
+  /** Calls out now; 0 once no producer is appending. */
+  in_flight: number;
+  /** Calls the gauge admits out now; 0 with `in_flight`. */
+  allowed: number;
+  /** The most calls the stop rules allow out; between phases, the next round's. */
+  most: number;
+  /** Whether a walk holds or admits any call now; otherwise `most` speaks for the
+   * next round alone. */
+  scoring_now: boolean;
+  /** The deepest press the next walk can take. */
+  pick_max: number;
+  /** How many more cells the spend limits admit, in words, where money and not the
+   * armed depth holds the walk; null where it does not. */
+  money_hold: string | null;
+  /** What each call out holds of the ceiling; null where no book binds. */
+  cell_reserve_usd: number | null;
+  /** Why holding calls ahead does not apply to this backend at all (`ceiling` of
+   * 1); empty where it applies. */
+  unavailable: string;
+  /** What the armed depth does, as the control explains itself: the mode in force,
+   * its bound and the calls discarded so far — or `unavailable`. */
+  explained: string;
+  /** Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A
+   * mode, not a press, so a paused run takes it for its relaunch; empty where
+   * offered. */
+  auto_refusal: string;
+  /** Each depth the control draws, 1 to `ceiling`. */
+  depths: LookaheadDepth[];
+}
+
+/** One depth the look-ahead control offers: that many calls held in flight. */
+export interface LookaheadDepth {
+  cells: number;
+  label: string;
+  /** `full` where that many calls are out now, `part` where the gauge allows that
+   * many; null past both. */
+  fill: 'full' | 'part' | null;
+  /** Whether a press of this depth is admitted now: the control applies, the run
+   * admits `set-sample-lookahead` and the next walk can take that many. */
+  pickable: boolean;
+}
+
 /** What a run's spend caps have counted, in the units they meter, by kind. */
 export interface MeteredSpend {
   meter: 'bill' | 'search_incurred';
@@ -1129,8 +1158,8 @@ export interface OptSearchPoint {
 /** The provenance of one mint: its edges, variations and words; it names no individual. */
 export interface IndividualLineage {
   /** Every individual this one derives from — one for a mutation, several for a
-   * crossover; empty at the origin. A tree view hangs it under
-   * `parent_ids[0]`. */
+   * crossover, its main first and its donor second; empty at the origin. A
+   * tree view hangs it under `parent_ids[0]`. */
   parent_ids: string[];
   changes_description: string;
   /** Every variation node that wrote it, in the order they ran; empty for an
@@ -1336,7 +1365,7 @@ export interface RoundAudit {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -1536,7 +1565,10 @@ export interface Comparability {
 export interface HeadToHead {
   rows: HeadToHeadRow[];
   covers_selection: boolean;
-  optimizers_differ: boolean;
+  /** The members some arm's optimizer walks and another's does not: what the arms'
+   * optimizers differ by. Empty where every arm walks one roster, whatever
+   * its knobs. */
+  swapped: string[];
   guard: PairGuard;
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
@@ -1552,6 +1584,9 @@ export interface HeadToHeadRow {
   subject: string;
   campaign_id: string;
   optimizer: string;
+  /** The members this arm's optimizer walks and some other arm's does not: what it
+   * was swapped in for. Empty where every arm walks the members it does. */
+  swapped_in: string[];
   optimizer_models: string[];
   purpose: Optimize | Compare;
   guard: PairGuard;
@@ -2005,18 +2040,6 @@ export interface FileContentResponse {
   content: string | null;
 }
 
-/** The caller's open check-ins, most recently edited first. */
-export interface DraftListResponse {
-  drafts: DraftSummary[];
-}
-
-export interface DraftSummary {
-  draft_id: string;
-  slug: string;
-  n_samples: number;
-  updated_at: string;
-}
-
 /** A re-opened check-in: its draft and what the last resolver turn left. */
 export interface DraftReopenResponse {
   draft: DraftCampaignWire;
@@ -2025,6 +2048,15 @@ export interface DraftReopenResponse {
   /** Proposals the last turn left unclicked, so a re-opened check-in keeps the
    * operator's outstanding actions. */
   raised: RaisedCommand[];
+  /** Its task is on file but no resolver turn ever set it up
+   * (`DraftCampaign.resolution_pending`): the one case a reopen sends
+   * `resolve-origin`, so a revisit never re-buys a turn or re-proposes over
+   * authored prompts. */
+  resolution_pending: boolean;
+  /** A Start on it waits on a machine slot: it is minted once one frees, so a
+   * reopen offers no second Start (the same fact as its listing's `queued`
+   * lifecycle). */
+  queued: boolean;
 }
 
 /** A check-in's draft as every check-in route answers it; Start mints its campaign. No */
@@ -2133,14 +2165,93 @@ export interface ManifestNodeOverlay {
 
 /** What the selected optimizer runs under a config, derived once for check-in and campaign. */
 export interface OptimizerSetup {
-  /** Every member's knob values, the manifest's under the config's overlays */
-  knobs: Record<string, Record<string, unknown>>;
+  /** The knobs a setup surface leads with, in order */
+  main: KnobRef[];
+  /** Every member taking a knob, in declared order, but a pool initializer: its
+   * knobs are its `pools` row */
+  knobs: NodeKnobs[];
+  /** By node, each node running a prompt; a node naming no `prompt_family` has no
+   * entry */
+  prompts: Record<string, OptimizerNodePrompt>;
   /** Arms each round tests */
   arms_per_round: number;
-  /** The nodes making each round's arms, in walk order */
-  proposers: string[];
+  /** The nodes making each round's arms under this config, in walk order: one that
+   * opens or adds arms and adds none here is off, and absent */
+  proposers: ProposerRow[];
   /** What the members draw from */
   pools: PoolRow[];
+}
+
+/** One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`. */
+export interface KnobRef {
+  /** The manifest node that owns the knob */
+  node: string;
+  /** The knob's name under `nodes.{node}.config` */
+  knob: string;
+}
+
+export interface NodeKnobs {
+  /** The manifest node that owns these knobs */
+  node: string;
+  /** The node's type: sampler | eliminator | selector | … */
+  kind: string;
+  /** Its knobs, in declared order */
+  knobs: KnobRow[];
+}
+
+/** One knob of one optimizer node, as every surface offers it: its only served row. */
+export interface KnobRow {
+  /** The knob's name under `nodes.{node}.config` */
+  key: string;
+  /** What the knob does — its field description, as plain text (RST literals
+   * unmarked) */
+  description: string;
+  /** The description's first sentence, cut at its first clause where that runs
+   * long: the one line a setup surface shows before the whole text */
+  summary: string;
+  /** JSON Schema type the value takes */
+  type: 'boolean' | 'integer' | 'number' | 'string' | 'array' | 'object';
+  /** The closed set a string knob takes, in declared order; null when open */
+  options: string[] | null;
+  /** Whether null is a legal value (an opt-in knob, off) */
+  nullable: boolean;
+  /** The least legal value, itself legal; null when none */
+  minimum: number | null;
+  /** A bound every legal value lies strictly above; null when none */
+  exclusive_minimum: number | null;
+  /** The greatest legal value, itself legal; null when none */
+  maximum: number | null;
+  /** A bound every legal value lies strictly below; null when none */
+  exclusive_maximum: number | null;
+  /** The value the manifest declares — a campaign's floor */
+  declared: unknown;
+  /** The value this config runs, the manifest's under its overlays */
+  value: unknown;
+  /** The agents that may move it within a run, as a config row's `movable_by`
+   * reads; `optimizer` where another member steers it, empty where only the
+   * operator does */
+  movable_by: ('proposer' | 'optimizer')[];
+}
+
+/** The prompt an optimizer node runs under a config, before any L4 override. */
+export interface OptimizerNodePrompt {
+  /** Every prompt field by name, its edits laid on */
+  fields: Record<string, string>;
+  /** The fields this config sets over the template, each written to
+   * `optimization.nodes.{node}.config.{field}` */
+  edited: string[];
+  /** The `prompt_version` the node's config names */
+  version: string;
+  /** How many versions the manifest declares for the node's prompt family — a
+   * surface showing this one says so where there are more */
+  versions_declared: number;
+}
+
+export interface ProposerRow {
+  /** The manifest node making the arms */
+  node: string;
+  /** What its arms are, in plain words: the manifest node's `makes` */
+  makes: string;
 }
 
 export interface PoolRow {
@@ -2152,24 +2263,68 @@ export interface PoolRow {
   initializer: string;
   /** The initializer's `active` paths: the entries in play */
   active: string[];
+  /** Every path `active` may name — `*` first, each leading run of an entry's group
+   * before what it holds, each entry id — with what it reads as and the
+   * entries it keeps; a demo pool's are the split its Start draws, none
+   * before that split is known */
+  offered: PoolOffer[];
   drawn_by: PoolDraw[];
+  /** The candidate parts its entries in play reach under this config, in render
+   * order, shots last: empty where no member draws it or nothing is in play,
+   * and then a surface draws the pool nowhere */
+  fills: PoolFill[];
+  /** The block packs it may draw from, the install's and the account's, in name
+   * order; none for a pool no pack feeds or no member draws, and none before
+   * the facts a Start mints against are known */
+  packs: PackOffer[];
 }
 
+/** One path an initializer's `active` knob may name, with what it keeps. */
+export interface PoolOffer {
+  /** The value to write into `active` */
+  path: string;
+  /** `all` is `*`, `part` a block's field, `source` the run of that field from one
+   * source, `entry` one entry by id */
+  kind: 'all' | 'part' | 'source' | 'entry';
+  /** What the path reads as: a part's field key, labelled as a fill's part is; a
+   * source in plain words; an entry's text cut short */
+  label: string;
+  /** How many entries the path keeps */
+  entries: number;
+}
+
+/** The nodes that read a pool under one knob: one knob, one access, however many readers. */
 export interface PoolDraw {
-  /** A node drawing from the pool, in walk order */
-  node: string;
-  /** How it draws under this config: `off` not at all, `open` a window to suggest
+  /** The knob that sets `access` */
+  switch: KnobRef;
+  /** How they draw under this config: `off` not at all, `open` a window to suggest
    * from, `closed` an entry's id only */
   access: 'off' | 'open' | 'closed';
-  /** The knob that sets `access` */
-  switch: KnobSwitch;
+  /** Every node reading the pool as this knob sets it, in walk order; potter's
+   * critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what
+   * L1 sees */
+  nodes: string[];
 }
 
-export interface KnobSwitch {
-  /** The node whose knob sets a reader's access */
-  node: string;
-  /** That knob, under `nodes.{node}.config` */
-  knob: string;
+/** One part of a candidate a pool's entries in play reach: the place a surface draws the pool. */
+export interface PoolFill {
+  /** A prompt field a target prompt node opens to search, or `shots` */
+  part: string;
+  /** How many entries in play land there */
+  entries: number;
+  /** The most one candidate carries there: the shots any member writing them may
+   * attach; null for a field, whose text a candidate takes or adapts */
+  most: number | null;
+}
+
+/** One block pack this account reads, as a pool's `packs` knob names it. */
+export interface PackOffer {
+  /** The value `packs` holds for it */
+  name: string;
+  /** The pool entries it holds that this run admits, one per part a snippet suits */
+  entries: number;
+  /** Whether `packs` names it under this config */
+  on: boolean;
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
@@ -2233,6 +2388,7 @@ export interface ModelCapability {
   reasoning_note: string;
   unsupported_params: string[] | null;
   indistinct_efforts: string[] | null;
+  refused_efforts: string[];
   source: string;
   display_name: string;
   context_length: number | null;
@@ -2603,6 +2759,7 @@ export interface MachineSlot {
 /** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
 export interface CampaignLaunch {
   dataset_name: string;
+  draft_id: string | null;
   kind: 'campaign_launch';
 }
 
@@ -2644,7 +2801,7 @@ export interface MachineNotice {
   detail: string;
 }
 
-/** What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw */
+/** An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`. */
 export interface OptimizerPipelineResponse {
   /** The graph topology — the same shape a campaign pipeline serves */
   view: PipelineView | null;
@@ -2652,33 +2809,18 @@ export interface OptimizerPipelineResponse {
    * nests under this graph, as each `nests[].node` names it per campaign.
    * Null where the manifest declares no measurement node. */
   measurement_node: string | null;
-  /** Per-node typed config rows, so the node detail renders the optimizer's own
-   * knobs through the canonical config element rather than a chip and a JSON
-   * dump */
+  /** Per-node typed config rows of what is no member's knob — an llm node's call
+   * config and prompt fields; a knob's one row is `OptimizerSetup.knobs` */
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   /** Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs
    * it accepts and what a round costs are the facts every other node's rows
    * need too */
   model_capabilities: Record<string, Record<string, ModelCapability>>;
-  /** Where the search reaches per node, summed off the rows above rather than in
-   * the browser — the same reading a campaign pipeline serves */
+  /** Where the search reaches per node, summed off every param it carries — the
+   * rows above and its knobs — rather than in the browser, the same reading a
+   * campaign pipeline serves */
   reach: Record<string, NodeReach>;
-  /** The prompt each node STARTS from, by node, as the run resolves it off the
-   * node's `prompt_family`/`prompt_version` — the floor under a searchpoint
-   * carrying no evolved delta for that node. A node declaring no prompt has
-   * no entry. */
-  start_prompts: Record<string, StartPrompt>;
-}
-
-export interface StartPrompt {
-  /** The prompt body, by decomposition field */
-  fields: Record<string, unknown>;
-  /** The `prompt_version` the node's config names */
-  version: string;
-  /** How many versions the manifest declares for the node's prompt family — a
-   * surface showing this one says so where there are more */
-  versions_declared: number;
 }
 
 /** The optimizers this install can run, the default first: one per manifest the registry holds. */
@@ -2703,53 +2845,63 @@ export interface OptimizerEntry {
   origin: string | null;
 }
 
-/** Every knob an optimizer manifest's nodes take, each written to `optimization.nodes.{node}.config.{key}`. */
-export interface OptimizerKnobsResponse {
-  /** The manifest name, as `optimization.optimizer` names it */
-  optimizer: string;
-  /** The manifest's own version */
-  version: string;
-  /** Every node taking a knob, in declared order */
-  nodes: NodeKnobs[];
+/** Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike. */
+export interface LibraryResponse {
+  /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
+  parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** Every source a snippet names, once, in first-named order */
+  sources: LibrarySource[];
+  /** By pack name, then each pack's own order */
+  snippets: LibrarySnippet[];
 }
 
-export interface NodeKnobs {
-  /** The manifest node that owns these knobs */
-  node: string;
-  /** The node's type: sampler | eliminator | selector | … */
-  kind: string;
-  /** Its knobs, in declared order */
-  knobs: KnobRow[];
+/** One source a snippet names: a cited work as its pack declares it, or the authored one. */
+export interface LibrarySource {
+  /** A snippet's `source`: the work's arXiv id, or `authored` */
+  id: string;
+  /** The work's title; for `authored`, the word itself */
+  title: string;
+  /** The title up to its first colon, for a chip */
+  short_title: string;
+  /** Absent for `authored` */
+  first_author: string | null;
+  /** Absent for `authored` */
+  year: number | null;
 }
 
-/** One knob of one optimizer node, as a settings surface offers it. */
-export interface KnobRow {
-  /** The knob's name under `nodes.{node}.config` */
-  key: string;
-  /** What the knob does — its field description */
-  description: string;
-  /** JSON Schema type the value takes */
-  type: 'boolean' | 'integer' | 'number' | 'string' | 'array' | 'object';
-  /** The closed set a string knob takes, in declared order; null when open */
-  options: string[] | null;
-  /** Whether null is a legal value (an opt-in knob, off) */
-  nullable: boolean;
-  /** The least legal value, itself legal; null when none */
-  minimum: number | null;
-  /** A bound every legal value lies strictly above; null when none */
-  exclusive_minimum: number | null;
-  /** The greatest legal value, itself legal; null when none */
-  maximum: number | null;
-  /** A bound every legal value lies strictly below; null when none */
-  exclusive_maximum: number | null;
-  /** The value the manifest declares — a campaign's floor */
-  value: unknown;
+/** One snippet of one pack the account reads, as a library surface lists it. */
+export interface LibrarySnippet {
+  /** Its content id, the suffix of each pool entry `{part}.{id}` it expands into;
+   * one text in two packs is two rows under one id */
+  id: string;
+  text: string;
+  /** The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part
+   * is allowed and shown as such */
+  suits: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** Free labels for search alone; nothing else reads them */
+  tags: string[];
+  /** A `sources` id: its cited work's arXiv id, or `authored` */
+  source: string;
+  /** The cited technique's family as its pack records it; absent for an authored
+   * snippet */
+  method: string | null;
+  /** The pack holding it, as a `packs` knob names it */
+  pack: string;
+  /** 0 for a cited snippet; an authored one's is one past the snippet it supersedes */
+  version: number;
+  /** The `id` of the snippet it was edited from; absent for a cited snippet and one
+   * written from nothing */
+  supersedes: string | null;
+  /** Who wrote an authored snippet; absent for a cited one */
+  author: string | null;
 }
 
-/** Every campaign in one store, root-major and newest first. */
+/** Every campaign in one store: the unstarted first, then root-major and newest first. */
 export interface HierarchyResponse {
-  /** Campaigns sharing a root cycle sit together, the group of the newest first. */
-  entries: HierarchyCampaign[];
+  /** Unstarted campaigns lead, most recently edited first; then campaigns sharing a
+   * root cycle sit together, the group of the newest first. A `campaign` or
+   * `attached` filter asks after runs, so it serves no unstarted one. */
+  entries: (HierarchyCampaign | UnstartedCampaign)[];
 }
 
 /** A campaign as the listing serves it: its state and line stats are its line course's. */
@@ -3008,6 +3160,34 @@ export interface LivesReading {
   spent: boolean;
 }
 
+/** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
+export interface UnstartedCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: (HierarchyStat | BenchStat)[];
+  level: 'unstarted';
+  span: HierarchySpan;
+  facts: UnstartedFacts;
+}
+
+/** An open check-in's typed facts: it has no cycle, so no course, line or run. */
+export interface UnstartedFacts {
+  /** What its check-in has cost so far. */
+  spend_lifetime: LifetimeSpend;
+}
+
 /** One window of a family's chronology, oldest-first: a course, its forks and inner runs. */
 export interface HierarchySteps {
   steps: HierarchyStep[];
@@ -3176,18 +3356,12 @@ export interface HierarchyRound {
   children: HierarchyCandidate[];
 }
 
-/** A round's typed facts: what its election declared and what it measured against. */
+/** A round's typed facts: what its election declared. */
 export interface RoundFacts {
   round: number;
   /** The column the round's election elected on (`Election.elects_on`); null on a
    * round never elected. `ability`: the round is won on θ, not on accuracy. */
   elects_on: 'accuracy' | 'composite' | 'ability' | null;
-  /** The address of the candidate the round measured its arms against — the
-   * individual its `parent`-role arm re-read, as the pick this course's line
-   * stood on going into the round. Never a child of the round: a reference is
-   * not re-listed. Null at round 0, where none was read, and where the re-
-   * read individual is not the line's pick. */
-  reference: string | null;
 }
 
 /** One candidate a round proposed; its children are the inner campaigns it spawned. */
@@ -3242,6 +3416,21 @@ export interface CandidateFacts {
    * crowned, then this candidate, then any later round that crowned nobody up
    * to the next crown. Read off crowns, never `parent_ids`. */
   main_line: MainLineStep[];
+  /** The address of the candidate its first parent, its main, was last measured as
+   * before it: the ONE edge a lineage view draws it from. Null at an origin,
+   * and where no candidate of its campaign measured that parent. */
+  descends_from: string | null;
+  /** The address of the candidate its second parent, the donor of a crossover, was
+   * last measured as before it, of any round. Null without a second parent or
+   * a main, and where no candidate of its campaign measured it. */
+  donor: string | null;
+  /** The loci, as `node.key`, it moved off its main to the donor's value verbatim:
+   * what the donor gave. Empty without a donor. */
+  donated_loci: string[];
+  /** Per other locus it moved off its main, the earlier candidates whose value
+   * there is closer to its own than the main's: most similar first, then most
+   * recently measured. */
+  gene_sources: GeneSource[];
   /** This candidate's composite fitness under the request's `score:` lens. Null
    * without a lens, or where no row carries a verdict under it. */
   lens_value: number | null;
@@ -3269,6 +3458,17 @@ export interface MainLineStep {
   /** The addresses of the candidates the round's election crowned; at the
    * candidate's own round, the candidate. Empty: the election crowned nobody. */
   candidates: string[];
+}
+
+/** A candidate one locus of a child may have come from, other than the parent it descends from. */
+export interface GeneSource {
+  /** The locus the child moved off its parent, as `node.key`. */
+  locus: string;
+  /** The address of the candidate whose value it resembles. */
+  source: string;
+  /** How alike the child's value and the source's are, 0 to 1: a verbatim copy is
+   * 1. Always above the child's similarity to its parent on that locus. */
+  similarity: number;
 }
 
 /** Where an alternative criterion would have elected someone else, on the candidate it names. */
@@ -3523,9 +3723,9 @@ export interface OriginListResponse {
   total: number;
 }
 
+/** A MINTED origin, its id the mint's hash; a dataset no campaign ran is a `DatasetIndexEntry`. */
 export interface OriginEntry {
-  /** Origin content identity — a campaign's root_content_hash (or the dataset's
-   * prospective origin hash for a prepared origin) */
+  /** Origin content identity — its campaigns' root_content_hash */
   origin_id: string;
   /** Dataset this origin starts from */
   dataset_name: string;
@@ -3533,12 +3733,10 @@ export interface OriginEntry {
   label: string;
   /** Dataset sample count; ``null`` if unmaterialized */
   n_samples: number | null;
-  /** Active campaigns minted from this origin (0 = prepared, not yet run) */
+  /** Active campaigns minted from this origin */
   n_campaigns: number;
   /** The origin's C0 score, as the root cycle's standing round 0 closed */
   origin_accuracy: number | null;
-  /** True = a ready dataset config with no campaign yet */
-  prepared: boolean;
   /** ISO 8601 — earliest campaign on this origin */
   created_at: string;
 }
@@ -3731,6 +3929,16 @@ export interface ArchiveCampaignPayload {
   campaign_id: string;
   /** Recorded with the command. */
   reason: string;
+}
+
+/** Bank an edited library snippet into this account's own block pack as the next version of */
+export interface BankSnippetPayload {
+  /** The id of the snippet the text was edited from. */
+  supersedes: string;
+  /** The edited text. */
+  text: string;
+  /** The campaign or check-in draft it was written in. */
+  experiment: string;
 }
 
 /** Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent. */
@@ -4270,7 +4478,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = "archive-campaign" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -4281,6 +4489,7 @@ export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } 
 // Each kind's body IS its payload model (domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).
 export interface CommandPayloads {
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
+  "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
   "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
   "change-run-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
@@ -4310,6 +4519,7 @@ export interface CommandPayloads {
 // What each kind answers: its route's `response_model` (presentation/api/routers/commands.py).
 export interface CommandResponses {
   "archive-campaign": CommandAcceptedBody;
+  "bank-snippet": CommandAcceptedBody;
   "cancel-queued-run": CommandAcceptedBody;
   "change-run-limits": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;

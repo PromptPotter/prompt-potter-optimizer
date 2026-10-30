@@ -53,6 +53,8 @@ class CampaignLaunch:
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     dataset_name: str
+    # The check-in a Start mints from; null for every other launch. A queued one serves its draft queued.
+    draft_id: str | None = None
     kind: Literal["campaign_launch"] = "campaign_launch"
 
 
@@ -117,10 +119,9 @@ class Job:
     started_at: str | None
     # A release is its own act, never a fourth stage: `stage` stays where the launch got to.
     released_at: str | None
-    # Its hold's ONE store, which its run's book reads live: what the account holds back for it,
+    # What the account holds back for it, which its run's book reads live; its cycle's share of the
+    # campaign's ceiling is the cycle's (`CycleShareRecord`).
     reserve: Budget = field(default_factory=Budget)
-    # and the most its cycle may have metered of the campaign's ceiling, in all.
-    allotment: Budget = field(default_factory=Budget)
     # Unset = never granted a run, so its failure is a refusal.
     admitted_at: str | None = None
     producer_id: str = ""
@@ -302,21 +303,19 @@ class JobRegistry:
             self.release(job_id)
             return True
 
-    def mark_admitted(self, job_id: str, reserve: Budget, allotment: Budget) -> None:
+    def mark_admitted(self, job_id: str, reserve: Budget) -> None:
         job = self.get(job_id)
         if job is None:
             return
         job.admitted_at = utcnow_iso()
         job.reserve = reserve
-        job.allotment = allotment
         self._persist(job)
 
-    def set_held(self, job_id: str, reserve: Budget, allotment: Budget) -> None:
+    def set_reserve(self, job_id: str, reserve: Budget) -> None:
         job = self.get(job_id)
         if job is None:
             return
         job.reserve = reserve
-        job.allotment = allotment
         self._persist(job)
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
@@ -332,7 +331,7 @@ class JobRegistry:
         return self._dir
 
     def job_file(self, job_id: str) -> Path:
-        """What a live spend book reads its hold off: the job is the hold's one store."""
+        """What a live spend book reads its reserve off: the job is the reserve's one store."""
         return self._path(job_id)
 
     def claimant_lock(self) -> Path:
@@ -477,6 +476,14 @@ class JobRegistry:
             for j in self.list_all(user_id=user_id)
             if j.created_at.startswith(today) and isinstance(j.holder, CampaignLaunch)
         ]
+
+    def queued_drafts(self, *, user_id: str) -> frozenset[str]:
+        """The check-ins a queued Start waits on: a reload serves each queued, never Start again."""
+        return frozenset(
+            j.holder.draft_id
+            for j in self.list_queued(user_id=user_id)
+            if isinstance(j.holder, CampaignLaunch) and j.holder.draft_id is not None
+        )
 
     def _persist(self, job: Job) -> None:
         write_json(self._path(job.job_id), _JOB.dump_python(job, mode="json"))

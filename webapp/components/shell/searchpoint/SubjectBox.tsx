@@ -13,7 +13,7 @@ import {
   searchpointText,
   type ObserveState,
 } from "@/lib/derivations";
-import { CopyButton, SegmentedControl } from "@/components/ui";
+import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
 import { RoundFacts, RoundVerdict } from "./RoundFacts";
 import { SubjectDiff } from "./SubjectDiff";
 import { SubjectFlips } from "./SubjectFlips";
@@ -73,14 +73,12 @@ export function SubjectBox() {
           changes={evidence.changes}
           verdict={<RoundVerdict reading={subject.verdict} />}
         />
+      ) : shown.failure ? (
+        <FailureLine failure={shown.failure} />
+      ) : shown.loading ? (
+        <Loading>Loading the searchpoint…</Loading>
       ) : (
-        <p className="subject-note">
-          {shown.loading
-            ? "Loading the searchpoint…"
-            : shown.failure
-              ? shown.failure.message
-              : "Nothing measured yet."}
-        </p>
+        <Empty>Nothing measured yet.</Empty>
       )}
       <SubjectFlips
         vsOrigin={evidence.vsOrigin}

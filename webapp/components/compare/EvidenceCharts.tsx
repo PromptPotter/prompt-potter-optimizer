@@ -4,9 +4,9 @@ import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api";
 import { maskedSubject } from "@/lib/api/reads";
+import { DataTable, Empty, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
-import type { MetricUnit } from "@/lib/format";
+import { fmtInterval, fmtUnit, shortId, type MetricUnit } from "@/lib/format";
 import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
@@ -54,9 +54,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   if (cells.length === 0) {
     return (
-      <p className="note-empty">
-        No selected subject reached a cell under this metric, so there is nothing to plot.
-      </p>
+      <Empty>No selected subject reached a cell under this metric, so there is nothing to plot.</Empty>
     );
   }
 
@@ -107,41 +105,52 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
     (s) => s.unscorable_cells.length > 0 || s.n_cells < cells.length,
   );
   if (!gaps || cells.length === 0) return null;
+  const columns: Column<SubjectReading>[] = [
+    {
+      id: "subject",
+      label: "subject",
+      width: "minmax(10ch, 18ch)",
+      cell: (s) => (
+        <span className="cmp-coverage-name" title={s.key}>
+          {seriesLabel(s)}
+        </span>
+      ),
+    },
+    ...cells.map(
+      (cell): Column<SubjectReading> => ({
+        id: cell,
+        label: "",
+        width: "1.1rem",
+        cell: (s) => {
+          const scored = s.values[cell] !== undefined;
+          const mark = scored ? "" : s.unscorable_cells.includes(cell) ? "x" : "?";
+          return (
+            <span
+              className={cx("cmp-coverage-cell", scored && "is-scored")}
+              title={`${cell}: ${
+                scored ? "scored" : mark === "x" ? "measured, unreadable here" : "not measured"
+              }`}
+            >
+              {mark}
+            </span>
+          );
+        },
+      }),
+    ),
+  ];
   return (
     <div className="cmp-coverage">
-      <table className="cmp-coverage-grid">
-        <caption className="l4-subtle">
-          Cell coverage — <code>?</code> not measured by this subject, <code>x</code> measured but
-          unreadable under this metric. Never a zero.
-        </caption>
-        <tbody>
-          {evidence.subjects.map((s) => {
-            const unscorable = new Set(s.unscorable_cells);
-            return (
-              <tr key={s.key}>
-                <th scope="row" className="cmp-coverage-name" title={s.key}>
-                  {seriesLabel(s)}
-                </th>
-                {cells.map((cell) => {
-                  const scored = s.values[cell] !== undefined;
-                  const mark = scored ? "" : unscorable.has(cell) ? "x" : "?";
-                  return (
-                    <td
-                      key={cell}
-                      className={cx("cmp-coverage-cell", scored && "is-scored")}
-                      title={`${cell}: ${
-                        scored ? "scored" : mark === "x" ? "measured, unreadable here" : "not measured"
-                      }`}
-                    >
-                      {mark}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <p className="l4-subtle">
+        Cell coverage — <code>?</code> not measured by this subject, <code>x</code> measured but
+        unreadable under this metric. Never a zero.
+      </p>
+      <DataTable
+        ariaLabel="Cell coverage"
+        className="cmp-coverage-grid"
+        columns={columns}
+        rows={evidence.subjects}
+        getRowId={(s) => s.key}
+      />
     </div>
   );
 }
@@ -166,7 +175,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
   const x = scaleOver([...rows, ...rows.flatMap((r) => r.winner_chain ?? [])]);
   if (x === null) {
     return (
-      <p className="note-empty">No subject in this selection could be read under this metric.</p>
+      <Empty>No subject in this selection could be read under this metric.</Empty>
     );
   }
   return (
@@ -220,8 +229,8 @@ function MergedRow({
   muted?: boolean;
   nested?: boolean;
 }) {
-  const value = fmtMetricValue(unit, row.value);
-  const interval = fmtMetricInterval(unit, row.ci_lo, row.ci_hi);
+  const value = fmtUnit(unit, row.value);
+  const interval = fmtInterval(unit, row.ci_lo, row.ci_hi);
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <div className={cx("ov-row", nested && "cmp-row-nested", muted && "cmp-row-muted")}>

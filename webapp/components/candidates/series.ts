@@ -2,7 +2,7 @@
 
 import type { MeasuredUnit, VerificationMark } from "@/lib/api/types";
 import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
-import { fmtNum, fmtPct0, unitCount } from "@/lib/format";
+import { fmtInterval, fmtUnit, PLACEHOLDER, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 
 type SeriesKey =
@@ -62,20 +62,18 @@ const MARK_ROWS: Record<VerificationMark["kind"], string> = {
   bench: "",
 };
 
-const pct = (v: number) => (v * 100).toFixed(0);
-
 function markTip(m: VerificationMark | null, unit: MeasuredUnit): string {
-  if (m == null) return "—";
+  if (m == null) return PLACEHOLDER;
   const name = MARK_NAME[m.kind];
   if (m.failure != null) return `${name}, failed: ${m.failure}`;
   const level = m.level;
   const band =
-    level?.ci_lo != null && level.ci_hi != null ? ` [${pct(level.ci_lo)}, ${pct(level.ci_hi)}]` : "";
+    level?.ci_lo != null && level.ci_hi != null ? ` ${fmtInterval("rate", level.ci_lo, level.ci_hi)}` : "";
   if (m.state === "running") {
-    const sofar = level == null ? "" : `, ${fmtPct0(level.value)} so far`;
+    const sofar = level == null ? "" : `, ${fmtUnit("rate", level.value)} so far`;
     return `${name}, ${m.scored} of ${unitCount(m.rows, unit)}${MARK_ROWS[m.kind]}${sofar}`;
   }
-  const read = level == null ? ", no level" : `, ${fmtPct0(level.value)}${band}`;
+  const read = level == null ? ", no level" : `, ${fmtUnit("rate", level.value)}${band}`;
   return `${name}, ${unitCount(m.scored, unit)}${MARK_ROWS[m.kind]}${read}`;
 }
 
@@ -96,7 +94,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     gap: "floor-when-started",
     valueOf: (v) => barLevel("accuracy", v),
     applies: (c) => c.metrics.has("accuracy"),
-    tip: (v) => `accuracy: ${fmtNum(barLevel("accuracy", v))}`,
+    tip: (v) => `accuracy: ${fmtUnit("level", barLevel("accuracy", v))}`,
   },
   {
     key: "ability",
@@ -109,7 +107,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     signed: true,
     valueOf: (v) => barLevel("ability", v),
     applies: (c) => c.metrics.has("ability"),
-    tip: (v) => `ability θ: ${fmtNum(barLevel("ability", v), 2)}`,
+    tip: (v) => `ability: ${fmtUnit("theta", barLevel("ability", v))}`,
   },
   {
     key: "composite",
@@ -120,7 +118,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     gap: "floor-when-started",
     valueOf: (v) => barLevel("composite", v),
     applies: (c) => c.metrics.has("composite"),
-    tip: (v) => `composite: ${fmtNum(barLevel("composite", v))}`,
+    tip: (v) => `composite: ${fmtUnit("composed", barLevel("composite", v))}`,
   },
   {
     key: "mask",
@@ -133,7 +131,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     gap: "floor-when-started",
     valueOf: (v) => (v.reading ? v.node.facts.lens_value : null),
     applies: (c) => c.showMask,
-    tip: (v) => `masked: ${fmtNum(v.reading ? v.node.facts.lens_value : null)}`,
+    tip: (v) => `masked: ${fmtUnit("composed", v.reading ? v.node.facts.lens_value : null)}`,
   },
   {
     key: "overlap",
@@ -150,7 +148,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     tip: (v, c) =>
       !v.reading || v.overlap?.rate == null
         ? "overlap: not read on the whole set"
-        : `overlap: ${fmtNum(v.overlap.rate)}${v.overlap.n ? ` on ${unitCount(v.overlap.n, c.unit)} shared` : ""}`,
+        : `overlap: ${fmtUnit("level", v.overlap.rate)}${v.overlap.n ? ` on ${unitCount(v.overlap.n, c.unit)} shared` : ""}`,
   },
   {
     key: "verify",
@@ -194,7 +192,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     tip: (v, c) => {
       const panel = v.reading?.panel;
       return panel?.cached == null || panel.scored == null
-        ? "cached: —"
+        ? `cached: ${PLACEHOLDER}`
         : `cached: ${panel.cached} of ${unitCount(panel.scored, c.unit)}`;
     },
   },

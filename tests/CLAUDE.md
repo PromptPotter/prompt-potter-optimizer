@@ -28,7 +28,6 @@ path it owns, asserting every decision along the way. A fact is an `assert` with
 invariant; a table of values is a `for` inside that function, never a `parametrize`. <!-- probe: git grep -cE "parametrize" -- tests/*.py == 0 --> A path that forks
 (live vs. folded back on resume, root vs. fork) may take a second function named for the fork.
 A new fact is one more assertion in its section's journey. Slow journeys are fine.
-The widest journey's modules are pinned in `scripts/tests_owning.py::WIDEST_JOURNEY_MODULES`.
 
 ## Structural invariants live in production, not tests
 

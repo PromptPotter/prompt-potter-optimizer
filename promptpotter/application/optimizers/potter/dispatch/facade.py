@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
 from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
@@ -16,6 +16,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
     Item,
+    PoolParent,
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.compose import (
@@ -46,6 +47,7 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
+from promptpotter.application.optimizers.variation.members import crossable
 from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import Critique
@@ -66,6 +68,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.nodes import CycleRead, Draw
     from promptpotter.domain.optimizer_state import StatePart
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Pool, PoolEntry
     from promptpotter.domain.results import RoundResult
 
@@ -267,6 +270,42 @@ def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]
     return {field: tuple(held) for field, held in out.items()}
 
 
+def _recombination(
+    lineage: Lineage, schema: PipelineSchema, generate: L1GenerateKnobs
+) -> dict[str, Any]:
+    """The population's highest-θ individuals as mains and the campaign's other highest-θ measured
+    ones, each to `pool_window`, an unread θ below every read one, and the loci a main can take
+    from another entry; none where no pair can trade."""
+    if not generate.recombine:
+        return {}
+    ranked = sorted(
+        ((i, lineage.theta(i.id)) for i in lineage.measured),
+        key=lambda it: (it[1] is not None, it[1] or 0.0),
+        reverse=True,
+    )
+    population = {i.id for i in lineage.population}
+    window = generate.pool_window
+    mains = [i.id for i, _ in ranked if i.id in population][:window]
+    kept = {*mains, *[i.id for i, _ in ranked if i.id not in population][:window]}
+    pool = tuple(PoolParent(i, t, main=i.id in population) for i, t in ranked if i.id in kept)
+    loci = dict.fromkeys(
+        locus
+        for main in pool
+        if main.main
+        for donor in pool
+        if donor is not main
+        for locus in crossable([main.individual, donor.individual], schema)
+    )
+    if not loci:
+        return {}
+    return {
+        "recombine": generate.recombine,
+        "recombination_host": generate.recombination_host,
+        "recombination_pool": pool,
+        "recombination_loci": tuple(loci),
+    }
+
+
 def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
     """The round under render is the cycle's last on every node: the bench folds a round in before any node reads it."""
     lineage, frontier, ruler_read, bounds, target = (
@@ -339,7 +378,9 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
         demo_split=target.demo_split,
         shot_k_max=generate.k_max,
         slot_of=ruler_read.slot_of,
+        pool_window=generate.pool_window,
         inner_cells=target.inner_cells,
+        **_recombination(lineage, target.schema, generate),
     )
     return replace(bundle, silent_l1_panels=_silent_l1_panels(bundle))
 

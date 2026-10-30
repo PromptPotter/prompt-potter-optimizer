@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -133,6 +133,8 @@ def _assert_overlay_preserved(
 class Cycle:
     session: Session
     config: CampaignConfig
+    # The launch's one selection (`binding_optimizer`): a manifest edit lands at the next launch.
+    optimizer: SelectedOptimizer
     slices: SliceMap
     difficulty: DifficultyView
     # By round, what each round not yet closed has produced, which its close banks (`close_state`).
@@ -149,6 +151,9 @@ class Cycle:
     bench_passes: BenchPasses | None = None
     # The last close's, set by the close and by a resume's replay; ``None`` until a close states one.
     standing: RunStanding | None = None
+    # `measured_pool`'s fold, held while the closed rounds it read are the cycle's, and its θ by scale.
+    _pool: tuple[tuple[int, ...], dict[str, tuple[OptSearchPoint, list[GradedCell]]]] | None = None
+    _pool_theta: dict[tuple[int, str], float | None] = field(default_factory=dict)
 
     @classmethod
     def start(
@@ -158,12 +163,12 @@ class Cycle:
         framing: TaskDecomposition,
         session: Session,
         config: CampaignConfig,
+        optimizer: SelectedOptimizer,
     ) -> Cycle:
         schema = session.pipeline_schema
         origin_sheet = origin.rows
-        selected = select_optimizer(config.optimization)
-        selected.refuse_origin(origin_sheet)
-        slices = SliceMap(selected.slices)
+        optimizer.refuse_origin(origin_sheet)
+        slices = SliceMap(optimizer.slices)
         sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)
         # Hashed here because the parent advances with every round's head.
@@ -180,12 +185,13 @@ class Cycle:
             },
             ruler=difficulty.stamp,
             optimizer_state=None,
-            elects_on=selected.elects_on,
+            elects_on=optimizer.elects_on,
             schema=schema,
         )
         return cls(
             session=session,
             config=config,
+            optimizer=optimizer,
             slices=slices,
             difficulty=difficulty,
             rounds=[origin_round],
@@ -195,10 +201,6 @@ class Cycle:
     @property
     def origin_round(self) -> RoundResult:
         return self.rounds[0]
-
-    @property
-    def optimizer(self) -> SelectedOptimizer:
-        return select_optimizer(self.config.optimization)
 
     @property
     def selection(self) -> RoundResult:
@@ -217,6 +219,36 @@ class Cycle:
     def measured(self, individual_id: str) -> Concluded:
         """The individual's latest arm a round of this cycle concluded."""
         return measured_arm(self.rounds, individual_id)
+
+    def measured_pool(self) -> dict[str, tuple[OptSearchPoint, list[GradedCell]]]:
+        """Every individual a CLOSED round concluded, by id in the order first measured, with its
+        cells across those rounds merged — folded once per close, never banked."""
+        closed = self.closed_rounds
+        # Keyed on the closed rounds' objects: `seat` swaps in a new copy, never edits one.
+        read_from = tuple(id(rr) for rr in closed)
+        if self._pool is not None and self._pool[0] == read_from:
+            return self._pool[1]
+        held: dict[str, tuple[OptSearchPoint, list[GradedCell]]] = {}
+        for rr in closed:
+            for key, arm in rr.arms.items():
+                if isinstance(arm, Concluded):
+                    # By individual, never arm key: a key names a slot, and readers ask by id.
+                    individual = arm.individual
+                    _, rows = held.get(individual.id, (individual, []))
+                    held[individual.id] = (individual, merge_known_outcomes(rows, rr.rows(key)))
+        self._pool = (read_from, held)
+        self._pool_theta.clear()
+        return held
+
+    def pooled_theta(self, individual_id: str) -> float | None:
+        """θ on the round's one judging fit over every cell the pool holds of it, read once per scale;
+        ``None`` where it is unread or a caveat says it is not ability."""
+        held = self.measured_pool().get(individual_id)
+        memo = (id(self.difficulty.judging), individual_id)
+        if memo not in self._pool_theta:
+            read = None if held is None else self.difficulty.scale.frontier(held[1])
+            self._pool_theta[memo] = None if read is None or read.caveat else read.theta
+        return self._pool_theta[memo]
 
     def _seat_origin(self, parent: ReadArm, optimizer_state: OptimizerState | None) -> None:
         """The origin's θ is carried, not re-fit: round 0 closes on the scale it opened on."""

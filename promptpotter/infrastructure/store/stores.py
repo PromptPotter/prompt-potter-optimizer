@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.config import paths
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
@@ -37,6 +38,7 @@ class Stores:
     identity: IdentityContext
     archive_home: ArchiveHome
     tenant_datasets: TenantDatasetStore
+    block_packs: PackShelf
     ruler: RulerStore
     campaigns: CampaignStore
     drafts: DraftStore
@@ -106,8 +108,9 @@ def build_stores(
         identity=identity,
         archive_home=home,
         # Rooted at the account beside the caches: a sandbox isolates campaign STATE, and a
-        # dataset or the ruler an L4 cell reads is not state.
+        # dataset, a block pack or the ruler an L4 cell reads is not state.
         tenant_datasets=TenantDatasetStore(account),
+        block_packs=PackShelf(account=account / paths.BLOCK_PACKS_DIR),
         ruler=RulerStore(account),
         campaigns=CampaignStore(tenant_dir),
         drafts=DraftStore(tenant_dir),

@@ -5,11 +5,10 @@ from pydantic import Field
 
 from promptpotter.application.cycle_addressing import active_pointer
 from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
+from promptpotter.application.library import LibraryResponse, library
 from promptpotter.application.pipeline_resolve import (
-    OptimizerKnobsResponse,
     OptimizerPipelineResponse,
     OptimizerRoster,
-    optimizer_knobs,
     optimizer_roster,
     resolve_pipeline_for_optimizer,
 )
@@ -79,12 +78,7 @@ def get_optimizers() -> OptimizerRoster:
     return optimizer_roster()
 
 
-@active_router.get(
-    "/optimizers/{name}/knobs", tags=["Optimizer"], response_model=OptimizerKnobsResponse
-)
-def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
-    """Every knob the manifest's nodes take, each with its type, closed options, bounds and declared value.
-
-    404 when no such optimizer is registered.
-    """
-    return optimizer_knobs(name)
+@active_router.get("/library", tags=["Optimizer"], response_model=LibraryResponse)
+def get_library(stores: StoresDep) -> LibraryResponse:
+    """Every snippet the caller's library holds, the install's packs beside its own, for a target or an optimizer prompt alike."""
+    return library(stores.block_packs)

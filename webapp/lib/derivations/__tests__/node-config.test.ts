@@ -11,7 +11,7 @@ import {
   permittedModels,
   seedOverlayFromRows,
   type ConfigRow,
-} from "../nodeConfig";
+} from "../node-config";
 import type { KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
 import { SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
 
@@ -429,6 +429,7 @@ describe("effortLadder", () => {
     reasoning_note: "",
     unsupported_params: null,
     indistinct_efforts: null,
+    refused_efforts: [],
     source: "unknown",
     display_name: "",
     context_length: null,
@@ -478,6 +479,7 @@ describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
   const knob = (over: Partial<KnobRow>): KnobRow => ({
     key: "k",
     description: "",
+    summary: "",
     type: "integer",
     options: null,
     nullable: false,
@@ -485,7 +487,9 @@ describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
     exclusive_minimum: null,
     maximum: null,
     exclusive_maximum: null,
+    declared: 10,
     value: 10,
+    movable_by: [],
     ...over,
   });
 

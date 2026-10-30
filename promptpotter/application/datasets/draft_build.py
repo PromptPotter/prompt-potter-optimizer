@@ -9,7 +9,6 @@ from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     default_campaign_config,
-    owned_drafts,
 )
 from promptpotter.application.datasets.origin_readiness import OriginReadiness, origin_readiness
 from promptpotter.application.jobs.quota import launch_usd_bound
@@ -116,31 +115,6 @@ class DraftCampaignWire(StrictModel):
         "step, each leaf keyed by its `EditDraftPatch` path and valued by this wire's own field of "
         "that path. A `writeOnly` subtree is `StartCheckinPayload`'s, sent with Start and stored "
         "nowhere."
-    )
-
-
-class DraftSummary(StrictModel):
-    draft_id: str
-    slug: str
-    n_samples: int
-    updated_at: str
-
-
-class DraftListResponse(StrictModel):
-    """The caller's open check-ins, most recently edited first."""
-
-    drafts: list[DraftSummary]
-
-
-def draft_list(stores: Stores) -> DraftListResponse:
-    drafts = sorted(owned_drafts(stores), key=lambda d: d.updated_at, reverse=True)
-    return DraftListResponse(
-        drafts=[
-            DraftSummary(
-                draft_id=d.draft_id, slug=d.slug, n_samples=d.n_samples, updated_at=d.updated_at
-            )
-            for d in drafts
-        ]
     )
 
 

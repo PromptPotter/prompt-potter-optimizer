@@ -4,7 +4,7 @@ import { postCommand } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
-import { Button, SegmentedControl, type Segment } from "@/components/ui";
+import { Button, FailureLine, SegmentedControl, type Segment } from "@/components/ui";
 
 type Mode = "compact" | "restore" | "purge-cold";
 
@@ -42,7 +42,6 @@ export function ArchiveCompactionControl() {
   });
   const commit = useCommand<Mode>("archive-apply", { describe: describeFailure(true) });
   const busy = dry.pending !== null || commit.pending !== null;
-  const error = commit.failure?.message ?? dry.failure?.message ?? null;
 
   // A preview must not stand as consent for another mode.
   function pick(next: Mode) {
@@ -95,11 +94,11 @@ export function ArchiveCompactionControl() {
         </Button>
       </div>
 
-      {error && <p className="account-error">{error}</p>}
+      <FailureLine failure={commit.failure ?? dry.failure} />
 
       {report !== null &&
         report.notes.map((note) => (
-          <p key={note} className={blocked ? "account-error" : "account-muted"}>
+          <p key={note} className={blocked ? "note-warn" : "account-muted"}>
             {note}
           </p>
         ))}

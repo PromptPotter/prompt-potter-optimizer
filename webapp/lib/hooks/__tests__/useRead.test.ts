@@ -3,10 +3,11 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider } from "@/lib/state/auth";
+import { READ_BEAT_MS } from "@/lib/cadence";
 import { clearIncidents } from "@/lib/diagnostics";
 import { GONE_CONFIRM_LIMIT, useRead } from "@/lib/hooks/useRead";
-import { READ_BEAT_MS, clearReadCache, type ReadDescriptor } from "@/lib/read-cache";
+import { clearReadCache, type ReadDescriptor } from "@/lib/read-cache";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(AuthProvider, null, children);

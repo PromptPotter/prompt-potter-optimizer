@@ -31,7 +31,9 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     BUNDLE_DRAWS,
     BUNDLE_READS,
     BUNDLE_SEES,
+    build_bundle,
     fingerprinted_modules,
+    node_packages,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -46,6 +48,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1CritiqueOutput,
     L1GenerateOutput,
     L2ContextOutput,
+    L2RecombiningOutput,
     L3PlanOutput,
     build_l2_response_model,
 )
@@ -95,13 +98,9 @@ from promptpotter.application.optimizers.potter.records import (
     L2Memory,
     L3Memory,
     Ladder,
+    Recombination,
 )
-from promptpotter.application.optimizers.potter.resume import (
-    ELECTION_REPLAYERS,
-    RACE_REPLAYERS,
-    rederive_critiques,
-    round_packages,
-)
+from promptpotter.application.optimizers.potter.resume import ELECTION_REPLAYERS, RACE_REPLAYERS
 from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
@@ -121,7 +120,6 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -139,7 +137,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.paired_reading import ArmKey
@@ -148,7 +145,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
 logger = logging.getLogger(__name__)
@@ -179,14 +175,9 @@ class AdaptiveQueue(nodes.Sampler):
     size_knob: ClassVar[str | None] = "sp_budget_round"
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ADAPTIVE_QUEUE
 
-    def round_cells(self, knobs: AdaptiveQueueKnobs, _search: int) -> int:
+    def drawn(self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str) -> nodes.PanelSize:
         # Unclamped: a budget above the search split is the finding preflight reports.
-        return knobs.sp_budget_round
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        # The draw is unclamped where the budget exceeds the search split; a round's is not.
-        budget = selected.knobs_of(self.name, AdaptiveQueueKnobs).sp_budget_round
-        return (selected.arms_per_round + 1) * min(budget, search)
+        return nodes.PanelSize(cells=knobs.sp_budget_round, block_size=1)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         view = ctx.read(Ruler).difficulty
@@ -227,7 +218,7 @@ class AdaptiveQueue(nodes.Sampler):
 class L1Generate(LayoutNode, nodes.Proposer):
     name: ClassVar[str] = "l1_generate"
     prompt_arity: ClassVar[PromptArity] = "each"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
@@ -245,17 +236,17 @@ class L1Generate(LayoutNode, nodes.Proposer):
         return frozenset({AdaptiveQueue, Escalation})
 
     def arms(self, selected: SelectedOptimizer) -> int:
-        return selected.knobs_of(self.name, L1GenerateKnobs).n_variants
+        knobs = selected.knobs_of(self.name, L1GenerateKnobs)
+        return knobs.n_variants + knobs.recombine
 
-    def opening(self, ctx: RoundContext, _walk: nodes.RoundWalk) -> nodes.RoundOpening:
-        cycle = ctx.cycle
-        selected = cycle.optimizer
-        replayed = cycle.banked_proposals(ctx.round_num) is not None
+    def opening(self, ctx: NodeContext, _bench: nodes.RoundOpening) -> nodes.RoundOpening:
+        knobs = ctx.knobs(L1GenerateKnobs)
+        replayed = ctx.read(Replay).banked_proposals() is not None
         # At patience 0 L2 fires every round, which "stall 1/0" would state as a riddle.
-        patience = selected.reached_knobs(self, EscalationKnobs).l1_patience
-        stall = cycle.slices.get(Ladder).l1_stall_count
+        patience = ctx.knobs(EscalationKnobs).l1_patience
+        stall = ctx.slice(Ladder).l1_stall_count
         standing = "L2 every round" if patience == 0 else f"stall {stall}/{patience} → L2"
-        if ctx.round_num and cycle.output(Critique, ctx.round_num - 1).readout:
+        if ctx.round_num and ctx.recall(Critique, ctx.round_num - 1).readout:
             critique = f"from R{ctx.round_num - 1}"
         elif ctx.round_num <= 1:
             critique = "none yet (first round)"
@@ -264,7 +255,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
         return nodes.RoundOpening(
             standing=standing,
             note=f"Prior critique: {critique}",
-            arms=variants_this_round(self.arms(selected), cycle.slices.get(L2Memory)),
+            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory)) + knobs.recombine,
             proposer="L1",
             replayed=replayed,
         )
@@ -333,6 +324,9 @@ class ThetaElection(nodes.Selector):
     ) -> list[Sample]:
         return panel.cells
 
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.cells
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         return elect_on_theta(ctx, measured)
 
@@ -357,19 +351,14 @@ class L1Critique(LayoutNode, nodes.Adapter):
     ) -> list[OptimizerFact]:
         return critique_facts(round_result)
 
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        """Every layout node's: one bundle feeds them all."""
-        return round_packages(cycle, rounds)
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
+        """Every layout node's: one bundle feeds them all, and it carries the trajectory up to *ctx*'s round."""
+        return node_packages(build_bundle(ctx, ctx.slice(Ladder)))
 
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
-        rounds: list[RoundResult],
-        drifted: list[int],
-    ) -> list[RoundResult]:
-        return await rederive_critiques(campaign_store, hop, cycle, rounds, drifted)
+    async def rederive(self, ctx: NodeContext) -> tuple[StatePart, ...]:
+        if ctx.recall(Critique, ctx.round_num).readout is None:
+            return ()
+        return (await distil_critique(ctx),)
 
     async def adapt(self, ctx: NodeContext) -> None:
         ctx.emit(await distil_critique(ctx))
@@ -397,7 +386,9 @@ class L2Context(LayoutNode):
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
-        return build_l2_response_model(bundle.silent_l1_panels)
+        return build_l2_response_model(
+            bundle.silent_l1_panels, bundle.recombination_offer(self.name)
+        )
 
     def parse(self, ctx: NodeContext, raw: L2ContextOutput) -> TransitionResult:
         # An absent reason is REPORTED, never replaced by a sentence that reads as L2's own.
@@ -438,6 +429,7 @@ class L2Context(LayoutNode):
                 ", ".join(o.validator_id for o in layout_outcomes),
             )
 
+        named = raw.recombinations if isinstance(raw, L2RecombiningOutput) else []
         return TransitionResult(
             described=f"L2: {rationale}",
             steer=steer,
@@ -447,12 +439,26 @@ class L2Context(LayoutNode):
             l2_guard_breaches=layout_outcomes,
             fork_proposal=raw.fork_proposal,
             terminate_proposal=raw.terminate_proposal,
+            recombinations=[
+                Recombination.model_validate(spec.model_dump())
+                for spec in named[: ctx.knobs(L1GenerateKnobs).recombine]
+            ],
+            # The round the bundle renders for, as the next round's L1 reads it.
+            for_round=ctx.read(Lineage).rounds[-1].round + 1,
         )
 
     def land(self, ctx: NodeContext, result: TransitionResult) -> None:
         memory = ctx.slice(L2Memory)
         steered = memory.steered_onto("l1_generate", result.steer) if result.steer else memory
-        ctx.put(steered.model_copy(update={"guard_breaches": list(result.l2_guard_breaches)}))
+        ctx.put(
+            steered.model_copy(
+                update={
+                    "guard_breaches": list(result.l2_guard_breaches),
+                    "recombinations": result.recombinations,
+                    "for_round": result.for_round if result.recombinations else None,
+                }
+            )
+        )
         ctx.restate(L2Memory)
 
     def record(self, ladder: Ladder, fire: Fire) -> Ladder:

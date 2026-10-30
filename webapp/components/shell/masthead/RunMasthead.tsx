@@ -13,20 +13,56 @@ import {
   ratePricedText,
   readSpend,
   spendHeadline,
+  statusTone,
+  tagLabel,
   tagValue,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { fmtAgo, shortId, shortModel } from "@/lib/format";
+import { fmtAgo, PLACEHOLDER, shortId, shortModel } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
 import { measuringArm, useCycleStream } from "@/lib/poll";
-import { useCampaign } from "@/lib/registry";
-import { statusTone } from "@/lib/run-phase";
+import { useCampaign, useRegistry } from "@/lib/state/registry";
 import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
 
 export function RunMasthead() {
+  const { viewedPath, checkin } = useWorkspace();
+  // No run viewed is a check-in (`lib/ingest-flow.tsx`): it has no run, so no run chip stands over it.
+  return viewedPath === null ? <CheckinMasthead draftId={checkin?.draftId ?? null} /> : <RunHeader />;
+}
+
+// An unstarted campaign: what its listing serves — dataset, name, lifecycle word, check-in spend.
+function CheckinMasthead({ draftId }: { draftId: string | null }) {
+  const campaign = useRegistry().unstarted.find((c) => c.address === draftId);
+  if (!campaign) return null;
+  const spend = campaign.stats[0];
+  return (
+    <header className="run-header">
+      <div className="run-header-inner">
+        <div className="run-title">
+          <Badge>{tagValue(campaign, "dataset")}</Badge>
+          <span className="run-name">{campaign.label}</span>
+        </div>
+        <div className="run-chips">
+          <span className="chip">
+            <span className="chip-lbl">State</span>
+            {tagLabel(campaign, "lifecycle")}
+          </span>
+          {spend && (
+            <span className="chip">
+              <span className="chip-lbl">{spend.label}</span>
+              {spend.value}
+            </span>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function RunHeader() {
   const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
 
   const { dash } = useCycleStream();
@@ -40,7 +76,7 @@ export function RunMasthead() {
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   const status = runState?.status ?? null;
-  const phaseLabel = status ? status.label : "—";
+  const phaseLabel = status ? status.label : PLACEHOLDER;
   const phaseTone = status && statusTone(status);
   const phaseBody = (
     <>
@@ -53,7 +89,7 @@ export function RunMasthead() {
   const bench = benchStat(course);
   const round = dash?.round_axis.position ?? null;
   const roundsCap = dash ? budgetAxis(dash.run_limits.budget, "rounds") : null;
-  const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : "—");
+  const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : PLACEHOLDER);
 
   const spend = readSpend(dash);
   const { metered } = spend;
@@ -135,14 +171,14 @@ export function RunMasthead() {
                 )}
               </PairedLift>
             ) : (
-              "—"
+              PLACEHOLDER
             )}
           </Term>
           {/* Ahead of the chip it fills: an ungraded bench's reason runs the row past the viewport. */}
           {viewedPath && !innerLeaf && <BenchAction path={viewedPath} />}
           <span className="chip">
             <span className="chip-lbl">Bench</span>
-            {bench?.value ?? "—"}
+            {bench?.value ?? PLACEHOLDER}
             {bench?.sub && <span className="chip-of"> {bench.sub}</span>}
           </span>
           <span className="chip">
@@ -157,7 +193,7 @@ export function RunMasthead() {
                 {spendHeadline(metered)}
               </Term>
             ) : (
-              "—"
+              PLACEHOLDER
             )}
             {priced && <span className="chip-of"> + {priced}</span>}
             {caps.map((line) => (

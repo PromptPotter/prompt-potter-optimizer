@@ -1,4 +1,5 @@
 import { cx } from "@/lib/cx";
+import { PLACEHOLDER } from "@/lib/format";
 import { connectorReachability, interiorNodes } from "@/lib/derivations";
 import type { ConnectorView } from "@/lib/types";
 
@@ -41,12 +42,12 @@ export function ConnectorInspector({ view }: Props) {
       <button
         type="button"
         className="connector-dot"
-        aria-label={`Connector ${connector ?? (selfOpt ? "PromptPotter" : "—")} — ${label}`}
+        aria-label={`Connector ${connector ?? (selfOpt ? "PromptPotter" : PLACEHOLDER)} — ${label}`}
       />
       <div className="connector-pop" role="group" aria-label="Connector state">
         <div className="connector-pop-head">
           <span className="dot" />
-          <span className="name">{connector ?? (selfOpt ? "PromptPotter" : "—")}</span>
+          <span className="name">{connector ?? (selfOpt ? "PromptPotter" : PLACEHOLDER)}</span>
           {backendType && <span className="kind">{backendType}</span>}
           <span className="state">{label}</span>
         </div>

@@ -6,7 +6,7 @@ import type {
 } from "@/lib/api/types";
 import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
-import { fmtLevel } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 import { tagValue } from "./hierarchy";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
 import { readPaired } from "./paired-reading";
@@ -30,7 +30,7 @@ export function barStarted(bar: CandidateBar): boolean {
 }
 
 export function barValueLabel(metric: DisplayMetric, bar: CandidateBar): string {
-  return fmtLevel(DISPLAY_METRIC_UNITS[metric], barLevel(metric, bar));
+  return fmtUnit(DISPLAY_METRIC_UNITS[metric], barLevel(metric, bar));
 }
 
 export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {

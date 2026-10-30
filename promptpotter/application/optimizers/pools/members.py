@@ -8,11 +8,8 @@ from pydantic import Field
 
 from promptpotter.application.bench.node_context import Target
 from promptpotter.application.optimizers import nodes
-from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.config.paths import block_packs_root
-from promptpotter.config.prompt_blocks import missing_packs, pack_entries, pack_identity
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
-from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
+from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import (
     EARNED_SOURCE,
     BlockPool,
@@ -23,7 +20,7 @@ from promptpotter.domain.pool import (
     kept,
     unnamed,
 )
-from promptpotter.domain.prompt_block import AUTHORED_SOURCE, PackName, Presumption
+from promptpotter.domain.prompt_block import ACCOUNT_PACK, AUTHORED_SOURCE, PackName, Presumption
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
@@ -32,6 +29,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import CycleRead, MintFacts
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.optimizer_state import StatePart
 
 
@@ -49,9 +47,10 @@ class PoolKnobs(StrictModel):
 class BlockPoolKnobs(PoolKnobs):
     packs: Annotated[list[PackName], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         description="The block packs the pool draws from, in draw order: each a directory the "
-        "operator installs under the user-data root's `block_packs/`, none shipped. Their blocks "
-        "are the treatment's starting content, so campaigns on different packs never share an "
-        "identity. Empty, the pool holds the earned blocks alone.",
+        "operator installs under the user-data root's `block_packs/`, none shipped, or one of the "
+        f"run's account, whose edits bank into `{ACCOUNT_PACK}`. Of their "
+        "snippets, the entries `active` keeps are the treatment's starting content, so campaigns drawing "
+        "different snippets never share an identity. Empty, the pool holds the earned blocks alone.",
     )
 
 
@@ -65,30 +64,41 @@ class _PoolInitializer(nodes.Initializer):
         return selected.knobs_of(self.name, PoolKnobs).active
 
 
-def _admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumption]:
-    ranking = {Presumption.RANKING} if schema.emits_ranking else set()
-    return frozenset(ranking) | (frozenset() if matcher is None else MATCHERS[matcher].admits)
-
-
 class BlockPoolInitializer(_PoolInitializer):
     name: ClassVar[str] = BlockPool.kind
     knobs: ClassVar[type[StrictModel]] = BlockPoolKnobs
     pool: ClassVar[type[Pool]] = BlockPool
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({BlockPool})
 
-    def starting_content(self, selected: SelectedOptimizer) -> object:
-        return pack_identity(selected.knobs_of(self.name, BlockPoolKnobs).packs)
+    def starting_content(
+        self, selected: SelectedOptimizer, admits: frozenset[Presumption], shelf: PackShelf
+    ) -> object:
+        # A snippet the run cannot admit is never drawn, so its edit re-keys nothing.
+        knobs = selected.knobs_of(self.name, BlockPoolKnobs)
+        held = shelf.entries(knobs.packs, admits=admits)
+        return [
+            (list(held[i].group), held[i].text)
+            for i in kept(knobs.active, ((i, e.group) for i, e in held.items()))
+        ]
+
+    def held(self, selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
+        packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
+        # At load no account is known, so no pack entry is.
+        if mint is None:
+            return []
+        return list(mint.shelf.entries(packs, admits=mint.admits).values())
 
     def refusal(
         self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:
         packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
-        if absent := missing_packs(packs):
-            return f"{self.name}.packs names {absent}, which {block_packs_root()} does not hold"
+        # A pack resolves in the run's account, so a pool drawing one is judged at the mint alone.
+        if packs and mint is None:
+            return None
+        if mint is not None and (absent := mint.shelf.missing(packs)):
+            return f"{self.name}.packs names {absent}, which neither the install nor this account holds"
         paths = self.active(selected)
-        # At load no chain is known, so a path is checked against every entry any chain admits.
-        admits = frozenset(Presumption) if mint is None else _admits(mint.schema, mint.matcher)
-        held = [(e.id, e.group) for e in pack_entries(packs, admits=admits).values()]
+        held = [(e.id, e.group) for e in self.held(selected, mint)]
         named = [p for p in paths if p.partition("/")[2] != EARNED_SOURCE]
         if bad := unnamed(named, held):
             return (
@@ -110,7 +120,7 @@ class BlockPoolInitializer(_PoolInitializer):
         )
         entries: Mapping[str, PoolEntry] = {
             **{e.id: e for e in earned},
-            **pack_entries(knobs.packs, admits=_admits(target.schema, target.matcher)),
+            **target.pack_entries(knobs.packs),
         }
         active = kept(knobs.active, ((i, e.group) for i, e in entries.items()))
         ctx.put(BlockPool(entries=tuple(entries[i] for i in active)))
@@ -121,15 +131,23 @@ class DemoPoolInitializer(_PoolInitializer):
     pool: ClassVar[type[Pool]] = DemoPool
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DemoPool})
 
-    def starting_content(self, _selected: SelectedOptimizer) -> object:
+    def starting_content(
+        self, _selected: SelectedOptimizer, _admits: frozenset[Presumption], _shelf: PackShelf
+    ) -> object:
         return None
+
+    def held(self, _selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
+        # The split is drawn at mint, so at load no key is known.
+        demo = () if mint is None else mint.demo
+        return [PoolEntry(id=s.key, group=(), text=s.query) for s in demo]
 
     def refusal(
         self, selected: SelectedOptimizer, _closed: bool, mint: MintFacts | None
     ) -> str | None:
         # A partition's size is its split's declaration, so only its names are refused.
         paths = self.active(selected)
-        if mint is not None and (bad := unnamed(paths, [(s.key, ()) for s in mint.demo])):
+        held = [(e.id, e.group) for e in self.held(selected, mint)]
+        if mint is not None and (bad := unnamed(paths, held)):
             return f"{self.name}.active names {bad}, which the demo partition lacks"
         return None
 

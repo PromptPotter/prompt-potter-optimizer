@@ -42,7 +42,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 
 ```
 .promptpotter/
-  block_packs/{name}/pack.json          # installed block packs (`config/paths.py::block_packs_root`)
+  block_packs/{name}/pack.json          # the install's block packs, read-only to every account
   jobs/{job_id}.json                    # machine-global admission records
   projects/{tenant_id}/
     .workspace/
@@ -67,6 +67,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
     optimizer_reuse/  judge_reuse/      # PAID; a grader never reads the loop's answers
     diagnostics/                        # scoring verbs that mint no cycle
     datasets/  materialized/  task-context/
+    block_packs/account/pack.json       # the account's own snippets, `bank-snippet`'s alone to write
     uploads/{sha256[:16]}.{ext}         # every ingested file, kept before parsing; never served
 ```
 
@@ -89,7 +90,7 @@ Each row's contract is its model; this table says only what the type cannot.
 | `.runtime/ledger.jsonl` | The only surface that says which optimizer node RAN (`llm_call` records); an `arm` record carries the individual's whole `lineage`. |
 | `measurements/*` | Each file is one `store/measurement_archive.py::ArchiveFile`; `restamp` walks every kind, removing a record its model still refuses with what it alone describes, and `check_readable` names any file no kind owns. |
 
-**What the cycle runs on is ledger records, read over the fork chain.** `bank_partition` (`domain/bench.py::PartitionRecord`) is appended at mint; a fork reads its parent's, so a re-cut never moves a cycle off its draw (`loop_start.py::cycle_partition`). `resolved_run` holds two halves at opposite cadences: its `declaration` (search SPACE) — the LAST wins; its `experiment` (CELLS) — the FIRST wins, a later disagreeing resolution logged, never adopted (`pipeline_resolve.py::resolve_pipeline_for_campaign`).
+**What the cycle runs on is ledger records, read over the fork chain.** `bank_partition` (`domain/bench.py::PartitionRecord`) is appended at mint; a fork reads its parent's, so a re-cut never moves a cycle off its draw (`loop_start.py::cycle_partition`). `resolved_run` holds two halves at opposite cadences: its `declaration` (search SPACE) — the LAST wins; its `experiment` (CELLS) — the FIRST wins, a later disagreeing resolution logged, never adopted (`pipeline_resolve.py::resolve_pipeline_for_campaign`); the panel's `model_capabilities` and the connector's `backend_revision` ride it, the LAST wins, and each launch appends one when either moved.
 
 Material facts land on disk human-readable; entry points never write campaign artifacts directly — every write rides the ledger.
 
@@ -134,7 +135,7 @@ A failed cell's `ErrorCategory` and message land in the latest `rounds/round_NNN
 | **Rewind** | `resume --from N` | Same `cycle_id`; rounds after N displaced; resume at N+1. |
 | **Fork on divergence** | `resume --fork-on-divergence` | Mint a sibling cycle rooted at the divergent round and continue. |
 
-**Until an L1 round closes, a resume re-enters round 0** and holds at the origin gate again. Refusals, from every way in: `409 cycle_busy` (one live run per cycle), `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only — `application/jobs/mint.py::refuse_drifted_resume`), `409 ledger_unreadable` (a line this build cannot read; remedy `delete <campaign>`, which keeps the caches; `restamp` lists every such cycle).
+**Until an L1 round closes, a resume re-enters round 0** and holds at the origin gate again. Refusals, from every way in: `409 cycle_busy` (one live run per cycle), `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only — `application/jobs/mint.py::resolve_resume`), `409 ledger_unreadable` (a line this build cannot read; remedy `delete <campaign>`, which keeps the caches; `restamp` lists every such cycle).
 
 ### The primitive
 
@@ -160,7 +161,7 @@ For a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclude_nod
 
 **`config_overrides` carries the fork's whole `OptimizationConfig` delta** — budget plus policy toggles — so a fork at offset 0 A/Bs a behaviour knob in isolation without moving the global default; a behaviour-knob change is a sibling cycle. **`budget.rounds` on a fork is an absolute target, not a remainder**: the fork's counter continues from its parent's. **Teardown-only state-sync was rejected — do not re-propose** (it reverses the folder-UI §0 commitment).
 
-**Pause** — the button, `pause` and the first Ctrl+C all fire `pause-cycle` through `CommandDispatcher`; the cycle stays non-terminal, `paused` with cause `command`. **The arm gate** (`optimization.arm_gate`: `off` · `review` · `author`) holds a round before any arm is measured; `submit-arms` answers it (`SubmittedArm`, an edit of the round's parent), banked as a second `round_proposed` record so a resume re-holds only where no answer stands. The knob is `policy`-scoped. **An inner cycle stops when its owner does** (cause `enclosing`). **The look-ahead (⇉)** — who may press and why — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user; on disk, the request is the accepted `set-sample-lookahead` and what ran is the served `sample_lookahead`.
+**Pause** — the button, `pause` and the first Ctrl+C all fire `pause-cycle` through `CommandDispatcher`; the cycle stays non-terminal, `paused` with cause `command`. **The arm gate** (`optimization.arm_gate`: `off` · `review` · `author`) holds a round before any arm is measured; `submit-arms` answers it (`SubmittedArm`, an edit of the round's parent), banked as a second `round_proposed` record so a resume re-holds only where no answer stands. The knob is `policy`-scoped. **An inner cycle stops when its owner does** (cause `enclosing`). **The look-ahead (⇉)** — who may press and why — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user; on disk, the request is the accepted `set-sample-lookahead` and what ran is the served `lookahead.depth`.
 
 ## CLI flags — `new` and `resume`
 
