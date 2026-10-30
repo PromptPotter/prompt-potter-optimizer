@@ -70,6 +70,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import ProducerAlert, ProducerState, RunPhase, StopReason
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -247,7 +248,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         l2=l2,
         l3=l3,
         framing=TaskDecomposition(),
-        pipeline_schema=None,
+        pipeline_schema=PipelineSchema(),
         cycle_slice=CycleSlice(
             round_num=1, l1_stall_depth=0, ladder=Ladder(), exploration_budget="tight"
         ),

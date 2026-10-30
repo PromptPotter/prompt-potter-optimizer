@@ -18,6 +18,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     PoolParent,
     RoundDigest,
+    l1_target_schema,
 )
 from promptpotter.application.optimizers.potter.dispatch.compose import (
     SECTION_SEP,
@@ -342,12 +343,13 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
     origin_per_sample = origin_round.results
     trajectory_results = tuple(frontier.frontier_rows)
 
+    schema = l1_target_schema(target.schema, cs.pipeline_params)
     bundle = InjectionBundle(
         parent=lineage.parent,
         l2=ctx.slice(L2Memory),
         l3=ctx.slice(L3Memory),
         framing=target.framing,
-        pipeline_schema=target.schema,
+        pipeline_schema=schema,
         cycle_slice=cs,
         digest=RoundDigest(
             diagnostics=latest_round.diagnostics,
@@ -380,7 +382,7 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
         slot_of=ruler_read.slot_of,
         pool_window=generate.pool_window,
         inner_cells=target.inner_cells,
-        **_recombination(lineage, target.schema, generate),
+        **_recombination(lineage, schema, generate),
     )
     return replace(bundle, silent_l1_panels=_silent_l1_panels(bundle))
 

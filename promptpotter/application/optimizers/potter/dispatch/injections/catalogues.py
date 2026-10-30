@@ -45,12 +45,12 @@ def _schema_description_block(
 
 
 def _schema_toggle_block(matcher: str | None) -> list[str]:
-    """The only channel a precondition on an axis WITH a menu reaches L1; split across two rounds, the first scores a mechanical zero."""
+    """The only channel a precondition on an axis WITH a menu reaches L1."""
     note = "" if matcher is None else MATCHERS[matcher].note
     lines = [
         f"    {SCHEMA_TOGGLE_PARAM}={ANSWER_AS_TEXT} REMOVES the output schema from the call: "
-        f"{SCHEMA_DESCRIPTION_PREFIX}* then reach nothing, and the answer has to be findable "
-        f"in prose. Rewrite answer_format in the SAME variant."
+        f"{SCHEMA_DESCRIPTION_PREFIX}* then reach nothing, and answer_format, held as it stands, "
+        "places the answer."
     ]
     if note:
         lines.append(f"      the scorer reads: {note}")
@@ -66,8 +66,6 @@ def _schema_toggle_block(matcher: str | None) -> list[str]:
 )
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
     schema = b.pipeline_schema
-    if schema is None:
-        return []
     npk = schema.node_param_keys()
     if not npk:
         return []

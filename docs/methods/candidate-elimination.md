@@ -43,7 +43,9 @@ bounded `P(θ_arm > θ_parent)` above `1 − ε`, PoBB's ε — so one discordan
 θ reads) never promotes. Admission is bounded; the election RANKS on the unbounded posterior
 (bounding it moved a banked crown across a 0.0007 gap). A pick's crowning cells are replayed by
 `rescore_parent` and kept out of later races (`selection.py::crowning_cells`), so the parent's bar
-needs no winner's-curse credit. What the bar does not test is
+needs no winner's-curse credit. A held round's leader ahead of its parent on θ is kept beside it and
+walks the next round's panel once, ahead of L1's arms (`potter/election.py::elect_on_theta`): the
+cells that ranked it first are the ones its luck rode. What the bar does not test is
 [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § Open — multi-arc's.
 
 ## Two regimes

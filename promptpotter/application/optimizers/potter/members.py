@@ -82,6 +82,7 @@ from promptpotter.application.optimizers.potter.knobs import (
 )
 from promptpotter.application.optimizers.potter.l1.candidate_source import (
     propose_l1_population,
+    rejoining,
     variants_this_round,
 )
 from promptpotter.application.optimizers.potter.l1.critique import distil_critique
@@ -106,6 +107,7 @@ from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.optimizer_state import Critique
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
@@ -139,7 +141,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
@@ -183,9 +184,14 @@ class AdaptiveQueue(nodes.Sampler):
         view = ctx.read(Ruler).difficulty
         knobs = ctx.knobs(AdaptiveQueueKnobs)
         lineage = ctx.read(Lineage)
-        # A race read on cells that crowned its parent re-reads the parent's luck as its ability.
-        crowned = crowning_cells(lineage.rounds, lineage.parent.id)
-        pool = [s for s in pool if s.key not in crowned]
+        # A race read on cells that crowned its parent re-reads the parent's luck as its ability,
+        # and a held leader's re-read on the cells it walked replays its cache.
+        spent = crowning_cells(lineage.rounds, lineage.parent.id).union(
+            cell.key
+            for kept in rejoining(lineage)
+            for cell in lineage.rounds[-1].rows(ArmKey(kept.individual.id))
+        )
+        pool = [s for s in pool if s.key not in spent]
         n_min = ctx.read(Bounds).elimination_n_min
         # No outcome and no ability choose a cell: the election reads these rows as the pool's.
         # A cold ruler keeps the campaign-start prefix, whose shared cells warm it fastest.
@@ -255,7 +261,9 @@ class L1Generate(LayoutNode, nodes.Proposer):
         return nodes.RoundOpening(
             standing=standing,
             note=f"Prior critique: {critique}",
-            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory)) + knobs.recombine,
+            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory))
+            + knobs.recombine
+            + len(rejoining(ctx.read(Lineage))),
             proposer="L1",
             replayed=replayed,
         )

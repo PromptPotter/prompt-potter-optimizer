@@ -28,7 +28,7 @@ from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
+from promptpotter.domain.wounds import RuntimeFailure
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.read_model import Moment
 
@@ -73,7 +73,7 @@ def _cut_failures(rr: RoundOutcome) -> list[RuntimeFailure]:
 def _distinct(failures: Sequence[RuntimeFailure]) -> list[RuntimeFailure]:
     out: dict[tuple[str, str, str], RuntimeFailure] = {}
     for rf in failures:
-        out.setdefault(rf_dedup_key(rf.model_dump(mode="json")), rf)
+        out.setdefault(rf.dedup_key, rf)
     return list(out.values())
 
 

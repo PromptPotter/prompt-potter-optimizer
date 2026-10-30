@@ -157,6 +157,14 @@ class RuntimeFailure(FrozenModel):
         ),
     )
 
+    @property
+    def dedup_key(self) -> tuple[str, str, str]:
+        return (
+            self.source,
+            self.dominant_warning,
+            json.dumps(self.observed_config, sort_keys=True, default=str),
+        )
+
 
 _NON_FATAL_REASONS = frozenset({"hallucinated_node"})
 assert not INVARIANT_REASONS & _NON_FATAL_REASONS
@@ -164,12 +172,3 @@ assert not INVARIANT_REASONS & _NON_FATAL_REASONS
 
 def fatal_validation_failures(failures: Iterable[ValidationFailure]) -> list[ValidationFailure]:
     return [vf for vf in failures if vf.reason not in _NON_FATAL_REASONS]
-
-
-def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    """Canonical, so intra-cycle dedup and cross-cycle sibling-wound inheritance match."""
-    return (
-        rf_dict["source"],
-        rf_dict["dominant_warning"],
-        json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
-    )

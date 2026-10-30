@@ -4,6 +4,7 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimizers.potter.dispatch.bundle import l1_target_schema
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_config_not_in_runtime_failures,
     l1_inner_layout_applies,
@@ -34,7 +35,7 @@ def parse_population(
     runtime_failures: Sequence[RuntimeFailure],
     inner_cells: InnerCells | None,
 ) -> list[Proposal]:
-    """L1's rejections only: search space, route keys and backend placeholders are the bench's (``Children.child``); shots are judged on the wire (``generate.py``), where demo ids still exist."""
+    """L1's rejections only: search space, route keys and backend placeholders are the bench's (``Children.child``); shots are judged on the wire (``generate.py``), where demo ids still exist. *schema* is the wire's (`l1_target_schema` under the parent's params)."""
     parsed: list[Proposal] = []
     for cp in proposals:
         pipeline_overlay = cp.overlay
@@ -42,7 +43,11 @@ def parse_population(
         merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
         # The DELTA, never the child's whole prompt: an inherited field was not proposed.
         prompt_edit = candidate_delta(opt_sp.prompts, parent.prompts, None, None).prompt
-        failures = l1_prompt_fields_open(prompt_edit, pipeline_schema=schema)
+        # Held under its OWN params too: a variant toggling a node to text may not rewrite what
+        # that node's scorer will then parse.
+        failures = l1_prompt_fields_open(
+            prompt_edit, pipeline_schema=l1_target_schema(schema, merged_pp)
+        )
         if pipeline_overlay:
             # The DELTA, unlike the placeholder check below: these convict what was PROPOSED.
             failures += [

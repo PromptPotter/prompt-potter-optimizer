@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
-from promptpotter.application.bench.node_context import Calls, Children, Lineage, Target
+from promptpotter.application.bench.node_context import Calls, Children, Lineage
 from promptpotter.application.optimizers.potter.dispatch.bundle import RECOMBINATION_ID_CHARS
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
@@ -88,9 +88,9 @@ async def l1_generate(
     calls, knobs = ctx.read(Calls), ctx.knobs(L1GenerateKnobs)
     model = calls.model
     opt_sp = ctx.read(Lineage).parent
-    pipeline_schema = ctx.read(Target).schema
 
     bundle = build_bundle(ctx, ctx.slice(Ladder))
+    pipeline_schema = bundle.pipeline_schema
     filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
     breakdown = filled.breakdown
     budget = bundle.cycle_slice.exploration_budget

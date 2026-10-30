@@ -22,10 +22,11 @@ A panel renders only what adds signal for this task and state; duplication, para
 ## L1 — what `l1_generate` may propose
 
 - **Mutate only with cause** — stall, critique / axis-memory evidence, or the frozen `task_context`. No data for a choice ⇒ no gamble; a panel speaking against a mutation vetoes it.
+- **L1 never writes an `answer_format` its scorer parses** — a node answering in prose (`pipeline_overlay.py::answers_as_text`) — so every potter node reads the target through `dispatch/bundle.py::l1_target_schema`, which holds it: withdrawn from the wire under the parent's params, rejected at parse under the variant's own too (`forbidden_axis`). <!-- probe: git grep -cE "[^(]target\.schema|Target\)\.schema" -- promptpotter/application/optimizers/potter/*.py == 0 -->
 - **The citable set is derived** (`citable_fields`), and `*_override` slots are withdrawn the same way when their panel rendered nothing.
 - **Never reorder `L1Variant` alone**: `evidence_grounding` generates before `changes_description` and the overrides, and the model, `answer_format` prose and `resolved_schemas` move together.
 - **Panel rules the renderers do not state**: `answer_distribution` is `L1_MANDATORY`; `failing_samples` orders on `Cycle.difficulty`, the one δ; `mutation_memory` derives from the payload, never `changes_description`; `axis_memory` and raw cross-run panels stay off the floor until L2 adds them.
-- **A cluster spans two rows** (`l1/critique.py::spanning_clusters`); a variant targets `targets_rows`, and its edit holds for every row — no per-row patch.
+- **A cluster spans the detectable move, two rows at least** (`l1/critique.py::spanning_clusters` over `panels.py::detectable_rows`); a variant targets `targets_rows`, and its edit holds for every row — no per-row patch.
 - **Reusable prompt material reaches L1 through the block pool**; reusing a block still needs `evidence_grounding`.
 - **`repeat_variant` rejects an idea this cycle measured and lost**, inside `l1_invariants`, never at parse: only measured losses count, the reject threshold is stricter than the marking one, a round is never emptied, and every rejection names its round on the wound channel.
 

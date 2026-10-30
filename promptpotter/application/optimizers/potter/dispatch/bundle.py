@@ -11,8 +11,10 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
-from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.pipeline_overlay import answers_as_text
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
+from promptpotter.domain.prompt_block import PromptPart
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
@@ -84,7 +86,7 @@ MISS_GT_CAP = 40
 MISS_NOTE_CAP = 120
 MISS_STEP_CAP = 160
 # The panel is mandatory on the critique, so this is what bounds its prompt on a dataset of any size.
-MISS_ROWS_CAP = 40
+MISS_ROWS_CAP = 20
 # Rows on a δ the ruler hands several cells carry no order among themselves, so a few stand for all.
 MISS_TIED_CAP = 5
 MEMORY_ROUND_CAP = 4
@@ -105,6 +107,15 @@ BLOCK_ID_INSTRUCTION = (
     "Per prompt node, its pooled fields: {node: {field: the id of a block the PROMPT BLOCK POOL "
     "panel lists for that field}}."
 )
+
+
+def l1_target_schema(schema: PipelineSchema, params: dict[str, Any] | None) -> PipelineSchema:
+    """The target as every potter node reads it under *params*: a node answering in prose holds
+    `answer_format`, which places what its scorer parses, so the wire withdraws it and the parse
+    rejects a write (`l1_prompt_fields_open`). A slot the scorer reads instead is no search's
+    (`SCHEMA_OWNED_FIELDS`)."""
+    held = NodeSearchNarrowing(prompt_fields_held=[PromptPart.ANSWER_FORMAT.value])
+    return schema.narrow(dict.fromkeys(answers_as_text(params, schema), held))
 
 
 class InjectionKind(enum.StrEnum):
@@ -195,7 +206,8 @@ class InjectionBundle:
     l2: L2Memory
     l3: L3Memory
     framing: TaskDecomposition
-    pipeline_schema: PipelineSchema | None
+    # `l1_target_schema`'s: what any potter node may say L1 can write.
+    pipeline_schema: PipelineSchema
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
@@ -237,7 +249,7 @@ class InjectionBundle:
 
     @property
     def prompt_nodes(self) -> list[PipelineNode]:
-        return [] if self.pipeline_schema is None else self.pipeline_schema.prompt_nodes()
+        return self.pipeline_schema.prompt_nodes()
 
     def recombines(self, host: str) -> bool:
         """Whether *host*'s call is shown the pool and offered the slot."""

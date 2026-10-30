@@ -14,35 +14,44 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.wounds import INVARIANT_REASONS, ValidationFailure
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 logger = logging.getLogger(__name__)
 
 
+@shapes_optimizer_prompt
+def lost(rr: RoundResult, key: ArmKey) -> bool:
+    """Measured and lost against its parent, the ONE reading the repeat gate rejects on and
+    ALREADY TRIED shows: ε cut it on cells it scored, or its lift on the parent's whole set reads
+    below. COLLAPSED is no measurement."""
+    fold = rr.folds.get(key)
+    if fold is None or not fold.total:
+        return False
+    match rr.panel.get(key):
+        case Cut(reason=Eliminated(elimination=cut)):
+            return cut.context.get("gate") == EliminationGate.EPSILON
+        case Measured():
+            fit = rr.fit(key)
+            whole = (
+                None if fit is None or fit.vs_reference is None else fit.vs_reference.on_whole_set
+            )
+            return whole is not None and whole.estimate.side == "below"
+        case _:
+            return False
+
+
 def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset[str]]]:
-    """Measured losses only, each read against the round BEFORE its own."""
+    """Each read against the round BEFORE its own."""
     out: list[tuple[int, frozenset[str]]] = []
     for parent_round, rr in pairwise(prior_rounds):
         if (head := parent_round.head) is None:
             continue
         parent, parent_pp = head.individual.prompts, head.individual.pipeline_params
         for key, arm in rr.panel.items():
-            fold = rr.folds.get(key)
-            match arm:
-                case Cut(reason=Eliminated(elimination=cut)) if fold and fold.total:
-                    # ε alone measured this arm against its priors; COLLAPSED is no measurement.
-                    lost = cut.context.get("gate") == EliminationGate.EPSILON
-                case Measured() if fold and fold.total:
-                    lost = (
-                        (fit := rr.fit(key)) is not None
-                        and fit.vs_reference is not None
-                        and (lift := fit.vs_reference.headline) is not None
-                        and lift.estimate.side == "below"
-                    )
-                case _:
-                    lost = False
-            if not lost:
+            if not lost(rr, key):
                 continue
             prompts = arm.individual.prompts
             if fp := candidate_idea(prompts, parent, arm.overlay, parent_pp):

@@ -63,6 +63,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
+    answers_as_text,
     apply_node_overlay,
     fold_output_contract,
     merge_pipeline_params,
@@ -77,9 +78,7 @@ from promptpotter.domain.pipeline_parsing import (
     parse_resolved_schema,
 )
 from promptpotter.domain.pipeline_schema import (
-    ANSWER_AS_TEXT,
     OUTPUT_SCHEMA_KEY,
-    SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
     MovableAgent,
     NestedPipelineRef,
@@ -760,14 +759,16 @@ def resolved_output_schemas(
     """Folded as the WIRE folds it, never the declaration; ``None`` is a point that answers as text."""
     configs = dict(node_config_items(dict(params)))
     folded = fold_output_contract(configs, schema)
+    prose = answers_as_text(configs, schema)
     out: dict[str, NodeOutputSchema | None] = {}
     for node, declared in schema.node_output_schemas().items():
-        if configs.get(node, {}).get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
-            out[node] = None
-            continue
         js = folded.get(node, {}).get("output_schema")
         out[node] = (
-            parse_resolved_schema({"json_schema": js}) if isinstance(js, dict) and js else declared
+            None
+            if node in prose
+            else parse_resolved_schema({"json_schema": js})
+            if isinstance(js, dict) and js
+            else declared
         )
     return out
 

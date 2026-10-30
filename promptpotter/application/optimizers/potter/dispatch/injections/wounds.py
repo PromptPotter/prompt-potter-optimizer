@@ -64,8 +64,6 @@ def _validation_block(b: InjectionBundle) -> str:
 
 def _writable(b: InjectionBundle) -> dict[str, set[str]]:
     schema = b.pipeline_schema
-    if schema is None:
-        return {}
     by_name = {n.name: n for n in schema.nodes}
     return {
         node: {k for k in keys if by_name[node].param_kind(k) in _PLAIN_PARAM_KINDS}

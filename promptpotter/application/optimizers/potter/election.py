@@ -76,6 +76,14 @@ def _verdict_reason(
     )
 
 
+def _kept_for_a_fresh_read(
+    leading: ArmKey, reads: Mapping[ArmKey, float], lineage: Lineage
+) -> bool:
+    """A held round's leader ahead of its parent, once: the cells that ranked it first are the ones
+    its luck rode, so only the next round's panel says whether it clears the bar."""
+    return reads[leading] > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
+
+
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     ruler = ctx.read(Ruler).difficulty.ruler
     lineage = ctx.read(Lineage)
@@ -92,6 +100,12 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     )
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
+    if selected is not None:
+        ranked = [measured.arms[selected].individual]
+    elif leading is not None and _kept_for_a_fresh_read(leading, reads, lineage):
+        ranked = [lineage.parent, measured.arms[leading].individual]
+    else:
+        ranked = [lineage.parent]
     ctx.read(Replay).decide(
         PotterCheckpointKind.ROUND_WINNER,
         {
@@ -108,7 +122,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     return Selection(
         selected=selected,
         leading=leading,
-        ranked=[lineage.parent if selected is None else measured.arms[selected].individual],
+        ranked=ranked,
         verdict_reason=_verdict_reason(
             winner=selected,
             leading=leading,

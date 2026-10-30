@@ -171,6 +171,21 @@ def pin_default_routes(pp: dict[str, Any], schema: PipelineSchema) -> dict[str, 
     return out
 
 
+@shapes_optimizer_prompt
+def answers_as_text(pp: dict[str, Any] | None, schema: PipelineSchema) -> frozenset[str]:
+    """The nodes whose reply the scorer reads as prose under *pp*, never a slot: toggled to text,
+    or holding no schema to send."""
+    configs = dict(node_config_items(pp))
+    out: set[str] = set()
+    for node in schema.declared_nodes:
+        cfg = configs.get(node.name, {})
+        sent = cfg.get("output_schema")
+        slotted = (isinstance(sent, dict) and sent) or node.output_schema
+        if cfg.get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT or not slotted:
+            out.add(node.name)
+    return frozenset(out)
+
+
 def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> dict[str, Any]:
     """The toggle is read, never WRITTEN: an unmoved node keeps a byte-identical payload, and so its banked hash."""
     out = dict(pp or {})

@@ -82,6 +82,7 @@ from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchGate
 from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
 from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
+from promptpotter.application.optimizers.potter.dispatch.bundle import l1_target_schema
 from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -104,6 +105,7 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     observe,
 )
 from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.members import L1Generate
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
 from promptpotter.application.optimizers.potter.records import (
@@ -169,7 +171,15 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.arm_reading import order_floor
-from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, is_leader_eligible
+from promptpotter.domain.arms import (
+    ArmSlot,
+    Cut,
+    CutKind,
+    Measured,
+    Proposal,
+    arm_end,
+    is_leader_eligible,
+)
 from promptpotter.domain.bench import (
     BenchPass,
     BenchPasses,
@@ -223,7 +233,13 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
+from promptpotter.domain.pipeline_schema import (
+    ANSWER_AS_TEXT,
+    SCHEMA_TOGGLE_PARAM,
+    ManifestNodeOverlay,
+    NodeOutputSchema,
+    PipelineNode,
+)
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.results_health import is_deprecated
@@ -254,6 +270,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, TokenUsageKind
 from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
+from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
 from promptpotter.infrastructure.llm.telemetry import (
@@ -892,6 +909,26 @@ def _asked(body: dict[str, Any]) -> str:
     return "\n".join(str(m["content"]) for m in body["messages"])
 
 
+def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
+    """Potter's L1 proposing one variant per instruction, in order; every other node a critique."""
+
+    def says(body: dict[str, Any]) -> str:
+        if "Propose up to" not in _asked(body):
+            return json.dumps({"priority_fix": "instruction: check each premise"})
+        variants = [
+            {
+                "evidence_grounding": {"field": "critique", "citation": "the parent"},
+                "targets_rows": [],
+                "prompt_fields_updates": {"solve": {"instruction": text}},
+                "changes_description": text,
+            }
+            for text in instructions
+        ]
+        return json.dumps({"variants": variants})
+
+    return says
+
+
 def _bench_pass(
     stores: Stores, individual: str, reward: float, *, cells: int = 4, stop: PassStop | None = None
 ) -> BenchPass:
@@ -1033,6 +1070,54 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     warm = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
     assert warm.cells["off"] == 4, "warm, the floor counts only the cells the ruler carries"
     assert closest_to_bar(reads, beside=near_key) == "deep"
+
+    # A held leader ahead of its parent is re-read on the next round, ahead of L1's own, once, and
+    # on cells it never answered: the ones that ranked it first are the ones its luck rode.
+    leader_asked: list[str] = []
+
+    def one_more_than_parent(prompt: str, sample: Sample) -> bool:
+        order = _PEER_READ_ORDER[sample.id]
+        if "Guess." in prompt:
+            return order % 4 == 0
+        if "Check each premise." in prompt:
+            leader_asked.append(sample.key)
+        return order % 2 == 0 or ("Check each premise." in prompt and order == 1)
+
+    with _peer_cycle(
+        workspace(tmp_path / "retest"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {
+            "l1_generate": {"config": {"n_variants": 2}},
+            "adaptive_queue": {"config": {"sp_budget_round": 7}},
+        },
+        one_more_than_parent,
+    ) as (cycle, callbacks):
+        parent_id = cycle.parent.id
+        offline.llm.says = _potter_says("Check each premise.", "Guess.")
+        first = asyncio.run(execute_round(cycle, 1, callbacks)).result
+        assert first.election is not None and first.election.selected is None, "round 1 held"
+        leader = first.election.leading
+        assert leader is not None
+        assert "Check" in first.arms[leader].individual.prompts["solve"].fields["instruction"]
+        assert [m.id for m in cycle.population] == [parent_id, leader], (
+            "a held leader ahead of its parent was dropped with its evidence"
+        )
+        ranked_on = {cell.key for cell in first.rows(leader)}
+        del leader_asked[:]
+        offline.llm.says = _potter_says("Guess.")
+        second = asyncio.run(execute_round(cycle, 2, callbacks)).result
+        re_read = [cell.key for cell in second.rows(leader)]
+        assert next(iter(second.panel)) == leader and re_read, (
+            "the round after a leader missed the bar did not re-score it, first"
+        )
+        # The overlap pass asks for the origin panel beside it.
+        assert set(re_read) <= set(leader_asked) and not ranked_on & set(re_read), (
+            "a held leader's re-read replayed answers it already had, so its luck re-ranked it"
+        )
+        assert cycle.output(L1Readout, 2).l1_proposed == 1, "a re-read counted as L1's yield"
+        assert [m.id for m in cycle.population] == [parent_id], "a leader was re-read twice"
 
     # A STOP IS NOT A VERDICT: only an invalid measurement bars an arm from leading.
     for arm, eligible in (
@@ -2582,6 +2667,65 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         {},
     ), "a round of no-op variants was booked as proposer wounds, not as zero candidates"
     assert warned == [PARSE_FAILURE_ALL_NO_OP], "the operator was not told the round was empty"
+
+    # The scorer parses answer_format, so an L1 write to it is refused before it costs a call.
+    with _peer_cycle(
+        workspace(tmp_path / "held_format"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {},
+        lambda _p, _s: True,
+    ) as (cycle, callbacks):
+        writes = [{"answer_format": "Say anything."}, {"instruction": "Check each premise."}]
+        offline.llm.says = lambda _body: json.dumps(
+            {
+                "variants": [
+                    {**variant, "prompt_fields_updates": {"solve": fields}} for fields in writes
+                ]
+            }
+        )
+        generating = NodeContext(
+            RoundContext(cycle=cycle, round_num=1, callbacks=callbacks),
+            optimizers.NODE_MEMBERS.get("l1_generate"),
+        )
+        proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
+    fatal = [
+        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
+        for cp in proposed.proposals
+    ]
+    assert fatal == [["forbidden_axis"], []], "an L1 edit of answer_format reached the backend"
+    # A slot carries a JSON node's answer, so its answer_format is open until a variant's OWN
+    # params toggle the node to prose.
+    slotted = pipeline_schema(
+        [
+            PipelineNode(
+                name="solve",
+                tunes_llm=False,
+                prompt_info=PROMPT_INFO,
+                output_schema=NodeOutputSchema(fields=["answer"]),
+            )
+        ]
+    )
+    plain = OptSearchPoint(prompts={"solve": NodePrompt(fields={"answer_format": "Reply."})})
+    rewritten = OptSearchPoint(
+        prompts={"solve": NodePrompt(fields={"answer_format": "Say anything."})}
+    )
+    parsed = parse_population(
+        [
+            Proposal(individual=rewritten, overlay=overlay)
+            for overlay in ({}, {"solve": {SCHEMA_TOGGLE_PARAM: ANSWER_AS_TEXT}})
+        ],
+        plain,
+        {},
+        l1_target_schema(slotted, {}),
+        runtime_failures=(),
+        inner_cells=None,
+    )
+    assert [[vf.reason for vf in cp.validation_failures] for cp in parsed] == [
+        [],
+        ["forbidden_axis"],
+    ], "answer_format was held where no scorer parses it, or open where a toggle made one"
 
     # Folded back on resume: a layer fires AFTER the round it reads has closed, so what it
     # authors is on no close.
