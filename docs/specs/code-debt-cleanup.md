@@ -141,10 +141,6 @@ acting.
 
 ### The member backbone
 
-- **The cladogram re-derives fork lineage the server resolves.**
-  `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts client-side while each
-  `HierarchyCandidate` serves `main_line`; the cut is by proposal round, not line position. Action:
-  an extent is the served line; the client walk dies.
 - **The dev loop serializes where it need not:** sibling gates queue whole runs, `next-build` peaks
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:** five builders plus one full gate with no reap and no gate waiting

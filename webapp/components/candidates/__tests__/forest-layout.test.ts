@@ -4,6 +4,7 @@ import type {
   CourseSpawn,
   SubtreeCampaign,
   HierarchyCandidate,
+  MainLineStep,
   SubtreeCourse,
 } from "@/lib/api";
 import {
@@ -33,9 +34,16 @@ const A = encodeCyclePath([{ campaignId: "camp", cycleId: "cycle_a" }]);
 const B = encodeCyclePath([{ campaignId: "camp", cycleId: "cycle_a_fork_b" }]);
 
 // Round `first + i` holds `rounds[i]` candidates; the last of each is crowned unless it held, and
-// each descends from the newest crown before it, as a mutation of the line serves.
-function cands(course: string, rounds: Rounds, first = 1): HierarchyCandidate[] {
+// each descends from the newest crown before it, as a mutation of the line serves. Each serves its
+// main line: `above` (the line its course hangs from), each round's crown before it, then itself.
+function cands(
+  course: string,
+  rounds: Rounds,
+  first = 1,
+  above: readonly MainLineStep[] = [],
+): HierarchyCandidate[] {
   let crown: string | null = null;
+  const line = [...above];
   return rounds.flatMap((spec, ri) => {
     const r = typeof spec === "number" ? { n: spec } : spec;
     const round = first + ri;
@@ -43,7 +51,7 @@ function cands(course: string, rounds: Rounds, first = 1): HierarchyCandidate[] 
     const made = Array.from({ length: r.n }, (_, i) => {
       const id = `c${round}_${i}`;
       const label = `C${round}.${i + 1}`;
-      return hierarchyCandidate(course, {
+      const cand = hierarchyCandidate(course, {
         id,
         descends_from: from,
         reading: armReading({
@@ -52,8 +60,11 @@ function cands(course: string, rounds: Rounds, first = 1): HierarchyCandidate[] 
           election: { held: true, selected: !r.held && i === r.n - 1 },
         }),
       });
+      cand.facts.main_line = [...line, { round, candidates: [cand.address] }];
+      return cand;
     });
     if (!r.held) crown = made.at(-1)?.address ?? crown;
+    line.push({ round, candidates: r.held || crown === null ? [] : [crown] });
     return made;
   });
 }
@@ -64,11 +75,10 @@ function course(
   mint: CourseKind = "root",
   spawn: CourseSpawn | null = null,
   first = 1,
+  above: readonly MainLineStep[] = [],
 ): SubtreeCourse {
-  return subtreeCourse(
-    { address, tags: courseTags(mint, "ds"), children: roundsOf(address, cands(address, rounds, first)) },
-    { mint, spawn },
-  );
+  const children = roundsOf(address, cands(address, rounds, first, above));
+  return subtreeCourse({ address, tags: courseTags(mint, "ds"), children }, { mint, spawn });
 }
 
 const campaign = (address: string, courses: SubtreeCourse[]): SubtreeCampaign =>
@@ -88,14 +98,21 @@ function forkAt(parent: SubtreeCourse, round: number, rounds: Rounds): SubtreeCo
     direction: "offshoot",
     issued_by: "",
   };
-  const fork = course(B, rounds, "fork", spawn, round + 1);
-  return { ...fork, facts: { ...fork.facts, from_candidate: winnerAt(parent, round).address } };
+  const from = winnerAt(parent, round);
+  const fork = course(B, rounds, "fork", spawn, round + 1, from.facts.main_line);
+  return { ...fork, facts: { ...fork.facts, from_candidate: from.address } };
 }
 
-// An inner campaign of one course, measuring for a candidate of `outer`.
-function inner(outer: string, campaignId: string, cycleId: string, rounds: Rounds) {
+// An inner campaign of one course, measuring for `host`, a candidate of `outer` (none: unplaced).
+function inner(
+  outer: string,
+  campaignId: string,
+  cycleId: string,
+  rounds: Rounds,
+  host: HierarchyCandidate | null = null,
+) {
   const address = encodeCyclePath([...decodeCyclePath(outer)!, { campaignId, cycleId }]);
-  const run = course(address, rounds, "inner");
+  const run = course(address, rounds, "inner", null, 1, host?.facts.main_line ?? []);
   return { run, campaign: campaign(`${outer}~${campaignId}`, [run]) };
 }
 
@@ -176,18 +193,27 @@ describe("layout", () => {
     expect(laneByKey.get(B)!.baseCol).toBe(0);
   });
 
-  it("cut at a candidate: later rounds and the courses cut after it take no row", () => {
-    const a = course(A, [2, 2]);
-    const tree = campaign("camp", [a, forkAt(a, 2, [1])]);
-    const keep = extentKeys(tree, { coursePathKey: A, candidateId: "c1_1" })!;
+  it("cut at a candidate: its served line; later rounds and the courses cut after it take no row", () => {
+    const a = course(A, [2, 2, 2]);
+    const tree = campaign("camp", [a, forkAt(a, 3, [1])]);
+    const keep = extentKeys(tree, { coursePathKey: A, candidateId: "c2_0" })!;
     const cut = layout(tree, new Set([A]), keep);
     expect(cut.laneByKey.size).toBe(1);
-    expect(cut.maxCol).toBe(1);
-    expect(ids(cut.laneByKey.get(A)!.candidates)).toEqual(["c1_0", "c1_1"]);
+    expect(cut.maxCol).toBe(2);
+    expect(ids(cut.laneByKey.get(A)!.candidates)).toEqual(["c1_1", "c2_0"]);
     expect(layout(tree, new Set()).laneByKey.size).toBe(2);
   });
 
-  it("a fork lifting no round keeps the chain to its from-candidate, never its parent's", () => {
+  it("a fork keeps its parent's line up to the candidate it hangs from", () => {
+    const a = course(A, [2, 2, 2]);
+    const tree = campaign("camp", [a, forkAt(a, 2, [1, 1])]);
+    const keep = extentKeys(tree, { coursePathKey: B, candidateId: "c3_0" })!;
+    const { laneByKey } = layout(tree, new Set([A]), keep);
+    expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1", "c2_1"]);
+    expect(ids(laneByKey.get(B)!.candidates)).toEqual(["c3_0"]);
+  });
+
+  it("a fork lifting no round keeps its from-candidate's line, never its parent's", () => {
     const C = encodeCyclePath([{ campaignId: "camp", cycleId: "cycle_a_fork_c" }]);
     const a = course(A, [2, 2, 2]);
     const spawn: CourseSpawn = {
@@ -197,15 +223,16 @@ describe("layout", () => {
       direction: "offshoot",
       issued_by: "",
     };
-    const steered = course(C, [1], "fork", spawn);
+    const from = winnerAt(a, 1);
+    const steered = course(C, [1], "fork", spawn, 1, from.facts.main_line);
     const tree = campaign("camp", [
       a,
       forkAt(a, 2, [1]),
-      { ...steered, facts: { ...steered.facts, from_candidate: winnerAt(a, 1).address } },
+      { ...steered, facts: { ...steered.facts, from_candidate: from.address } },
     ]);
     const keep = extentKeys(tree, { coursePathKey: C, candidateId: "c1_0" })!;
     const { laneByKey } = layout(tree, new Set([A]), keep);
-    expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_0", "c1_1"]);
+    expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1"]);
     expect(laneByKey.has(B)).toBe(false);
   });
 
@@ -222,9 +249,10 @@ describe("layout", () => {
   });
 
   it("a point inside a seed cuts within it, and the sibling seeds are out", () => {
-    const mine = inner(A, "seed0", "cycle_seed", [1, 1, 1]);
-    const sibling = inner(A, "seed1", "cycle_seed", [1, 1, 1]);
-    const a = hangOffWinner(hangOffWinner(course(A, [1]), 1, mine.campaign), 1, sibling.campaign);
+    const host = course(A, [1]);
+    const mine = inner(A, "seed0", "cycle_seed", [1, 1, 1], winnerAt(host, 1));
+    const sibling = inner(A, "seed1", "cycle_seed", [1, 1, 1], winnerAt(host, 1));
+    const a = hangOffWinner(hangOffWinner(host, 1, mine.campaign), 1, sibling.campaign);
     const tree = campaign("camp", [a]);
     const keep = extentKeys(tree, { coursePathKey: mine.run.address, candidateId: "c2_0" })!;
     const { laneByKey } = layout(tree, new Set(), keep);
