@@ -43,11 +43,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
-**Each is gated by a capability bit whose injection renders empty when off; terminate outranks fork.**
-
-- **`fork_proposal` carries no round offset**: the layer decides whether to rewind, UCB decides where (`application/mask/backprop.py::select_rewind_round`).
-- **`unlock_schema_field_rename` is a bool, never `ConfigOverrides`** — a layer must not move its own spend ceiling.
-- **A blank `terminate_proposal` reason is ignored**; honored and ignored both land on the operator's warnings channel.
+**Each sits behind its capability bit; terminate outranks fork.** `terminate_proposal` is in the reply schema only where `InjectionBundle.terminate_offer` holds (a measured starved node); a blank reason is ignored, an honored one stops the cycle `optimizer_abort`. `fork_proposal` names no round — UCB picks it (`mask/backprop.py::select_rewind_round`). `unlock_schema_field_rename` is a bool: a layer never moves its own spend ceiling.
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 

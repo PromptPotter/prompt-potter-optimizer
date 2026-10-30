@@ -3,7 +3,7 @@ import { useState } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import type { RunAdmission } from "@/lib/api/types";
-import { phasePauseLabel, phaseWalks } from "@/lib/derivations";
+import { pauseNextStep, phasePauseLabel, phaseWalks } from "@/lib/derivations";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -64,7 +64,7 @@ export function useRunControl(): RunControl | null {
     // No dashboard yet: a warming cycle's launch is already in flight.
     noneReason: admission === undefined ? "Starting up…" : admission.refusal || null,
     pauseNote: pause
-      ? `Paused by ${pause.cause}${pause.detail ? ` (${pause.detail})` : ""} — ${pause.next_step}`
+      ? `Paused by ${pause.cause}${pause.detail ? ` (${pause.detail})` : ""} — ${pauseNextStep(pause)}`
       : null,
     toggle,
   };

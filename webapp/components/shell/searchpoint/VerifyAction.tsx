@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
-import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import { READING_STATE_INFO, VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { VERIFY_PASS_POLL_MS } from "@/lib/cadence";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
@@ -122,8 +122,10 @@ export function VerifyAction({
         </p>
       )}
       <FailureLine failure={cmd.failure} />
-      {!busy && last?.failure != null && (
-        <p className="verify-action-note error">The last verify failed: {last.failure}</p>
+      {!busy && last?.failed_as != null && (
+        <p className="verify-action-note error">
+          The last verify failed: {READING_STATE_INFO[last.failed_as].sentence}
+        </p>
       )}
       {reading && unit && <VerifyReading reading={reading} unit={unit} />}
     </div>

@@ -11,15 +11,16 @@ import { useWorkspace } from "@/lib/workspace";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
-import { Lane } from "./Lane";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { ForestCard } from "@/components/candidates/ForestCard";
-import { ConfigMapPanel } from "@/components/dashboard/pipeline/ConfigMapPanel";
+import { BackendRetries } from "@/components/dashboard/pipeline/BackendRetries";
 import { OptimizerCard } from "@/components/dashboard/pipeline/OptimizerCard";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
-import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
+import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
+import { FreqChart } from "@/components/dashboard/scoring/FreqChart";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
+import { TrendChart } from "@/components/dashboard/scoring/TrendChart";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { SubjectBox } from "@/components/shell/searchpoint/SubjectBox";
@@ -40,15 +41,12 @@ export function DashboardTab() {
   return (
     <div className="content" id="content-dashboard">
       <div className="box-grid">
+        {/* Read top-down as the backbone: the run now → who leads this round → the rounds so far →
+            the cells → the pipeline being tuned and the optimizer tuning it. */}
         <div className="box-full">
           <RunErrorBanner />
           <TopStrip />
         </div>
-        {isOuterSelfOpt && (
-          <div className="box-full">
-            <OuterSignalPanel />
-          </div>
-        )}
         <div className="box-full">
           <TimeRay />
         </div>
@@ -63,15 +61,23 @@ export function DashboardTab() {
             <ScoringInspector selected={candidate} onClose={() => setSelectionForCandidate(null)} />
           </div>
         )}
+        {isOuterSelfOpt && <OuterSignalPanel />}
+
+        <TrendChart />
+        <CostStrip />
 
         {hasSamples && (
           <CardFrame title="Samples" headingTag="h2" span="full">
             <HardSamplesHeatmap />
+            <div className="card-inset">
+              <FreqChart />
+            </div>
           </CardFrame>
         )}
 
         <CardFrame title="Pipeline" headingTag="h2">
           <PipelineStack datasetName={datasetName} />
+          <BackendRetries />
         </CardFrame>
         <OptimizerCard pipeline={optimizerPipeline} />
         {node && (
@@ -79,23 +85,6 @@ export function DashboardTab() {
             <NodeDetail node={node} onClose={() => setSelectionForNode(null)} />
           </div>
         )}
-
-        <Lane
-          id="livestate"
-          title="Run details"
-          subtitle="Raw dashboard.json + trend + score frequency"
-          defaultOpen
-        >
-          <LiveStateCard />
-        </Lane>
-        <Lane
-          id="config-map"
-          title="Config map"
-          subtitle="What each knob moves, what overwrites what, and which knobs clash"
-          defaultOpen={false}
-        >
-          <ConfigMapPanel />
-        </Lane>
       </div>
     </div>
   );

@@ -85,6 +85,46 @@ acting.
   `setSelectionForSampleSet` from several surfaces, `TrendChart.onOpen` exists so a caller can
   `openView`, `FileTree::onSelect` drilled through its parents.
 
+### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
+
+- **`domain/bench.py::BENCH_STATE_INFO` is a second table over `ReadingState`** beside
+  `READING_STATE_INFO`. Action: one table with a `fault` column. Merging re-keys optimizer prompts
+  (a digest table), so it asks the operator first. **Re-test:** `git grep -c "BENCH_STATE_INFO" -- promptpotter`.
+- **`DISPLAY_METRIC_INFO` is hand-emitted three ways** (`DISPLAY_METRICS`, `_LABELS`, `_UNITS` in
+  `scripts/build_ts_types.py`). Action: one `_WORD_TABLES` row. **Re-test:** grep the three names in the script.
+- **One wording kept in two languages**: `selection_line` (Python `markdown.py` / `activity.py`, TS
+  `hierarchy.ts::selectionLine`), and likewise the rounds (`primitives.py::rounds_readout` /
+  `roundsText`) and lives (`LivesReading.label` / `lives.ts`) phrasings. The words are one table; the
+  sentence frame is still written twice. Action: none until a third surface; then the frame is a table row.
+- **`lib/derivations/time-ray.ts::rayHead` stitches `dash.run_phase` with the course's
+  `state.status`** (two sources for one run). Action: one served head. **Rides with:** one owner per fact across `/hierarchy` and `/dashboard`.
+- **A candidate's `caveat` restates the θ caveat** `THETA_CAVEAT_INFO` already words. Action: serve the enum.
+- **`RunErrorBanner` splits `err.message` on `\n`** — prose read as structure. **Rides with:** warnings narrowed to self-heals.
+- **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and passes it through `model_validate`**,
+  so the `StatusMark` literal is checked at runtime only. Action: map phase/outcome → `StatusMark` typed.
+- **`application/config_map.py::ConfigKnob.source` is an untyped `str`**, and its only reader is
+  `RowHoverCard`'s declared-knobs list. Action: a `KnobSource` literal. **Re-test:** `git grep -n "source: str" -- promptpotter/application/config_map.py`.
+- **The pipeline renderer's styles live in `app/styles/domains/chat.css`** (`.wf-hero-*`,
+  `.connector*`, `.pipeline-zoom*`), restated by `dashboard-pipeline-nodes.css` to win on order. The
+  renderer is `dashboard/pipeline/PipelineFlow`'s. Action: move the block to its own domain file in
+  one commit once the run-card session's `chat.css` hunk lands. **Re-test:** `git grep -c "wf-hero" -- webapp/app/styles/domains/chat.css`.
+- **`NodeKnobsPanel::POOL_NOUN` words a served closed set (`PoolRow.source`) locally.** Action: an
+  exported word table. **Re-test:** `git grep -n "POOL_NOUN" -- webapp/components`.
+- **`FreqChart` inks the low half of the bands one colour and the high half another**: colour that
+  carries no meaning. Action: one ink. **Re-test:** read `FreqChart.tsx::colors`.
+- **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
+  served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
+- **A running server keeps serving a ledger refusal after the ledger is rewritten**: `/hierarchy`
+  answered `ledger_unreadable` for a cycle that `restamp` read whole, until restart. Action: key a
+  refusal on the file's identity (size + mtime) like the fold it guards. **Re-test:** migrate a
+  refused ledger under a live server; the next read answers 200.
+- **A live producer started on older code writes shapes the landed code refuses**, and reads
+  shapes a migration wrote: landing a ledger shape change while any run writes breaks both sides.
+  Action: a run records its code revision and the landing refuses while a producer of an older one
+  holds a cycle. **Re-test:** `machine-status` before a shape-moving landing.
+- **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
+  session. **Rides with:** that session landing.
+
 ### The member backbone
 
 - **The cladogram re-derives fork lineage the server resolves.**

@@ -119,9 +119,9 @@ class SampleLookahead(StrictModel):
         "next round alone."
     )
     pick_max: int = Field(description="The deepest press the next walk can take.")
-    money_hold: str | None = Field(
-        description="How many more cells the spend limits admit, in words, where money and not "
-        "the armed depth holds the walk; null where it does not."
+    affordable: int | None = Field(
+        description="How many more cells the spend limits admit, where money and not the armed "
+        "depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not."
     )
     cell_reserve_usd: float | None = Field(
         description="What each call out holds of the ceiling; null where no book binds."
@@ -350,8 +350,12 @@ def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
 _ONE_AT_A_TIME = "This backend runs one sample at a time — a single call has no latency to overlap."
 
 
-def _money_hold(affordable: int) -> str:
-    return "holds no further cell" if affordable <= 0 else f"{affordable} more affordable"
+# `SampleLookahead.affordable` worded: none left, or how many more.
+type LookaheadWord = Literal["no_further_cell", "more_affordable"]
+LOOKAHEAD_WORDS: dict[LookaheadWord, str] = {
+    "no_further_cell": "holds no further cell",
+    "more_affordable": "more affordable",
+}
 
 
 def _lookahead_explained(*, auto: bool, ceiling: int, pick_max: int, discards: int) -> str:
@@ -380,8 +384,8 @@ def _lookahead(
     depth = 1 if standing is None else effective_lookahead(standing.lookahead, ceiling)
     affordable, most = state.lookahead_affordable, state.lookahead_most
     # Both verdicts read the depth and the gauge as just corrected.
-    money_hold = (
-        _money_hold(affordable)
+    held_by_money = (
+        affordable
         if standing is not None
         and affordable is not None
         and in_flight + affordable < min(depth, allowed)
@@ -400,7 +404,7 @@ def _lookahead(
         most=most,
         scoring_now=in_flight > 0 or allowed > 0,
         pick_max=pick_max,
-        money_hold=money_hold,
+        affordable=held_by_money,
         cell_reserve_usd=state.cell_reserve_usd,
         unavailable=unavailable,
         explained=unavailable

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { ArmReading, VerificationMark } from "@/lib/api/types";
+import { READING_STATE_INFO } from "@/lib/api/types.generated";
 import type { NodeSchemaReading } from "@/lib/types";
 import { NOT_SEPARABLE, readPaired, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
@@ -75,8 +76,8 @@ export function SearchpointDrillIn({
                 k="bench · held out"
                 hint="This same searchpoint on the held-out bench set: questions no round of the search ever read, so no candidate was chosen on them. A different set of questions from the accuracy above, so the two rates are not differenced. Any bench lift is against the ORIGIN, not the parent."
                 v={
-                  benchPass?.failure != null
-                    ? `failed · ${benchPass.failure}`
+                  benchPass?.failed_as != null
+                    ? `failed · ${READING_STATE_INFO[benchPass.failed_as].sentence}`
                     : benchPass != null
                     ? `${fmtPct1(benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null

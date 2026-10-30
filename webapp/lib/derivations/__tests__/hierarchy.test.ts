@@ -26,7 +26,7 @@ describe("runningCourses", () => {
   it("keeps only attached courses, ordered by the served dock priority", () => {
     const attached = (run_phase: "running" | "paused" | "queued") =>
       hierarchyState({
-        run_phase,
+        status: { run_phase, stop_reason: null, mark: run_phase },
         attached: true,
       });
     const campaign = {
@@ -44,7 +44,7 @@ describe("runningCourses", () => {
       "camp_a::cycle_3",
       "camp_a::cycle_4",
     ]);
-    const priorities = running.map((c) => dockPriority(c.state.run_phase));
+    const priorities = running.map((c) => dockPriority(c.state.status.run_phase));
     expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
   });
 });

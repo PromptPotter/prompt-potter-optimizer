@@ -23,6 +23,8 @@ interface GridOpts {
   rowH: number;
   padTop: number;
   padBottom: number;
+  // Columns the box holds; past it the serpentine folds into more rows, never off the edge.
+  maxCols: number | null;
 }
 
 export function cycleOf(nodes: PipelineViewNode[], edges: PipelineViewEdge[]): string[] {
@@ -64,7 +66,7 @@ export function layoutGrid(
 ): GridLayout {
   const order = flowOrder(nodes, cycle);
   const onSpine = new Set(cycle);
-  const cols = Math.max(Math.ceil(order.length / 2), 1);
+  const cols = Math.max(Math.min(Math.ceil(order.length / 2), o.maxCols ?? Infinity), 1);
   const rows = Math.max(Math.ceil(order.length / cols), 1);
 
   const pos = new Map<string, PlacedNode>();

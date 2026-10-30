@@ -1016,14 +1016,13 @@ def cycle_result(
     if bench_levels is None:
         bench_levels = [bench_origin if bench_origin is not None else 0.5] * len(levels)
     unheld = PairedReading.unread(ReadingState.NOT_HELD)
-    bench = BenchScore.of(
+    bench = BenchScore(
         bench_size=0,
         scorer_id="",
         headline=BENCH_HEADLINE,
         status=bench_status(
             trigger="at_end",
             bench_size=0,
-            tolerance=0,
             on_line=True,
             inner=False,
             held_by=None,

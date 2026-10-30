@@ -25,16 +25,12 @@ from promptpotter.application.hierarchy import (
     campaign_courses,
     campaign_entry,
     entries_version,
-    level_text,
-    lift_stat,
     superseded_tag,
 )
 from promptpotter.application.mask.record import Lens
 from promptpotter.application.mask.tree_lens import lensed, read_samples
 from promptpotter.domain.arm_reading import (
     ARM_VERDICT_LABELS,
-    ArmReading,
-    DisplayMetric,
     arm_verdict,
     panel_cuts,
 )
@@ -52,13 +48,12 @@ from promptpotter.domain.cycle_paths import (
 )
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
-    EntryStat,
+    CandidateStanding,
     GeneSource,
     HierarchyCandidate,
     HierarchyCourse,
     HierarchyEntry,
     HierarchyRound,
-    HierarchyStat,
     HierarchyTag,
     MainLineStep,
     RoundFacts,
@@ -325,48 +320,6 @@ def _main_line(c: _Candidate) -> list[MainLineStep]:
     return steps
 
 
-def _theta(reading: ArmReading, *, elected: bool) -> HierarchyStat | None:
-    ability = reading.ability
-    if ability is None or (ability.theta is None and ability.caveat is None):
-        return None
-    value = "—" if ability.theta is None else f"{ability.theta:.2f}"
-    if ability.theta is not None and ability.se is not None:
-        value += f" ± {ability.se:.2f}"
-    sub = (
-        "not ability — see below"
-        if ability.caveat
-        else "what the round elects on"
-        if elected
-        else None
-    )
-    return HierarchyStat(key="ability", label="Ability θ", value=value, sub=sub)
-
-
-def _accuracy(reading: ArmReading) -> HierarchyStat:
-    own = reading.own
-    accuracy = None if own is None or own.accuracy is None else own.accuracy.value
-    scored, expected = reading.panel.scored, reading.panel.expected
-    return HierarchyStat(
-        key="accuracy",
-        label="Accuracy",
-        value=level_text("rate", accuracy),
-        sub=None
-        if scored is None
-        else f"{scored}{'' if expected is None else f' of {expected}'} scored",
-    )
-
-
-def _candidate_stats(reading: ArmReading, elects_on: DisplayMetric | None) -> list[EntryStat]:
-    on_theta = elects_on == "ability"
-    theta = _theta(reading, elected=on_theta)
-    level = [_accuracy(reading), *([] if theta is None else [theta])]
-    if on_theta:
-        level.reverse()
-    pair = reading.vs_reference
-    lift = [] if pair is None else [lift_stat("lift", "Lift vs parent", pair, "parent", notes=[])]
-    return [*level, *lift]
-
-
 def _unplaced(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
     """Why no candidate holds a run, in the words of the pass its record names."""
     asked = (
@@ -387,22 +340,13 @@ def _fields(entry: FrozenModel) -> dict[str, Any]:
     return {name: getattr(entry, name) for name in type(entry).model_fields}
 
 
-def _lede(c: _Candidate, *, stood_on: bool) -> str:
+def _standing(c: _Candidate, *, stood_on: bool) -> CandidateStanding:
     match c.status:
         case _Retired():
-            return (
-                "Retired: the run branched and continued in the course that took its place. It "
-                "stays as the record of what ran, its line as it ran."
-            )
+            return CandidateStanding.RETIRED
         case "rewound":
-            return (
-                "Rewound: its course re-ran this round in place after a fork was cut from it. It "
-                "stays as the record of what ran"
-                + (", and a fork's line stands on it." if stood_on else ".")
-            )
-    if c.round == 0:
-        return "This course's ORIGIN: the specification it started from, measured."
-    return "A candidate this course proposed and measured."
+            return CandidateStanding.REWOUND_STOOD_ON if stood_on else CandidateStanding.REWOUND
+    return CandidateStanding.ORIGIN if c.round == 0 else CandidateStanding.PROPOSED
 
 
 class _Build:
@@ -551,7 +495,6 @@ class _Build:
                 self._candidate(
                     course,
                     c,
-                    elects_on,
                     cut=cut[c.address],
                     stands=stands,
                     latest=latest,
@@ -589,7 +532,6 @@ class _Build:
         self,
         course: _Course,
         c: _Candidate,
-        elects_on: DisplayMetric | None,
         *,
         cut: bool,
         stands: str | None,
@@ -615,6 +557,7 @@ class _Build:
             individual=c.arm.state.individual.id,
             parent_ids=list(lineage.parent_ids),
             variations=list(lineage.variations),
+            standing=_standing(c, stood_on=stood_on),
             reading=reading,
             stands=c.address == stands,
             course_latest=c.address == latest,
@@ -635,12 +578,10 @@ class _Build:
             address=c.address,
             parent=round_address(course.address, c.round),
             label=reading.arm.label,
-            lede=_lede(c, stood_on=stood_on),
             caveat=None
             if caveat is None
             else f"{THETA_CAVEAT_INFO[caveat].head}. {THETA_CAVEAT_INFO[caveat].body}",
             tags=tags,
-            stats=_candidate_stats(reading, elects_on),
             children=list(c.inner),
             facts=facts,
         )

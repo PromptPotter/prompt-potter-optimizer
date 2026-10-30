@@ -115,7 +115,7 @@ export function LineageProvider({
           .filter(
             (e) =>
               e.children.length > 0 &&
-              e.children.every((c) => phaseIs(c.state.run_phase, "settled")),
+              e.children.every((c) => phaseIs(c.state.status.run_phase, "settled")),
           )
           .map((e) => e.address),
       ),

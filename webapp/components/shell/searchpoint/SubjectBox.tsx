@@ -7,7 +7,6 @@ import { useOriginEvidence } from "@/lib/hooks/useOriginEvidence";
 import { useSearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useSelection } from "@/lib/SelectionContext";
 import {
-  benchStat,
   readSpend,
   searchpointCopyChoices,
   searchpointText,
@@ -43,7 +42,7 @@ export function SubjectBox() {
         <SubjectHeadline
           spend={readSpend(dash)}
           reading={row?.reading ?? null}
-          bench={subject.state === "best" ? (benchStat(course)?.vs_origin ?? null) : null}
+          bench={subject.state === "best" ? (course?.facts.bench?.vs_origin ?? null) : null}
         />
         {subject.options.length > 1 ? (
           <SegmentedControl<ObserveState>

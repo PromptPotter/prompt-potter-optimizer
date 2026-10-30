@@ -93,7 +93,7 @@ invariants:
                       origin panel (the masthead''s BEST, ForestRows, PanelCellRow,
                       run-summary) and never either member''s own level; `origin_accuracy` on
                       the origins listing (DatasetPickList), the course's
-                      `BenchStat.vs_origin` (headline-stats), and run_card.flips'' per-sample rows. PARENT is the round''s
+                      `facts.bench.vs_origin` (headline-stats), and run_card.flips'' per-sample rows. PARENT is the round''s
                       own floor — the origin at round 0, the prior winner after: every
                       `vs_reference` reading, wherever it surfaces (the searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
@@ -152,18 +152,18 @@ invariants:
 `domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
 `GET /hierarchy` (the webapp's `lib/state/registry.tsx`, the `cycles` verb), discriminated on `level`.
 A level a row or a card renders — campaign, course, candidate — wears the envelope (`label`,
-`lede`, `caveat`, `tags`, `stats`); a round and a step are nodes (`address`, `parent`, `facts`),
-since an envelope nothing renders is an empty field on every poll and every generated type. A
-level that gains a row moves under `_HierarchyEntry`. A generic row, hover card, switcher entry or
-dock chip reads the envelope and never opens `facts`, and a `facts` field no reader names is
+`caveat`, `tags`) over its typed `facts`; a round and a step are nodes (`address`, `parent`,
+`facts`), since an envelope nothing renders is an empty field on every poll and every generated
+type. A level that gains a row moves under `_HierarchyEntry`. A `facts` field no reader names is
 deleted (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). The address grammar is
 [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address.
 
-- **Tags and stats are the rendering, worded on the server, in served order**, each clause at one
-  site; `stats[0]` is the row's headline. Grouping, filtering on a tag and formatting a time are
-  layout; wording a number, ordering stats or deriving a state survives nowhere in
+- **An entry serves facts, never a worded restatement of them**: a row's numbers are
+  `lib/derivations/hierarchy.ts::entryFigures` over `facts`, its words an exported `*_INFO` /
+  `*_WORDS` table keyed by a served enum (`CANDIDATE_STANDING_INFO`, `ROUNDS_CAP_WORDS`).
+  Grouping, filtering on a tag and formatting are layout; deriving a state survives nowhere in
   `webapp/lib/derivations`.
-  <!-- probe: git grep -cE "rounds are won on" -- promptpotter/application/hierarchy.py == 1 -->
+  <!-- probe: git grep -cE "HierarchyStat\b|BenchStat\b|StatKey|stats: list" -- promptpotter == 0 -->
   <!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
 - **One declared tag exception, `mint`**: code branches on a course's kind exhaustively and a tag's
   value is an untyped string, so the kind is served twice — typed as `facts.mint`, worded as the tag.
@@ -173,9 +173,9 @@ deleted (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). Th
   `RunStatus.of`'s other caller is `evidence/head_to_head.py`, whose subject is an arm.
   <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 -->
   <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 -->
-- **A run's word is the course's; the dashboard read is run CONTROL.** `status` and `next_step`
-  ride the course entry alone (`lib/lineage.tsx::useViewedCourse`), built off the HEAD index under
-  any moment or mask, so they are one value everywhere. `ServedDashboard` declares neither; it keeps
+- **A run's word is the course's; the dashboard read is run CONTROL.** `state.status` (phase,
+  stop reason, mark — worded by `run-phase.ts::runWord` / `runNextStep`) rides the course entry alone (`lib/lineage.tsx::useViewedCourse`), built off the HEAD index under
+  any moment or mask, so it is one value everywhere. `ServedDashboard` does not declare it; it keeps
   what control acts on and only the head measures — `run_phase`, `admission`, `pause`, the clocked
   producer, spend, limits, the walk. Read under a lens, a sample set or a moment, every course
   carries a `caveat` naming which (`hierarchy_subtree.py::_read_under`). The listing serves

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
@@ -12,7 +13,6 @@ from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
     import random
@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
+
+logger = logging.getLogger(__name__)
 
 MatingPool = Literal["population", "measured"]
 
@@ -99,11 +101,11 @@ class Mating(nodes.Proposer):
                 drawn = rng.sample(rivals, min(knobs.tournament, len(rivals)))
                 pairs.append((main, _fittest(drawn, by)))
         if dropped := knobs.offspring - len(pairs):
-            emit_round_warning(
-                kind="offspring_dropped",
-                message=f"{dropped} offspring dropped: the population holds "
-                f"{len(mains)} main(s), and a child needs a {knobs.donor_from} donor apart from "
-                "its main.",
+            logger.info(
+                "%d offspring dropped: %d main(s), a child needing a %s donor apart from it",
+                dropped,
+                len(mains),
+                knobs.donor_from,
             )
         children = ctx.read(Children)
         return nodes.Proposals(
@@ -175,11 +177,8 @@ class LocusCrossover(nodes.Proposer):
                 continue
             out.append(children.edit(proposal, take=take))
         if clones:
-            emit_round_warning(
-                kind="offspring_dropped",
-                message=f"{len(clones)} offspring dropped: each pair differs on under two loci a "
-                "crossover swaps, so every child would be one of its parents again.",
-                detail={"pairs": clones},
+            logger.info(
+                "%d offspring dropped, each pair under two crossable loci: %s", len(clones), clones
             )
         return nodes.Proposals(out)
 

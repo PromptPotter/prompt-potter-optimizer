@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
 import {
-  STOP_REASON_OUTCOMES,
+  STOP_REASON_INFO,
   type CommandKind,
   type CommandPayloads,
   type HierarchyResponse,
@@ -278,12 +278,12 @@ export function assertBoundedStop(label: string, stopped: string) {
   if (!stopped) return;
   if (!isStopReason(stopped)) {
     throw new Error(
-      `${label} stopped on '${stopped}', which STOP_REASON_OUTCOMES does not classify — the ` +
+      `${label} stopped on '${stopped}', which STOP_REASON_INFO does not classify — the ` +
         `generated mirror has drifted from domain/phases.py::STOP_REASON_INFO`,
     );
   }
   expect(
-    STOP_REASON_OUTCOMES[stopped],
+    STOP_REASON_INFO[stopped].outcome,
     `${label} terminated on '${stopped}', which the engine classifies as a FAILURE rather than a ` +
       `bounded stop`,
   ).not.toBe("failed");

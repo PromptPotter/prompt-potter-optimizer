@@ -273,6 +273,23 @@
             "description": "The quieter half of the line.",
             "title": "Detail"
           },
+          "healed": {
+            "anyOf": [
+              {
+                "enum": [
+                  "layer_parse_failure",
+                  "injection_budget_overrun",
+                  "trace_sink_failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The self-heal a round warning reports; null on every other item.",
+            "title": "Healed"
+          },
           "icon": {
             "title": "Icon",
             "type": "string"
@@ -1451,6 +1468,21 @@
         "title": "BenchReading",
         "type": "object"
       },
+      "BenchRefusal": {
+        "description": "Why a bench pass cannot be asked for now.",
+        "enum": [
+          "inner",
+          "no_manifest",
+          "held_elsewhere",
+          "not_held",
+          "selecting",
+          "origin_unscored",
+          "graded",
+          "no_selection"
+        ],
+        "title": "BenchRefusal",
+        "type": "string"
+      },
       "BenchScope": {
         "additionalProperties": false,
         "description": "One dataset's rows of a bench spanning several, read apart: a level is never averaged\nacross datasets.",
@@ -1535,11 +1567,6 @@
             "title": "Headline",
             "type": "string"
           },
-          "line": {
-            "description": "The headline on one line — both levels, the lift in each column and the held-out row count, or `status.sentence` where the bench is not graded. The ONE wording of it: the completion box, the `bench` verb and every screen print this. Stamped by :meth:`of` alone.",
-            "title": "Line",
-            "type": "string"
-          },
           "origin": {
             "anyOf": [
               {
@@ -1591,8 +1618,7 @@
           "origin",
           "selected",
           "vs_origin",
-          "cost",
-          "line"
+          "cost"
         ],
         "title": "BenchScore",
         "type": "object"
@@ -1650,82 +1676,6 @@
         "title": "BenchSet",
         "type": "object"
       },
-      "BenchStat": {
-        "additionalProperties": false,
-        "description": "The bench as one stat: its wording, and the readings a control or a headline acts on.",
-        "properties": {
-          "key": {
-            "const": "bench",
-            "default": "bench",
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "lift_per_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread.",
-            "title": "Lift Per Usd"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null on a course beside the line, which no command grades."
-          },
-          "sub": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`BenchScore.line`, or why the bench is not read here.",
-            "title": "Sub"
-          },
-          "value": {
-            "title": "Value",
-            "type": "string"
-          },
-          "vs_origin": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairedReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`BenchScore.vs_origin`; null with `status`."
-          }
-        },
-        "required": [
-          "label",
-          "value",
-          "sub",
-          "status",
-          "vs_origin",
-          "lift_per_usd"
-        ],
-        "title": "BenchStat",
-        "type": "object"
-      },
       "BenchStatus": {
         "additionalProperties": false,
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
@@ -1778,14 +1728,13 @@
           "refusal": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/BenchRefusal"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why not, exactly where `can_grade` is false.",
-            "title": "Refusal"
+            "description": "Why not, exactly where `can_grade` is false."
           },
           "scored": {
             "anyOf": [
@@ -1797,11 +1746,6 @@
               }
             ],
             "title": "Scored"
-          },
-          "sentence": {
-            "description": "`state` in words, with the rows and the stop behind it.",
-            "title": "Sentence",
-            "type": "string"
           },
           "state": {
             "$ref": "#/components/schemas/ReadingState"
@@ -1845,7 +1789,6 @@
         "required": [
           "state",
           "trigger",
-          "sentence",
           "can_grade",
           "refusal",
           "offered",
@@ -2156,6 +2099,17 @@
             "title": "Line",
             "type": "string"
           },
+          "line_course": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CourseFacts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The facts of the course holding the line, which the campaign's row reads as its own; null where that course has no mint record."
+          },
           "root": {
             "description": "The root course's address.",
             "title": "Root",
@@ -2183,7 +2137,8 @@
           "line",
           "lifecycle",
           "spend_lifetime",
-          "runs_with"
+          "runs_with",
+          "line_course"
         ],
         "title": "CampaignFacts",
         "type": "object"
@@ -2621,6 +2576,9 @@
             "description": "How many of the `samples=` subset this candidate carries a scoreable verdict for. Null without a `samples=` mask.",
             "title": "Sample Set N"
           },
+          "standing": {
+            "$ref": "#/components/schemas/CandidateStanding"
+          },
           "stands": {
             "description": "The newest crowned live candidate of its course — the parent the next round mutates from. At most one per course.",
             "title": "Stands",
@@ -2639,6 +2597,7 @@
           "individual",
           "parent_ids",
           "variations",
+          "standing",
           "reading",
           "stands",
           "course_latest",
@@ -2657,6 +2616,18 @@
         ],
         "title": "CandidateFacts",
         "type": "object"
+      },
+      "CandidateStanding": {
+        "description": "What a candidate is on its course's record, derived once every line resolves.",
+        "enum": [
+          "origin",
+          "proposed",
+          "rewound",
+          "rewound_stood_on",
+          "retired"
+        ],
+        "title": "CandidateStanding",
+        "type": "string"
       },
       "CatchUpLogEntry": {
         "additionalProperties": false,
@@ -3813,6 +3784,17 @@
         "additionalProperties": false,
         "description": "A course's typed facts, for a pane or a route argument; its rows read the envelope.",
         "properties": {
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The campaign's bench, on the course holding the line, read whole at the head; null on every other course (the line's reads `held_elsewhere` there) and under a moment."
+          },
           "elects_on": {
             "anyOf": [
               {
@@ -3834,6 +3816,18 @@
             "$ref": "#/components/schemas/CourseKind",
             "description": "How the course was minted; the `mint` tag renders it."
           },
+          "rounds_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The rounds cap that binds it: its wiring's, before its first launch its campaign's. 0 runs the origin only; null where it has no rounds axis.",
+            "title": "Rounds Cap"
+          },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin.",
             "title": "Rounds Closed",
@@ -3849,6 +3843,10 @@
               }
             ],
             "description": "Null on a root, and on a cycle cut from another tree."
+          },
+          "spend": {
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "This course's own ledger's bill, at the moment."
           },
           "standing": {
             "anyOf": [
@@ -3880,7 +3878,10 @@
           "task",
           "standing",
           "rounds_closed",
-          "elects_on"
+          "rounds_cap",
+          "elects_on",
+          "spend",
+          "bench"
         ],
         "title": "CourseFacts",
         "type": "object"
@@ -4190,16 +4191,8 @@
             "title": "Kind",
             "type": "string"
           },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
           "message": {
             "title": "Message",
-            "type": "string"
-          },
-          "next_step": {
-            "title": "Next Step",
             "type": "string"
           },
           "stop_reason": {
@@ -4209,9 +4202,7 @@
         "required": [
           "kind",
           "message",
-          "stop_reason",
-          "label",
-          "next_step"
+          "stop_reason"
         ],
         "title": "DashboardError",
         "type": "object"
@@ -5797,29 +5788,6 @@
         "title": "Elimination",
         "type": "object"
       },
-      "EntryStat": {
-        "discriminator": {
-          "mapping": {
-            "ability": "#/components/schemas/HierarchyStat",
-            "accuracy": "#/components/schemas/HierarchyStat",
-            "bench": "#/components/schemas/BenchStat",
-            "lift": "#/components/schemas/HierarchyStat",
-            "lives": "#/components/schemas/HierarchyStat",
-            "rounds": "#/components/schemas/HierarchyStat",
-            "spend": "#/components/schemas/HierarchyStat",
-            "spend_lifetime": "#/components/schemas/HierarchyStat"
-          },
-          "propertyName": "key"
-        },
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/HierarchyStat"
-          },
-          {
-            "$ref": "#/components/schemas/BenchStat"
-          }
-        ]
-      },
       "EnvironmentReading": {
         "additionalProperties": false,
         "description": "One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the\nsubjects' spread at this cell over the roster's pooled residual — which environments tell the\nsubjects apart, read without a replicate, which the content-addressed instrument cannot give.\nA held-out cell reads the subjects' bench passes, which only a round's selection has.",
@@ -7331,18 +7299,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one sentence under the title: the selection line.",
-            "title": "Lede"
-          },
           "level": {
             "const": "campaign",
             "default": "campaign",
@@ -7367,14 +7323,6 @@
           "state": {
             "$ref": "#/components/schemas/HierarchyState"
           },
-          "stats": {
-            "description": "Server-ordered; `stats[0]` is the headline.",
-            "items": {
-              "$ref": "#/components/schemas/EntryStat"
-            },
-            "title": "Stats",
-            "type": "array"
-          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/HierarchyTag"
@@ -7387,10 +7335,8 @@
           "address",
           "parent",
           "label",
-          "lede",
           "caveat",
           "tags",
-          "stats",
           "state",
           "span",
           "facts",
@@ -7435,18 +7381,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one sentence under the title: the selection line.",
-            "title": "Lede"
-          },
           "level": {
             "const": "candidate",
             "default": "candidate",
@@ -7465,14 +7399,6 @@
             "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
             "title": "Parent"
           },
-          "stats": {
-            "description": "Server-ordered; `stats[0]` is the headline.",
-            "items": {
-              "$ref": "#/components/schemas/EntryStat"
-            },
-            "title": "Stats",
-            "type": "array"
-          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/HierarchyTag"
@@ -7485,10 +7411,8 @@
           "address",
           "parent",
           "label",
-          "lede",
           "caveat",
           "tags",
-          "stats",
           "facts",
           "children"
         ],
@@ -7524,18 +7448,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one sentence under the title: the selection line.",
-            "title": "Lede"
-          },
           "level": {
             "const": "course",
             "default": "course",
@@ -7560,14 +7472,6 @@
           "state": {
             "$ref": "#/components/schemas/HierarchyState"
           },
-          "stats": {
-            "description": "Server-ordered; `stats[0]` is the headline.",
-            "items": {
-              "$ref": "#/components/schemas/EntryStat"
-            },
-            "title": "Stats",
-            "type": "array"
-          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/HierarchyTag"
@@ -7580,10 +7484,8 @@
           "address",
           "parent",
           "label",
-          "lede",
           "caveat",
           "tags",
-          "stats",
           "state",
           "span",
           "facts"
@@ -7693,57 +7595,9 @@
         "title": "HierarchySpan",
         "type": "object"
       },
-      "HierarchyStat": {
-        "additionalProperties": false,
-        "description": "One number an entry shows, worded by the server in the order it is served.",
-        "properties": {
-          "key": {
-            "enum": [
-              "spend_lifetime",
-              "spend",
-              "rounds",
-              "accuracy",
-              "lives",
-              "ability",
-              "lift"
-            ],
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "sub": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The second line under the value; null where none.",
-            "title": "Sub"
-          },
-          "value": {
-            "description": "The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`.",
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "value",
-          "sub"
-        ],
-        "title": "HierarchyStat",
-        "type": "object"
-      },
       "HierarchyState": {
         "additionalProperties": false,
-        "description": "A run's state as one value: the phase, its word and mark, whether it is held, the verbs.",
+        "description": "A run's state as one value: its status, whether it is held, the verbs.",
         "properties": {
           "admission": {
             "$ref": "#/components/schemas/RunAdmission"
@@ -7758,11 +7612,6 @@
             "title": "Intervened",
             "type": "boolean"
           },
-          "next_step": {
-            "description": "What the operator does now, as the run's stop reason states it (`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. Empty while the run has not stopped, or where its reason owes nothing.",
-            "title": "Next Step",
-            "type": "string"
-          },
           "pause": {
             "anyOf": [
               {
@@ -7774,20 +7623,15 @@
             ],
             "description": "Why the run reads paused; null otherwise."
           },
-          "run_phase": {
-            "$ref": "#/components/schemas/RunPhase"
-          },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           }
         },
         "required": [
-          "run_phase",
           "status",
           "attached",
           "pause",
           "admission",
-          "next_step",
           "intervened"
         ],
         "title": "HierarchyState",
@@ -8787,27 +8631,28 @@
       },
       "LivesReading": {
         "additionalProperties": false,
-        "description": "A run's life bank as every surface shows it. Built by :meth:`of` alone.",
+        "description": "A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,\nread off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`).",
         "properties": {
-          "bar": {
-            "description": "One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank.",
-            "title": "Bar",
-            "type": "string"
+          "cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null where the bank has no cap.",
+            "title": "Cap"
           },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "spent": {
-            "description": "The bank is empty: the run stops after this round.",
-            "title": "Spent",
-            "type": "boolean"
+          "left": {
+            "title": "Left",
+            "type": "integer"
           }
         },
         "required": [
-          "bar",
-          "label",
-          "spent"
+          "left",
+          "cap"
         ],
         "title": "LivesReading",
         "type": "object"
@@ -8865,6 +8710,11 @@
             "type": "object"
           },
           "kind": {
+            "enum": [
+              "layer_parse_failure",
+              "injection_budget_overrun",
+              "trace_sink_failed"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -8884,6 +8734,10 @@
             "title": "Round"
           },
           "severity": {
+            "enum": [
+              "warning",
+              "error"
+            ],
             "title": "Severity",
             "type": "string"
           },
@@ -11983,7 +11837,8 @@
           "interrupt",
           "cancelled",
           "step",
-          "bound"
+          "bound",
+          "owed"
         ],
         "title": "PauseCause",
         "type": "string"
@@ -12048,10 +11903,6 @@
             "title": "Detail",
             "type": "string"
           },
-          "next_step": {
-            "title": "Next Step",
-            "type": "string"
-          },
           "stop_reason": {
             "anyOf": [
               {
@@ -12060,14 +11911,14 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Null on an accepted pause the loop has yet to reach."
           }
         },
         "required": [
           "stop_reason",
           "cause",
           "detail",
-          "next_step",
           "at"
         ],
         "title": "PauseReading",
@@ -12401,41 +12252,10 @@
         "title": "PrefixReading",
         "type": "object"
       },
-      "ProducerAlert": {
-        "additionalProperties": false,
-        "description": "What a producer's state raises on its own, worded once for every surface.",
-        "properties": {
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "detail"
-        ],
-        "title": "ProducerAlert",
-        "type": "object"
-      },
       "ProducerReading": {
         "additionalProperties": false,
-        "description": "One cycle's producer as served: its state, its two server-measured clocks and its words.",
+        "description": "One cycle's producer as served: its state and its two server-measured clocks. Its words are\n`PRODUCER_STATE_INFO[state]` (the alert it raises, whether it is stepping) and `RAY_HEAD_WORDS`.",
         "properties": {
-          "alert": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ProducerAlert"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What this state raises on its own (`silent`, `wedged`); null where nothing is wrong with the producer."
-          },
           "appending": {
             "description": "That process is walking the loop, so the transient indicators are live.",
             "title": "Appending",
@@ -12450,16 +12270,6 @@
             "description": "That cell has been open past `CALL_HOLDS_AFTER_S`: calls are taken in walk order, so it is what holds every call behind it.",
             "title": "Call Holds",
             "type": "boolean"
-          },
-          "label": {
-            "description": "The state as a walking run's head reads it: the state's own word, or the measuring word while it sits on an open cell with no recent step.",
-            "title": "Label",
-            "type": "string"
-          },
-          "label_on_child": {
-            "description": "The same head while the run's newest step is a child run's — the one word for a parent whose call is open on it.",
-            "title": "Label On Child",
-            "type": "string"
           },
           "open_for_s": {
             "anyOf": [
@@ -12485,27 +12295,12 @@
             "description": "Seconds since the last ledger record that was not a heartbeat; null unless appending.",
             "title": "Silent For S"
           },
-          "stalled": {
-            "description": "How long a wedged producer has made no progress, as a sentence; empty on every other state.",
-            "title": "Stalled",
-            "type": "string"
-          },
           "state": {
             "$ref": "#/components/schemas/ProducerState"
-          },
-          "stepping": {
-            "description": "A record landed inside the recent-step window, so the run's newest step is where it stands now.",
-            "title": "Stepping",
-            "type": "boolean"
           }
         },
         "required": [
           "state",
-          "label",
-          "label_on_child",
-          "stepping",
-          "stalled",
-          "alert",
           "attached",
           "appending",
           "silent_for_s",
@@ -13641,7 +13436,7 @@
                 "type": "null"
               }
             ],
-            "description": "The life bank after this round: the pips and their words, as the readout prints them. Null where the campaign banks no lives (`optimization.lives`)."
+            "description": "The life bank after this round. Null where the campaign banks no lives (`optimization.lives`)."
           },
           "parent": {
             "anyOf": [
@@ -13695,18 +13490,29 @@
       },
       "RunStatus": {
         "additionalProperties": false,
-        "description": "How a run reads on a row: one word and the mark drawn beside it.",
+        "description": "How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. Its word\nis `label`, a lookup every surface makes the same way (`lib/derivations/run-phase.ts::runWord`).",
         "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
           "mark": {
             "$ref": "#/components/schemas/StatusMark"
+          },
+          "run_phase": {
+            "$ref": "#/components/schemas/RunPhase"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while the run has not stopped."
           }
         },
         "required": [
-          "label",
+          "run_phase",
+          "stop_reason",
           "mark"
         ],
         "title": "RunStatus",
@@ -13833,6 +13639,18 @@
         "additionalProperties": false,
         "description": "The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its\ncontrol offers. A replay takes no armed control, so it reads depth 1 and nothing armed.",
         "properties": {
+          "affordable": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many more cells the spend limits admit, where money and not the armed depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not.",
+            "title": "Affordable"
+          },
           "allowed": {
             "description": "Calls the gauge admits out now; 0 with `in_flight`.",
             "title": "Allowed",
@@ -13888,18 +13706,6 @@
             "title": "In Flight",
             "type": "integer"
           },
-          "money_hold": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How many more cells the spend limits admit, in words, where money and not the armed depth holds the walk; null where it does not.",
-            "title": "Money Hold"
-          },
           "most": {
             "description": "The most calls the stop rules allow out; between phases, the next round's.",
             "title": "Most",
@@ -13930,7 +13736,7 @@
           "most",
           "scoring_now",
           "pick_max",
-          "money_hold",
+          "affordable",
           "cell_reserve_usd",
           "unavailable",
           "explained",
@@ -14624,13 +14430,12 @@
           "waiting_on": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/WaitingOn"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Waiting On"
+            ]
           },
           "walk": {
             "anyOf": [
@@ -15466,6 +15271,7 @@
           "lives_exhausted",
           "paused",
           "panel_cut",
+          "adapter_output_owed",
           "crashed",
           "diverged",
           "optimizer_abort",
@@ -16025,18 +15831,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one sentence under the title: the selection line.",
-            "title": "Lede"
-          },
           "level": {
             "const": "campaign",
             "default": "campaign",
@@ -16061,14 +15855,6 @@
           "state": {
             "$ref": "#/components/schemas/HierarchyState"
           },
-          "stats": {
-            "description": "Server-ordered; `stats[0]` is the headline.",
-            "items": {
-              "$ref": "#/components/schemas/EntryStat"
-            },
-            "title": "Stats",
-            "type": "array"
-          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/HierarchyTag"
@@ -16081,10 +15867,8 @@
           "address",
           "parent",
           "label",
-          "lede",
           "caveat",
           "tags",
-          "stats",
           "state",
           "span",
           "facts",
@@ -16122,6 +15906,17 @@
             "title": "Line",
             "type": "string"
           },
+          "line_course": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CourseFacts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The facts of the course holding the line, which the campaign's row reads as its own; null where that course has no mint record."
+          },
           "root": {
             "description": "The root course's address.",
             "title": "Root",
@@ -16150,6 +15945,7 @@
           "lifecycle",
           "spend_lifetime",
           "runs_with",
+          "line_course",
           "deletable_stubs"
         ],
         "title": "SubtreeCampaignFacts",
@@ -16206,18 +16002,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one sentence under the title: the selection line.",
-            "title": "Lede"
-          },
           "level": {
             "const": "course",
             "default": "course",
@@ -16242,14 +16026,6 @@
           "state": {
             "$ref": "#/components/schemas/HierarchyState"
           },
-          "stats": {
-            "description": "Server-ordered; `stats[0]` is the headline.",
-            "items": {
-              "$ref": "#/components/schemas/EntryStat"
-            },
-            "title": "Stats",
-            "type": "array"
-          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/HierarchyTag"
@@ -16262,10 +16038,8 @@
           "address",
           "parent",
           "label",
-          "lede",
           "caveat",
           "tags",
-          "stats",
           "state",
           "span",
           "facts",
@@ -16278,6 +16052,17 @@
         "additionalProperties": false,
         "description": "What only the subtree read knows: it reads every candidate, under the request's lens.",
         "properties": {
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The campaign's bench, on the course holding the line, read whole at the head; null on every other course (the line's reads `held_elsewhere` there) and under a moment."
+          },
           "elects_on": {
             "anyOf": [
               {
@@ -16346,6 +16131,18 @@
             "description": "The address of the arm the course's standing is paired against: the round-0 pick its line holds, whichever course ran it. Null on a branch cut at round 0 before it measured its own.",
             "title": "Origin"
           },
+          "rounds_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The rounds cap that binds it: its wiring's, before its first launch its campaign's. 0 runs the origin only; null where it has no rounds axis.",
+            "title": "Rounds Cap"
+          },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin.",
             "title": "Rounds Closed",
@@ -16361,6 +16158,10 @@
               }
             ],
             "description": "Null on a root, and on a cycle cut from another tree."
+          },
+          "spend": {
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "This course's own ledger's bill, at the moment."
           },
           "standing": {
             "anyOf": [
@@ -16392,7 +16193,10 @@
           "task",
           "standing",
           "rounds_closed",
+          "rounds_cap",
           "elects_on",
+          "spend",
+          "bench",
           "lens_criterion",
           "lens_shift",
           "origin",
@@ -16637,18 +16441,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lede": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The one sentence under the title: the selection line.",
-            "title": "Lede"
-          },
           "level": {
             "const": "unstarted",
             "default": "unstarted",
@@ -16670,14 +16462,6 @@
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
           },
-          "stats": {
-            "description": "Server-ordered; `stats[0]` is the headline.",
-            "items": {
-              "$ref": "#/components/schemas/EntryStat"
-            },
-            "title": "Stats",
-            "type": "array"
-          },
           "tags": {
             "items": {
               "$ref": "#/components/schemas/HierarchyTag"
@@ -16690,10 +16474,8 @@
           "address",
           "parent",
           "label",
-          "lede",
           "caveat",
           "tags",
-          "stats",
           "span",
           "facts"
         ],
@@ -16835,17 +16617,16 @@
             "$ref": "#/components/schemas/ArmName",
             "description": "The arm the pass measures; `arm.key` joins it to its row."
           },
-          "failure": {
+          "failed_as": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ReadingState"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why a `failed` pass ended without a reading.",
-            "title": "Failure"
+            "description": "How a `failed` pass reads, so why it ended without a reading; null otherwise."
           },
           "kind": {
             "enum": [
@@ -16893,7 +16674,7 @@
           "rows",
           "scored",
           "level",
-          "failure"
+          "failed_as"
         ],
         "title": "VerificationMark",
         "type": "object"
@@ -17074,6 +16855,34 @@
           "held_absent"
         ],
         "title": "VerifyReading",
+        "type": "object"
+      },
+      "WaitingOn": {
+        "additionalProperties": false,
+        "description": "The cell the producer's open call holds — worded `RAY_HEAD_WORDS` on every surface.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The owning arm's label; null for a pass no arm owns.",
+            "title": "Label"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "position"
+        ],
+        "title": "WaitingOn",
         "type": "object"
       },
       "WalkEnd": {

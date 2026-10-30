@@ -126,7 +126,7 @@ def _read_pass(
         return _PassReading(bench_pass, None, outcome, sheet)
 
     if bench_pass.stop is not None:
-        return unread(ReadingState.PASS_STOPPED)
+        return unread(bench_pass.stop.state)
     if expected - scored > tolerance:
         return unread(ReadingState.PAST_TOLERANCE)
     # Rows on several datasets read no level: `BenchScore.scopes` reads each apart.
@@ -235,7 +235,6 @@ def read_bench(
     status = bench_status(
         trigger=line.trigger,
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
-        tolerance=0 if passes is None else passes.tolerance,
         on_line=line.on_line,
         inner=line.inner,
         held_by=line.held_by,
@@ -254,7 +253,7 @@ def read_bench(
             spec=ROUND_LIFT_SPEC,
             instrument_id=line.instrument_id,
         )
-    return BenchScore.of(
+    return BenchScore(
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
         scorer_id=scorer.id,
         headline=BENCH_HEADLINE,

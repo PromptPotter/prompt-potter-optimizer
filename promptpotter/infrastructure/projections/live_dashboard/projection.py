@@ -10,7 +10,7 @@ from promptpotter.domain.arms import Concluded, Measuring
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir
 from promptpotter.domain.dashboard_rows import RoundSummary, VerificationKind, VerificationMark
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ArmName
+from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.phase_views import (
     BenchEnterView,
     BenchGradedView,
@@ -24,7 +24,6 @@ from promptpotter.domain.phase_views import (
     VerifyGradedView,
 )
 from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
     CampaignPhase,
     DashboardState,
     ErrorRecord,
@@ -75,6 +74,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     CurrentRound,
     DashboardError,
     LiveDashboardState,
+    WaitingOn,
 )
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -119,12 +119,10 @@ _PHASE_TO_STATE: dict[str, DashboardState] = {
 
 _CHECKIN_NODE = "checkin"
 
-_VERIFY_UNREAD = "The pass ended without a reading; the verb that sent it says why."
-
 
 def _opened(kind: VerificationKind, arm: ArmName, rows: int) -> VerificationMark:
     return VerificationMark(
-        kind=kind, arm=arm, state="running", rows=rows, scored=0, level=None, failure=None
+        kind=kind, arm=arm, state="running", rows=rows, scored=0, level=None, failed_as=None
     )
 
 
@@ -302,15 +300,13 @@ class LiveDashboardProjection(Projection):
                     _opened("bench", arm, len(taken.sample_keys)).ended(
                         scored=len(taken.cells) if reading is None else reading.n,
                         level=None if reading is None else reading.level,
-                        failure=None
-                        if reading is not None
-                        else READING_STATE_INFO[view.state].sentence,
+                        failed_as=None if reading is not None else view.state,
                     )
                 )
             case VerifyGradedView(verify_pass=banked, reading=read):
                 self._mark(
                     _opened("verify", banked.arm, len(banked.positions)).ended(
-                        scored=read.fresh.n, level=read.fresh.accuracy, failure=None
+                        scored=read.fresh.n, level=read.fresh.accuracy, failed_as=None
                     )
                 )
         if record.event == "exit" and record.phase in (CampaignPhase.BENCH, CampaignPhase.VERIFY):
@@ -318,7 +314,7 @@ class LiveDashboardProjection(Projection):
         if record.phase == CampaignPhase.VERIFY and record.event == "exit":
             # A verify is graded inside its bracket; a bench pass after it.
             s.verification = [
-                m.ended(scored=m.scored, level=None, failure=_VERIFY_UNREAD)
+                m.ended(scored=m.scored, level=None, failed_as=ReadingState.PASS_STOPPED)
                 if m.kind == "verify" and m.state == "running"
                 else m
                 for m in s.verification
@@ -484,13 +480,8 @@ class LiveDashboardProjection(Projection):
             self._in_flight = None
 
     def _handle_error(self, record: ErrorRecord) -> None:
-        info = STOP_REASON_INFO[record.stop_reason]
         self.state.error = DashboardError(
-            kind=record.kind,
-            message=record.message,
-            stop_reason=record.stop_reason,
-            label=info.label,
-            next_step=info.next_step,
+            kind=record.kind, message=record.message, stop_reason=record.stop_reason
         )
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
@@ -545,12 +536,14 @@ class LiveDashboardProjection(Projection):
             in_flight = allowed = 0
             most = s.round_cells_ceiling
         opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
-        waiting_on: str | None = None
+        waiting_on: WaitingOn | None = None
         waiting_since: float | None = None
         if self._waiting is not None and opened is not None:
             arm = opened[1]
-            owner = "pass" if arm is None else self._buffer.label(arm)
-            waiting_on = f"{owner} · sample {self._waiting[0]}"
+            waiting_on = WaitingOn(
+                label=None if arm is None else self._buffer.label(arm),
+                position=self._waiting[0],
+            )
             waiting_since = self._waiting[1]
         # The field holds one sender: the episode that has held longest.
         held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)

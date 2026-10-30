@@ -21,6 +21,7 @@ from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import (
+    SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
     ErrorRecord,
     PauseCause,
@@ -203,9 +204,7 @@ def _finalize_run(
             session,
             observers,
             stop_reason,
-            interrupted_by=(
-                PauseCause.BOUND if stop_reason is StopReason.PANEL_CUT else pause_cause
-            ),
+            interrupted_by=SELF_PAUSE_CAUSE.get(stop_reason, pause_cause),
         )
     else:
         # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.

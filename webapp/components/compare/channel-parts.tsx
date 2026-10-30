@@ -2,12 +2,13 @@ import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
-import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
+import { BENCH_STATE_INFO, CEILING_METER_LABELS } from "@/lib/api/types.generated";
 import {
   liftOf,
   meteredBucketsLine,
   ratePricedText,
   readPaired,
+  runWord,
   spendHeadline,
   type LineStep,
 } from "@/lib/derivations";
@@ -93,7 +94,10 @@ export function benchLead(row: HeadToHeadRow | null): {
   return {
     score:
       bench === null || s === null
-        ? { value: PLACEHOLDER, band: bench?.status.sentence ?? "" }
+        ? {
+            value: PLACEHOLDER,
+            band: bench === null ? "" : (BENCH_STATE_INFO[bench.status.state]?.sentence ?? ""),
+          }
         : {
             value: fmtUnit("level", level?.value),
             band: `${s.headline} ${fmtInterval("level", level?.ci_lo, level?.ci_hi)} · ${s.n}/${bench.bench_size} rows`,
@@ -184,7 +188,7 @@ export function HeadlineBadges({ row }: { row: HeadToHeadRow }) {
     <span className="cmp-channel-badges">
       <GuardBadge guard={row.guard} />
       {row.bench_set === null && <Badge>no headline</Badge>}
-      {row.status.mark === "failed" && <Badge tone="danger">{row.status.label}</Badge>}
+      {row.status.mark === "failed" && <Badge tone="danger">{runWord(row.status)}</Badge>}
     </span>
   );
 }

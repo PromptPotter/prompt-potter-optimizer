@@ -1,3 +1,5 @@
+import { Term } from "@/components/ui";
+import { STOP_REASON_INFO } from "@/lib/api/types.generated";
 import { useCycleStream } from "@/lib/poll";
 
 export function RunErrorBanner() {
@@ -15,7 +17,12 @@ export function RunErrorBanner() {
         <div className="run-error-banner" role="alert">
           <div className="run-error-banner-head">
             <span className="run-error-banner-kind">{err.kind}</span>
-            <span className="run-error-banner-stop">{err.label}</span>
+            <Term
+              className="run-error-banner-stop"
+              content={STOP_REASON_INFO[err.stop_reason].next_step || undefined}
+            >
+              {STOP_REASON_INFO[err.stop_reason].label}
+            </Term>
           </div>
           <p className="run-error-banner-msg">{lines[0] ?? err.message}</p>
           {lines.length > 1 ? (

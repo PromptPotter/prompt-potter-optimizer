@@ -67,7 +67,7 @@ PromptPotter **is** AlphaZero-shaped MCTS over the lineage tree:
 - **Selection.** L2/L3 emits `fork_proposal: {reason}` — *whether* to rewind; *where* is UCB1 over the backpropagated tree (`application/mask/backprop.py::select_rewind_round`). The layer does not name the round — it never sees the ancestors' fitness.
 - **Expansion.** A round: L1 proposes a population from the selected node.
 - **Simulation.** A deterministic forward pass, not a random rollout (AlphaZero's precedent); within a round PoBB prunes siblings on shared samples.
-- **Backpropagation.** Each round's θ rolls up to every ancestor as visit count + value (`accumulate_node_stats`), every cycle read on ONE fit (`DifficultyView.level_series`); a caveated round is a visit with no value, and a rewind finding no valued ancestor is dropped as a `layer_rebase_dropped` warning.
+- **Backpropagation.** Each round's θ rolls up to every ancestor as visit count + value (`accumulate_node_stats`), every cycle read on ONE fit (`DifficultyView.level_series`); a caveated round is a visit with no value, and a rewind finding no valued ancestor is dropped.
 
 **Value is θ, never accuracy, and a fork's inherited prefix is not a fresh visit** (`application/mask/backprop.py`) — both naive forms fail silently. A rollout is a full round of LLM calls, so exploration is closer to PUCT than vanilla UCT; it buys **recovery from dead-end branches**.
 

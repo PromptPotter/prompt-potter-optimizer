@@ -7,7 +7,6 @@ import { liftOf, NOT_SEPARABLE } from "@/lib/derivations";
 import { fmtInterval, fmtLogits, fmtSigned, fmtUnit, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 import {
-  CANDIDATE_SERIES,
   activeSeries,
   seriesByKey,
   seriesColumn,
@@ -44,7 +43,6 @@ declare module "chart.js" {
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     ciWhisker?: { bands: WhiskerBand[]; shaded: boolean };
-    verificationMarks?: { marks: MarkRow[]; still: boolean };
     partialPanels?: { short: boolean[]; picked: number | null };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
@@ -289,78 +287,8 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
-const MARK_R = 5;
-const MARK_GAP = 7;
-const MARK_STEP = 11;
-const MARK_PULSE_MS = 1400;
-type MarkOpts = { marks: MarkRow[]; still: boolean };
-interface MarkRow {
-  key: string;
-  filled: boolean;
-  running: boolean[];
-}
+const MARK_R = 6;
 type MarkEl = { x: number; y: number; skip?: boolean };
-
-// Beside the bar group, never on it: each mark series keeps its slot, drawn or not.
-const verificationMarksPlugin: Plugin<"bar", MarkOpts> = {
-  id: "verificationMarks",
-  afterDatasetsUpdate(chart, _args, opts) {
-    const rows = opts.marks;
-    const xScale = chart.scales.x;
-    if (!rows.length || !xScale) return;
-    const bars = chart.data.datasets.flatMap((ds, di) =>
-      seriesByKey(String(ds.label ?? ""))?.kind === "bar" ? [chart.getDatasetMeta(di)] : [],
-    );
-    rows.forEach((row, slot) => {
-      const di = chart.data.datasets.findIndex((ds) => ds.label === row.key);
-      if (di < 0) return;
-      chart.getDatasetMeta(di).data.forEach((el, i) => {
-        let right = xScale.getPixelForValue(i);
-        for (const meta of bars) {
-          const bar = (meta.data[i] as Placed)?.getProps?.(["x", "width"], true);
-          const x = bar?.x;
-          const w = bar?.width;
-          // A bar channel drawn as a line has points, no width.
-          if (typeof x === "number") right = Math.max(right, typeof w === "number" ? x + w / 2 : x);
-        }
-        (el as unknown as MarkEl).x = right + MARK_GAP + MARK_STEP * slot;
-      });
-    });
-  },
-  afterDatasetsDraw(chart, _args, opts) {
-    const rows = opts.marks;
-    if (!rows.length) return;
-    const { ctx } = chart;
-    const t = 0.5 + 0.5 * Math.cos((Date.now() / MARK_PULSE_MS) * Math.PI * 2);
-    let pulsing = false;
-    ctx.save();
-    ctx.lineWidth = 1.4;
-    for (const row of rows) {
-      const di = chart.data.datasets.findIndex((ds) => ds.label === row.key);
-      const ink = chart.data.datasets[di]?.borderColor;
-      if (di < 0 || typeof ink !== "string") continue;
-      ctx.strokeStyle = ink;
-      ctx.fillStyle = ink;
-      for (const [i, el] of chart.getDatasetMeta(di).data.entries()) {
-        const { x, y, skip } = el as unknown as MarkEl;
-        if (skip || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-        const running = row.running[i] === true;
-        pulsing ||= running && !opts.still;
-        ctx.globalAlpha = !running ? 1 : opts.still ? 0.6 : 0.35 + 0.65 * t;
-        ctx.beginPath();
-        ctx.moveTo(x, y - MARK_R);
-        ctx.lineTo(x + MARK_R, y);
-        ctx.lineTo(x, y + MARK_R);
-        ctx.lineTo(x - MARK_R, y);
-        ctx.closePath();
-        if (row.filled) ctx.fill();
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-    if (pulsing) nextPulseFrame(chart);
-  },
-};
 
 const HEX_R = 4;
 // A point on fewer rows than its panel holds is an empty hexagon, never a dot.
@@ -417,12 +345,9 @@ const CHART_PLUGINS = [
   divergenceLinePlugin,
   inFlightPulsePlugin,
   ciWhiskerPlugin,
-  verificationMarksPlugin,
   partialPanelsPlugin,
   xBridgePlugin,
 ];
-
-const MARK_SERIES = CANDIDATE_SERIES.filter((s) => s.kind === "mark");
 
 const ROTATE_THRESHOLD = 8;
 const LINES_ABOVE = 12;
@@ -489,21 +414,10 @@ export const FitnessChart = memo(function FitnessChart({
     [views],
   );
 
-  const marks = useMemo<MarkRow[]>(
-    () =>
-      MARK_SERIES.map((spec) => ({
-        key: spec.key,
-        filled: spec.mark?.filled === true,
-        running: views.map((v) => spec.mark?.of(v)?.state === "running"),
-      })),
-    [views],
-  );
-
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     const bars = active.filter((s) => s.kind === "bar").length;
-    // A group carrying marks narrows, leaving them room before the next group.
-    const roomy = active.some((s) => s.kind === "mark") ? 0.7 : 1;
-    const cat = roomy * (bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95);
+    const cat = bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95;
+    const paper = getCss("--color-background-primary");
     const barCount = Math.max(1, labels.length);
     const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
     const outline = () => {
@@ -521,19 +435,23 @@ export const FitnessChart = memo(function FitnessChart({
         const ink = getCss(spec.ink(ctx));
         const data = seriesColumn(spec, views);
         if (spec.kind === "mark") {
-          // Hit targets only: `verificationMarks` places and draws each diamond.
+          // chart.js's own diamond, at the candidate's slot and level: filled is the bench, open
+          // (paper-filled, so it reads over a bar) is the verify pass.
           return {
             type: "line" as const,
             label: spec.key,
             data,
-            borderColor: ink,
             showLine: false,
+            pointStyle: "rectRot" as const,
             pointRadius: MARK_R,
-            pointHoverRadius: MARK_R,
+            pointHoverRadius: MARK_R + 1,
             pointHitRadius: MARK_R + 3,
-            pointBackgroundColor: "transparent",
-            pointBorderColor: "transparent",
+            pointBorderWidth: 1.5,
+            pointBorderColor: ink,
+            pointBackgroundColor: spec.mark?.filled ? ink : paper,
+            borderColor: ink,
             yAxisID: spec.axis,
+            order: -2,
             animation: false as const,
           };
         }
@@ -685,12 +603,11 @@ export const FitnessChart = memo(function FitnessChart({
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       ciWhisker: { bands, shaded: asLines },
-      verificationMarks: { marks, still: reducedMotion },
       partialPanels: { short: asLines ? shortPanels : [], picked: selectionBorder?.idx ?? null },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands, marks, shortPanels, selectionBorder]);
+  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
     <div className="fitness-chart-frame">

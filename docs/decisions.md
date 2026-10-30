@@ -82,6 +82,6 @@ Each entry is a boundary, why it sits there, and the symbol that enforces it; wh
 ## 0010 — Every paid pass lean, stoppable, visible
 
 - **No pass scores more than `domain/scoring.py::MAX_PASS_ROWS`** — bench, verify, origin and round alike. A short confidence band is a pass's purpose; rows past it buy no decision. A request or definition asking for more is refused, never silently cut, and `application/scoring/query_loop.py::run_walks` refuses an oversize walk before a cell is sent.
-- **Every paid pass stops on the one stop** that pauses a campaign, from every entry point, and lands as `pass_stopped` with what it banked: a second stop is a stop someone forgets to wire.
+- **Every paid pass stops on the one stop** that pauses a campaign, from every entry point, and lands as a `PassStop` with what it banked (a pause leaves it owed, never faulted: `domain/bench.py::PassStop.state`): a second stop is a stop someone forgets to wire.
 - **A stopped or shrunk pass re-pays nothing**: its cells replay by content (§ 0008).
 - **A pass in flight is visible on the campaign**, served by the backend, whichever door launched it.

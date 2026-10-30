@@ -5,6 +5,7 @@ import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import {
   candidatesOf,
+  entryFigures,
   groupByRoot,
   hasTag,
   type RetiredGroup,
@@ -305,13 +306,13 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
 }
 
 function CourseRowLabel({ course }: { course: SubtreeCourse }) {
-  const lift = course.stats.find((s) => s.key === "lift");
+  const lift = entryFigures(course).find((s) => s.key === "lift")?.value ?? PLACEHOLDER;
   return (
     <span className="unit-library-row">
       <span className="unit-library-name">{course.label}</span>
       <span className="unit-library-meta unit-library-meta-marked">
         <PhaseMark status={course.state.status} />
-        <span title={lift?.value}>{lift ? lift.value : PLACEHOLDER}</span>
+        <span title={lift}>{lift}</span>
       </span>
     </span>
   );
@@ -353,7 +354,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
   const selected = isPicked(cand);
   const retired = tagValue(cand, "superseded") !== null;
   const elected = tagValue(cand, "verdict") === "elected";
-  const [headline] = cand.stats;
+  const [headline] = entryFigures(cand);
   return (
     <>
       <RowHoverCard card={cand}>

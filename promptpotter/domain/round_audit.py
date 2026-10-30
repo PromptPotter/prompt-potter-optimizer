@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import Field
 
+from promptpotter.domain.run_records import RoundWarningKind, RoundWarningSeverity
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
@@ -14,8 +15,8 @@ class LoopWarning(StrictModel):
     """One optimizer-loop degradation the self-healing rails recovered from."""
 
     ts: str
-    kind: str
-    severity: str
+    kind: RoundWarningKind
+    severity: RoundWarningSeverity
     message: str
     round: int | None = None
     detail: dict[str, Any] = Field(default_factory=dict)

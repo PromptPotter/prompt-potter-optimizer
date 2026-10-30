@@ -33,6 +33,6 @@ export function panelCellLabel(cell: string): string {
 
 export function runningInnerRun(index: LineageIndex): SubtreeCourse | null {
   return (
-    index.courses.find((c) => c.facts.mint === "inner" && phaseWalks(c.state.run_phase)) ?? null
+    index.courses.find((c) => c.facts.mint === "inner" && phaseWalks(c.state.status.run_phase)) ?? null
   );
 }

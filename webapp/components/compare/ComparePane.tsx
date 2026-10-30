@@ -77,10 +77,10 @@ export function ComparePane() {
     return line?.level === "course" ? [line] : [];
   });
   const moved = compared
-    .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.run_phase}`)
+    .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.status.run_phase}`)
     .join("|");
   useEffect(() => invalidateReads("evidence"), [moved]);
-  const running = compared.some((a) => phaseWalks(a.state.run_phase));
+  const running = compared.some((a) => phaseWalks(a.state.status.run_phase));
   const { evidence, loading, failure, invalidMetric } = useEvidence(
     selected,
     running ? LIVE_EVIDENCE_MS : null,

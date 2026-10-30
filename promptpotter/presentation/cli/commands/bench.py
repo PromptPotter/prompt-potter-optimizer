@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
+from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.domain.command_kinds import GradeBenchPayload, PauseCyclePayload
 from promptpotter.presentation.cli.commands.launch import ctrl_c_pauses
 from promptpotter.presentation.cli.commands.result import CommandResult
@@ -52,5 +53,5 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     score: BenchScore = sent.result
     logger.info("bench: %s -> graded", campaign_id)
     return CommandResult(
-        data=score.model_dump(mode="json"), human=f"{campaign_id} -> bench: {score.line}"
+        data=score.model_dump(mode="json"), human=f"{campaign_id} -> bench: {bench_readout(score)}"
     )

@@ -4,7 +4,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -24,6 +24,7 @@ from promptpotter.domain.run_records import (
     RaceCatchUpRecord,
     RoundWarningKind,
     RoundWarningRecord,
+    RoundWarningSeverity,
     SampleScoredRecord,
     SampleStartedRecord,
     SpendHoldRecord,
@@ -364,7 +365,7 @@ def emit_round_warning(
     *,
     kind: RoundWarningKind,
     message: str,
-    severity: Literal["warning", "error"] = "warning",
+    severity: RoundWarningSeverity = "warning",
     detail: dict[str, Any] | None = None,
 ) -> None:
     _append_record(

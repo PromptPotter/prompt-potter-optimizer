@@ -51,14 +51,19 @@ class BackendWarning(StrictModel):
     detail: str | None = None
 
 
+class WaitingOn(StrictModel):
+    """The cell the producer's open call holds — worded `RAY_HEAD_WORDS` on every surface."""
+
+    label: str | None = Field(description="The owning arm's label; null for a pass no arm owns.")
+    position: int
+
+
 class DashboardError(StrictModel):
     """The structured failure of a stop whose ``STOP_REASON_INFO`` row is FAILED, else absent."""
 
     kind: str
     message: str
     stop_reason: StopReason
-    label: str
-    next_step: str
 
 
 class RacingBlock(StrictModel):
@@ -130,7 +135,7 @@ class DashboardFacts(StrictModel):
     current_query_payload: str | None = None
     open_positions: list[int] = Field(default_factory=list)
 
-    waiting_on: str | None = None
+    waiting_on: WaitingOn | None = None
     backpressure: BackpressureReading | None = None
     measured_unit: MeasuredUnit
 

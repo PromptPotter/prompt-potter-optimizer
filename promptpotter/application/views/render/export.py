@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, assert_never
 
-from promptpotter.application.views.render.primitives import fmt_pct
+from promptpotter.application.views.render.primitives import bench_readout, fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
@@ -341,7 +341,7 @@ def dataset_card(p: Provenance, data_file: str) -> str:
     )
 
 
-def _bench_line(export: PromptExport) -> tuple[str, str]:
+def _bench_readout(export: PromptExport) -> tuple[str, str]:
     reading = export.bench.vs_origin
     lift = reading.headline
     if lift is None:
@@ -353,7 +353,7 @@ def _bench_line(export: PromptExport) -> tuple[str, str]:
 def skill_md(export: PromptExport, p: Provenance) -> str:
     """Agent Skills' envelope: ``name`` and ``description`` required, the binding in ``metadata``."""
     models = ", ".join(f"{node}={model}" for node, model in p.models.items()) or "—"
-    lift, ci = _bench_line(export)
+    lift, ci = _bench_readout(export)
     m = export.measurement
     description = (
         f"Run the prompt PromptPotter selected for {export.dataset_name} on {models}. "
@@ -401,7 +401,7 @@ def skill_md(export: PromptExport, p: Provenance) -> str:
             "",
             f"- its own level, round {m.round}, under `{m.formula or '—'}`: accuracy {level} "
             f"n={m.own.n}, on the rows that chose it — not an estimate",
-            f"- held out: {export.bench.line}",
+            f"- held out: {bench_readout(export.bench)}",
             "",
             "## Files",
             "",

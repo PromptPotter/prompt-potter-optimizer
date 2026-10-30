@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
-from typing import Literal, NamedTuple, Self, get_args
+from typing import Literal, NamedTuple, Self
 
 from pydantic import Field, model_validator
 
@@ -181,6 +181,15 @@ class PassStop(FrozenModel):
     warning: str | None = Field(
         description="The backend's dominant warning, where errors ended the pass."
     )
+
+    @property
+    def state(self) -> ReadingState:
+        """A pause leaves the pass owed, never faulted: `resume` sends it again."""
+        paused = (
+            isinstance(self.cause, StopReason)
+            and stop_reason_outcome(self.cause) is StopOutcome.PAUSED
+        )
+        return ReadingState.PENDING if paused else ReadingState.PASS_STOPPED
 
 
 class BenchPass(FrozenModel):
@@ -375,17 +384,47 @@ class LineRun(NamedTuple):
     rounds_closed: int
 
 
+class BenchRefusal(StrEnum):
+    """Why a bench pass cannot be asked for now."""
+
+    INNER = "inner"
+    NO_MANIFEST = "no_manifest"
+    HELD_ELSEWHERE = "held_elsewhere"
+    NOT_HELD = "not_held"
+    SELECTING = "selecting"
+    ORIGIN_UNSCORED = "origin_unscored"
+    GRADED = "graded"
+    NO_SELECTION = "no_selection"
+
+
+BENCH_REFUSAL_INFO: dict[BenchRefusal, str] = {
+    BenchRefusal.INNER: "An inner run is one cell of its outer campaign; no command grades its line.",
+    BenchRefusal.NO_MANIFEST: "This campaign has no manifest on disk.",
+    BenchRefusal.HELD_ELSEWHERE: (
+        "Another cycle (`held_by`) holds this campaign's line, and the bench grades the "
+        "campaign's result. Ask for that cycle."
+    ),
+    BenchRefusal.NOT_HELD: "The campaign's dataset_split holds no bench rows out.",
+    BenchRefusal.SELECTING: "The run is still selecting. Pause it or let it end first.",
+    BenchRefusal.ORIGIN_UNSCORED: (
+        "The origin has not been scored, so there is no reference to grade against."
+    ),
+    BenchRefusal.GRADED: "The line's selection is already graded.",
+    BenchRefusal.NO_SELECTION: "No round closed past the origin, so there is no selection to grade.",
+}
+assert BENCH_REFUSAL_INFO.keys() == set(BenchRefusal)
+
+
 class BenchStatus(FrozenModel):
     """Where a campaign's bench stands, and whether asking for its pass would be admitted."""
 
     state: ReadingState
     trigger: BenchTrigger
-    sentence: str = Field(description="`state` in words, with the rows and the stop behind it.")
     can_grade: bool = Field(
         description="Whether `bench` / `grade-bench` is admitted now. Every entry point reads "
         "this one answer."
     )
-    refusal: str | None = Field(description="Why not, exactly where `can_grade` is false.")
+    refusal: BenchRefusal | None = Field(description="Why not, exactly where `can_grade` is false.")
     offered: bool = Field(
         description="Whether the grade control shows: admitted, or a pass still waited on. "
         "Never on an inner run, whose line no command grades."
@@ -416,7 +455,6 @@ def bench_status(
     *,
     trigger: BenchTrigger,
     bench_size: int,
-    tolerance: int,
     on_line: bool,
     inner: bool,
     held_by: str | None,
@@ -452,43 +490,24 @@ def bench_status(
         state, decided = selected.state, selected
         subject = None if state is ReadingState.READ else "selected"
 
-    sentence = BENCH_STATE_INFO[state].sentence
-    if decided is not None and state is ReadingState.PAST_TOLERANCE:
-        sentence += (
-            f" {subject}: {decided.expected - decided.scored} of {decided.expected} rows, past a "
-            f"tolerance of {tolerance}."
-        )
-    elif decided is not None and state is ReadingState.PASS_STOPPED and decided.stop is not None:
-        warned = "" if decided.stop.warning is None else f": {decided.stop.warning}"
-        sentence += (
-            f" {subject}: {decided.stop.cause.value} after {decided.scored} of "
-            f"{decided.expected} rows{warned}."
-        )
-
-    refusal: str | None = None
+    refusal: BenchRefusal | None = None
     if inner:
-        refusal = "An inner run is one cell of its outer campaign; no command grades its line."
+        refusal = BenchRefusal.INNER
     elif not on_line:
-        refusal = (
-            "This campaign has no manifest on disk."
-            if held_by is None
-            else f"Cycle {held_by} holds this campaign's line, and the bench grades the "
-            "campaign's result. Ask for that cycle."
-        )
+        refusal = BenchRefusal.NO_MANIFEST if held_by is None else BenchRefusal.HELD_ELSEWHERE
     elif not bench_size:
-        refusal = sentence
+        refusal = BenchRefusal.NOT_HELD
     elif run.selecting:
-        refusal = "The run is still selecting. Pause it or let it end first."
+        refusal = BenchRefusal.SELECTING
     elif run.selection is None:
-        refusal = "The origin has not been scored, so there is no reference to grade against."
+        refusal = BenchRefusal.ORIGIN_UNSCORED
     elif state is ReadingState.READ:
-        refusal = "The line's selection is already graded."
+        refusal = BenchRefusal.GRADED
     elif state is ReadingState.NO_SELECTION:
-        refusal = sentence
+        refusal = BenchRefusal.NO_SELECTION
     return BenchStatus(
         state=state,
         trigger=trigger,
-        sentence=sentence,
         can_grade=refusal is None,
         refusal=refusal,
         offered=refusal is None
@@ -563,33 +582,6 @@ class GradedBench(NamedTuple):
     selected: BenchReading
 
 
-def _bench_line(
-    bench_size: int,
-    headline: BenchColumn,
-    status: BenchStatus,
-    origin: BenchReading | None,
-    selected: BenchReading | None,
-    vs_origin: PairedReading,
-) -> str:
-    if status.state is not ReadingState.READ or origin is None or selected is None:
-        return status.sentence
-
-    def level(reading: BenchReading) -> str:
-        return "—" if reading.level is None else f"{reading.level.value:.3f}"
-
-    # `—` where the selection is the origin: one pass read twice compares nothing.
-    read = vs_origin.lift(COLUMN_GRADE[headline])
-    lift = "—" if read is None else f"{read.estimate.value:+.3f}"
-    for column in get_args(BenchColumn):
-        beside = vs_origin.lift(COLUMN_GRADE[column])
-        if column != headline and beside is not None:
-            lift += f" ({column} {beside.estimate.value:+.3f})"
-    return (
-        f"{headline} {level(selected)} selected (round {selected.round}) · "
-        f"{level(origin)} origin · lift {lift} · {bench_size} held-out rows"
-    )
-
-
 class BenchScore(FrozenModel):
     """The headline: the selection and the origin, scored on a bench set no optimizer node read."""
 
@@ -619,39 +611,6 @@ class BenchScore(FrozenModel):
         "levels above then read no column, since two datasets' levels never average, while "
         "`vs_origin` still pairs every row.",
     )
-    line: str = Field(
-        description="The headline on one line — both levels, the lift in each column and the "
-        "held-out row count, or `status.sentence` where the bench is not graded. The ONE wording "
-        "of it: the completion box, the `bench` verb and every screen print this. Stamped by "
-        ":meth:`of` alone."
-    )
-
-    @classmethod
-    def of(
-        cls,
-        *,
-        bench_size: int,
-        scorer_id: str,
-        headline: BenchColumn,
-        status: BenchStatus,
-        origin: BenchReading | None,
-        selected: BenchReading | None,
-        vs_origin: PairedReading,
-        cost: LiftCost,
-        scopes: list[BenchScope],
-    ) -> Self:
-        return cls(
-            bench_size=bench_size,
-            scorer_id=scorer_id,
-            headline=headline,
-            status=status,
-            origin=origin,
-            selected=selected,
-            vs_origin=vs_origin,
-            cost=cost,
-            scopes=scopes,
-            line=_bench_line(bench_size, headline, status, origin, selected, vs_origin),
-        )
 
     @model_validator(mode="after")
     def _read_holds_both(self) -> Self:
@@ -659,10 +618,6 @@ class BenchScore(FrozenModel):
             self.origin is None or self.selected is None
         ):
             raise ValueError("a bench that reads holds the origin's level and the selection's")
-        if self.line != _bench_line(
-            self.bench_size, self.headline, self.status, self.origin, self.selected, self.vs_origin
-        ):
-            raise ValueError("a bench score's line is the wording of its own readings")
         return self
 
     @property

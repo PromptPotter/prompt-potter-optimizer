@@ -208,7 +208,7 @@ it("hangs each pass on the arm it measures, by kind, and on no other", () => {
     rows: 10,
     scored: 0,
     level: null,
-    failure: null,
+    failed_as: null,
   });
   const bench = mark("bench", "b");
   const verify = mark("verify", "a");

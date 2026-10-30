@@ -6,12 +6,16 @@ import { PairedLift } from "@/components/shell/PairedLift";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
-  benchStat,
+  benchSentence,
+  benchWord,
+  billText,
   budgetAxis,
   capLines,
   fmtLift,
   ratePricedText,
   readSpend,
+  roundsText,
+  runWord,
   spendHeadline,
   statusTone,
   tagLabel,
@@ -37,7 +41,7 @@ export function RunMasthead() {
 function CheckinMasthead({ draftId }: { draftId: string | null }) {
   const campaign = useRegistry().unstarted.find((c) => c.address === draftId);
   if (!campaign) return null;
-  const spend = campaign.stats[0];
+  const spent = campaign.facts.spend_lifetime;
   return (
     <header className="run-header">
       <div className="run-header-inner">
@@ -50,12 +54,10 @@ function CheckinMasthead({ draftId }: { draftId: string | null }) {
             <span className="chip-lbl">State</span>
             {tagLabel(campaign, "lifecycle")}
           </span>
-          {spend && (
-            <span className="chip">
-              <span className="chip-lbl">{spend.label}</span>
-              {spend.value}
-            </span>
-          )}
+          <span className="chip">
+            <span className="chip-lbl">Spent</span>
+            {billText(spent.billed_usd, spent.bill_is_floor)}
+          </span>
         </div>
       </div>
     </header>
@@ -76,7 +78,7 @@ function RunHeader() {
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   const status = runState?.status ?? null;
-  const phaseLabel = status ? status.label : PLACEHOLDER;
+  const phaseLabel = status ? runWord(status) : PLACEHOLDER;
   const phaseTone = status && statusTone(status);
   const phaseBody = (
     <>
@@ -86,7 +88,14 @@ function RunHeader() {
   );
 
   const best = course?.facts.standing ?? null;
-  const bench = benchStat(course);
+  // The bench grades the course holding the line; every other course reads it held elsewhere.
+  const bench = course?.facts.bench ?? null;
+  const holdsLine = bench !== null || course?.address === campaign?.facts.line;
+  const benchPass = bench?.status;
+  const benchRows =
+    benchPass?.scored != null && benchPass.expected != null && benchPass.scored < benchPass.expected
+      ? `${benchPass.scored} of ${benchPass.expected} rows`
+      : null;
   const round = dash?.round_axis.position ?? null;
   const roundsCap = dash ? budgetAxis(dash.run_limits.budget, "rounds") : null;
   const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : PLACEHOLDER);
@@ -102,8 +111,13 @@ function RunHeader() {
     <header className="run-header">
       <div className="run-header-inner">
         <div className="run-title">
-          {campaign && <Badge>{tagValue(campaign, "dataset")}</Badge>}
-          {campaign?.facts.label && <span className="run-name">{campaign.facts.label}</span>}
+          {/* One headline: the campaign's label, else the dataset it runs — never a chip alone. */}
+          {campaign?.facts.label && (
+            <Badge className="run-dataset">{tagValue(campaign, "dataset")}</Badge>
+          )}
+          {campaign && (
+            <span className="run-name">{campaign.facts.label ?? tagValue(campaign, "dataset")}</span>
+          )}
           {suffix && suffix !== campaign.address && <span className="run-suffix">__{suffix}</span>}
           <CampaignSwitcher />
           {innerLeaf && (
@@ -133,7 +147,7 @@ function RunHeader() {
             {[
               runsWith ? `${runsWith.optimizer} optimizer` : "pipeline unreadable",
               ...(runsWith?.vendors.flatMap((v) => v.models).map(shortModel) ?? []),
-              campaign.stats.find((s) => s.key === "rounds")?.value,
+              campaign.facts.line_course && roundsText(campaign.facts.line_course),
               fmtAgo(campaign.span.last_at),
             ]
               .filter(Boolean)
@@ -174,12 +188,15 @@ function RunHeader() {
               PLACEHOLDER
             )}
           </Term>
-          {/* Ahead of the chip it fills: an ungraded bench's reason runs the row past the viewport. */}
           {viewedPath && !innerLeaf && <BenchAction path={viewedPath} />}
           <span className="chip">
             <span className="chip-lbl">Bench</span>
-            {bench?.value ?? PLACEHOLDER}
-            {bench?.sub && <span className="chip-of"> {bench.sub}</span>}
+            {course ? (
+              <Term content={benchSentence(bench, holdsLine)}>{benchWord(bench, holdsLine)}</Term>
+            ) : (
+              PLACEHOLDER
+            )}
+            {benchRows && <span className="chip-of"> {benchRows}</span>}
           </span>
           <span className="chip">
             <span className="chip-lbl">Rounds</span>
@@ -189,19 +206,23 @@ function RunHeader() {
           <span className={cx("chip", metered?.bill_is_floor && "chip-warn")}>
             <span className="chip-lbl">Spend</span>
             {metered ? (
-              <Term content={<SpendBuckets metered={metered} campaignUsd={spend.campaignUsd} />}>
+              // The figure on the chip; how it splits, what was rate-priced and every cap in the hover.
+              <Term
+                content={
+                  <>
+                    <SpendBuckets metered={metered} campaignUsd={spend.campaignUsd} />
+                    {priced && <p>+ {priced}</p>}
+                    {caps.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </>
+                }
+              >
                 {spendHeadline(metered)}
               </Term>
             ) : (
               PLACEHOLDER
             )}
-            {priced && <span className="chip-of"> + {priced}</span>}
-            {caps.map((line) => (
-              <span key={line} className="chip-of">
-                {" "}
-                · {line}
-              </span>
-            ))}
           </span>
         </div>
       </div>

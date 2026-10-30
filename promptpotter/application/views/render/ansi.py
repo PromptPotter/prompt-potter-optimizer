@@ -317,8 +317,8 @@ def _render_bench_scored(v: BenchScoredView) -> str:
     graded = bench.graded
     if graded is None:
         # Loud only where a pass or the run broke; a bench still waiting is no fault.
-        ink = YELLOW if BENCH_STATE_INFO[bench.status.state].fault else DIM
-        return f"  {ink}bench: no headline — {bench.status.sentence}{RESET}"
+        info = BENCH_STATE_INFO[bench.status.state]
+        return f"  {YELLOW if info.fault else DIM}bench: no headline — {info.sentence}{RESET}"
     selected = graded.selected
     levels = " → ".join(
         "—" if (level := reading.of(column)) is None else f"{level.value:.3f}" for reading in graded

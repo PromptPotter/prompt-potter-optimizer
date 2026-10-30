@@ -12,6 +12,7 @@ from promptpotter.application.views.render.primitives import (
     YELLOW,
     _dbox_block,
     _node_line,
+    bench_readout,
     fmt_coverage,
     fmt_fitness,
     fmt_pct,
@@ -207,7 +208,7 @@ def render_completion(
     # Repeated under a terminal's readout: a notebook cell has no readout, only this box.
     fields: list[str] = [
         *stop_lines(result.stop_reason),
-        f"Bench        {result.bench.line}",
+        f"Bench        {bench_readout(result.bench)}",
         headline,
     ]
     if result.error is not None:

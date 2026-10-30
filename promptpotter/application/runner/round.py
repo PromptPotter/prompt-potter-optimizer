@@ -32,12 +32,11 @@ from promptpotter.application.runner.output import (
 from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
-from promptpotter.application.views.render.primitives import overlap_series
 from promptpotter.domain.arms import ArmState, Concluded, Measured, Proposal, is_leader_eligible
 from promptpotter.domain.cell_fold import unscoreable_cells
 from promptpotter.domain.optimizer_state import RoundOutput
-from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, OverlapReading, RoundAdvance
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState
+from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -51,7 +50,6 @@ from promptpotter.domain.run_records import BenchCheckpointKind
 from promptpotter.domain.run_standing import line_reference, rounds_without_advance, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import SendRefusedError, graceful
 
 if TYPE_CHECKING:
@@ -85,7 +83,7 @@ def run_init(cycle: Cycle, cb: RunCallbacks) -> None:
 
 
 async def settle_owed_outputs(ctx: RoundContext) -> None:
-    """Before a walk: an adapter that landed nothing on the round before is re-run onto it, and the walk HALTS (``PAUSED``, resumable) where it never lands."""
+    """Before a walk: an adapter that landed nothing on the round before is re-run onto it, and the walk HALTS (``ADAPTER_OWED``, resumable) where it never lands."""
     cycle = ctx.cycle
     prior = cycle.rounds[-1]
     # A replayed walk makes no call, so nothing it would read is re-sent.
@@ -119,50 +117,13 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
                     exc,
                 )
         else:
-            emit_round_warning(
-                kind="adapter_output_unavailable",
-                message=(
-                    f"round {prior.round}'s {adapter.name} landed no "
-                    f"{[k.kind for k in owed]} and {OWED_WRITE_ATTEMPTS} re-runs failed — halting "
-                    f"rather than walking round {ctx.round_num} without it; `resume` re-runs it"
-                ),
-                severity="error",
-                detail={
-                    "prior_round": prior.round,
-                    "node": adapter.name,
-                    "attempts": OWED_WRITE_ATTEMPTS,
-                    "error": str(last)[:200],
-                },
-            )
-            raise StopLoop(StopReason.PAUSED)
+            raise StopLoop(StopReason.ADAPTER_OWED) from last
         logger.info(
             "Round %d's %s landed late; round %d reads it.",
             prior.round,
             adapter.name,
             ctx.round_num,
         )
-
-
-def _warn_not_advanced(round_result: RoundResult) -> None:
-    overlap = round_result.overlap
-    if overlap.advance not in (RoundAdvance.NOT_SEPARATED, RoundAdvance.UNREAD):
-        return
-    lead = overlap.lead
-    evidence = (
-        READING_STATE_INFO[lead.state].sentence
-        if lead.headline is None
-        else f"lift interval [{lead.headline.estimate.ci_lo:+.3f}, "
-        f"{lead.headline.estimate.ci_hi:+.3f}] on {overlap_series(overlap)}"
-    )
-    head = round_result.head
-    emit_round_warning(
-        kind="round_not_advanced",
-        message=(
-            f"round {round_result.round} selected {'no arm' if head is None else head.label}: "
-            f"{ROUND_ADVANCE_INFO[overlap.advance].sentence} {evidence}"
-        ),
-        detail={"advance": overlap.advance.value, "lead_state": lead.state.value},
-    )
 
 
 def _round_result(
@@ -522,11 +483,9 @@ class _Walking:
             raise
         reading, bought = await overlap
         # Re-read: an adapter emits onto the round it adapts to.
-        round_result = cycle.seat(
+        return cycle.seat(
             cycle.rounds[-1].model_copy(update={"overlap": reading, "overlap_results": bought})
         )
-        _warn_not_advanced(round_result)
-        return round_result
 
     @property
     def walked(self) -> RoundWalked:

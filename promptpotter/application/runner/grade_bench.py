@@ -20,6 +20,7 @@ from promptpotter.application.runner.campaign_result import (
 from promptpotter.application.runner.output import publish_export, write_review_md
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.views.readout import ReadoutProjection
+from promptpotter.domain.bench import BENCH_REFUSAL_INFO
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO
@@ -45,9 +46,10 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
         if campaign is None:
             raise BenchTriggerError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-        refusal = read_cycle_bench(stores, campaign, hop).status.refusal
-        if refusal is not None:
-            raise BenchTriggerError(refusal)
+        status = read_cycle_bench(stores, campaign, hop).status
+        if status.refusal is not None:
+            held = "" if status.held_by is None else f" Holder: {status.held_by}."
+            raise BenchTriggerError(BENCH_REFUSAL_INFO[status.refusal] + held)
         return await _grade(stores, hop)
 
 

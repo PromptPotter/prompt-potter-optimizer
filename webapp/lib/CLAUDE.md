@@ -37,7 +37,11 @@ chart theme, vocabulary). A context one surface alone consumes lives in that sur
 
 **Every response type comes from `lib/api/types.generated.ts`** (gate `ts-types`); re-export from `lib/api/types.ts`. A route with no `response_model` stays hand-written and says so; a narrow alias is derived (`ResponseType["field"]`), never re-declared.
 
-**A closed set belongs on the server** — a union declared only in TypeScript is the bug.
+**A closed set belongs on the server** — a union declared only in TypeScript is the bug. **So do its
+words**: a served enum is worded by its exported table (`scripts/build_ts_types.py::_WORD_TABLES`,
+e.g. `STATUS_MARK_INFO`, `STOP_REASON_INFO`), never a local `Record<…, string>` beside it; a served
+model carries the enum and numbers, never the sentence.
+<!-- probe: git grep -cE "^const [A-Z_]+_(LABELS|TONE|ADVICE|NAME): Record" -- webapp/*.ts <= 2 -->
 
 ## Viewed identity — one address (CyclePath)
 

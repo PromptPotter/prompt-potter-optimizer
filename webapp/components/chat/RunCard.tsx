@@ -5,6 +5,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { HierarchyCourse } from "@/lib/api";
 import { cx } from "@/lib/cx";
+import { entryLede, runNextStep } from "@/lib/derivations";
 import { SubjectBox } from "@/components/shell/searchpoint/SubjectBox";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { HardSamplesPreview } from "@/components/chat/HardSamplesPreview";
@@ -41,14 +42,16 @@ export function RunCard() {
 // The course entry as served when its producer detached: frozen, never re-worded here.
 export function RunSummaryItem({ course }: { course: HierarchyCourse }) {
   const changes = course.facts.standing?.changes;
+  const lede = entryLede(course);
+  const nextStep = runNextStep(course.state.status);
   return (
     <div className="chat-msg ai run-summary-item" role="note">
       <SummaryBlock
         dense
         facts={course}
-        lede={course.lede ? <p className="run-summary-line">{course.lede}</p> : null}
+        lede={lede ? <p className="run-summary-line">{lede}</p> : null}
       />
-      {course.state.next_step ? <p className="run-summary-line">{course.state.next_step}</p> : null}
+      {nextStep ? <p className="run-summary-line">{nextStep}</p> : null}
       {changes ? <p className="run-summary-line">{changes}</p> : null}
       {course.caveat ? <p className="run-summary-line">{course.caveat}</p> : null}
     </div>

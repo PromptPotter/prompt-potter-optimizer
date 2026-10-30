@@ -232,7 +232,6 @@ from promptpotter.domain.run_records import (
     CommandAckRecord,
     ComparisonExit,
     PhaseRecord,
-    RoundWarningRecord,
     RunPhaseRecord,
 )
 from promptpotter.domain.run_standing import RunStanding, rounds_without_advance, stalls_left
@@ -1537,7 +1536,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         ]
         assert isinstance(stopped_view, BenchGradedView)
         paused_pass = stopped_view.bench_pass
-        assert stopped_view.state is ReadingState.PASS_STOPPED and paused_pass.stop is not None
+        assert stopped_view.state is ReadingState.PENDING and paused_pass.stop is not None, (
+            "a paused pass read as faulted, when `resume` sends it again"
+        )
         assert paused_pass.stop.cause is StopReason.PAUSED and 0 < len(paused_pass.cells) < 4, (
             "a paused pass banked no record of the cells it walked, or never stopped"
         )
@@ -2570,18 +2571,12 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
         proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
         readout = cycle.output(L1Readout, 1)
-        warned = [
-            record.detail.get("reason")
-            for _, record in callbacks.ledger.iter()
-            if isinstance(record, RoundWarningRecord) and record.kind == "l1_zero_candidates"
-        ]
     assert proposed.proposals == [], "a round of no-op variants measured a candidate"
     assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
         PARSE_FAILURE_ALL_NO_OP,
         0,
         {},
     ), "a round of no-op variants was booked as proposer wounds, not as zero candidates"
-    assert warned == [PARSE_FAILURE_ALL_NO_OP], "the operator was not told the round was empty"
 
     # Folded back on resume: a layer fires AFTER the round it reads has closed, so what it
     # authors is on no close.

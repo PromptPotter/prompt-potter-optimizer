@@ -1,27 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field
 
 from promptpotter.domain.activity import ActivityItem
 from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
-from promptpotter.domain.bench import BenchStatus
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
-from promptpotter.domain.paired_reading import PairedReading
-from promptpotter.domain.phases import (
-    PauseReading,
-    RunAdmission,
-    RunPhase,
-    RunState,
-    stop_next_step,
-)
+from promptpotter.domain.phases import PauseReading, RunAdmission, RunState
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.spend import LifetimeSpend
+from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 type CourseKind = Literal["root", "fork", "diag", "inner"]
@@ -36,9 +30,38 @@ type TagKind = Literal[
     "superseded",
     "verdict",
 ]
-# A plain alias: a discriminator reads through no `type` statement.
-StatKey = Literal["spend_lifetime", "spend", "rounds", "accuracy", "lives", "ability", "lift"]
 type RankMove = Literal["up", "down", "unchanged"]
+
+
+class CandidateStanding(StrEnum):
+    """What a candidate is on its course's record, derived once every line resolves."""
+
+    ORIGIN = "origin"
+    PROPOSED = "proposed"
+    REWOUND = "rewound"
+    # Rewound, and a fork's line stands on it.
+    REWOUND_STOOD_ON = "rewound_stood_on"
+    RETIRED = "retired"
+
+
+CANDIDATE_STANDING_INFO: dict[CandidateStanding, str] = {
+    CandidateStanding.ORIGIN: "This course's ORIGIN: the specification it started from, measured.",
+    CandidateStanding.PROPOSED: "A candidate this course proposed and measured.",
+    CandidateStanding.REWOUND: "Rewound: its course re-ran this round in place after a fork was "
+    "cut from it. It stays as the record of what ran.",
+    CandidateStanding.REWOUND_STOOD_ON: "Rewound: its course re-ran this round in place after a "
+    "fork was cut from it. It stays as the record of what ran, and a fork's line stands on it.",
+    CandidateStanding.RETIRED: "Retired: the run branched and continued in the course that took "
+    "its place. It stays as the record of what ran, its line as it ran.",
+}
+assert CANDIDATE_STANDING_INFO.keys() == set(CandidateStanding)
+
+# How a rounds count reads where its cap says more than a count: none past the origin, no axis.
+type RoundsCapWord = Literal["origin_only", "no_axis"]
+ROUNDS_CAP_WORDS: dict[RoundsCapWord, str] = {
+    "origin_only": "origin only",
+    "no_axis": "no rounds axis",
+}
 
 # A step window: what one request is served, and the most a store's fold keeps.
 DEFAULT_STEP_LIMIT = 200
@@ -56,36 +79,6 @@ class HierarchyTag(FrozenModel):
     label: str = Field(description="The chip as it reads.")
 
 
-class HierarchyStat(FrozenModel):
-    """One number an entry shows, worded by the server in the order it is served."""
-
-    key: StatKey
-    label: str
-    value: str = Field(description="The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`.")
-    sub: str | None = Field(description="The second line under the value; null where none.")
-
-
-class BenchStat(FrozenModel):
-    """The bench as one stat: its wording, and the readings a control or a headline acts on."""
-
-    key: Literal["bench"] = "bench"
-    label: str
-    value: str
-    sub: str | None = Field(description="`BenchScore.line`, or why the bench is not read here.")
-    status: BenchStatus | None = Field(
-        description="Null on a course beside the line, which no command grades."
-    )
-    vs_origin: PairedReading | None = Field(
-        description="`BenchScore.vs_origin`; null with `status`."
-    )
-    lift_per_usd: float | None = Field(
-        description="`BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread."
-    )
-
-
-type EntryStat = Annotated[HierarchyStat | BenchStat, Field(discriminator="key")]
-
-
 class HierarchySpan(FrozenModel):
     """When an entry opened and last moved."""
 
@@ -94,18 +87,12 @@ class HierarchySpan(FrozenModel):
 
 
 class HierarchyState(FrozenModel):
-    """A run's state as one value: the phase, its word and mark, whether it is held, the verbs."""
+    """A run's state as one value: its status, whether it is held, the verbs."""
 
-    run_phase: RunPhase
     status: RunStatus
     attached: bool = Field(description="A process holds this cycle, running or launching it.")
     pause: PauseReading | None = Field(description="Why the run reads paused; null otherwise.")
     admission: RunAdmission
-    next_step: str = Field(
-        description="What the operator does now, as the run's stop reason states it "
-        "(`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. "
-        "Empty while the run has not stopped, or where its reason owes nothing."
-    )
     intervened: bool = Field(
         description="An operator intervened by hand, so the run is no longer purely reproducible."
     )
@@ -116,12 +103,10 @@ class HierarchyState(FrozenModel):
     ) -> HierarchyState:
         stop = None if index is None else index.stop_reason
         return cls(
-            run_phase=run.run_phase,
             status=RunStatus.of(run.run_phase, stop, lifecycle=lifecycle),
             attached=run.producer.attached,
             pause=run.pause,
             admission=run.admission,
-            next_step=stop_next_step(stop),
             intervened=index is not None and index.human_intervened,
         )
 
@@ -144,6 +129,10 @@ class CampaignFacts(FrozenModel):
     )
     runs_with: CampaignRunsWith | None = Field(
         description="What the root course runs with; null where its pipeline did not resolve."
+    )
+    line_course: CourseFacts | None = Field(
+        description="The facts of the course holding the line, which the campaign's row reads "
+        "as its own; null where that course has no mint record."
     )
 
 
@@ -177,9 +166,19 @@ class CourseFacts(FrozenModel):
     task: str | None = Field(description="The outer panel cell an L4 inner course measures.")
     standing: RunStanding | None = Field(description="Null before round 0 closes.")
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
+    rounds_cap: int | None = Field(
+        description="The rounds cap that binds it: its wiring's, before its first launch its "
+        "campaign's. 0 runs the origin only; null where it has no rounds axis."
+    )
     elects_on: DisplayMetric | None = Field(
         description="The column the course's newest election elected on; null before its first. "
         "`ability`: its rounds are won on θ, not on accuracy."
+    )
+    spend: MeteredSpend = Field(description="This course's own ledger's bill, at the moment.")
+    bench: BenchScore | None = Field(
+        description="The campaign's bench, on the course holding the line, read whole at the "
+        "head; null on every other course (the line's reads `held_elsewhere` there) and under a "
+        "moment."
     )
 
 
@@ -285,6 +284,7 @@ class CandidateFacts(FrozenModel):
         description="The variation nodes that wrote this individual, in the order they ran. Empty "
         "on an origin."
     )
+    standing: CandidateStanding
     reading: ArmReading = Field(
         description="`reading.arm` is the key every per-cycle document of this course speaks; "
         "`reading.sp_hash` joins to the archive rows. A retired candidate's election wears no "
@@ -362,13 +362,11 @@ class _HierarchyNode(FrozenModel):
 
 
 class _HierarchyEntry(_HierarchyNode):
-    """A level a row or a card renders: worded, tagged and counted by the server."""
+    """A level a row or a card renders: named and tagged by the server; its numbers are `facts`."""
 
     label: str = Field(description="The display name.")
-    lede: str | None = Field(description="The one sentence under the title: the selection line.")
     caveat: str | None = Field(description="What could not be read; null where all was.")
     tags: list[HierarchyTag]
-    stats: list[EntryStat] = Field(description="Server-ordered; `stats[0]` is the headline.")
 
     def tag(self, kind: TagKind) -> HierarchyTag | None:
         return next((t for t in self.tags if t.kind == kind), None)

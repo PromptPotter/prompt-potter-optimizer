@@ -8,7 +8,6 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
     GateKind,
     LaunchStage,
     PauseCause,
@@ -181,7 +180,6 @@ def derive_run_state(cycle_dir: Path) -> RunState:
                 stop_reason=stood.stop_reason,
                 cause=stood.cause,
                 detail=stood.detail,
-                next_step=STOP_REASON_INFO[stood.stop_reason].next_step,
                 at=stood.timestamp,
             )
         )
@@ -192,7 +190,6 @@ def derive_run_state(cycle_dir: Path) -> RunState:
             stop_reason=None,
             cause=PauseCause.COMMAND,
             detail=f"pause-cycle by {asked.issued_by.display}",
-            next_step="The run stops at its next checkpoint.",
             at=asked.at,
         )
     )

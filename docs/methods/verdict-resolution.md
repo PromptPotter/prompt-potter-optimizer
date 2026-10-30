@@ -65,17 +65,10 @@ interface, only when it beats 1PL out-of-sample (with hysteresis), so a thin dat
 
 ## Reading a round — which column is the verdict
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-light.png">
-    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png" alt="Optimizer warnings: rounds 3 to 6 each resolved nothing, because every arm's lift interval spans zero" width="100%">
-  </picture>
-</p>
-
 **It does not grade its own homework.** With three arms and no real difference, *some* arm beats its
-parent most of the time. PromptPotter promotes the best it saw and says, per round, on screen and on
-disk, that the lift interval spans zero (`(ns)` beside its `p`). Degenerate candidates (a constant
+parent most of the time. PromptPotter promotes the best it saw and marks the round's
+`RoundAdvance` (`not separated` where the lift interval spans zero) on its round, on screen and on
+disk (`(ns)` beside its `p`). Degenerate candidates (a constant
 answer, a scorer-gaming shape) are caught before they count, and the layer that validates a fix is
 never the one that proposed it.
 

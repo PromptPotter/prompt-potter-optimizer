@@ -5,7 +5,7 @@ import types
 import typing
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -170,6 +170,18 @@ def measured_address(declaration: RunDeclaration) -> dict[str, Any]:
 
 # Gravest first: an ill-defined statistic, a silent waste, knobs that co-move.
 CouplingSeverity = Literal["collision", "inert", "info"]
+
+
+class CouplingSeverityInfo(NamedTuple):
+    # The badge an ACTIVE coupling wears; an inactive one wears none.
+    tone: Literal["danger", "accent", "default"]
+
+
+COUPLING_SEVERITY_INFO: dict[CouplingSeverity, CouplingSeverityInfo] = {
+    "collision": CouplingSeverityInfo("danger"),
+    "inert": CouplingSeverityInfo("accent"),
+    "info": CouplingSeverityInfo("default"),
+}
 
 
 @dataclass(frozen=True)

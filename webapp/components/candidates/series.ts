@@ -1,6 +1,7 @@
 "use client";
 
 import type { MeasuredUnit, VerificationMark } from "@/lib/api/types";
+import { READING_STATE_INFO, VERIFICATION_KIND_INFO } from "@/lib/api/types.generated";
 import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
 import { fmtInterval, fmtUnit, PLACEHOLDER, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
@@ -32,7 +33,7 @@ interface SeriesSpec {
   legend?: (ctx: SeriesCtx) => string;
   hint?: (ctx: SeriesCtx) => string;
   ink: (ctx: SeriesCtx) => string;
-  // A mark is a diamond beside its bar's group: a check on it, never a second bar.
+  // A mark is a diamond at its candidate's slot: a check on the bar, never a second bar.
   kind: "bar" | "line" | "mark";
   axis: "y" | "y1";
   gap: "floor-when-started" | "sparse";
@@ -52,29 +53,19 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-const MARK_NAME: Record<VerificationMark["kind"], string> = {
-  verify: "verify",
-  bench: "held-out bench",
-};
-
-const MARK_ROWS: Record<VerificationMark["kind"], string> = {
-  verify: " never seen",
-  bench: "",
-};
-
 function markTip(m: VerificationMark | null, unit: MeasuredUnit): string {
   if (m == null) return PLACEHOLDER;
-  const name = MARK_NAME[m.kind];
-  if (m.failure != null) return `${name}, failed: ${m.failure}`;
+  const { name, rows } = VERIFICATION_KIND_INFO[m.kind];
+  if (m.failed_as != null) return `${name}, failed: ${READING_STATE_INFO[m.failed_as].sentence}`;
   const level = m.level;
   const band =
     level?.ci_lo != null && level.ci_hi != null ? ` ${fmtInterval("rate", level.ci_lo, level.ci_hi)}` : "";
   if (m.state === "running") {
     const sofar = level == null ? "" : `, ${fmtUnit("rate", level.value)} so far`;
-    return `${name}, ${m.scored} of ${unitCount(m.rows, unit)}${MARK_ROWS[m.kind]}${sofar}`;
+    return `${name}, ${m.scored} of ${unitCount(m.rows, unit)}${rows}${sofar}`;
   }
   const read = level == null ? ", no level" : `, ${fmtUnit("rate", level.value)}${band}`;
-  return `${name}, ${unitCount(m.scored, unit)}${MARK_ROWS[m.kind]}${read}`;
+  return `${name}, ${unitCount(m.scored, unit)}${rows}${read}`;
 }
 
 // A course bar carries no arm, so no pass of this cycle reads it.
@@ -154,7 +145,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     key: "verify",
     legend: () => "verify",
     hint: () =>
-      "An open diamond: this candidate on search cells its rounds never bought, read on those fresh cells alone — the check on the level its bar claims. Picked hardest-first, they sit below that level by construction. It pulses while the pass is out.",
+      "An open diamond: this candidate on search cells its rounds never bought, read on those fresh cells alone — the check on the level its bar claims. Picked hardest-first, they sit below that level by construction.",
     ink: () => "--color-accent",
     kind: "mark",
     mark: { of: verifyOf, filled: false },
@@ -168,7 +159,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     key: "bench",
     legend: () => "bench · held out",
     hint: () =>
-      "A filled diamond: this candidate on the held-out bench set — questions no round of the search ever read. Graded for the origin as the run starts and for the selection as it ends, so most bars carry none. It pulses while the pass is out.",
+      "A filled diamond: this candidate on the held-out bench set — questions no round of the search ever read. Graded for the origin as the run starts and for the selection as it ends, so most bars carry none.",
     ink: () => "--color-accent",
     kind: "mark",
     mark: { of: benchOf, filled: true },

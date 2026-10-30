@@ -16,7 +16,13 @@ from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.bench import BandedValue, BenchColumn, BenchScore, DatasetSplit
+from promptpotter.domain.bench import (
+    BENCH_STATE_INFO,
+    BandedValue,
+    BenchColumn,
+    BenchScore,
+    DatasetSplit,
+)
 from promptpotter.domain.campaign import BenchSet
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
@@ -236,7 +242,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 f"{_banded(_lift(b, h2h.headline), '{:+.3f}', 7, 18)}  "
                 f"{_value(_lift(b, beside), '{:+.3f}'):>9}  "
                 if graded is not None
-                else f"{b.status.sentence:<106.106}  "
+                else f"{BENCH_STATE_INFO[b.status.state].sentence:<106.106}  "
             )
             + (
                 f"{spend.total_used_usd:>8.4f}  {spend.total_rate_priced_usd:>10.4f}  "

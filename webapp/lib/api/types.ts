@@ -131,8 +131,6 @@ export type {
   HierarchyCourse,
   HierarchyRound,
   HierarchyResponse,
-  HierarchyStat,
-  BenchStat,
   HierarchyState,
   HierarchyTag,
   SubtreeCampaign,

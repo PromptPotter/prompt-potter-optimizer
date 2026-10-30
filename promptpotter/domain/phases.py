@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.clock import duration_words, utcnow_iso
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
@@ -37,6 +37,8 @@ class StopReason(enum.StrEnum):
     LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
     PANEL_CUT = "panel_cut"
+    # The round before's adapter landed nothing, and its re-runs before this walk failed.
+    ADAPTER_OWED = "adapter_output_owed"
     CRASHED = "crashed"
     DIVERGED = "diverged"
     OPTIMIZER_ABORT = "optimizer_abort"
@@ -124,15 +126,18 @@ class PauseCause(enum.StrEnum):
     STEP = "step"
     # A declared bound cut the round's panel (``StopReason.PANEL_CUT``).
     BOUND = "bound"
+    # An adapter's round output stayed owed past its re-runs (``StopReason.ADAPTER_OWED``).
+    OWED = "owed"
 
 
 class PauseReading(FrozenModel):
     """Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach."""
 
-    stop_reason: StopReason | None
+    stop_reason: StopReason | None = Field(
+        description="Null on an accepted pause the loop has yet to reach."
+    )
     cause: PauseCause
     detail: str = Field(description="Who or what asked, in the declarer's own words.")
-    next_step: str
     at: str
 
 
@@ -184,9 +189,20 @@ PRODUCER_STATE_INFO: dict[ProducerState, ProducerStateInfo] = {
     ProducerState.ABSENT: ProducerStateInfo("Running", False, "", ""),
 }
 
-# Where the state's own word says too little: on an open cell with no recent step; on a child run.
-HEAD_MEASURING_LABEL = "Measuring"
-HEAD_ON_CHILD_LABEL = "Waiting"
+# A walking run's head where its producer's state word says too little: an open cell with no
+# recent step, a call open on a child run, a wedge, no step in the window, a cell no arm owns.
+type RayHeadWord = Literal[
+    "measuring", "on_child", "on_child_detail", "stalled", "no_recent_step", "pass", "sample"
+]
+RAY_HEAD_WORDS: dict[RayHeadWord, str] = {
+    "measuring": "Measuring",
+    "on_child": "Waiting",
+    "on_child_detail": "on a child run",
+    "stalled": "no progress",
+    "no_recent_step": "no recent step",
+    "pass": "pass",
+    "sample": "sample",
+}
 
 _missing_producer_info = set(ProducerState) - set(PRODUCER_STATE_INFO)
 if _missing_producer_info:
@@ -196,42 +212,11 @@ if _missing_producer_info:
     )
 
 
-class ProducerAlert(FrozenModel):
-    """What a producer's state raises on its own, worded once for every surface."""
-
-    title: str
-    detail: str
-
-    @classmethod
-    def of(cls, state: ProducerState, *, clocked: str = "") -> ProducerAlert | None:
-        info = PRODUCER_STATE_INFO[state]
-        return cls(title=info.alert, detail=info.alert_detail + clocked) if info.alert else None
-
-
 class ProducerReading(FrozenModel):
-    """One cycle's producer as served: its state, its two server-measured clocks and its words."""
+    """One cycle's producer as served: its state and its two server-measured clocks. Its words are
+    `PRODUCER_STATE_INFO[state]` (the alert it raises, whether it is stepping) and `RAY_HEAD_WORDS`."""
 
     state: ProducerState
-    label: str = Field(
-        description="The state as a walking run's head reads it: the state's own word, or the "
-        "measuring word while it sits on an open cell with no recent step."
-    )
-    label_on_child: str = Field(
-        description="The same head while the run's newest step is a child run's — the one word "
-        "for a parent whose call is open on it."
-    )
-    stepping: bool = Field(
-        description="A record landed inside the recent-step window, so the run's newest step is "
-        "where it stands now."
-    )
-    stalled: str = Field(
-        description="How long a wedged producer has made no progress, as a sentence; empty on "
-        "every other state."
-    )
-    alert: ProducerAlert | None = Field(
-        description="What this state raises on its own (`silent`, `wedged`); null where nothing "
-        "is wrong with the producer."
-    )
     attached: bool = Field(
         description="A process holds this cycle — running it, or launching it (`claimed`) — so "
         "the cycle is neither deleted, compacted, resumed nor billed by a second party."
@@ -262,22 +247,8 @@ class ProducerReading(FrozenModel):
         appending = state in _APPENDING
         open_s = open_for_s if appending else None
         silent_s = silent_for_s if appending else None
-        info = PRODUCER_STATE_INFO[state]
-        wedged = state is ProducerState.WEDGED
-        clocked = "" if silent_s is None else f" for {duration_words(silent_s)}"
         return cls(
             state=state,
-            label=HEAD_MEASURING_LABEL
-            if state is ProducerState.IDLE and open_s is not None
-            else info.label,
-            label_on_child=HEAD_ON_CHILD_LABEL,
-            stepping=info.stepping,
-            stalled=""
-            if not wedged
-            else "no progress recorded"
-            if silent_s is None
-            else f"no progress{clocked}",
-            alert=ProducerAlert.of(state, clocked=clocked if wedged else ""),
             attached=appending or state in (ProducerState.HELD, ProducerState.CLAIMED),
             appending=appending,
             silent_for_s=silent_s,
@@ -622,6 +593,16 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "`optimization.panel_gate: off` to elect on the holed panel.",
         False,
     ),
+    StopReason.ADAPTER_OWED: StopReasonInfo(
+        "Adapter output owed",
+        StopOutcome.PAUSED,
+        StopCategory.FAILURE,
+        True,
+        False,
+        "The round before's adapter landed nothing in its re-runs; `resume` re-runs it before "
+        "the next walk.",
+        False,
+    ),
     StopReason.OPTIMIZER_ABORT: StopReasonInfo(
         "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True
     ),
@@ -776,6 +757,14 @@ if _missing_stop_info:
         f"STOP_REASON_INFO is missing rows for {sorted(r.value for r in _missing_stop_info)} — "
         "every StopReason needs a label + outcome (domain/phases.py)."
     )
+
+
+# A pause the run raises on itself names its own cause, whatever else reached the process.
+SELF_PAUSE_CAUSE: dict[StopReason, PauseCause] = {
+    StopReason.PANEL_CUT: PauseCause.BOUND,
+    StopReason.ADAPTER_OWED: PauseCause.OWED,
+}
+assert all(STOP_REASON_INFO[r].outcome is StopOutcome.PAUSED for r in SELF_PAUSE_CAUSE)
 
 
 def stop_reason_outcome(reason: StopReason) -> StopOutcome:

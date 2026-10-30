@@ -192,47 +192,21 @@ async def _run_transition(fired: LayerCall, fire: Fire) -> TransitionResult | No
 def _layer_control(fired: LayerCall, result: TransitionResult) -> None:
     """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
     layer, ctx = fired
-    round_num = ctx.round_num
     capability = ctx.knobs(EscalationKnobs)
     if result.terminate_proposal is not None:
+        # Present only where the reply schema offered it (`InjectionBundle.terminate_offer`).
         reason = result.terminate_proposal.reason.strip()
-        if not capability.terminate_capability:
-            # A model can volunteer the field with no guidance in the prompt; it must not abort the run.
-            logger.warning(
-                "%s emitted terminate_proposal while terminate_capability is off — ignored",
-                layer.layer_id,
-            )
-        elif not reason:
+        if not reason:
             # Never substitute a stand-in reason: a blank stop is not a decision.
             logger.warning(
                 "%s emitted a blank terminate_proposal — ignored, cycle continues",
                 layer.layer_id,
-            )
-            emit_round_warning(
-                kind="layer_terminate_blank",
-                message=(
-                    f"{layer.layer_id} asked to stop the cycle but named no reason, so the "
-                    "request was ignored and the run continued. Nothing is wrong with this "
-                    "cycle; the layer's own output schema let it fill the stop field with an "
-                    "empty string."
-                ),
-                detail={"layer": layer.layer_id, "round": round_num},
             )
         else:
             logger.info(
                 "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
                 layer.layer_id,
                 reason,
-            )
-            emit_round_warning(
-                kind="layer_terminated_cycle",
-                message=(
-                    f"{layer.layer_id} stopped this cycle: {reason} Nothing here resumes on "
-                    "its own — fix what that names, then `python -m promptpotter resume` picks "
-                    "the cycle up where it halted."
-                ),
-                severity="error",
-                detail={"layer": layer.layer_id, "reason": reason, "round": round_num},
             )
             raise StopLoop(StopReason.OPTIMIZER_ABORT)
 
@@ -252,14 +226,10 @@ def _rebase_request(
     round_num = ctx.round_num
     lineage = ctx.read(Lineage)
     if lineage.rebases >= MAX_AUTO_REBASES:
-        emit_round_warning(
-            kind="layer_rebase_dropped",
-            message=(
-                f"{layer_id} asked to rewind this cycle, but this launch has already rebased "
-                f"{lineage.rebases} times, the most one launch may. The request was dropped and "
-                "the run continued on this line."
-            ),
-            detail={"layer": layer_id, "round": round_num, "caveats": []},
+        logger.warning(
+            "%s emitted fork_proposal after %d rebases, the most one launch may — dropped",
+            layer_id,
+            lineage.rebases,
         )
         return None
     target_round = lineage.rewind_round()
@@ -275,22 +245,10 @@ def _rebase_request(
                 and read.caveat is not None
             }
         )
-        why = (
-            f"θ is withheld there under {', '.join(c.value for c in withheld)}"
-            if withheld
-            else "none holds a level"
-        )
-        emit_round_warning(
-            kind="layer_rebase_dropped",
-            message=(
-                f"{layer_id} asked to rewind this cycle, but no earlier round can be chosen: "
-                f"{why}. The request was dropped and the run continued on this line."
-            ),
-            detail={
-                "layer": layer_id,
-                "round": round_num,
-                "caveats": [c.value for c in withheld],
-            },
+        logger.warning(
+            "%s emitted fork_proposal, but no earlier round holds a level%s — dropped",
+            layer_id,
+            f" (θ withheld under {', '.join(c.value for c in withheld)})" if withheld else "",
         )
         return None
 

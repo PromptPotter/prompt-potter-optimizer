@@ -255,6 +255,24 @@
             "description": "The quieter half of the line.",
             "title": "Detail"
           },
+          "healed": {
+            "anyOf": [
+              {
+                "enum": [
+                  "layer_parse_failure",
+                  "injection_budget_overrun",
+                  "trace_sink_failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The self-heal a round warning reports; null on every other item.",
+            "title": "Healed"
+          },
           "icon": {
             "title": "Icon",
             "type": "string"
@@ -1410,6 +1428,21 @@
         "title": "BenchReading",
         "type": "object"
       },
+      "BenchRefusal": {
+        "description": "Why a bench pass cannot be asked for now.",
+        "enum": [
+          "inner",
+          "no_manifest",
+          "held_elsewhere",
+          "not_held",
+          "selecting",
+          "origin_unscored",
+          "graded",
+          "no_selection"
+        ],
+        "title": "BenchRefusal",
+        "type": "string"
+      },
       "BenchScope": {
         "additionalProperties": false,
         "description": "One dataset's rows of a bench spanning several, read apart: a level is never averaged\nacross datasets.",
@@ -1494,11 +1527,6 @@
             "title": "Headline",
             "type": "string"
           },
-          "line": {
-            "description": "The headline on one line — both levels, the lift in each column and the held-out row count, or `status.sentence` where the bench is not graded. The ONE wording of it: the completion box, the `bench` verb and every screen print this. Stamped by :meth:`of` alone.",
-            "title": "Line",
-            "type": "string"
-          },
           "origin": {
             "anyOf": [
               {
@@ -1550,8 +1578,7 @@
           "origin",
           "selected",
           "vs_origin",
-          "cost",
-          "line"
+          "cost"
         ],
         "title": "BenchScore",
         "type": "object"
@@ -1627,14 +1654,13 @@
           "refusal": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/BenchRefusal"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why not, exactly where `can_grade` is false.",
-            "title": "Refusal"
+            "description": "Why not, exactly where `can_grade` is false."
           },
           "scored": {
             "anyOf": [
@@ -1646,11 +1672,6 @@
               }
             ],
             "title": "Scored"
-          },
-          "sentence": {
-            "description": "`state` in words, with the rows and the stop behind it.",
-            "title": "Sentence",
-            "type": "string"
           },
           "state": {
             "$ref": "#/components/schemas/ReadingState"
@@ -1694,7 +1715,6 @@
         "required": [
           "state",
           "trigger",
-          "sentence",
           "can_grade",
           "refusal",
           "offered",
@@ -4491,27 +4511,28 @@
       },
       "LivesReading": {
         "additionalProperties": false,
-        "description": "A run's life bank as every surface shows it. Built by :meth:`of` alone.",
+        "description": "A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,\nread off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`).",
         "properties": {
-          "bar": {
-            "description": "One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank.",
-            "title": "Bar",
-            "type": "string"
+          "cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null where the bank has no cap.",
+            "title": "Cap"
           },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "spent": {
-            "description": "The bank is empty: the run stops after this round.",
-            "title": "Spent",
-            "type": "boolean"
+          "left": {
+            "title": "Left",
+            "type": "integer"
           }
         },
         "required": [
-          "bar",
-          "label",
-          "spent"
+          "left",
+          "cap"
         ],
         "title": "LivesReading",
         "type": "object"
@@ -5821,7 +5842,8 @@
           "interrupt",
           "cancelled",
           "step",
-          "bound"
+          "bound",
+          "owed"
         ],
         "title": "PauseCause",
         "type": "string"
@@ -7265,17 +7287,8 @@
           },
           "kind": {
             "enum": [
-              "l1_zero_candidates",
-              "injection_budget_overrun",
               "layer_parse_failure",
-              "layer_terminated_cycle",
-              "send_refused",
-              "layer_terminate_blank",
-              "layer_rebase_dropped",
-              "adapter_output_unavailable",
-              "critique_cluster_dropped",
-              "round_not_advanced",
-              "offspring_dropped",
+              "injection_budget_overrun",
               "trace_sink_failed"
             ],
             "title": "Kind",
@@ -7658,7 +7671,7 @@
                 "type": "null"
               }
             ],
-            "description": "The life bank after this round: the pips and their words, as the readout prints them. Null where the campaign banks no lives (`optimization.lives`)."
+            "description": "The life bank after this round. Null where the campaign banks no lives (`optimization.lives`)."
           },
           "parent": {
             "anyOf": [
@@ -8667,6 +8680,7 @@
           "lives_exhausted",
           "paused",
           "panel_cut",
+          "adapter_output_owed",
           "crashed",
           "diverged",
           "optimizer_abort",

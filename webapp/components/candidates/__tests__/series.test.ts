@@ -136,7 +136,7 @@ describe("the confidence band", () => {
       rows: 6,
       scored: 6,
       level: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 },
-      failure: null,
+      failed_as: null,
     };
     const running: VerificationMark = {
       ...verify,

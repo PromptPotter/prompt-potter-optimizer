@@ -3,11 +3,11 @@ import { useMemo } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import {
-  benchStat,
   indexLineage,
   readSpend,
   runningInnerRun,
   tagValue,
+  waitingText,
 } from "@/lib/derivations";
 import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
@@ -46,7 +46,7 @@ export function useRemoteModel() {
   const { metered, lines } = readSpend(dash);
   const waitNote =
     producer.call_holds && producer.open_for_s !== null && dash.waiting_on
-      ? `waiting on ${dash.waiting_on} · ${fmtDuration(producer.open_for_s)}`
+      ? `waiting on ${waitingText(dash.waiting_on)} · ${fmtDuration(producer.open_for_s)}`
       : null;
   const arm = (cells: number, auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
@@ -75,7 +75,7 @@ export function useRemoteModel() {
     budget: dash.run_limits.budget,
     share: dash.allotment,
     benchLiftPerUsd:
-      leafEntry?.level === "course" ? (benchStat(leafEntry)?.lift_per_usd ?? null) : null,
+      leafEntry?.level === "course" ? (leafEntry.facts.bench?.cost.lift_per_usd ?? null) : null,
     lookahead,
     waitNote,
     providerHeld: dash.backpressure,

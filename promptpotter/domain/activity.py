@@ -32,6 +32,7 @@ from promptpotter.domain.run_records import (
     ProviderHoldRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
+    RoundWarningKind,
     RoundWarningRecord,
     RunPhaseRecord,
     SampleScoredRecord,
@@ -98,6 +99,9 @@ class ActivityItem(FrozenModel):
     round: int | None = Field(default=None, description="The round the record names.")
     arm: ArmKey | None = Field(
         default=None, description="The arm the record is about, by its key; `label` renders it."
+    )
+    healed: RoundWarningKind | None = Field(
+        default=None, description="The self-heal a round warning reports; null on every other item."
     )
 
 
@@ -373,6 +377,7 @@ class ActivityFeed:
                     label=record.message or "round degraded",
                     tone="bad" if error else "warn",
                     round=record.round,
+                    healed=record.kind,
                 )
             case ErrorRecord():
                 return ActivityItem(

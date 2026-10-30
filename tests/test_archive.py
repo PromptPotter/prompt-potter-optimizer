@@ -117,7 +117,7 @@ from promptpotter.domain.hierarchy import (
 )
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
@@ -1192,17 +1192,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     [line_course] = [c for c in listed.children if c.address == listed.facts.line]
     assert line_course.facts.standing is not None, "guard"
-    held_label = READING_STATE_INFO[ReadingState.HELD_ELSEWHERE].label
-    for course in listed.children:
-        graded = [s.value for s in course.stats if s.key == "bench"]
-        assert (graded == [held_label]) is (course is not line_course), (
-            "the bench graded a course that does not hold the line, or the line's read held elsewhere"
-        )
-    assert listed.stats[1:] == line_course.stats[1:], "the campaign's bench is not its line's"
-    [lift] = [s for s in line_course.stats if s.key == "lift"]
-    assert ("θ" in (lift.sub or "")) is (line_course.facts.elects_on == "ability"), (
-        "a lift column read beside a round won on θ does not say so, or says it where none was"
+    assert all(c.facts.bench is None for c in listed.children if c is not line_course), (
+        "the bench graded a course that does not hold the line"
     )
+    assert listed.facts.line_course == line_course.facts, "the campaign's bench is not its line's"
     # The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
     validator = subtree_version(stores, listed.address)
     filed(

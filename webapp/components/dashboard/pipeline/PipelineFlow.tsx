@@ -1,5 +1,6 @@
 "use client";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { useWidth } from "@/lib/hooks/useWidth";
 import {
   nodeKind,
   nodeSubLabel,
@@ -107,6 +108,9 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
   const { connector, activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const { dash } = useCycleStream();
+  // The ring folds to the box it sits in, so no node is ever scrolled out of sight.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const boxW = useWidth(boxRef);
   const interior = interiorNodes(view);
   const CELL_W = compact ? 44 : models ? 132 : 72;
   const CELL_W_OPEN = 132;
@@ -154,6 +158,7 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
         rowH: compact ? 24 : LABEL_BELOW_EXTENT + 34,
         padTop: compact ? 13 : 16,
         padBottom: compact ? 13 : LABEL_BELOW_EXTENT,
+        maxCols: boxW == null ? null : Math.floor(boxW / CELL_W),
       })
     : null;
 
@@ -227,7 +232,19 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
           {/* Spans, not divs: a `<button>` takes phrasing content only. */}
           <span className="head">
             <span className="ico">{LLM_ICON}</span>
-            <span className="lbl">{sole.label}</span>
+            {/* A node id wraps at its underscores, never mid-word. */}
+            <span className="lbl">
+              {sole.label.split("_").map((part, i) => (
+                <span key={i}>
+                  {i > 0 && (
+                    <>
+                      _<wbr />
+                    </>
+                  )}
+                  {part}
+                </span>
+              ))}
+            </span>
           </span>
           <span className="val">{calling ? (soleModel ?? "running") : "idle"}</span>
         </button>
@@ -241,12 +258,13 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
         "wf-hero-node",
         "llm",
         "wf-hero-node-multi",
+        ring && "is-ring",
         isLive && "running",
         calling && "scoring",
       )}
     >
       {connector && <div className="wf-hero-multi-tag">{connector}</div>}
-      <div className="wf-hero-multi-rail">
+      <div className="wf-hero-multi-rail" ref={boxRef}>
       {/* min-width floors the scaling: below ~44px a cell is unreadable, so the rail scrolls. */}
       <svg
         viewBox={`0 0 ${totalW} ${canvasH}`}
@@ -277,8 +295,9 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
           const a = posOf.get(e.from);
           const b = posOf.get(e.to);
           if (!a && !b) return null;
-          // Only the outgoing end gets a stub; the Input chip owns the incoming one.
-          if (!a) return null;
+          // Only the outgoing end gets a stub; the Input chip owns the incoming one. A ring has no
+          // Output chip to point at: a stub there reads as an edge into its neighbour.
+          if (!a || (!b && ring)) return null;
           const d = b ? edgeD(a, b) : terminalD(a);
           return (
             <path
@@ -423,7 +442,9 @@ function FlowEnd({ icon, lbl, val }: { icon: ReactNode; lbl: string; val: string
       <span className="ico">{icon}</span>
       <span className="text-col">
         <span className="lbl">{lbl}</span>
-        <span className="val">{val}</span>
+        <span className="val" title={val}>
+          {val}
+        </span>
       </span>
     </div>
   );
@@ -438,6 +459,9 @@ export function PipelineFlow({
   bare = false,
 }: PipelineFlowProps) {
   const { view, status } = layer;
+  const { dash } = useCycleStream();
+  // The input IS the query in flight, when the run names one.
+  const query = (layer.isLive && dash?.current_query_payload) || "Query";
   const interior = interiorNodes(view);
   const box =
     view == null || interior.length === 0 ? (
@@ -452,7 +476,7 @@ export function PipelineFlow({
     <div className="wf-hero-flow">
       {inspector != null && (
         <>
-          <FlowEnd icon={ATTACH_ICON} lbl="Input" val="Query" />
+          <FlowEnd icon={ATTACH_ICON} lbl="Input" val={query} />
           <div className="wf-hero-arrow">{inspector}</div>
         </>
       )}

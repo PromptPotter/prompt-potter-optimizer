@@ -747,29 +747,17 @@ class CommandAckRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+# A halt is its `StopReason`, and an outcome the loop decided is a field of the record of its step.
 RoundWarningKind = Literal[
-    "l1_zero_candidates",
-    "injection_budget_overrun",
+    # An L2/L3 reply that never parsed: its refinement is discarded, the prior framing kept.
     "layer_parse_failure",
-    "layer_terminated_cycle",
-    "send_refused",
-    # A `terminate_proposal` carrying no reason: ignored, never silently.
-    "layer_terminate_blank",
-    # A `fork_proposal` dropped: no ancestor holds a level (naming what withholds θ), or the
-    # launch's rebase clock is spent.
-    "layer_rebase_dropped",
-    # An adapter landed no round output, and the re-runs before the next walk failed: the run halts.
-    "adapter_output_unavailable",
-    # A critique cluster spanning fewer marked rows than a cluster is: dropped before the generator reads it.
-    "critique_cluster_dropped",
-    # Nothing failed: the round promoted an arm the origin panel does not back (`runner/round.py`).
-    "round_not_advanced",
-    # A declared child no node could make: `mating`'s pool under two, a `locus_crossover` pair on
-    # under two loci, or an `l1_generate` recombination naming no two pool entries.
-    "offspring_dropped",
+    # A state panel over its runaway backstop: the items past it never reach the LLM.
+    "injection_budget_overrun",
     # A configured trace sink that failed to open at the run's start: the run traces nothing to it.
     "trace_sink_failed",
 ]
+# `error` = the step produced nothing usable; `warning` = degraded but progressed.
+RoundWarningSeverity = Literal["warning", "error"]
 
 
 class RoundWarningRecord(FrozenModel):
@@ -777,8 +765,7 @@ class RoundWarningRecord(FrozenModel):
 
     record_type: Literal["round_warning"] = "round_warning"
     kind: RoundWarningKind
-    # `error` = the round produced nothing usable; `warning` = degraded but progressed.
-    severity: Literal["warning", "error"] = "warning"
+    severity: RoundWarningSeverity = "warning"
     message: str
     round: int | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
