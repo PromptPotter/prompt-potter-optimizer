@@ -1239,11 +1239,15 @@ class InterventionRecord(FrozenModel):
 
 
 class ComparisonExit(enum.StrEnum):
-    """A launch act that runs an arm off the comparison its head-to-head declared."""
+    """An act that runs an arm off the comparison its head-to-head declared: admitted like on any
+    campaign, its event is the arm's exit (decisions.md § 0009)."""
 
     REWIND = "rewind"
     FORK_ON_DIVERGENCE = "fork_on_divergence"
     NO_DIVERGENCE_CHECK = "no_divergence_check"
+    FORK = "fork"
+    SUBMIT_ARMS = "submit_arms"
+    SKIP = "skip"
 
 
 class LeftComparisonRecord(FrozenModel):

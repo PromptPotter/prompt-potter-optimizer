@@ -8,7 +8,7 @@ from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, restored_partition
-from promptpotter.domain.campaign import Compare, Optimize, Purpose
+from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
@@ -137,9 +137,7 @@ class Session:
         )
 
     def leave_comparison(self, act: ComparisonExit, *, on: CycleHop) -> None:
-        """decisions.md § 0009: the act is admitted; on an arm it is the event its guard reads."""
-        if isinstance(self.purpose, Compare):
-            self.store.campaigns.record_left_comparison(on, act=act)
+        self.store.campaigns.leave_comparison(on, act, purpose=self.purpose)
 
     def record_intervention(self, kind: str) -> None:
         """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""

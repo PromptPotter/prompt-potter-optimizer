@@ -12,6 +12,7 @@ from promptpotter.application.runner.operator_hold import hold_for_operator
 from promptpotter.domain.opt_search_point import Locus, loci_of
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.results import round_document_digest
+from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.wounds import ValidationFailure
 
@@ -70,6 +71,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
         session.record_intervention("submit-arms")
+        session.leave_comparison(ComparisonExit.SUBMIT_ARMS, on=session.hop)
         bank_proposals(ctx, arms, submitted=True)
         session.state.control.take_submission(command_id, arms=len(arms))
         return arms

@@ -161,7 +161,7 @@ shows it informative.
 
 1. **The mode head-to-head** (PAID), the host the only difference, matched on USD and cells.
 2. **L4 reach** — the mix as an outer-arm lever, on the inner cell's overlay and identity.
-3. **A pool fed while a campaign runs** — refused by a controlled arm, applied at the next round
+3. **A pool fed while a campaign runs** — on a controlled arm it leaves the comparison, applied at the next round
    boundary, replayed on resume.
 4. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
 

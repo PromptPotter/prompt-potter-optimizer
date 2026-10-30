@@ -12,9 +12,6 @@ acting.
 
 - **Inputs that change a run but leave no event** (audit 2026-10-29, `decisions.md` § 0009's last
   bullets). Left:
-  - **An arm's fork, `submit_arms` and skip are refused** (`refused_on_an_arm`) while a rewind,
-    `fork_on_divergence` and `no_divergence_check` are admitted as a `LeftComparisonRecord`: one door
-    shape per act is `decisions.md` § 0009's open proposal.
   - **Today's ledgers are read by tolerance until the 2026-10-30 wipe**: the new `ResolvedRunRecord`
     fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
     fields required and tag the union with the wipe.

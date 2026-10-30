@@ -27,6 +27,7 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.results_health import is_deprecated
+from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     CellSheet,
@@ -775,6 +776,7 @@ class _ScoringPhase[K: Hashable]:
             if session.state.control.spend_skip():
                 # Stamped where a searchpoint is actually cut, never at the press.
                 session.record_intervention("skip")
+                session.leave_comparison(ComparisonExit.SKIP, on=session.hop)
             logger.info(
                 "Operator skip after query %d/%d; accepting partial searchpoint.",
                 len(walk.results),

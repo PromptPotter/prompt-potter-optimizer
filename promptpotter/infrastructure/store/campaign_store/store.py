@@ -15,9 +15,11 @@ from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
     CampaignOwner,
+    Compare,
     HeadToHeadRecord,
     LifecycleFilter,
     LifecycleStatus,
+    Purpose,
     ceiling_meter,
 )
 from promptpotter.domain.cycle_index import CycleIndex
@@ -520,8 +522,10 @@ class CampaignStore:
     def record_intervention(self, hop: CycleHop, *, kind: str) -> None:
         self._append(hop, InterventionRecord(kind=kind))
 
-    def record_left_comparison(self, hop: CycleHop, *, act: ComparisonExit) -> None:
-        self._append(hop, LeftComparisonRecord(act=act))
+    def leave_comparison(self, hop: CycleHop, act: ComparisonExit, *, purpose: Purpose) -> None:
+        """decisions.md § 0009: every act on an arm is admitted, and this is the event it leaves by."""
+        if isinstance(purpose, Compare):
+            self._append(hop, LeftComparisonRecord(act=act))
 
     def left_comparison(self, hop: CycleHop) -> list[ComparisonExit]:
         return scan_left_comparison(self._chain(hop))

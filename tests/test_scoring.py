@@ -3639,8 +3639,10 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         if "rewound" in arms:
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
             assert rewound is not None
-            h2h_stores.campaigns.record_left_comparison(
-                h2h_stores.campaigns.line_holder(rewound.root_hop), act=ComparisonExit.REWIND
+            h2h_stores.campaigns.leave_comparison(
+                h2h_stores.campaigns.line_holder(rewound.root_hop),
+                ComparisonExit.REWIND,
+                purpose=rewound.declaration.purpose,
             )
         h2h = subject_evidence(h2h_stores, arm_subjects).head_to_head
         assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case

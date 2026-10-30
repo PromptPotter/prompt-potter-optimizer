@@ -14,7 +14,6 @@ from promptpotter.application.commands.dispatcher import (
     Dispatched,
     DispatchedToCycle,
     DispatchedToDraft,
-    refused_on_an_arm,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
@@ -52,7 +51,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import CycleSeed, OriginSource
+from promptpotter.domain.run_records import ComparisonExit, CycleSeed, OriginSource
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -172,8 +171,6 @@ def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[objec
         dispatched.campaign,
         dispatched.hop,
     )
-    if refused := refused_on_an_arm(campaign):
-        return refused
     stores = dispatcher.stores
     campaign_config = resolve_campaign_config(stores, campaign, None)
     seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
@@ -198,6 +195,10 @@ def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[objec
             reason=payload.reason,
         )
         fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id)
+        # On the fork, before it runs: the line it cut from stays the arm it was.
+        stores.campaigns.leave_comparison(
+            fork, ComparisonExit.FORK, purpose=campaign.declaration.purpose
+        )
         try:
             # Declares no budget: the seed's governs, admitted from what the parent leaves.
             launched = await launch(
