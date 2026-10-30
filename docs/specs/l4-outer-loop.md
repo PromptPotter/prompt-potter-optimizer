@@ -14,7 +14,8 @@ its own prompts, at bounded and visible cost.
 
 `mean_bench_lift` — the MEAN, over the inner rounds, of the headline accuracy of the prompt the search
 had **adopted** by that round on the cell's **held-out** rows, minus the origin prompt's on the same rows
-(`domain/l4/proxies.py::bench_level_series`, read off the cell's `each_round` bench passes). The held-out
+(`domain/l4/proxies.py::bench_level_series`, read off the cell's `each_round` bench passes over every round its
+LINE spent, a rebase's discarded rounds included: `application/runner/bench.py::line_bench_series`). The held-out
 rows are drawn beside the origin bank under the cell's seed (`application/diagnostics/seed_screen.py::draw_bench`),
 marked `bench_only`, and reached by no inner node. `dataset.yaml` `campaign.scoring.per_sample` re-anchors it
 `x + 0.5`, so the paired estimator's effect IS the mean held-out lift; `scoring.per_cell` may weigh each cell by
@@ -33,7 +34,7 @@ nothing; it is null, with `series_reason`, wherever that series differences noth
 - **Mean, not endpoint.** Measured as the quieter instrument at identical spend, agreeing with the endpoint's
   arm effects; peak and per-round slope beat neither. Lifting early and holding scores above reaching the same
   place in the last round.
-- **The denominator is the round BUDGET**, holding the last adopted level forward across rounds a cell never
+- **The denominator is the line's round BUDGET** — a rebased fork runs only what its line had left — holding the last adopted level forward across rounds a cell never
   ran (`bench_level_series`, `parent_level_series` for θ). A per-cell length would divide an early-lifting cell
   stopped by `inner_lives` by its own brake. A round whose selection pass read nothing is a hole, and a cell with
   a hole is EXCLUDED (`no_evidence_reason`), never held forward.

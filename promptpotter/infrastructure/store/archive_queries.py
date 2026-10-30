@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
 from pydantic import Field
 
-from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
@@ -159,7 +158,6 @@ class SampleFoldRow(FrozenModel):
     cells: list[tuple[int, bool, bool, str | None]] = Field(default_factory=list)
     # ``(slot, query, ground_truth)`` per sample this row was first to introduce.
     new_samples: list[tuple[int, str, str]] = Field(default_factory=list)
-    reading: CellFold | None = None
 
 
 def read_sample_fold(path: Path) -> list[SampleFoldRow]:

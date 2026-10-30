@@ -41,8 +41,6 @@ class EscalationInputs:
     l1_stall_count: int
     l1_patience: int
     escalation_ladder: EscalationLadder
-    # ``None`` until AxisIndex is initialised.
-    axes_with_positive_yield: int | None = None
     l1_mandatory_breach: bool = False
     l1_zero_candidates: bool = False
     # NEVER stops the loop here: the stop authority stays with the LLM tier.
@@ -93,16 +91,6 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
         when=lambda s: s.evidence_starved,
         fire=NextAction.FIRE_L2,
         priority=65,
-    ),
-    EscalationRule(
-        name="l2_axis_yield_drought",
-        when=lambda s: (
-            s.l1_stall_count >= 1
-            and s.axes_with_positive_yield is not None
-            and s.axes_with_positive_yield == 0
-        ),
-        fire=NextAction.FIRE_L2,
-        priority=60,
     ),
     EscalationRule(
         name="l1_continue",

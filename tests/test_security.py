@@ -53,7 +53,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
-from promptpotter.application.optimizers.potter.dispatch.layout import unplaceable_edit
+from promptpotter.application.optimizers.potter.dispatch.layout import (
+    NODE_LAYOUTS,
+    unplaceable_edit,
+)
 from promptpotter.application.optimizers.potter.dispatch.prompts import load_optimizer_prompt
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.config import log_redaction
@@ -301,7 +304,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
     # The slot L2 asked for is LLM-authored: it renders only as a name from the closed vocabulary.
     def shown(slot: str) -> str:
-        breach = unplaceable_edit({slot: ["critique"]})
+        breach = unplaceable_edit({slot: ["critique"]}, NODE_LAYOUTS["l1_generate"])
         assert breach is not None
         return DispatchHub.render(
             "guard_breaches",

@@ -265,14 +265,22 @@ acting.
   where no prompt node declares `problem_description` (`promptpotter-self` hit it; its `task.md` dropped the
   two). Action: decomposition writes the splice fields only where the schema has a splice target.
   **Re-test:** a check-in on a params-only backend commits no splice field and mints.
-- **A rebase that changes nothing still mints**: under `deepseek/deepseek-v4.1-flash-1017` with reasoning off
-  (jl-optmodel-1 arm `deepseek1017-off`), `l2_context` fired `l2_axis_yield_drought` after ONE held round,
-  proposed a fork, and the line rebased onto the unchanged origin with no `config_overrides`. The fork
-  stalled the same way and rebased again, a loop bounded only by `domain/run_records.py::MAX_AUTO_REBASES`.
-  Each hop also re-ran a bench pass on the R0 selection. Action:
-  `escalation/firing.py::_rebase_request` refuses a fork whose cut is the origin and that carries no
-  override, and a drought rule does not fire on a single held round. **Re-test:** that arm's config holds
-  past round 1 without minting a fork.
+- **A fork can name one change only**: `ForkProposal.unlock_schema_field_rename` is the sole config a
+  rebase applies, so once it is unlocked a layer's fork is admitted only as a backtrack the engine
+  picks. L3's measured asks (stand on an arm read but never adopted, e.g. C3.3; narrow a dead param
+  axis) have no channel: standing on a non-elected arm needs the fork's first round to elect it.
+  Action: decide which fork-only changes exist and name each as a `ForkProposal` member mapped to one
+  `ConfigOverrides`/seed edit. **Re-test:** `git grep -n "class ForkProposal" -A20 -- promptpotter`.
+- **The L4 estimator digest does not see the line series**: `CycleResult.bench_round_levels` now spans
+  the line (`runner/bench.py::line_bench_series`), which `domain/l4/proxies.py` reads unchanged, so a
+  rebased cell banked under the per-cycle series and one under the line series share an estimator
+  digest yet differ in what their mean averages. Action: move the line's series into the hashed
+  estimator, or re-key on the wipe. **Re-test:** `python scripts/offline_run.py --digests` before and
+  after a line-series edit.
+- **`AxisIndex.digest` computes what no panel renders**: `panels.py::_r_axis_memory` prints only
+  `_AXIS_MEMORY_LABEL_ORDER`, yet `digest` also builds `dead_queries`, `discriminating`, `bottleneck`,
+  `failure_group_insights`, `volatile` and `improvement_attribution` each round. Action: delete each key
+  no reader takes, or render it. **Re-test:** `git grep -n "digest.get\|\.digest(" -- promptpotter`.
 - **The fastest hosts refuse the `l1_generate` schema**: Cerebras and Groq (`openai/gpt-oss-*`) answer 400 to
   `L1GenerateOutput`'s inlined JSON schema — Cerebras wants `properties` on every object, Groq strict mode wants
   every property `required` — so the cheapest fast silicon cannot run an optimizer node. This was found by
@@ -541,10 +549,6 @@ word's `git grep -c` for that sense is 0.
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
 - **Seen removing the migrations** (2026-10-30):
-  - `standing_rounds` reads past a ledger line carrying an undeclared key; every other reader in
-    `test_archive.py`'s stranded-close journey refuses it (its `resume` reader is red at 77c3b96b2).
-    Also red there: `test_spend.py`'s compaction step, an index keeping its old rows after a
-    shorter file is swapped in.
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
   - `identity/default_claim.py::_rewrite_campaign_ownership` writes `campaign.json` beside
     `CampaignStore.update_campaign`, and logs an unreadable manifest instead of refusing.

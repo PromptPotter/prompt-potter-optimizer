@@ -6,14 +6,11 @@ from collections.abc import KeysView
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.scoring.metrics import fold_cells
-from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
-from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -44,8 +41,6 @@ class SampleIndex:
         self._admitted = sample_ids
         self._rows: dict[str, SampleFoldRow] | None = None
         self._reset()
-        self.runs: list[tuple[ArchiveEntry, CellFold]] = []
-        self.generation = 0
 
     def _reset(self) -> None:
         # Admitted or not, so the persisted fold does not depend on who wrote it.
@@ -231,20 +226,8 @@ class SampleIndex:
         unscored = next((why for cell in sheet if (why := cell.grade.unscored)), None)
         if unscored is not None:
             return row.model_copy(update={"unscoreable": True}), unscored
-        taught = {
-            answer.answer
-            for answer in population
-            if answer.provenance != "C" and answer.role != MeasurementRole.BENCH
-        }
-        learnable = sheet.where(lambda cell: cell.facts.answer in taught)
         cells, new_samples = self._derive(sheet, prior)
-        return row.model_copy(
-            update={
-                "cells": cells,
-                "new_samples": new_samples,
-                "reading": fold_cells(learnable) if learnable else None,
-            }
-        ), None
+        return row.model_copy(update={"cells": cells, "new_samples": new_samples}), None
 
     def _persisted(self, stores: Stores, scorer_id: str) -> dict[str, SampleFoldRow]:
         """A fold with any row graded under another formula is rejected whole."""
@@ -306,13 +289,6 @@ class SampleIndex:
                 ", ".join(skipped[:5]),
                 len(rows) - len(skipped),
             )
-
-        self.runs = [
-            (entry, row.reading)
-            for entry in entries
-            if (row := rows.get(entry.config_key)) is not None and row.reading is not None
-        ]
-        self.generation += 1
         logger.debug("SampleIndex refreshed: %d of %d configurations folded", moved, len(rows))
 
     @classmethod

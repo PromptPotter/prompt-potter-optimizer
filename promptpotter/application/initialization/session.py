@@ -81,8 +81,6 @@ class LaunchState:
     # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.
     human_intervened: bool = False
     control: RunControl = field(default_factory=RunControl)
-    # The forks this launch's line rebased onto: past `MAX_AUTO_REBASES` a proposal is dropped.
-    rebases: int = 0
     flight: FlightGauge | None = None
     # What admission held for this launch, set at the runner seam BEFORE the book is armed.
     held: HeldBudget | None = None

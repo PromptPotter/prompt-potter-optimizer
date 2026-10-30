@@ -77,7 +77,7 @@ decisions. Each campaign is a child process, as many at once as free memory hold
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
 | `diverged/` | The first optimizer's campaign resumed with `--fork-on-divergence` under an edited proposer prompt: the parent ends on one `REBASED` stop, the fork runs on, and two further forks give one campaign four courses (the multi-course sidebar fixture). |
-| `rebased/` | Potter's campaign paused at round 1, beside a prior campaign, resumed with `--from 1` under an L2 proposing a fork at every fire: it fails unless the line forks `MAX_AUTO_REBASES` times, each fork ends on a stop that is not a failure, and the line ends on a stop other than `REBASED`. |
+| `rebased/` | Potter's campaign paused at round 1, beside a prior campaign, resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire: it fails unless the line forks, each fork ends on a stop that is not a failure, the line's cycles together run no more rounds than its budget, and the line ends on a stop other than `REBASED`. |
 | `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
@@ -120,14 +120,14 @@ only the bank and the call-identity policy below.
   benchmark rows before the session opens, so nothing is downloaded and nothing licensed is copied.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
   `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt. Potter's markers follow
-  a scripted trajectory that fires L2 and L3; every other marker draws its `k` from its name.
+  a scripted trajectory whose stalls fire L2 at the leg's pinned `l1_patience`; every other marker draws its `k` from its name.
   `FakeBackend(hardness=…)` spreads `k` per row, so a δ ruler fits; at `0` the ruler is flat and a
   rewind is dropped.
 - **The optimizer LLM** answers by CALL IDENTITY — the node, the request's seed, the call's turn
   among sends sharing both — never by wording or arrival order. A structured call gets a minimal
   valid instance of its response schema; a paper preset's text call is matched to the manifest
   template it opens with and answered in the form that template asks for. `ByCallIdentity(rebasing=True)`
-  adds a `fork_proposal` to every L2 answer; off, no answer carries one.
+  adds a `fork_proposal` unlocking `schema_field_rename` to every L2 answer; off, no answer carries one.
 - **The knobs** are the dataset's `campaign` under the script's `BENCH` sizes; an optimizer the
   template's overlay does not select takes its `SCALED` entry or runs its manifest as declared, and
   a sampler's size knob draws `ROUND_CELLS`. One seeded determinism clamp holds every optimizer:

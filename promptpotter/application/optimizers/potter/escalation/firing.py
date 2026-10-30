@@ -42,7 +42,6 @@ from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import (
-    MAX_AUTO_REBASES,
     ConfigOverrides,
     ForkTrigger,
     RebaseRequest,
@@ -224,41 +223,36 @@ def _rebase_request(
     ctx: NodeContext, layer_id: str, proposal: ForkProposal
 ) -> RebaseRequest | None:
     round_num = ctx.round_num
-    lineage = ctx.read(Lineage)
-    if lineage.rebases >= MAX_AUTO_REBASES:
-        logger.warning(
-            "%s emitted fork_proposal after %d rebases, the most one launch may — dropped",
-            layer_id,
-            lineage.rebases,
-        )
-        return None
-    target_round = lineage.rewind_round()
-    if target_round is None:
-        # A rewind to nowhere mints a duplicate of this cycle.
+    unlock = proposal.unlock_schema_field_rename and not (
+        ctx.knobs(L1GenerateKnobs).schema_field_rename
+    )
+    branch = ctx.read(Lineage).branch_round(changing=unlock)
+    if branch is None:
         series = ctx.read(Ruler).level_series
         withheld = sorted(
             {
                 read.caveat
                 for rnd in series.rounds
-                if rnd < round_num
+                if rnd <= round_num
                 and (read := series.reading(rnd)) is not None
                 and read.caveat is not None
             }
         )
         logger.warning(
-            "%s emitted fork_proposal, but no earlier round holds a level%s — dropped",
+            "%s emitted fork_proposal changing %s, and no round it may stand on holds a level%s "
+            "— dropped",
             layer_id,
+            "schema_field_rename"
+            if unlock
+            else "nothing (only a promoted individual the line left may take it)",
             f" (θ withheld under {', '.join(c.value for c in withheld)})" if withheld else "",
         )
         return None
 
-    unlock = bool(proposal.unlock_schema_field_rename) and not (
-        ctx.knobs(L1GenerateKnobs).schema_field_rename
-    )
     request = RebaseRequest(
-        fork_from_round=target_round,
+        fork_from_round=branch + 1,
         trigger=ForkTrigger.OPTIMIZER_REBASE,
-        reason=str(proposal.reason or f"{layer_id} fork_proposal"),
+        reason=proposal.reason or f"{layer_id} fork_proposal",
         issued_by=Principal(f"{layer_id}/round_{round_num}", layer_id),
         config_overrides=(
             ConfigOverrides(
@@ -269,10 +263,10 @@ def _rebase_request(
         ),
     )
     logger.info(
-        "%s emitted fork_proposal; UCB selected round %d of %d as the rewind target%s "
+        "%s emitted fork_proposal; UCB stands the fork on round %d of %d%s "
         "— cycle will exit with REBASED",
         layer_id,
-        target_round,
+        branch,
         round_num,
         ", unlocking schema_field_rename" if unlock else "",
     )

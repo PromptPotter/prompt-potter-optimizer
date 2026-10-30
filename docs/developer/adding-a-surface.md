@@ -272,7 +272,7 @@ The archive's shape is [`../concepts/scoring-and-memory.md`](../concepts/scoring
 |---|---|
 | New field on every measurement | A measured FACT joins `domain/scoring.py::MeasuredCell` (or `PipelineData`); a STAMP beside the facts joins `domain/sample.py::FiledAnswer`. A `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 | New retrieval query | A method on `MeasurementArchive` parallel to `measurements_for_config`; pair it with an index class if filtering must stay efficient |
-| New derived index | A class folding each POPULATION into one row keyed by `config_key` and stamped with its signature, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`, persist via `archive_queries.write_sample_fold`'s shape — never a second mechanism |
+| New derived index | A class folding each POPULATION into one row keyed by `config_key` and stamped with its signature, applied through ONE `replay_row()` both live and on replay; register on `SampleIndex.refresh()`, persist via `archive_queries.write_sample_fold`'s shape — never a second mechanism |
 
 **`node_configs` is canonical identity** — it must stay deterministic from pipeline params.
 

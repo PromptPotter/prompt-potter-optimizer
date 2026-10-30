@@ -194,7 +194,7 @@ class FakeBackend:
     each row's `k` by its own draw, so the δ ruler spans the rows and θ holds a level."""
 
     AT = "127.0.0.1:8000"
-    # P(correct) = k/10 by marker. Potter's script: round-1 win, two stalls (L2, L3), round-4 win.
+    # P(correct) = k/10 by marker. Potter's script: a round-1 win, then the stalls that fire L2.
     SKILL: ClassVar[dict[str | None, int]] = {
         None: 3,
         "g0v0": 1, "g0v1": 7, "g0v2": 2, "g1v0": 2, "g1v1": 4, "g1v2": 3,

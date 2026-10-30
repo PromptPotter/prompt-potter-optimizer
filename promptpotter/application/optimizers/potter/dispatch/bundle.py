@@ -61,7 +61,7 @@ SCHEMA_RENAME_INSTRUCTION = (
 LAYOUT_SCHEMA_INSTRUCTION = (
     "Where in the READING node's own prompt each evidence panel is rendered. A slot is a "
     "position in that prompt, never the target-prompt field the evidence is about: the "
-    "reader gets every placed panel whichever slot holds it. Keyed by SLOT — the four "
+    "reader gets every placed panel whichever slot holds it. Keyed by SLOT — the "
     "properties are the only slots there are — each listing the panels to place there: a "
     "listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only "
     "ever in one place."

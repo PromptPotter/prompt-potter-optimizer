@@ -254,8 +254,7 @@
             "properties": {
               "reason": {
                 "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
+                "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
                 "title": "Reason",
                 "type": "string"
               },
@@ -281,28 +280,33 @@
           },
           "l1_layout": {
             "additionalProperties": false,
-            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the four properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place. Legal panels: answer_distribution, axis_memory, block_pool, budget_state, confounds, critique, demo_pool, detectable_move, diagnostics, escalation_panel, failing_samples, inner_narratives, l1_wounds, measurand, mutation_memory, pipeline_param_catalogue, plan, recombination_pool, rendered_prompt, sample_transcripts, task_context.",
+            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place.",
             "properties": {
-              "persona": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "task_intent": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "thinking_style": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
               "problem_description": {
                 "items": {
+                  "enum": [
+                    "answer_distribution",
+                    "axis_memory",
+                    "block_pool",
+                    "budget_state",
+                    "confounds",
+                    "critique",
+                    "demo_pool",
+                    "detectable_move",
+                    "diagnostics",
+                    "escalation_panel",
+                    "failing_samples",
+                    "inner_narratives",
+                    "l1_wounds",
+                    "measurand",
+                    "mutation_memory",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "recombination_pool",
+                    "rendered_prompt",
+                    "sample_transcripts",
+                    "task_context"
+                  ],
                   "type": "string"
                 },
                 "type": "array"
@@ -358,8 +362,7 @@
             "properties": {
               "reason": {
                 "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
+                "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
                 "title": "Reason",
                 "type": "string"
               },

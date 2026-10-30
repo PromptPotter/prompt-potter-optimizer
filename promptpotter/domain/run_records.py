@@ -53,7 +53,6 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import ARM_ROLES, MeasurementRole
 
@@ -852,6 +851,13 @@ class ForkRemainder(FrozenModel):
             rounds=None if rounds is None else max(1, rounds - rounds_closed),
         )
 
+    def past_cut(self, cut_round: int) -> ForkRemainder:
+        """A superseding fork's cap re-counts the rounds it lifts below *cut_round*, so its line
+        runs only what was left."""
+        if self.rounds is None:
+            return self
+        return self.model_copy(update={"rounds": max(cut_round - 1, 0) + self.rounds})
+
     def under(self, overrides: ConfigOverrides) -> ConfigOverrides:
         """A rounds axis the overrides NAME wins, ``0`` and a lift included."""
         left = Budget() if self.rounds is None else Budget(rounds=self.rounds)
@@ -1293,12 +1299,9 @@ RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(
 class RebaseRequest(FrozenModel):
     """A policy change and a rewind are ONE move: the new axis is searched only on the sibling."""
 
-    fork_from_round: int
+    # The cut: the first round the fork runs, every round below it lifted.
+    fork_from_round: int = Field(ge=1)
     trigger: ForkTrigger
     reason: str
     issued_by: Principal
     config_overrides: ConfigOverrides | None = None
-
-
-# PER LEVEL: an inner campaign gets its own, so a `fork_proposal` on every fire cannot spiral.
-MAX_AUTO_REBASES: Annotated[int, shapes_optimizer_prompt] = 10

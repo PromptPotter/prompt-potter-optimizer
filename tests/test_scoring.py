@@ -2234,9 +2234,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
 
     # The L1-only arm can reach no layer above it, over the WHOLE predicate space: a deferral that
     # never fires in one run is no suppression.
-    grid = list(
-        product([0, 1, 5], [0, 3], [None, 0, 2], [False, True], [False, True], [False, True])
-    )
+    grid = list(product([0, 1, 5], [0, 3], [False, True], [False, True], [False, True]))
 
     def actions(ladder: EscalationLadder) -> set[NextAction]:
         return {
@@ -2245,13 +2243,12 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                     l1_stall_count=stall,
                     l1_patience=patience,
                     escalation_ladder=ladder,
-                    axes_with_positive_yield=yield_axes,
                     l1_mandatory_breach=mandatory,
                     l1_zero_candidates=zero,
                     evidence_starved=starved,
                 )
             ).next_action
-            for stall, patience, yield_axes, mandatory, zero, starved in grid
+            for stall, patience, mandatory, zero, starved in grid
         }
 
     assert actions(EscalationLadder.L1) == {NextAction.CONTINUE}, "the L1 arm escalated"
@@ -2400,8 +2397,8 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     )
     assert watched.advance is RoundAdvance.NOT_SEPARATED, "a triggered arm is read, never adopted"
     assert line_by_individual(watched)["c2.2"].rate == 1.0, "and served beside the line"
-    assert observed([line.advance for line in lines]).l1_stall_count == 2, (
-        "a round that crowned a winner and resolved NOTHING advances L1 patience"
+    assert observed([*(line.advance for line in lines), RoundAdvance.HELD]).l1_stall_count == 1, (
+        "a crown is progress for pacing, separated or not; only the held round stalls"
     )
 
     # A reading that failed moves the stall clock neither way.
@@ -2437,6 +2434,10 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     assert rounds_without_advance([*rounds, round_result(4, improved=False)]) == 2
     assert observed([rr.overlap.advance for rr in rounds[1:]]).l1_stall_count == 1, (
         "the live stall reads what the standing reads"
+    )
+    unread_close = round_result(3, improved=True, overlap=stopped, voted={"electable": 2})
+    assert stalls_left([origin_close, unread_close], (2, 4)) == 2, (
+        "the life bank reads the stall column: an unread pick banks no life"
     )
     holed = _line_read(1, True, ("C1.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
     assert holed.lead.coverage is not None and holed.lead.headline is not None

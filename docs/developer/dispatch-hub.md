@@ -50,7 +50,7 @@ Two corollaries are easy to miss: input length is a quality tax and not only a b
 
 ### Cross-round derived
 
-- **`axis_memory`** (DERIVED) ← `Cycle.axes().digest()` — AxisIndex per-axis effect size + sample coverage, for L1_GENERATE, L2_CONTEXT, L3_PLAN; empty until AxisIndex is initialised.
+- **`axis_memory`** (DERIVED) ← `Cycle.axes().digest()` — per-locus effect size over the closed rounds' measured arms (each arm's `OptSearchPoint.loci()` against its round fold's accuracy), and the sample index's failure readings, for L1_GENERATE, L2_CONTEXT, L3_PLAN; a semantic critique ranks prompt-field loci alone (`AxisImpact.kind`).
 - **Panels family** (`injections/panels.py`) — each one's ordering and caps live at its `@signal`; here only what each is FOR:
   - `escalation_panel` — L1 stall depth + `exploration_budget`; gates the `stall_exploration` citation.
   - `evidence_health` — per-node failure rates: an evidence-starved enricher is an upstream fault no param mutation fixes.
@@ -125,7 +125,7 @@ The wire model is `dispatch/schemas.py::L2ContextOutput`. Every field is optiona
 
 - `axis_targeted` — the fire's evidence anchor; deliberately **not** a steering surface: L1 reads its axes from `axis_memory`, derived from measurement.
 - `rationale` — the diagnosis, carried forward as `described`, the fire's exit-view line; an absent one is REPORTED, never replaced by a stand-in — a placeholder makes an undiagnosed fire read like a diagnosed one.
-- `l1_layout` — **a per-slot EDIT, not a replacement layout**: `coerce_l1_layout(raw, base=node_layout("l1_generate", l2))` moves the listed panels and keeps the rest, the rule `resolve_node_layout` gives L4's `layout` param; a replacement silently loses every signal L2 did not restate. HARD failures roll back to the prior.
+- `l1_layout` — **a per-slot EDIT, not a replacement layout**: `coerce_l1_layout(raw, base=node_layout("l1_generate", l2))` moves the listed panels and keeps the rest, the rule `resolve_node_layout` gives L4's `layout` param; a replacement silently loses every signal L2 did not restate. An edit addresses only the slots `NodeLayoutSpec.slots` opens — for `l1_generate` the volatile slot alone, so L2 chooses what L1 sees, never where in the frame it sits. HARD failures roll back to the prior.
 - `l1_overrides` — the keys `L2Context.steers` names, numeric only, laid key by key over the standing steer.
 
 ### How L2 steers L1

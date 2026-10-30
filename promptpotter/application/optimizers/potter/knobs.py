@@ -250,7 +250,7 @@ class EscalationKnobs(StrictModel):
             "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
             "injection renders the rare-escape-hatch instruction into L2 + L3 "
             "prompts and the runner auto-mints a sibling cycle on each fired "
-            "fork_proposal (capped at ``MAX_AUTO_REBASES`` per session). When "
+            "fork_proposal that changes something, its rounds charged to the line. When "
             "False, the injection renders empty — L2/L3 prompts contain no "
             "fork_proposal guidance, the LLM never emits one, the runner's "
             "rebase loop never fires. Flip to ``false`` for ablation runs "

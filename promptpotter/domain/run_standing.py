@@ -47,8 +47,13 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     for rr in rounds:
         if rr.round == 0 or rr.election is None or rr.election.electable == 0:
             continue
-        promoted = ROUND_ADVANCE_INFO[rr.overlap.advance].promoted
-        bank = max(0, min(cap, bank + (1 if promoted else -1)))
+        match ROUND_ADVANCE_INFO[rr.overlap.advance].stall:
+            case StallEffect.RESETS:
+                bank = min(cap, bank + 1)
+            case StallEffect.COUNTS:
+                bank = max(0, bank - 1)
+            case StallEffect.STARTS | StallEffect.SKIPS:
+                pass
     return bank
 
 

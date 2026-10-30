@@ -64,7 +64,7 @@ Mid-round abortion is **best-arm identification**; three choices place PoBB:
 
 PromptPotter **is** AlphaZero-shaped MCTS over the lineage tree:
 
-- **Selection.** L2/L3 emits `fork_proposal: {reason}` — *whether* to rewind; *where* is UCB1 over the backpropagated tree (`application/mask/backprop.py::select_rewind_round`). The layer does not name the round — it never sees the ancestors' fitness.
+- **Selection.** L2/L3 emits `fork_proposal: {reason}` — *whether* to rewind; *where* is UCB1 over the backpropagated tree (`application/mask/backprop.py::select_branch_round`). The layer does not name the round — it never sees the ancestors' fitness.
 - **Expansion.** A round: L1 proposes a population from the selected node.
 - **Simulation.** A deterministic forward pass, not a random rollout (AlphaZero's precedent); within a round PoBB prunes siblings on shared samples.
 - **Backpropagation.** Each round's θ rolls up to every ancestor as visit count + value (`accumulate_node_stats`), every cycle read on ONE fit (`DifficultyView.level_series`); a caveated round is a visit with no value, and a rewind finding no valued ancestor is dropped.

@@ -599,6 +599,18 @@ class CampaignStore:
             out.append(hop)
         return out
 
+    def line_to(self, hop: CycleHop) -> list[CycleHop]:
+        """The supersede chain ending at *hop*, oldest first: `line` walked back."""
+        out = [hop]
+        while (index := self.load(out[0], moment=None)) is not None and (
+            parent := index.parent_cycle_id
+        ) is not None:
+            up = CycleHop(campaign_id=hop.campaign_id, cycle_id=parent)
+            if self._successor(up, None) != out[0].cycle_id:
+                break
+            out.insert(0, up)
+        return out
+
     def line_holder(self, hop: CycleHop, *, moment: Moment | None = None) -> CycleHop:
         return self.line(hop, moment=moment)[-1]
 

@@ -101,7 +101,7 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
 ### Selector members — parent choice as one acquisition
 
 Potter's selector (`application/scoring/selection.py::elect_round_winner`, greedy) is UCB1 rebase
-(`application/mask/backprop.py::select_rewind_round`) with the exploration term at zero. Direction:
+(`application/mask/backprop.py::select_branch_round`) with the exploration term at zero. Direction:
 **one PUCT acquisition `Q + c·P·√ΣN/(1+N)`**, P a predicted lift in θ units on `L1Variant`
 (never a normalized preference). `fork_proposal`'s contract does not change. No learned value model
 until a surrogate's held-out error is measured below the lifts the loop chases; Q stays measured θ.

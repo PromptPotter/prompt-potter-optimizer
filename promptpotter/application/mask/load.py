@@ -94,7 +94,9 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
         edges.append((hop.cycle_id, index, own))
         lines.append(rounds)
     cycles: list[SpineCycle] = []
-    for (cid, index, own), series in zip(edges, difficulty.level_series(lines), strict=True):
+    for (cid, index, own), rounds, series in zip(
+        edges, lines, difficulty.level_series(lines), strict=True
+    ):
         cycles.append(
             SpineCycle(
                 cycle_id=cid,
@@ -104,6 +106,11 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
                     rnd: None if (level := series.level(rnd)) is None else level.theta
                     for rnd in series.rounds
                     if rnd in own
+                },
+                pick_by_round={
+                    rr.round: rr.head.individual.id
+                    for rr in rounds
+                    if rr.round in own and rr.election is not None and rr.head is not None
                 },
             )
         )

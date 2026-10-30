@@ -77,7 +77,7 @@ from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_r
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import MAX_AUTO_REBASES, CycleSeed
+from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -118,6 +118,8 @@ CROSSED_HOSTS = ("l1_generate", "l2_context")
 CROSSED_OFFSPRING = 2
 # L2 fires every round, a leg's premise pinned rather than left to the fake replies.
 EVERY_L2 = {"l1_patience": 0}
+# The two stalls `offline_world.py::FakeBackend.SKILL` scripts for potter fire L2 at this pacing.
+SCRIPTED_L2 = {"l1_patience": 2}
 # Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
@@ -356,7 +358,10 @@ class ByCallIdentity:
             _recombine(obj, filler.resolve(schema)["properties"], filler, call)
             obj.pop("fork_proposal", None)
             if self.rebasing:
-                obj["fork_proposal"] = {"reason": f"L2 fire {call}: rewind past the stall."}
+                obj["fork_proposal"] = {
+                    "reason": f"L2 fire {call}: the stall is the output schema's names.",
+                    "unlock_schema_field_rename": True,
+                }
         elif node.startswith("L3Plan"):
             obj["plan"] = (
                 f"Replan {call}: L1 rewrites the instruction to track negation explicitly."
@@ -458,7 +463,7 @@ def campaign_config(
     if optimizer != templated:
         roster = resolve_optimizer(optimizer, {}, gate="off").manifest.nodes
         opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
-    knobs = dict(knobs or {})
+    knobs = ({"escalation": SCRIPTED_L2} if optimizer == "potter" else {}) | (knobs or {})
     # The draw's host and the LLM host *crossover* names at once, drawing on one measured pool; an
     # L2 host fires every round, so each round past the first can add its children.
     if crossover:
@@ -650,7 +655,8 @@ async def run_one(
 
 
 async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
-    """Potter resumed with `--from` under an L2 proposing a fork at every fire, until the clock stops it."""
+    """Potter resumed with `--from` under an L2 proposing the same fork at every fire: only the
+    first changes something, and the line's forks spend one round budget between them."""
     # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall.
     config = campaign_config(
         "potter", rounds, bench_trigger="manual", knobs={"escalation": EVERY_L2}
@@ -683,17 +689,25 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     await session.backend_client.aclose()
     cycles = dict(stores.campaigns.campaign_cycles(session.campaign_id))
     forks = [index for index in cycles.values() if index.parent_cycle_id is not None]
-    if len(forks) != MAX_AUTO_REBASES:
-        raise SystemExit(
-            f"offline run: the line forked {len(forks)} times, its clock is {MAX_AUTO_REBASES}"
-        )
+    if not forks:
+        raise SystemExit("offline run: a fork that changes the config minted no fork")
     ended = [index.stop_reason for index in forks]
     if any(r is None or stop_reason_outcome(r).exit_code for r in ended):
         raise SystemExit(f"offline run: a rebase's fork re-applied the operator's rewind: {ended}")
+    spent = sum(
+        1
+        for hop, index in cycles.items()
+        for rnd in stores.campaigns.standing_rounds(hop, moment=None).rounds
+        if rnd >= (1 if index.cut_round is None else index.cut_round)
+    )
+    if spent > rounds:
+        raise SystemExit(
+            f"offline run: the line's forks ran {spent} rounds on a budget of {rounds}"
+        )
     final = cycles[session.hop].stop_reason
     if final in (None, StopReason.REBASED):
-        raise SystemExit(f"offline run: the clock stopped the line, which still reads {final}")
-    print(f"rebased {len(forks)} times, clock stopped at MAX_AUTO_REBASES, line ended {final}")
+        raise SystemExit(f"offline run: the line still reads {final}")
+    print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
 
 
 def run_terminal(

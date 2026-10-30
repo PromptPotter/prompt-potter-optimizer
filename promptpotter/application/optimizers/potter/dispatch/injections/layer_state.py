@@ -24,7 +24,6 @@ from promptpotter.application.optimizers.potter.escalation.state import Explorat
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
-from promptpotter.domain.run_records import MAX_AUTO_REBASES
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
 
@@ -272,7 +271,9 @@ def _r_skill_tiers(b: InjectionBundle) -> list[Item]:
 _REBASE_CAPABILITY_TEXT = (
     'FORK PROPOSAL — fork_proposal = {"reason": "<1-2 sentences>"} only when this lineage is '
     "exhausted (stalled, refining cannot recover); you judge WHETHER, the engine picks the "
-    f"ancestor round. At most {MAX_AUTO_REBASES} per session; default omit — it costs a cycle."
+    "individual it stands on and keeps this layer's memory. A fork changing nothing that only "
+    "rewinds to where the line stands, or to the origin, is refused; its rounds count against "
+    "the same budget. Default omit."
 )
 
 _SCHEMA_RENAME_UNLOCK_TEXT = (

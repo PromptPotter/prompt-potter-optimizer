@@ -41,13 +41,14 @@ from promptpotter.application.runner.termination import (
     end_run_on,
     run_stop_reason,
 )
+from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import STOP_REASON_INFO, PauseCause, StopReason
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    MAX_AUTO_REBASES,
+    ConfigOverrides,
     CycleSeed,
     RebaseRequest,
 )
@@ -232,26 +233,37 @@ def _mint_and_rebase_fork(
     observers: RunObservers,
     rebase_req: RebaseRequest,
 ) -> tuple[PreparedRun, Session, RunObservers]:
-    """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree."""
+    """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree. The
+    fork's cap is what its line has left; its working state is the parent's latest, since the cut
+    rewinds the line, never what the optimizer learned on it."""
     parent = session.hop
-    seed: CycleSeed | None = None
-    if rebase_req.config_overrides is not None:
-        campaign_config = apply_config_overrides(prep.campaign_config, rebase_req.config_overrides)
-        prep = replace(prep, campaign_config=campaign_config)
-        # No `origin_prompts`: a rebase replays its origin from the parent's round.
-        seed = CycleSeed(config_overrides=rebase_req.config_overrides)
+    store = session.store.campaigns
+    cut = rebase_req.fork_from_round
+    overrides = (
+        fork_remainder(session.store, parent)
+        .past_cut(cut)
+        .under(rebase_req.config_overrides or ConfigOverrides())
+    )
+    prep = replace(prep, campaign_config=apply_config_overrides(prep.campaign_config, overrides))
+    held = store.standing_rounds(parent, moment=None).rounds
+    learned = held[max(held)].close.optimizer_state
     new_cycle_id = mint_fork(
-        campaign_store=session.store.campaigns,
+        campaign_store=store,
         parent=parent,
-        fork_from_round=rebase_req.fork_from_round,
+        fork_from_round=cut,
         trigger=rebase_req.trigger,
         reason=rebase_req.reason,
         issued_by=rebase_req.issued_by,
-        seed=seed,
+        # No `origin_prompts`: a rebase replays its origin from the parent's round.
+        seed=CycleSeed(config_overrides=overrides),
     )
-    session = session.bound(
-        CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), purpose=session.purpose
+    child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
+    branch = store.standing_rounds(child, moment=None).rounds[cut - 1].close
+    store.restate_round(
+        child,
+        branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),
     )
+    session = session.bound(child, purpose=session.purpose)
     observers = _onto_fork(
         session,
         parent,
@@ -259,12 +271,11 @@ def _mint_and_rebase_fork(
         campaign_config=prep.campaign_config,
     )
     logger.info(
-        "Auto-rebase #%d/%d: %s → %s at round %d [trigger=%s, reason=%s]",
-        session.state.rebases,
-        MAX_AUTO_REBASES,
+        "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
         parent.cycle_id,
         new_cycle_id,
-        rebase_req.fork_from_round,
+        cut,
+        overrides.budget.rounds,
         rebase_req.trigger.value,
         rebase_req.reason,
     )
@@ -291,7 +302,6 @@ async def _run_line(
         )
         if outcome.fork is None:
             return outcome
-        outcome.session.state.rebases += 1
         # The operator's `--from` rewound the line's first cycle; a fork stands on its rebase's cut.
         mode = mode.model_copy(update={"from_round": None})
         prep, session, observers = _mint_and_rebase_fork(

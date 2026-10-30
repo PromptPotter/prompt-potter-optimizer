@@ -175,7 +175,7 @@ def render_round_stats(
 def render_patience_status(advance: RoundAdvance, stall: int, patience: int | None) -> str:
     info = ROUND_ADVANCE_INFO[advance]
     if info.stall is StallEffect.RESETS:
-        return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
+        return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
     bound = "" if patience is None else f" (converges at {patience})"
     return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{bound}{RESET}")

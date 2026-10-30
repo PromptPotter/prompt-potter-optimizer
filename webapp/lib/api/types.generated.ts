@@ -4199,9 +4199,9 @@ export interface OptimizationConfig {
   halt_at_accuracy: number | null;
   /** Consecutive closed rounds without an advance of the best-so-far line on the
    * origin panel (``RunStanding.rounds_without_advance``) after which the run
-   * stops ``converged``, under any optimizer. A promotion that has not
-   * separated from the origin counts toward it; a round whose origin-panel
-   * reading was not taken counts neither way. ``None`` → no such stop. */
+   * stops ``converged``, under any optimizer. A promotion resets it,
+   * separated from the origin or not; a round whose origin-panel reading was
+   * not taken counts neither way. ``None`` → no such stop. */
   convergence_patience: number | null;
   degradation_threshold: number;
   /** End a candidate at the first FATAL sample (empty response, content-filtered,
@@ -4583,7 +4583,6 @@ export interface RoundAdvanceInfo {
   label: string;
   sentence: string;
   stall: StallEffect;
-  promoted: boolean;
 }
 
 export interface ThetaCaveatInfo {
@@ -4764,12 +4763,12 @@ export const ROUNDS_CAP_WORDS: Record<"origin_only" | "no_axis", string> = {
 
 // Mirror of domain/origin_panel.py::ROUND_ADVANCE_INFO.
 export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
-  "origin": { label: "origin", sentence: "Round 0 measured the origin every later pick is read against.", stall: "starts", promoted: false },
-  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's.", stall: "resets", promoted: true },
-  "advanced_unpaired": { label: "advanced, unpaired", sentence: "An arm was promoted, and the origin panel held nothing to pair it with the origin on.", stall: "resets", promoted: true },
-  "not_separated": { label: "not separated", sentence: "An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick.", stall: "counts", promoted: true },
-  "held": { label: "held", sentence: "No arm was promoted.", stall: "counts", promoted: false },
-  "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall.", stall: "skips", promoted: true },
+  "origin": { label: "origin", sentence: "Round 0 measured the origin every later pick is read against.", stall: "starts" },
+  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's.", stall: "resets" },
+  "advanced_unpaired": { label: "advanced, unpaired", sentence: "An arm was promoted, and the origin panel held nothing to pair it with the origin on.", stall: "resets" },
+  "not_separated": { label: "not separated", sentence: "An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick.", stall: "resets" },
+  "held": { label: "held", sentence: "No arm was promoted.", stall: "counts" },
+  "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall.", stall: "skips" },
 };
 
 // Mirror of domain/ruler.py::THETA_CAVEAT_INFO.

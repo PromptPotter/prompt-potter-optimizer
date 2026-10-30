@@ -20,7 +20,6 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     parent_grades,
     stratum_shares,
 )
-from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.nodes import OptimizerPhase
@@ -409,13 +408,12 @@ class L2Context(LayoutNode):
         layout_outcomes: list[ValidatorOutcome] = []
         accepted_layout: L1Layout | None = None
         layout_refused = False
-        if breach := unplaceable_edit(raw.l1_layout):
+        spec = NODE_LAYOUTS[L1Generate.name]
+        if breach := unplaceable_edit(raw.l1_layout, spec):
             layout_outcomes = [breach]
             layout_refused = True
         elif proposed_layout := coerce_l1_layout(raw.l1_layout, base=prior):
-            layout_result = validate_l1_layout(
-                proposed_layout, spec=NODE_LAYOUTS["l1_generate"], prior_layout=prior
-            )
+            layout_result = validate_l1_layout(proposed_layout, spec=spec, prior_layout=prior)
             layout_outcomes = list(layout_result.outcomes)
             if layout_result.is_valid:
                 accepted_layout = proposed_layout
@@ -606,12 +604,6 @@ class Escalation(nodes.Controller):
 
     def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
         knobs = ctx.knobs(EscalationKnobs)
-        axes = ctx.read(Ruler).axes
-        axes_with_positive_yield = (
-            None
-            if axes is None
-            else sum(1 for r in axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
-        )
         # Structural, not a stall: heals L2 now instead of burning l1_patience rounds.
         l1_mandatory_breach = any(
             vf.reason == DROPPED_MANDATORY_PLACEHOLDER
@@ -627,7 +619,6 @@ class Escalation(nodes.Controller):
             advance=round_result.overlap.advance,
             l1_patience=knobs.l1_patience,
             escalation_ladder=knobs.escalation_ladder,
-            axes_with_positive_yield=axes_with_positive_yield,
             l1_mandatory_breach=l1_mandatory_breach,
             l1_zero_candidates=l1_zero_candidates,
             evidence_starved=evidence_starved,

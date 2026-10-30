@@ -40,43 +40,38 @@ class RoundAdvanceInfo(NamedTuple):
     label: str
     sentence: str
     stall: StallEffect
-    promoted: bool
 
 
+# `stall` is the ONE pacing column: L1 patience, `rounds_without_advance` and the life bank read it.
 ROUND_ADVANCE_INFO: Annotated[dict[RoundAdvance, RoundAdvanceInfo], shapes_optimizer_prompt] = {
     RoundAdvance.ORIGIN: RoundAdvanceInfo(
         "origin",
         "Round 0 measured the origin every later pick is read against.",
         StallEffect.STARTS,
-        False,
     ),
     RoundAdvance.ADVANCED: RoundAdvanceInfo(
         "advanced",
         "The pick's lift over the origin clears zero on the origin panel, and its rate there "
         "tops every earlier pick's.",
         StallEffect.RESETS,
-        True,
     ),
     RoundAdvance.ADVANCED_UNPAIRED: RoundAdvanceInfo(
         "advanced, unpaired",
         "An arm was promoted, and the origin panel held nothing to pair it with the origin on.",
         StallEffect.RESETS,
-        True,
     ),
     RoundAdvance.NOT_SEPARATED: RoundAdvanceInfo(
         "not separated",
         "An arm was promoted, and on the origin panel it has not separated from the origin and "
         "every earlier pick.",
-        StallEffect.COUNTS,
-        True,
+        StallEffect.RESETS,
     ),
-    RoundAdvance.HELD: RoundAdvanceInfo("held", "No arm was promoted.", StallEffect.COUNTS, False),
+    RoundAdvance.HELD: RoundAdvanceInfo("held", "No arm was promoted.", StallEffect.COUNTS),
     RoundAdvance.UNREAD: RoundAdvanceInfo(
         "unread",
         "An arm was promoted, and the origin-panel reading owed on it was not taken: the round "
         "neither advances the line nor counts as a stall.",
         StallEffect.SKIPS,
-        True,
     ),
 }
 assert ROUND_ADVANCE_INFO.keys() == set(RoundAdvance)

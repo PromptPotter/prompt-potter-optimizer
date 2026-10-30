@@ -19,7 +19,7 @@ from promptpotter.application.intelligence.earned_blocks import (
     answer_space_signature,
     earned_blocks_for,
 )
-from promptpotter.application.mask.backprop import select_rewind_round
+from promptpotter.application.mask.backprop import select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
@@ -206,16 +206,14 @@ class Lineage(CycleRead):
         """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what the node declares."""
         return [rr.model_copy(update={"optimizer_state": None}) for rr in self._cycle.rounds]
 
-    @property
-    def rebases(self) -> int:
-        return self._cycle.session.state.rebases
-
-    def rewind_round(self) -> int | None:
-        """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
-        return select_rewind_round(
+    def branch_round(self, *, changing: bool) -> int | None:
+        """The closed round a fork of this line stands on (UCB over the campaign's lineage); ``None`` where none may."""
+        return select_branch_round(
             load_lineage_spine(self._cycle.difficulty),
             cycle_id=self._cycle.session.cycle_id,
             current_round=self._round.round_num,
+            origin_id=self.origin.id,
+            changing=changing,
         )
 
 

@@ -218,13 +218,16 @@ class L1CritiqueOutput(OptimizerResponseModel):
     )
 
 
+FORK_REASON_MAX = 400
+
+
 class ForkProposal(OptimizerResponseModel):
     """Carries no round offset: ``optimizers/potter/CLAUDE.md`` § The layer-control channel."""
 
-    reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
+    # Uncapped on the wire: a decoder held to a length cuts the reason mid-word.
+    reason: Annotated[str, BeforeValidator(_truncate_marked(FORK_REASON_MAX))] = Field(
         default="",
-        max_length=150,
-        description="1-2 sentences naming the cause and what the operator must fix.",
+        description="1-2 sentences: why this line is exhausted, and what the fork changes.",
     )
     unlock_schema_field_rename: bool = Field(
         False,
