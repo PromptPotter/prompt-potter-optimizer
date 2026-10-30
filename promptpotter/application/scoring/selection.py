@@ -230,41 +230,82 @@ _UNSOLVED = PairedGrade(0.0, 0.0)
 _SOLVED = PairedGrade(1.0, 1.0)
 
 
-def elimination_p_best_bounds(
+def worst_case_p_best(
     cells: Sequence[str],
     candidate: Mapping[str, PairedGrade],
     priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
     ruler: DeltaRuler | None,
-    *,
-    settled: Collection[ArmKey],
-) -> tuple[float, float]:
-    """``high`` is over ``settled`` priors alone: any other may drop out, which can only RAISE the minimum."""
+) -> float:
+    """The lowest ``P(best)`` any grades on the absent *cells* could read: what an elimination there needs."""
     sids = list(cells)
     entries = ruler.entries_covering(sids) if ruler is not None else None
     known = {s: candidate[s] for s in sids if s in candidate}
-    c_low, c_high, c_floor = theta_bounds_given_delta(
+    c_low, _, c_floor = theta_bounds_given_delta(
         {s: g.response for s, g in known.items()}, [s for s in sids if s not in known], entries
     )
-    low: dict[ArmKey, float] = {}
-    high: dict[ArmKey, float] = {}
-    for pid, grades in priors.items():
+    low: list[float] = []
+    for grades in priors.values():
         both = {s: grades[s] for s in known if s in grades}
         rest = [s for s in sids if s not in both]
-        p_low, p_high, p_floor = theta_bounds_given_delta(
+        _, p_high, p_floor = theta_bounds_given_delta(
             {s: g.response for s, g in both.items()}, rest, entries
         )
         wins, losses = discordance([known[s] for s in both], list(both.values()))
-        # An absent grade can go either way, so it is read as the worst case for each bound.
+        # An absent grade can go either way, so it is read as the worst case.
         _, can_lose = discordance(
             [candidate.get(s, _UNSOLVED) for s in rest], [grades.get(s, _SOLVED) for s in rest]
         )
-        can_win, _ = discordance(
-            [candidate.get(s, _SOLVED) for s in rest], [grades.get(s, _UNSOLVED) for s in rest]
-        )
         worst = p_exceeds(c_low, c_floor, p_high, p_floor) if c_low < p_high else 0.5
-        best = p_exceeds(c_high, c_floor, p_low, p_floor) if c_high > p_low else 0.5
-        low[pid] = _capped(worst, sign_posterior(wins, losses + can_lose))
-        high[pid] = _capped(best, sign_posterior(wins + can_win, losses))
-    if not low:
-        return 1.0, 1.0
-    return min(low.values()), min(high[p] for p in settled) if settled else max(high.values())
+        low.append(_capped(worst, sign_posterior(wins, losses + can_lose)))
+    return min(low, default=1.0)
+
+
+def _left_lost(
+    panel: Sequence[str],
+    grades: Mapping[str, PairedGrade],
+    lost: PairedGrade,
+    won: PairedGrade,
+    reached: Collection[str],
+) -> list[PairedGrade]:
+    # Not the bounds' worst case: their SE is only floored, so on the leading side it reads 0.5.
+    return [grades.get(s, won if s in reached else lost) for s in panel]
+
+
+def curtailed_p_best(
+    panel: Sequence[str],
+    candidate: Mapping[str, PairedGrade],
+    priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
+    ruler: DeltaRuler | None,
+) -> float:
+    """``P(best)`` on the whole *panel* with every grade not yet in lost: each cell the candidate
+    has not answered unsolved, each one a prior has not solved. Past ``1 − ε``, no cell left can
+    undo the lead."""
+    own = _left_lost(panel, candidate, _UNSOLVED, _SOLVED, ())
+    return elimination_p_best(
+        own,
+        {pid: _left_lost(panel, grades, _SOLVED, _UNSOLVED, ()) for pid, grades in priors.items()},
+        list(panel),
+        ruler,
+    )[0]
+
+
+def curtailed_support(
+    panel: Sequence[str],
+    candidate: Mapping[str, PairedGrade],
+    priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
+    *,
+    reached: Collection[str],
+) -> float:
+    """The most the discordant pairs can support at a curtailment once the walk is at *reached*:
+    those cells won where ungraded, the rest lost. It caps :func:`curtailed_p_best`, and only rises
+    with each grade, so a horizon on it is never late."""
+    own = _left_lost(panel, candidate, _UNSOLVED, _SOLVED, reached)
+    return min(
+        (
+            sign_posterior(
+                *discordance(own, _left_lost(panel, grades, _SOLVED, _UNSOLVED, reached))
+            )
+            for grades in priors.values()
+        ),
+        default=1.0,
+    )

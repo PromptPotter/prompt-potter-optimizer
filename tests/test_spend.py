@@ -177,7 +177,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
+from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
     CYCLE_AXES,
@@ -726,16 +726,20 @@ async def _walk(
     def _backfill(_sp: Any, sample: Sample, _prior_id: str) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
 
-        def _commit() -> list[Any]:
+        def _commit() -> CellSheet:
             committed.append(sample.id)
-            return [_HIT.grade(call.result())]
+            return CellSheet(_HIT.id, (_HIT.grade(call.result()),))
 
         return call, _commit, call.cancel
 
     # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
     priors = CatchUpPool(
         PoBBCheck(
-            pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None, parent=ArmKey("parent")
+            pobb_knobs(),
+            n_min=6,
+            panel=[s.key for s in dataset],
+            ruler=None,
+            parent=ArmKey("parent"),
         ),
         _backfill,
         "elimination",

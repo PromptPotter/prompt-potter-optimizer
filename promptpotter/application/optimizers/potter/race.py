@@ -22,6 +22,7 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.validators import CaughtUp
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
+    from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
@@ -46,7 +47,10 @@ def _reason(ctx: EliminationContext, unit: MeasuredUnit, labels: Mapping[ArmKey,
     n = ctx["n_priors"]
     priors = f"(of {n} prior{'' if n == 1 else 's'})"
     if ctx["gate"] is EliminationGate.LOCK_IN:
-        return f"leader locked {q}  p_best={ctx['p_best']:.1%} {priors}"
+        return (
+            f"leader locked {q}  p_best={ctx['p_best']:.1%} > 1-eps={1 - ctx['epsilon']:.0%} "
+            f"with every cell left lost  {priors}"
+        )
     return (
         f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
         f"vs {labels[ctx['leader']]} {priors}"
@@ -89,6 +93,15 @@ class CatchUpPool:
         self._member = member
         self._sps: dict[ArmKey, JobSearchPoint] = {}
         self._pending: dict[tuple[ArmKey, int], CatchUp] = {}
+        self._caught: dict[ArmKey, CellSheet] = {}
+
+    @property
+    def caught(self) -> Mapping[ArmKey, CellSheet]:
+        return self._caught
+
+    def _took(self, key: ArmKey, sheet: CellSheet) -> Sequence[GradedCell]:
+        self._caught[key] = self._caught.get(key, NO_CELLS).merged(sheet)
+        return sheet.cells
 
     def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
         self._check.register_completed(results, key=key)
@@ -125,7 +138,7 @@ class CatchUpPool:
         for cid in self._check.priors_by_sample:
             backfill = self._pending.pop((cid, sample.id), None)
             if backfill is not None:
-                taken[cid] = backfill[1]()
+                taken[cid] = self._took(cid, backfill[1]())
                 self._check.extend_prior(cid, taken[cid])
         return CaughtUp(self._member, taken) if taken else None
 
@@ -137,7 +150,7 @@ class CatchUpPool:
             landed = call.done() and not call.cancelled() and call.exception() is None
             if key[1] in wanted and landed:
                 del self._pending[key]
-                taken.setdefault(key[0], []).extend(commit())
+                taken.setdefault(key[0], []).extend(self._took(key[0], commit()))
         return CaughtUp(self._member, taken) if taken else None
 
     def discard_backfills(self) -> None:
@@ -164,7 +177,7 @@ class PoBBRace(CatchUpPool):
             PoBBCheck(
                 ctx.knobs(PoBBKnobs),
                 n_min=ctx.read(Bounds).elimination_n_min,
-                n_samples=len(panel.cells),
+                panel=[sample.key for sample in panel.order],
                 ruler=ctx.read(Ruler).difficulty.ruler,
                 parent=parent,
             ),
@@ -221,21 +234,20 @@ class PoBBRace(CatchUpPool):
                 "candidate_cells": fit.cells,
                 "prior_histories": {
                     pid: {cell: grade._asdict() for cell, grade in grades.items()}
-                    for pid, grades in fit.priors.items()
+                    for pid, grades in signal.read.items()
                 },
             }
-        check = self._check
+        if "epsilon" in context:
+            inputs["epsilon"] = context["epsilon"]
         if gate is EliminationGate.LOCK_IN:
             kind = PotterCheckpointKind.LEADER_LOCK_IN
-            inputs |= {"lock_in": float(check.lock_in), "lock_in_n_min": int(check.lock_in_n_min)}
+            data["panel_cells"] = self._check.panel
         else:
             kind = PotterCheckpointKind.ELIMINATION_CUT
             # WHICH gate cut it, so the replayer re-derives the rule that fired.
             inputs["gate"] = gate
-            if gate is EliminationGate.EPSILON:
-                inputs["epsilon"] = context["epsilon"]
         self._replay.decide(kind, inputs, True, data=data)
-        named = {**labels, check.parent: "parent"}
+        named = {**labels, self._check.parent: "parent"}
         return Elimination(
             reason=_reason(context, self._measured_unit, named), context=dict(context)
         )

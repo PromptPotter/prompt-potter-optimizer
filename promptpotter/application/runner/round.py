@@ -632,6 +632,7 @@ async def post_round(
         accuracy=None if fold is None else fold.accuracy,
         winner_id=None if election is None else election.selected,
         control=session.state.control,
+        seed=cycle.rng(round_num, "verify").getrandbits(31),
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
     reserve_selection_pass(cycle, session)

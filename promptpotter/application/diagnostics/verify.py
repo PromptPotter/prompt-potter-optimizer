@@ -382,6 +382,7 @@ async def verify_on_saturation(
     accuracy: float | None,
     winner_id: str | None,
     control: RunControl,
+    seed: int,
 ) -> VerifyOutcome | None:
     if accuracy is None or accuracy < 1.0 or not winner_id:
         return None
@@ -399,7 +400,7 @@ async def verify_on_saturation(
             candidate_id=winner_id,
             samples=None,
             strategy="random",
-            seed=None,
+            seed=seed,
         )
     except (DiagnosticError, BankedSearchPointError) as exc:
         logger.info("verify skipped for %s: %s", winner_id, exc)

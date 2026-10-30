@@ -167,6 +167,7 @@ from promptpotter.application.scoring.selection import (
     elect_round_winner,
     elimination_p_best,
     level_band,
+    paired_p_best,
     readable_lifts,
 )
 from promptpotter.config.paths import optimizers_root
@@ -1916,29 +1917,33 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 
 # 5. Elimination — who is cut, and when
 
+_PANEL_28 = [str(i) for i in range(28)]
 
-def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> None:
+
+def test_an_arm_is_cut_only_on_evidence_that_it_trails(
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
     # ε ramps in from its floor; the depths come from `fit_theta`'s dispersion rule.
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
     parent = ArmKey("parent")
-    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
+    graded = PoBBCheck(cfg, n_min=6, panel=_PANEL_28, ruler=None, parent=parent)
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
         pobb_knobs(epsilon=0.30, epsilon_floor=0.30),
         n_min=6,
-        n_samples=28,
+        panel=_PANEL_28,
         ruler=None,
         parent=parent,
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30), "a floor at ε does not ramp"
-    shipped = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent)
+    shipped = PoBBCheck(pobb_knobs(), n_min=6, panel=_PANEL_28, ruler=None, parent=parent)
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon), (
         "the manifest sits floor and ε on the same value, so an untouched campaign never grades"
     )
 
     def behind_perfect_prior(n: int, misses: int, *, parent_cells: int = 28) -> Any:
-        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
+        check = PoBBCheck(cfg, n_min=6, panel=_PANEL_28, ruler=None, parent=parent)
         check.register_completed(sheet(measurements([1.0] * 28)), key=ArmKey("winner"))
         check.register_completed(sheet(measurements([1.0] * parent_cells)), key=parent)
         check.set_current(ArmKey("arm"))
@@ -1965,7 +1970,86 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     late = behind_perfect_prior(26, 4)
     assert late is not None and late.outcome == "eliminated"
     assert late.check_result["epsilon"] == pytest.approx(0.30)
-    unpaired = PoBBCheck(pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None, parent=parent)
+
+    # Mirrored by curtailment: an arm locks in only past 1 − ε(n) with every cell left lost, so a
+    # lead on a prefix the parent's later cells can undo walks on.
+    walked = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(28)]
+    parent_grades = [1.0] * 4 + [0.0] * 2 + [float(i % 2) for i in range(6, 28)]
+
+    def on_panel(grades: list[float]) -> list[GradedCell]:
+        return [measurement(i, g, sample_key=walked[i].key) for i, g in enumerate(grades)]
+
+    def leading(**bend: Any) -> PoBBCheck:
+        check = PoBBCheck(
+            pobb_knobs(**bend), n_min=6, panel=[s.key for s in walked], ruler=None, parent=parent
+        )
+        check.register_completed(on_panel(parent_grades), key=parent)
+        check.set_current(ArmKey("arm"))
+        return check
+
+    two_of_six = on_panel([1.0] * 6)
+    peak = paired_p_best(two_of_six, leading().priors_by_sample, None, min_shared=6)
+    assert peak is not None and peak.p_best >= 0.85, "the six-cell prefix no longer reads as a peak"
+    assert leading().check(two_of_six) is None, (
+        "two discordant wins in six cells locked an arm in on a peak the parent's 11 solved cells "
+        "left could undo"
+    )
+    depth = next(n for n in range(6, 29) if leading().check(on_panel([1.0] * n)) is not None)
+    locked = leading().check(on_panel([1.0] * depth))
+    assert locked is not None and locked.outcome == "locked_in" and depth < 28, (
+        "an arm the panel left can no longer overtake kept spending"
+    )
+    assert locked.check_result["p_best"] > 1 - locked.check_result["epsilon"], (
+        "the lock-in archives the curtailed P(best) and the ε(n) its bar mirrored"
+    )
+    horizon = leading().earliest_stop(two_of_six, [(s, None) for s in walked[6:]])
+    assert horizon is not None and horizon <= depth, (
+        f"the horizon answered {horizon}, past the lock-in at {depth}: its look-ahead is discarded"
+    )
+    assert leading(epsilon_stop=False).check(on_panel([1.0] * depth)) is None, (
+        "epsilon_stop off still locked in"
+    )
+
+    # A locked-in leader is the bar every later arm races, and is read on every cell it was caught
+    # up on: its twin, which locks in against the parent alone, walks the panel tied with it. Past
+    # 200 characters the composite is the verdict, so a lead is decided before the panel ends.
+    def ace_or_as_parent(prompt: str, sample: Sample) -> bool:
+        return "Ace" in prompt or _PEER_READ_ORDER[sample.id] % 4 == 0
+
+    ace, twin = (
+        f"{lead} " + "Check each premise before you answer. " * 6 for lead in ("Ace.", "Ace!")
+    )
+    with _peer_cycle(
+        workspace(tmp_path / "locked"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 2}}},
+        ace_or_as_parent,
+    ) as (cycle, callbacks):
+        offline.llm.says = _potter_says(ace, twin)
+        raced = asyncio.run(execute_round(cycle, 1, callbacks)).result
+    by_text = {
+        arm.individual.prompts["solve"].fields["instruction"]: key
+        for key, arm in raced.panel.items()
+    }
+    ends = {text: arm_end(raced.panel[key]) for text, key in by_text.items()}
+    assert ends == {ace: "locked_in", twin: None}, (
+        f"a locked-in leader never joined the priors the arm after it raced: {ends}"
+    )
+    leader = raced.panel[by_text[ace]]
+    assert isinstance(leader, Measured) and leader.locked_in is not None
+    stopped_at = int(leader.locked_in.context["queries_scored"])
+    assert len(raced.rows(by_text[ace])) == len(raced.rows(by_text[twin])) > stopped_at, (
+        "the round read its locked-in leader on the cells it stopped at, not those it was caught up on"
+    )
+    unpaired = PoBBCheck(
+        pobb_knobs(epsilon=0.05),
+        n_min=4,
+        panel=[str(i) for i in range(20)],
+        ruler=None,
+        parent=parent,
+    )
     unpaired.register_completed(
         sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key=ArmKey("lucky_leader")
     )
@@ -1974,7 +2058,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
     assert unpaired.check(challenger.cells) is None, "an arm was cut on cells its rival never sat"
     longer, terse_parent = _charged_by_length()
-    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent)
+    charged = PoBBCheck(cfg, n_min=6, panel=[str(i) for i in range(34)], ruler=None, parent=parent)
     charged.register_completed(terse_parent, key=parent)
     standings: list[node_contract.RaceSnapshot] = []
     charged.set_current(ArmKey("l"), on_snapshot=standings.append)
@@ -1998,7 +2082,9 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
         ]
 
     def collapse(rows: list[GradedCell]) -> Any:
-        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent).check(rows)
+        return PoBBCheck(pobb_knobs(), n_min=6, panel=_PANEL_28, ruler=None, parent=parent).check(
+            rows
+        )
 
     signal = collapse(answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
     assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED, (

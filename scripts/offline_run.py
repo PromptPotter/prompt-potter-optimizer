@@ -121,6 +121,9 @@ EVERY_L2 = {"l1_patience": 0}
 # Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
+# A bank every panel revisits: past PoBB's cuts a cell of a wide bank is answered by the parent
+# alone, so its δ is the prior (`prior_pinned`) or none (`unmeasured_delta`) and no round holds a level.
+REBASE_ROWS = 40
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
@@ -651,13 +654,13 @@ async def run_one(
     return cycle, session.campaign_id
 
 
-async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
+async def run_rebasing(workspace: Path, *, rounds: int) -> None:
     """Potter resumed with `--from` under an L2 proposing a fork at every fire, until the clock stops it."""
     # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall.
     config = campaign_config(
         "potter", rounds, bench_trigger="manual", knobs={"escalation": EVERY_L2}
     )
-    samples = synthetic_rows(rows)
+    samples = synthetic_rows(REBASE_ROWS)
     (workspace / "requests").mkdir()
     llm = ByCallIdentity(workspace / "requests", text_templates(config))
     # A rewind lands on a round holding a θ level, which only a ruler spanning the rows gives.
@@ -1283,7 +1286,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             interrupts=args.interrupts,
         )
     elif args.rebase:
-        asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
+        asyncio.run(run_rebasing(workspace, rounds=args.rounds))
     else:
         one = run_one(
             args.child,

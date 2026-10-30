@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.validators import StopRule, StopSignal
 
     # (the call already started, the commit writing its row once a walk takes the cell, the discard).
-    CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
+    CatchUp = tuple[asyncio.Future[Any], Callable[[], CellSheet], Callable[[], None]]
     CatchUpFn = Callable[[JobSearchPoint, Sample, ArmKey], CatchUp]
 
 
@@ -645,8 +645,6 @@ class RaceSnapshot:
     current: ArmKey
     n_samples: int
     paired_breakdown: dict[ArmKey, dict[str, float]]
-    # Whether the cells read reached the depth this race lets a standing decide at.
-    decision_grade: bool
 
 
 class Race(CatchUps, Protocol):
@@ -654,6 +652,11 @@ class Race(CatchUps, Protocol):
 
     @property
     def n_priors(self) -> int: ...
+
+    @property
+    def caught(self) -> Mapping[ArmKey, CellSheet]:
+        """Each prior's cells it was caught up on: rows of its round reading, as the race read them."""
+        ...
 
     @property
     def blocks(self) -> BlockRace[ArmKey] | None: ...
@@ -671,6 +674,10 @@ class Race(CatchUps, Protocol):
 
 class NoCatchUps:
     """The catch-up half of a ``Race`` whose arms all walk one panel, so no prior is paired."""
+
+    @property
+    def caught(self) -> Mapping[ArmKey, CellSheet]:
+        return {}
 
     def start_backfill(self, _sample: Sample, _room: int) -> list[asyncio.Future[Any]]:
         return []

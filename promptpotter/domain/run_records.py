@@ -388,7 +388,6 @@ class RaceStandingRecord(FrozenModel):
     n_samples: int
     p_best: float
     paired_breakdown: dict[ArmKey, dict[str, float]]
-    decision_grade: bool
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

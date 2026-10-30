@@ -55,36 +55,6 @@ ADAPTIVE_QUEUE = (
 
 POBB = (
     MemberCoupling(
-        name="lock_in_floor_below_elimination",
-        knobs=("lock_in_n_min",),
-        bench_knobs=("optimization.elimination_n_min",),
-        estimand=Estimand.STOPPING,
-        relation=(
-            "A leader can lock in (and stop measuring) at lock_in_n_min samples; "
-            "losers only start being eliminated at elimination_n_min."
-        ),
-        consequence=(
-            "If lock-in fires on fewer samples than elimination needs, a leader is "
-            "crowned before the field can be dropped — the round can end before it is "
-            "tested. Keep lock_in_n_min ≥ elimination_n_min."
-        ),
-        severity="info",
-        predicate=lambda c, k, _d: k.lock_in_n_min < c.optimization.elimination_n_min,
-    ),
-    MemberCoupling(
-        name="epsilon_threshold_inert",
-        knobs=("epsilon", "epsilon_elimination"),
-        bench_knobs=(),
-        estimand=Estimand.STOPPING,
-        relation="epsilon is read only by the Bayesian best-test (epsilon_elimination).",
-        consequence=(
-            "epsilon was tuned away from the manifest's value but epsilon_elimination is "
-            "OFF, so nothing reads it — the knob is inert and every round runs full budget."
-        ),
-        severity="inert",
-        predicate=lambda _c, k, d: (not k.epsilon_elimination) and k.epsilon != d.epsilon,
-    ),
-    MemberCoupling(
         name="epsilon_floor_inverted",
         knobs=("epsilon_floor", "epsilon"),
         bench_knobs=(),
@@ -100,23 +70,5 @@ POBB = (
         ),
         severity="inert",
         predicate=lambda _c, k, _d: k.epsilon_floor > k.epsilon,
-    ),
-    MemberCoupling(
-        name="lock_in_threshold_inert",
-        knobs=("lock_in", "lock_in_n_min", "leader_lock_in"),
-        bench_knobs=(),
-        estimand=Estimand.STOPPING,
-        relation=(
-            "lock_in / lock_in_n_min only govern anything while the leader_lock_in toggle is ON."
-        ),
-        consequence=(
-            "A lock-in threshold was tuned but leader_lock_in is OFF, so no leader "
-            "ever locks in early — the knobs are inert."
-        ),
-        severity="inert",
-        predicate=lambda _c, k, d: (
-            (not k.leader_lock_in)
-            and (k.lock_in != d.lock_in or k.lock_in_n_min != d.lock_in_n_min)
-        ),
     ),
 )

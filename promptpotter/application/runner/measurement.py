@@ -77,7 +77,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
+    from promptpotter.domain.scoring import CellSheet
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule
 
@@ -450,6 +450,11 @@ async def _walk_population(
         on_turn=on_turn,
         on_decided=on_decided,
     )
+    # A prior is read on every cell its race caught it up on: the leader it locked in, past its stop.
+    for key, caught in (race.caught if race is not None else {}).items():
+        if key in concluded:
+            ctx.walked(ReadArm(key, concluded[key], caught), asked[key])
+            rows[key] = ctx.walks[key].arm.rows
     ranked = [key for key in proposed if key in concluded]
     return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
 
@@ -468,10 +473,10 @@ def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior: ArmKey) -
     walk.release()
     _, cell = walk.launch(1)
 
-    def commit() -> Sequence[GradedCell]:
+    def commit() -> CellSheet:
         walk.collect()
         walk.end(walk.take(cell) or walk.judge(), cancel=True)
-        return close_walk(walk).sheet.cells
+        return close_walk(walk).sheet
 
     def discard() -> None:
         # Collected first, so a cell already back releases its claim now rather than on a callback.
@@ -530,8 +535,10 @@ def _conclude_arm(
         if isinstance(signal, BrokenSignal)
         else None
     )
-    # Every cell taken, and not a walk the gateway gave up on, whose rows are synthetic.
+    # Every cell taken, or locked in, so a later arm races the leader, caught up where it stopped;
+    # never a walk the gateway gave up on, whose rows are synthetic.
     gave_up = signal is not None and signal.check_name == SCORING_ERROR_ABORT
-    if race is not None and scored.stopped is None and not gave_up:
+    locked = signal is not None and signal.outcome == "locked_in"
+    if race is not None and (scored.stopped is None or locked) and not gave_up:
         race.admit(key, results.cells, sp)
     return conclude(arm, scored, elimination=elimination, breakage=breakage), results
