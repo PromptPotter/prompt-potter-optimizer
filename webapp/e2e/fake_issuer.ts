@@ -42,7 +42,7 @@ export async function startFakeIssuer(
   const env: NodeJS.ProcessEnv = { ...process.env, PP_E2E_PORT: port, PROMPTPOTTER_HOME: home };
   // Deleted, not inherited: the runner's own shell may carry it.
   delete env.PP_E2E_RESET;
-  const proc = spawn("node", [path.join(WEBAPP, "e2e", "serve.mjs"), "--auth=on"], {
+  const proc = spawn("node", [path.join(WEBAPP, "e2e", "serve.mjs"), "--auth=on", "--backend=offline"], {
     cwd: WEBAPP,
     stdio: "inherit",
     env,

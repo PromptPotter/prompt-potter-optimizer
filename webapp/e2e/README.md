@@ -18,6 +18,11 @@ First time on a machine: `npx playwright install chromium`.
 what CI can honestly walk. `walk` needs the operator's own campaigns and `spend` needs money, so
 both stay desk tiers run by hand.
 
+**The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
+without `spend` serves the throwaway world `offline`: `serve_app.py` answers `TERMNORM_URL` with
+`scripts/offline_world.py::FakeBackend`, so a check-in reads one schema on every machine. A desk
+TermNorm at :8000 once turned a CI-red spec green at the push hook.
+
 ## Three worlds, because the app has two populations
 
 | Project | Workspace | Covers |
@@ -37,7 +42,7 @@ operator's workspace.
 **One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
 needs an identity that is signed in and is not the host, which neither server above can produce
 because both start `serve.mjs --auth=off`. So `fake_issuer.ts` runs the same script with
-`--auth=on` — same preflight, same fault tee, same interpreter — over a workspace it mints and
+`--auth=on --backend=offline` — same preflight, same fault tee, same interpreter — over a workspace it mints and
 deletes per file. Auth posture is the whole difference, which is why `serve.mjs` refuses to start
 without it rather than inherit one.
 

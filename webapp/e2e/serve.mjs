@@ -23,6 +23,13 @@ if (AUTH !== "on" && AUTH !== "off") {
   process.exit(2);
 }
 
+// So is the backend's: `offline` serves the same schema on every machine, `live` whatever this one runs.
+const BACKEND = process.argv.find((arg) => arg.startsWith("--backend="))?.slice("--backend=".length);
+if (BACKEND !== "offline" && BACKEND !== "live") {
+  console.error("[e2e] serve.mjs needs --backend=offline or --backend=live");
+  process.exit(2);
+}
+
 for (const [what, where, remedy] of [
   ["venv interpreter", PYTHON, "python scripts/gate.py"],
   ["static export", path.join(WEBAPP, "out", "index.html"), "npm run build"],
@@ -77,7 +84,7 @@ function tee(stream, out) {
 console.log(`[e2e] :${PORT} serving ${home ?? "<checkout workspace>"}`);
 const server = spawn(
   PYTHON,
-  ["-m", "uvicorn", "promptpotter.main:app", "--host", "127.0.0.1", "--port", PORT],
+  [path.join(WEBAPP, "e2e", "serve_app.py"), `--backend=${BACKEND}`, PORT],
   {
     cwd: REPO,
     stdio: ["inherit", "pipe", "pipe"],
