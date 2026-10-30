@@ -294,6 +294,7 @@ def _bind_observers(
     ledger = open_with_history(cycle_dir)
 
     ledger.bind(dashboard)
+    session.state.spend = dashboard.state.spend
     ledger.bind(audit)
     readout.open_readout(cycle_dir)
     ledger.bind(readout)

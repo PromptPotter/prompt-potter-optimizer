@@ -5,7 +5,7 @@ import functools
 import logging
 import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -21,6 +21,7 @@ from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Measure
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.send_pacing import PauseCancelledError
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import current_round, filed_as
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
@@ -164,7 +165,7 @@ async def _claim_cell(
                     )
                 )
             if session.state.control.pause_requested():
-                raise asyncio.CancelledError("claim wait aborted by a pause")
+                raise PauseCancelledError("claim wait aborted by a pause")
             await asyncio.sleep(_CLAIM_POLL_S)
     finally:
         if waiting is not None:
@@ -254,6 +255,23 @@ async def score_search_point(
         )
         await run_walks({label: walk}, session, keep_cut=False)
     return close_walk(walk)
+
+
+async def score_search_points[K: Hashable](
+    points: Mapping[K, tuple[JobSearchPoint, list[Sample], MeasuredPass | None]],
+    session: Session,
+    *,
+    label: str,
+) -> dict[K, ScoredWalk]:
+    """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their
+    sum, and rows land as a serial walk of *points*' order lands them."""
+    with filed_as(ROLE_SPEND_KIND.get(label)):
+        walks = {
+            key: open_walk(search_point, dataset, session, label=label, measured=measured)
+            for key, (search_point, dataset, measured) in points.items()
+        }
+        await run_walks(walks, session, keep_cut=False)
+    return {key: close_walk(walk) for key, walk in walks.items()}
 
 
 def reread_cells(

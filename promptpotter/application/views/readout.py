@@ -594,6 +594,8 @@ class ReadoutProjection(Projection):
                     self._write(line)
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
+        if (climb := round_result.run_standing.climb_line) is not None:
+            self._write(_node_line(f"climb vs origin: {climb}"))
         for line in render_patience_status(
             round_result.overlap.advance,
             round_result.run_standing.rounds_without_advance,

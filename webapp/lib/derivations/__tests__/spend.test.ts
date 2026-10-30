@@ -29,7 +29,6 @@ function metered(
     calls_rate_priced: false,
     rate_known: true,
     bill_is_floor: false,
-    metered_is_bill: true,
     incurred_usd: 0,
     billed_tokens: 0,
     unpriced_tokens: 0,

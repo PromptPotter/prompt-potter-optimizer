@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
@@ -20,6 +21,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LaunchClockRecord
+from promptpotter.domain.run_standing import LineOutlay
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -78,6 +80,26 @@ def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]
     """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
     return scan_launch_clocks(
         LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
+
+
+def line_ran_s(stores: Stores, hop: CycleHop) -> float | None:
+    """The wall clock of the line's ended launches; ``None`` where one's endpoints did not parse."""
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    ended = [] if campaign is None else [r.clock.elapsed_s for r in line_launches(stores, campaign)]
+    return None if None in ended else sum(s for s in ended if s is not None)
+
+
+def line_outlay(session: Session) -> LineOutlay:
+    """What the line has paid by now, off what is live: the bound chain's spend as its fold banks
+    it, and the wall clock of the line's ended launches, then this one's."""
+    state = session.state
+    if state.spend is None:
+        raise RuntimeError("a round closes only under the observers that bind its spend")
+    ran, opened = state.line_ran_s, state.launch_clock().monotonic
+    return LineOutlay(
+        search_usd=state.spend.search_incurred_usd,
+        elapsed_s=None if ran is None else ran + time.monotonic() - opened,
     )
 
 

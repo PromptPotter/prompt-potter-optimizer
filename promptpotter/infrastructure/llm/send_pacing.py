@@ -90,6 +90,12 @@ def drawn_budget() -> SendBudget:
 # The runner binds ``RunControl.pause_requested``; per task, so concurrent cycles never cross.
 _ABORT_CHECK: ContextVar[Callable[[], bool] | None] = ContextVar("send_abort_check", default=None)
 
+
+class PauseCancelledError(asyncio.CancelledError):
+    """A wait the pause ended, never a cancel of the task waiting: the one cancel a pass answers
+    with what it banked (`RunControl.paused`)."""
+
+
 _UNWAITABLE_SCOPES: frozenset[str] = frozenset({"TPD", "RPD", "TPH", "RPH", "daily", "hourly"})
 
 
@@ -174,8 +180,11 @@ def set_abort_check(predicate: Callable[[], bool]) -> None:
     _ABORT_CHECK.set(predicate)
 
 
-def get_abort_check() -> Callable[[], bool] | None:
-    return _ABORT_CHECK.get()
+def abort_wait_if_paused(wait: str) -> None:
+    """Polled by every wait a pause may end, off the check the runner bound."""
+    abort = _ABORT_CHECK.get()
+    if abort is not None and abort():
+        raise PauseCancelledError(f"{wait} aborted by a pause")
 
 
 OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
@@ -304,11 +313,9 @@ class Backpressure:
 
     @asynccontextmanager
     async def send(self) -> AsyncIterator[int]:
-        abort = _ABORT_CHECK.get()
         self._announce()
         while (hold := self._hold()) > 0:
-            if abort is not None and abort():
-                raise asyncio.CancelledError(f"backpressure wait aborted ({self.sender})")
+            abort_wait_if_paused(f"backpressure wait ({self.sender})")
             started = loop_now()
             await asyncio.sleep(min(1.0, hold))
             report_throttle_stall(loop_now() - started)
@@ -407,14 +414,12 @@ class Backpressure:
 
 
 async def held_wait(total_sec: float, label: str) -> None:
-    abort = _ABORT_CHECK.get()
     started = loop_now()
     end = started + total_sec
     # Reported on EVERY exit, abort included: waiting is not working.
     try:
         while (remaining := end - loop_now()) > 0:
-            if abort is not None and abort():
-                raise asyncio.CancelledError(f"resend wait aborted ({label})")
+            abort_wait_if_paused(f"resend wait ({label})")
             await asyncio.sleep(min(1.0, remaining))
     finally:
         report_throttle_stall(loop_now() - started)

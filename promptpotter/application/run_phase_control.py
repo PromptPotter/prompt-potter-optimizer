@@ -19,6 +19,7 @@ from promptpotter.domain.run_records import (
     PausedEffect,
     SkippedEffect,
 )
+from promptpotter.infrastructure.llm.send_pacing import PauseCancelledError
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import emit_command_ack
 from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
@@ -97,6 +98,12 @@ class RunControl:
         if self._inbox().pause is not None:
             return True
         return any(standing_controls(outer).pause is not None for outer in self.enclosing)
+
+    def paused(self, stop: KeyboardInterrupt | asyncio.CancelledError) -> bool:
+        """*stop* is a pause this control was asked: a walk's graceful stop or a wait the pause
+        ended, never any other cancel. The one stop a pass answers with what it banked."""
+        ended = isinstance(stop, KeyboardInterrupt | PauseCancelledError)
+        return ended and self.pause_requested()
 
     def take_pause(self) -> tuple[PauseCause, str] | None:
         """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""

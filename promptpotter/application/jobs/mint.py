@@ -26,6 +26,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
+    optimizer_node_configs,
     refuse_below_reasoning_floor,
     refuse_unfit_pipeline,
     refuse_unpriced,
@@ -55,6 +56,7 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -107,7 +109,9 @@ def refuse_unrunnable(
     mint = mint_facts(campaign_config, partition.demo, schema, shelf)
     if pools := selected.pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
-    refuse_below_reasoning_floor(selected, pipeline_params)
+    refuse_below_reasoning_floor(
+        [*node_config_items(dict(pipeline_params)), *optimizer_node_configs(selected)]
+    )
     refuse_unpriced(unpriced_routes(campaign_config, selected, pipeline_params, schema))
     if free:
         refuse_outside_free_tier(

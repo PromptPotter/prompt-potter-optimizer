@@ -14,7 +14,7 @@ from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
-from promptpotter.domain.spend import HeldBudget
+from promptpotter.domain.spend import HeldBudget, SpendRollup
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
@@ -73,6 +73,11 @@ class LaunchState:
 
     # Read once at `run_optimization`'s start; every cycle its line closes reads this one.
     clock: LaunchClock | None = None
+    # Read beside it: the wall clock the line's launches ran before this one, which ends none of
+    # them; `None` where an ended launch's endpoints did not parse.
+    line_ran_s: float | None = None
+    # The bound cycle's chain as its live fold banks it (`DashboardCheckout`), rebound on a fork.
+    spend: SpendRollup | None = None
     resumed_from_round: int = 1
     audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None

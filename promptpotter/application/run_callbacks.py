@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.ruler import LevelSeries
+    from promptpotter.domain.run_standing import LineOutlay
 
 
 def stated_line(
@@ -40,10 +41,11 @@ def stated_line(
     difficulty: DifficultyView,
     *,
     lives: LivesConfig | None,
+    outlay: LineOutlay,
 ) -> tuple[list[RoundResult], LevelSeries, RunStanding]:
     """The line a statement of *closing* reads, and the level and standing it reads it at."""
     line = [*(rr for rr in prior if rr.round < closing.round), closing]
-    standing = RunStanding.after(line, lives=None if lives is None else lives.bank)
+    standing = RunStanding.after(line, lives=None if lives is None else lives.bank, outlay=outlay)
     [series] = difficulty.level_series([line])
     return line, series, standing
 
@@ -85,8 +87,9 @@ class RunCallbacks:
         difficulty: DifficultyView,
         *,
         lives: LivesConfig | None,
+        outlay: LineOutlay,
     ) -> tuple[int | None, RunStanding]:
-        line, series, standing = stated_line(closing, prior, difficulty, lives=lives)
+        line, series, standing = stated_line(closing, prior, difficulty, lives=lives, outlay=outlay)
         anchors = self.view_context.anchors()
         return self._emit(RoundClosedRecord.of(line, slot_of, series, standing, anchors)), standing
 

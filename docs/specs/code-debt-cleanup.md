@@ -187,23 +187,64 @@ acting.
 
 **Rides with:** "The optimizer climbs" in [`roadmap.md`](roadmap.md) § Sequence.
 
-- **A held leader's evidence is discarded**: an arm that leads but misses the bar is never re-scored
-  (`optimizers/potter/members.py::AdaptiveQueue.draw`). Action: carry it into the next round's draw.
-  **Re-test:** the round after a leader missed the bar re-scores that arm.
-- **`l1_generate` edits `answer_format`.** Action: the parsed directive stays locked, the rest free; the
-  operator sees the diff first. **Re-test:** a round file whose `l1_generate` arm's `answer_format`
-  differs from its parent's.
+- **A resumed walk re-walks a later proposer's arms**: `runner/round.py::bank_walk` banks the walk
+  whole, and the opener's replay (`potter/l1/candidate_source.py::_generate_or_load`) returns it whole,
+  so `mating` adds its children again and `locus_crossover` re-crosses the banked ones on a shifted rng;
+  L1's replayed readout counts them as its yield. Inert at `mating.offspring: 0`. Action: a replayed
+  walk returns its bank and runs no proposer, its readout banked beside it. **Rides with:** any change
+  to `bank_walk`. **Re-test:** resume a potter round with `offspring: 1` between bank and close; the
+  same arms walk.
+- **A re-read arm has two names**: `runner/measurement.py::ReferencePairs.of_round` names an individual
+  by the slot an EARLIER round walked it in, so a population member walked again (CAPO's
+  `population_rejoin`, potter's held leader) reads `C2.1` on its pair and `C3.1` on the round card. **Rides with:** any change to
+  `arm_name`. **Re-test:** a held leader's round-3 pair names its round-3 slot.
+- **An operator-held prompt field is refused by potter alone**: `bench/children.py::carried_writes`
+  writes any declared prompt field, so GEPA, CAPO, LEVI and an authored arm write a field
+  `NodeSearchNarrowing.prompt_fields_held` holds; only `potter/validators/l1_strict.py::l1_prompt_fields_open`
+  refuses it. Action: the child door refuses a held field. Open: may an operator's own authored arm
+  write a field they held? **Rides with:** any change to `carried_writes`. **Re-test:** a GEPA child
+  writing a held field carries no failure.
 - **A declared bench is not the held-out count**: `CampaignConfig.dataset_split` `{bench: 100}` held out
-  162 rows. Action: hold out the declared count. **Re-test:** a fresh `{bench: 100}` campaign holds out 100.
-- **A paid pass does not stop on its command**: a stopped bench or verify pass acks `rejected`; a pass with
-  no hop stops only on Ctrl+C; a standing pause stops a later bench pass with no result
-  (`application/runner/grade_bench.py::grade_line_bench`). Action: every pass takes pause and stop at its
-  cell boundary and banks what it graded. **Re-test:** pause a bench pass from a second terminal; it acks
-  `accepted` and banks a result.
-- **One refusal, one entry point**: `seed-screen` skips `application/preflight.py::refuse_below_reasoning_floor`,
-  which `new` raises through `jobs/mint.py`; `presentation/cli/commands/new.py` parses `--set` with
-  `yaml.safe_load`, so `off` reads `False`. Action: the refusal sits where every entry point passes; `--set`
-  keeps `off` a string. **Re-test:** `seed-screen` below a reasoning floor refuses; `--set x=off` lands `"off"`.
+  162 rows on the box's `hotpotqa-closedbook`. No shipped recipe adds it a `bench_only` tail and the
+  loader dedups rows, so the 62 are in the box's tenant definition; the one code path holding out past
+  `bench` is `domain/bench.py::partition_bank` holding declared `bench_only` rows beside the ranked
+  ones, which L4 inner cells (`bench: 0`) and `justlogic/d234-held` are built on. Open: read the
+  definition (`/potter-box`), then decide whether `bench` becomes the total. **Re-test:** a fresh
+  `{bench: 100}` campaign on that definition holds out 100.
+- **A pass with no cycle has no address**: `seed-screen` and `probe-reasoning` hold a job
+  (`jobs/launcher/admission.py::paid_pass`, `hop=None`) but no ledger a `pause-cycle` reaches, so only
+  Ctrl+C in their own terminal stops them; `noise-floor` lets its pause escape as `PassStoppedError`,
+  a band over fewer than `k` rescores being no band. Open: a job-addressed stop at all five entry
+  points, or Ctrl+C named as a CLI-only verb's stop. **Rides with:** any change to `paid_pass`.
+  **Re-test:** stop a `seed-screen` from a second terminal.
+- **A rewind on a young dataset finds no level**: past PoBB's cuts a parent's cells are answered by no
+  arm outside the parent line, so `bench/difficulty.py::level_series` reads their δ off the prior
+  (`prior_pinned`) or not at all (`unmeasured_delta`), `LevelSeries.level` withholds the round, and
+  `escalation/firing.py::_rebase_request` drops L2's fork until the tenant ruler warms. Yet
+  `unmeasured_delta` only shortens the cells θ reads, on the one scale. Open: does a level read on its
+  linked cells difference? **Rides with:** any change to `theta_caveat`. **Re-test:** the offline
+  rebasing leg at `REBASE_ROWS = 200` rebases.
+- **The origin's `changes_description` embeds the absolute dataset path**
+  (`application/origin.py::establish_campaign_origin`), so a decision record depends on where the
+  checkout sits; `offline_run.py --against` another checkout reads gepa and levi as MOVED. Action:
+  name the dataset, not its path. **Rides with:** any change to the origin record. **Re-test:**
+  `offline_run.py --against` a base run from another directory reads gepa UNMOVED.
+- **The critique's axis vocabulary is prose beside the derived set**: `l1_critique`'s `priority_fix`
+  names its axes in static prompt text, while `injections/layer_state.py::critique_axes` derives the
+  open set from `open_prompt_fields`; `answer_format` is open on a slot-answering node and absent from
+  the prose. Action: the prose lists `critique_axes`. **Rides with:** any edit to `l1_critique`.
+  **Re-test:** a JSON-answering target's critique may name `answer_format`.
+- **Any cancel reads as the pause**: `scoring/query_loop.py::turn_state` takes a cancelled call as
+  `cut`, the pause's own doing, and `runner/termination.py::run_stop_reason` maps every
+  `CancelledError` to `PAUSED`; only `RunControl.paused` reads the pause's typed cancel
+  (`send_pacing.py::PauseCancelledError`). Open: what a cancel no pause made ends a walk as.
+  **Rides with:** any change to `turn_state`. **Re-test:** a call cancelled with no pause standing
+  does not bank the walk as paused.
+- **A killed producer's pause outlives it**: an accepted `pause-cycle` stands until a launch's RUNNING
+  record empties the inbox, so the first pass to hold the cycle after a `kill -9` stops on it with
+  nothing measured (`jobs/launcher/admission.py::paid_pass`). Action: whatever reaps a dead producer
+  declares its stop. **Rides with:** any change to the job reaper. **Re-test:** kill a run with a
+  pause accepted; the next bench pass grades.
 
 ## Open — from the head-to-head arc
 

@@ -17,9 +17,8 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
    on `hotpotqa-closedbook`, closing M13 (§ The bench (M13)); L4 validation (~$1).
 2. **Recombination at $0** (C9): the member backbone (code-debt § The member backbone). Paid: the
    mode head-to-head (§ Variation and pools, item 1).
-3. **The optimizer climbs** (§ Optimizer tuning — the standing board): L1 quality (answer_format is
-   never edited, a held leader is never re-scored); early stop when C1.1 clearly beats C0; Δ per time,
-   per candidate and per $ served in chat. Paid: the board's path, steps (1)–(4).
+3. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
+   (1)–(4).
 4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
    partition; third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
@@ -141,13 +140,6 @@ less wall clock, on an official dataset with a natural origin below 0.4. A one-k
 **The path:** (1) replicate the nearest climbing setting and read what the proposer saw of the
 misses; (2) screen library blocks without the optimizer — authored arms, origin plus ONE block;
 (3) the optimizer-model screen — re-run the halted `qwen3.7-flash @ none` arm; (4) combine the winners.
-
-**Wall clock:**
-- The `n_min` origin-panel top-ups block the round close; root: one scoring pass over every member.
-- `l1_critique` gets the `detectable_move` panel; `spanning_clusters` drops clusters below it.
-- `mutation_memory` only for separated lifts.
-- A transcript carries the question and the gold paragraph (`potter/dispatch/bundle.py::TRANSCRIPT_QUERY_CAP`);
-  `MISS_ROWS_CAP` 40 → 20 once the top-ups are gone.
 
 **Defects** are [`code-debt-cleanup.md`](code-debt-cleanup.md) § Open — optimizer tuning.
 

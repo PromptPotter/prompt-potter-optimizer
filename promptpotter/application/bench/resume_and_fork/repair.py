@@ -102,9 +102,12 @@ def _rebank_on_branch(
     for t in rounds:
         if t.round not in keys:
             continue
-        line, series, standing = stated_line(t, rounds, difficulty, lives=lives)
-        # Under its round's own anchors, never the resuming launch's.
-        anchors = closes[t.round].close.anchors
+        # Under its round's own anchors and outlay, never the resuming launch's.
+        close = closes[t.round].close
+        line, series, standing = stated_line(
+            t, rounds, difficulty, lives=lives, outlay=close.run_standing.outlay
+        )
+        anchors = close.anchors
         offset = campaign_store.restate_round(
             branch,
             RoundRestatedRecord.of(line, slot_of, series, standing, anchors),

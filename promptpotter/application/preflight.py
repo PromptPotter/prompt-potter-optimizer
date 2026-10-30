@@ -264,16 +264,19 @@ def refuse_unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -
         raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
 
 
-def refuse_below_reasoning_floor(
-    selected: SelectedOptimizer, pipeline_params: Mapping[str, Any] | None
-) -> None:
-    """An ABSENT ``max_tokens`` is the sanctioned default, never a violation."""
-    node_configs: Iterable[tuple[str, Mapping[str, Any]]] = [
-        *node_config_items(dict(pipeline_params or {})),
-        # Every llm node DECLARED, off the `default` chain too, or an escalation node escapes.
+def optimizer_node_configs(selected: SelectedOptimizer) -> list[tuple[str, Mapping[str, Any]]]:
+    """Every llm node a run DECLARES beside its pipeline, off the `default` chain too, or an
+    escalation node escapes."""
+    return [
         *((n, selected.node_config(n)) for n in selected.llm_nodes),
         *((n.name, n.current_config) for n in checkin_manifest().schema.declared_nodes),
     ]
+
+
+def refuse_below_reasoning_floor(node_configs: Iterable[tuple[str, Mapping[str, Any]]]) -> None:
+    """Over every node a pass sends to: a run's (`jobs/mint.py::refuse_unrunnable`), or a
+    pipeline scored outside every run (`loop_start.py::arm_diagnostic_scoring`). An ABSENT
+    ``max_tokens`` is the sanctioned default, never a violation."""
     refused: list[str] = []
     below_floor: list[str] = []
     for node, cfg in node_configs:

@@ -680,8 +680,6 @@ class MeteredSpend(StrictModel):
     # `False` ⇒ no USD figure here says anything, and a kind reads in tokens.
     rate_known: bool
     bill_is_floor: bool
-    # `metered_usd` IS `billed_usd` + `rate_priced_usd` under this meter.
-    metered_is_bill: bool
     incurred_usd: float
     billed_tokens: int
     unpriced_tokens: int
@@ -701,7 +699,6 @@ class MeteredSpend(StrictModel):
             calls_rate_priced=calls_rate_priced(spend.total_rate_priced_usd),
             rate_known=any(b.rate_known for b in spend.by_kind.values()),
             bill_is_floor=bill_is_floor(spend.unpriced_tokens),
-            metered_is_bill=not METER_PRICES_REPLAYS[meter] and set(counted) == set(spend.by_kind),
             incurred_usd=spend.total_incurred_usd,
             billed_tokens=spend.total_tokens_used,
             unpriced_tokens=spend.unpriced_tokens,

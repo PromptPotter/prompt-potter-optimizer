@@ -252,7 +252,12 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     RunPhaseRecord,
 )
-from promptpotter.domain.run_standing import RunStanding, rounds_without_advance, stalls_left
+from promptpotter.domain.run_standing import (
+    LineOutlay,
+    RunStanding,
+    rounds_without_advance,
+    stalls_left,
+)
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import (
     NO_RESULT,
@@ -273,6 +278,7 @@ from promptpotter.domain.spend import Budget, TokenUsageKind
 from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
 from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.llm.send_pacing import PauseCancelledError
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
 from promptpotter.infrastructure.llm.telemetry import (
     at_round,
@@ -2667,7 +2673,10 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                     for n, (improved, electable) in enumerate(closes, 1)
                 ),
             ]
-            set_cycle(cycle, line=line, standing=RunStanding.after(line, lives=lives.bank))
+            paid = LineOutlay(search_usd=None, elapsed_s=None)
+            set_cycle(
+                cycle, line=line, standing=RunStanding.after(line, lives=lives.bank, outlay=paid)
+            )
             return stalls_left(line, lives.bank), standing_tripped(cycle)
 
         held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
@@ -2696,10 +2705,13 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         def outcome(objective: float, advance: RoundAdvance) -> StopReason | None:
             closing = round_result(1, improved=True, overlap=readings[advance])
             folds = {key: score_summary(composite_fitness=objective) for key in closing.folds}
+            line = [round_result(0, improved=False), closing.model_copy(update={"folds": folds})]
             set_cycle(
                 cycle,
-                line=[round_result(0, improved=False), closing.model_copy(update={"folds": folds})],
-                standing=RunStanding.opening(None),
+                line=line,
+                standing=RunStanding.after(
+                    line, lives=None, outlay=LineOutlay(search_usd=None, elapsed_s=None)
+                ),
             )
             return standing_tripped(cycle)
 
@@ -2918,6 +2930,10 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
             press(PauseCyclePayload(**address), "pause-1")
             assert control.pause_requested()
+            stops = (asyncio.CancelledError(), PauseCancelledError("a wait"))
+            assert [control.paused(stop) for stop in stops] == [False, True], (
+                "a cancel the pause never made was answered as the pause, or the pause's was not"
+            )
             waiting = derive_run_state(command_dir).pause
             assert waiting is not None and waiting.stop_reason is None, (
                 "a pause the loop has not reached read as a run already stopped"
@@ -3626,7 +3642,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         )
 
     def stands(run: list[Any]) -> RunStanding:
-        return RunStanding.after(run, lives=None)
+        return RunStanding.after(
+            run, lives=None, outlay=LineOutlay(search_usd=None, elapsed_s=None)
+        )
 
     # C0 is re-read between the lines: the panel cell it took in round 1 it misses by round 3.
     first_line = _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL, ids=ids)
@@ -3665,6 +3683,10 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         2,
         1,
     ), "promotions and separations are counted apart: a promotion is a point estimate"
+    assert (at_c0.candidates, standing_now.candidates) == (0, 5), (
+        "the climb's per-candidate divisor counts the arms rounds after the origin proposed, "
+        "never the parent each re-read"
+    )
     vs_c0 = standing_now.vs_origin
     assert vs_c0.coverage is not None and vs_c0.headline is not None
     assert (vs_c0.coverage.scored, vs_c0.headline.rate_a, vs_c0.headline.rate_b) == (9, 0.0, 1.0), (

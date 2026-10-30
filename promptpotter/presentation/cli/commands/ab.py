@@ -14,12 +14,10 @@ from promptpotter.application.cycle_addressing import (
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.initialization.loop_start import open_diagnostic
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.arms import BankedSearchPointError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -55,12 +53,9 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    try:
-        hop = _target(args, stores)
-        opened = await open_diagnostic(stores, hop, source=RunSource.AB)
-        report = ab_replay_cycle(hop, opened.session, opened.config)
-    except (DiagnosticError, BankedSearchPointError) as exc:
-        raise SystemExit(f"ERROR: {exc}") from exc
+    hop = _target(args, stores)
+    opened = await open_diagnostic(stores, hop, source=RunSource.AB)
+    report = ab_replay_cycle(hop, opened.session, opened.config)
 
     scope = (
         f"campaign {report.campaign_id} — {report.n_cycles} cycle(s), {report.n_rounds} round(s)"

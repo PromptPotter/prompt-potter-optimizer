@@ -24,6 +24,7 @@ from promptpotter.application.runner.bench import bench_selection
 from promptpotter.application.runner.campaign_result import (
     bench_origin,
     declare_line_bench,
+    line_ran_s,
 )
 from promptpotter.application.runner.cycle_close import close_cycle
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
@@ -320,6 +321,7 @@ async def run_optimization(
     if not session.cycle_id:
         raise RuntimeError("run_optimization runs a minted cycle: bind its session first")
     session.state.clock = LaunchClock.now()
+    session.state.line_ran_s = line_ran_s(session.store, session.hop)
     try:
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
         with (

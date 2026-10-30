@@ -20,8 +20,8 @@ from promptpotter.infrastructure.llm.send_pacing import (
     HELD_POLL_S,
     Backpressure,
     SendBudget,
+    abort_wait_if_paused,
     drawn_budget,
-    get_abort_check,
     held_wait,
     loop_now,
     report_throttle_stall,
@@ -117,10 +117,8 @@ class MachineSlots:
         return None
 
     async def _wait(self, take: Callable[[], HeldLock | None]) -> HeldLock:
-        abort = get_abort_check()
         while (held := take()) is None:
-            if abort is not None and abort():
-                raise asyncio.CancelledError("machine-slot wait aborted")
+            abort_wait_if_paused("machine-slot wait")
             started = loop_now()
             await asyncio.sleep(HELD_POLL_S)
             report_throttle_stall(loop_now() - started)
@@ -260,10 +258,8 @@ class BackendClient:
             return {"status": "error", "error": str(exc)}
 
     async def _reachable_within(self, down_since: float) -> bool:
-        abort = get_abort_check()
         while loop_now() - down_since < _OUTAGE_WAIT_S:
-            if abort is not None and abort():
-                raise asyncio.CancelledError("backend outage wait aborted")
+            abort_wait_if_paused("backend outage wait")
             started = loop_now()
             await asyncio.sleep(_OUTAGE_POLL_S)
             answered = (await self.check_status()).get("status") != "unreachable"

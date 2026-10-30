@@ -140,6 +140,9 @@ export function runStanding(
     rounds_closed: round,
     improved: 0,
     advanced: 0,
+    candidates: 0,
+    search_usd: null,
+    elapsed_s: null,
     ...over,
   };
 }

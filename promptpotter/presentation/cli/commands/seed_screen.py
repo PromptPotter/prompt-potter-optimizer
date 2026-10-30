@@ -6,27 +6,23 @@ from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
 from promptpotter.config.logging import setup_logging
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.shared.errors import DiagnosticError
 
 
 async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
 
-    try:
-        outcome = await screen_inner_seeds(
-            stores=stores,
-            identity=stores.identity,
-            dataset_name=args.dataset,
-            seeds=list(args.seeds),
-            n_samples=args.n_samples,
-            repeat=args.repeat,
-            parallel=args.parallel,
-            model=args.model,
-            provider=args.provider,
-        )
-    except DiagnosticError as exc:
-        raise SystemExit(f"ERROR: {exc}") from exc
+    outcome = await screen_inner_seeds(
+        stores=stores,
+        identity=stores.identity,
+        dataset_name=args.dataset,
+        seeds=list(args.seeds),
+        n_samples=args.n_samples,
+        repeat=args.repeat,
+        parallel=args.parallel,
+        model=args.model,
+        provider=args.provider,
+    )
 
     rows = outcome.readings
     collapse = {True: "REWARDS COLLAPSE", False: "ok              ", None: "no floor        "}
