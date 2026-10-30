@@ -50,6 +50,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
       events.jsonl                      # workspace ledger — commands with no cycle, the account's events
     head_to_heads/{id}.json             # `domain/campaign.py::HeadToHeadRecord`
     drafts/{draft_id}/                  # an open check-in, until Start or Discard
+    ruler.jsonl                         # the tenant's δ ruler, `store/ruler_store.py`
     campaigns/{campaign_id}/
       campaign.json  log.md
       cycles/{cycle_id}/                # root + forks + diags, ALL FLAT

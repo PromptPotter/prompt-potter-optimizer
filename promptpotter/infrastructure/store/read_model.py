@@ -15,6 +15,7 @@ from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_
 
 from pydantic import ValidationError
 
+from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import append_line, open_text_robust
@@ -308,8 +309,11 @@ class _Feeder:
             kind.encode(): model for kind, model in _by_record_type(folds.values()).items()
         }
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
-        # By kind, so the folds that never take a refused line (run state, spend) still read whole.
-        self.refused: dict[type[StrictModel], LedgerUnreadableError] = {}
+        # By kind, so the folds that never take a refused line (run state, spend) still read whole:
+        # a reshape of one kind leaves the spend bank readable, so a reset can bank before it wipes.
+        self.refused: dict[
+            type[StrictModel], LedgerUnreadableError | UnregisteredStatePartError
+        ] = {}
 
     def line(self, offset: int, raw: bytes) -> None:
         for placed in self._placed:
@@ -323,7 +327,7 @@ class _Feeder:
             record = ledger_record(
                 model.model_validate_json, raw, ledger=self._ledger, offset=offset
             )
-        except LedgerUnreadableError as refusal:
+        except (LedgerUnreadableError, UnregisteredStatePartError) as refusal:
             self.refused.setdefault(model, refusal)
             return
         if record is None:
