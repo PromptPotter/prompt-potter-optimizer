@@ -160,7 +160,7 @@ stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
   `MeResponse.access_state`) answers `blocked` only for a revoked email.
 - **How many strangers is bounded too: `Settings.MAX_ACCOUNTS`**, counted off disk
   (`user_store.py::count_accounts`, the host's included) at the one place an account opens
-  (`account.py::arrive`), under one OS lock so two first sign-ins at the ceiling never both read
+  (`promptpotter/application/account.py::arrive`), under one OS lock so two first sign-ins at the ceiling never both read
   room. An existing account always signs in and the host always opens one; a refused sign-in keeps
   no session, lands on `/?auth_error=accounts_full`, and is told to the operator-admin channel. With
   the coupon above, it bounds what strangers together spend on the box's keys before any grant.
@@ -198,7 +198,7 @@ rate limit and the host's wallet — are external and singular, so cost is bound
 | Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | Yes — least-served tenant next |
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | No |
 | What the box's keys may ever pay for an account | the host coupon (`Settings.HOST_COUPON`, or its `grant.json`), both units; its own keys are not metered | No |
-| Accounts the box holds | `Settings.MAX_ACCOUNTS`, at `account.py::arrive` (`accounts_full`) | No |
+| Accounts the box holds | `Settings.MAX_ACCOUNTS`, at `promptpotter/application/account.py::arrive` (`accounts_full`) | No |
 | Reads one principal may poll | `quota.py::refuse_read_rate`, a token bucket sized above the webapp's polls, at `deps.py::admit_session` (429 `rate_limited`) | No |
 | Writes one principal may send, a free verb's included | `quota.py::refuse_write_rate`, every non-read at the same seam, the host exempt (429 `rate_limited`) | No |
 
