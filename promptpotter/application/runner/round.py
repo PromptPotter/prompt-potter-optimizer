@@ -90,7 +90,7 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
     # A replayed walk makes no call, so nothing it would read is re-sent.
     if prior.round == 0 or not prior.results or cycle.banked_proposals(ctx.round_num) is not None:
         return
-    at_prior = replace(ctx, round_num=prior.round)
+    at_prior = RoundContext(cycle=cycle, round_num=prior.round, callbacks=ctx.callbacks)
     for adapter in cycle.optimizer.plan.adapters:
         owed = [
             kind

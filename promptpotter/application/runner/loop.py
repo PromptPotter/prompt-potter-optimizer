@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
 from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
@@ -141,7 +140,9 @@ async def run_round_loop(
                     diagnosed = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
                     await diagnosing.diagnose(NodeContext(diagnosed, diagnosing))
                     with at_round(round_num + 1):
-                        await diagnosing.show_round(replace(diagnosed, round_num=round_num + 1))
+                        await diagnosing.show_round(
+                            RoundContext(cycle=cycle, round_num=round_num + 1, callbacks=cb)
+                        )
                     return LoopEnd(StopReason.DIAG_COMPLETE)
             round_num += 1
 
