@@ -310,7 +310,9 @@ async def apply_correction(
         {t.round for t in corrected},
         proposed,
     )
-    rederived = await _rederived(cycle, corrected, drifted, callbacks)
+    rederived = await _rederived(
+        cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], callbacks
+    )
     repair_target = mint_fork(
         campaign_store,
         hop,
@@ -344,10 +346,11 @@ async def apply_correction(
             len(cut.retirements),
             repair_target,
         )
+    carried_closes = campaign_store.standing_rounds(branch, moment=None).rounds
     for slot, rr in enumerate(corrected):
         if (state := rederived.get(rr.round)) is not None:
             corrected[slot] = rr.model_copy(update={"optimizer_state": state})
-            campaign_store.restate_round(branch, rr.round, state)
+            campaign_store.rebank_round(branch, carried_closes[rr.round].close.restated(state))
 
     equivalent = not mismatches
     campaign_store.grade_fork(

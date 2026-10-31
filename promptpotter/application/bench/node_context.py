@@ -84,16 +84,14 @@ logger = logging.getLogger(__name__)
 
 def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
     """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
-    session = round_.cycle.session
     rounds = round_.cycle.rounds
-    session.store.campaigns.propose_round(
-        session.hop,
+    round_.callbacks.ledger.append(
         RoundProposedRecord(
             round=round_.round_num,
             consumed=round_document_digest(rounds[-1]) if rounds else "",
             proposals=list(proposals),
             submitted=submitted,
-        ),
+        )
     )
 
 
@@ -664,11 +662,11 @@ class NodeContext:
         return _drawn(self._round, self._member, kind)
 
     def _bank(self, restated: RoundResult) -> None:
-        """On the cycle's line before the cycle seats it: a restatement that failed to land is held nowhere."""
+        """On the run's live ledger before the cycle seats it: a restatement that failed to land is held nowhere."""
         cycle = self._round.cycle
-        session = cycle.session
         if restated.at_offset is not None:
-            session.store.campaigns.restate_round(
-                session.hop, restated.round, restated.closed_state
-            )
+            session = cycle.session
+            standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
+            close = standing.rounds[restated.round].close
+            self._round.callbacks.ledger.append(close.restated(restated.closed_state))
         cycle.seat(restated)

@@ -25,7 +25,6 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
-from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.run_records import (
@@ -548,13 +547,8 @@ class CampaignStore:
     def propose_round(self, hop: CycleHop, proposed: RoundProposedRecord) -> int:
         return self._append(hop, proposed)
 
-    def restate_round(self, hop: CycleHop, round_num: int, state: OptimizerState) -> int:
-        """*round_num*'s standing close on *hop*'s line, holding *state*: the one restatement of what a closed round holds."""
-        close = self.standing_rounds(hop, moment=None).rounds[round_num].close
-        return self._append(hop, close.restated(state))
-
     def rebank_round(self, hop: CycleHop, statement: RoundRestatedRecord) -> int:
-        """A repaired round stated whole: the branch holding it owns every arm in it."""
+        """A closed round stated again on a cycle no run holds; a running cycle restates on its live ledger."""
         return self._append(hop, statement)
 
     def rewind_enters(self, hop: CycleHop, after_round: int) -> int:
