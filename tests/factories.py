@@ -727,7 +727,6 @@ def election(
         "selected": pick,
         "leading": pick,
         "ended_on": ArmKey(ended_on) if ended_on else pick or PARENT,
-        "reference": None,
         "electable": int(pick is not None),
         "elects_on": "ability",
         "ruler": RulerStamp(

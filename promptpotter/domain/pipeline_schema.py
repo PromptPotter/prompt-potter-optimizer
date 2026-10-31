@@ -565,6 +565,10 @@ class ManifestNodeOverlay(FrozenModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+DEFAULT_PIPELINE = "default"
+"""The chain a schema runs: a backend's per cell, an optimizer manifest's per round."""
+
+
 class PipelineSchema(FrozenModel):
     name: str = ""
     version: str = ""
@@ -572,7 +576,7 @@ class PipelineSchema(FrozenModel):
     # Every DECLARED node, on the chain or not; the chain a round runs is `nodes`.
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
     # `default` is the chain a round runs; the manifest digest folds the others.
-    pipelines: dict[str, list[str]] = Field(default_factory=lambda: {"default": list[str]()})
+    pipelines: dict[str, list[str]] = Field(default_factory=lambda: {DEFAULT_PIPELINE: list[str]()})
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
     # Rides the schema, NOT the identity. Empty is UNKNOWN, never "accepts nothing".
@@ -583,7 +587,7 @@ class PipelineSchema(FrozenModel):
 
     @model_validator(mode="after")
     def _names_the_chain_a_round_runs(self) -> "PipelineSchema":
-        if "default" not in self.pipelines:
+        if DEFAULT_PIPELINE not in self.pipelines:
             raise ValueError(
                 f"pipelines declares {sorted(self.pipelines)} and no `default`, the chain a round runs"
             )
@@ -600,7 +604,7 @@ class PipelineSchema(FrozenModel):
     def nodes(self) -> list[PipelineNode]:
         """The chain a round RUNS; identity stays on it, since folding every declared node into ``sp_hash`` re-keys each measurement."""
         declared = self._node_map
-        return [declared[name] for name in self.pipelines["default"] if name in declared]
+        return [declared[name] for name in self.pipelines[DEFAULT_PIPELINE] if name in declared]
 
     @property
     def active_steps(self) -> tuple[str, ...]:
@@ -850,7 +854,7 @@ class PipelineSchema(FrozenModel):
                 "declared_nodes": [n for n in self.declared_nodes if n.name in active],
                 "pipelines": {
                     **self.pipelines,
-                    "default": [n for n in self.pipelines["default"] if n in active],
+                    DEFAULT_PIPELINE: [n for n in self.pipelines[DEFAULT_PIPELINE] if n in active],
                 },
             },
         )

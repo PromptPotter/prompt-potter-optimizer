@@ -1212,21 +1212,19 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             # A repair restates a lifted round WHOLE at its mint, so the round is the fork's own.
             for r in restated_at_mint.get(row_course, ()):
                 lifted = store.standing_rounds(hops[row_course], moment=None).rounds[r].close
-                store.restate_round(hops[row_course], lifted.restated(lifted.optimizer_state))
+                store.rebank_round(hops[row_course], lifted.restated(lifted.optimizer_state))
         line, n = line_of[row_course], len(line_of[row_course])
         arms = {
             ArmKey(ident(p)): arm_state(p, slot=ArmSlot(round=n, idx=i, total=len(row_picks)))
             for i, p in enumerate(row_picks)
         }
-        reference = None
         if row_reference is not None:
             arms[ArmKey(ident(row_reference))] = arm_state(
                 row_reference,
                 slot=walked_slot(line, ArmKey(ident(row_reference))),
                 role=MeasurementRole.PARENT,
             )
-            reference = line_reference(line)
-            assert reference.arm == ident(row_reference), (
+            assert line_reference(line).arm == ident(row_reference), (
                 f"guard: a row re-reads off {row_course}'s line"
             )
         row_ended = row_crown or row_reference or row_picks[0]
@@ -1237,7 +1235,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 election=election(
                     None if row_crown is None else ident(row_crown),
                     ended_on=ident(row_ended),
-                    reference=reference,
                 ),
             )
         )
@@ -1543,7 +1540,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 RoundProposedRecord(round=2, consumed="", proposals=[], submitted=False)
             )
         set_cycle(cycle, line=line)
-        before = round_packages(cycle, line)
+        before = round_packages(cycle, line, callbacks)
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             with (
@@ -1551,9 +1548,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 spending_under(cycle.session.state.control.book),
             ):
                 branch_id = asyncio.run(
-                    apply_correction(
-                        stores.campaigns, hop, line, before, cycle.session, cycle, repair_bank
-                    )
+                    apply_correction(cycle, line, before, repair_bank, callbacks)
                 )
         finally:
             reset_cycle_ledger(bound)

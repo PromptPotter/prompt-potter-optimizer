@@ -9,7 +9,6 @@ import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -329,28 +328,6 @@ class RoundOpening:
 
 INITIAL_POPULATION = "initial_population"
 RUN_INIT = "run_init"
-
-
-class RoundRole(Enum):
-    """The order a `default` walk lists its roles in, each by the node kinds it ``admits``: ``optimizer_manifest.py::_round_plan`` places a node by position, so one kind serves two roles."""
-
-    admits: frozenset[NodeKind]
-
-    # Valued by position, so two roles admitting one kind set stay two roles.
-    def __new__(cls, *kinds: NodeKind) -> RoundRole:
-        role = object.__new__(cls)
-        role._value_ = len(cls.__members__)
-        role.admits = frozenset(kinds)
-        return role
-
-    SAMPLER = (NodeKind.SAMPLER,)
-    PROPOSER = (NodeKind.LLM, NodeKind.ALGORITHM)
-    # The gateway's walk, raced by the eliminator.
-    MEASUREMENT = (NodeKind.ELIMINATOR, NodeKind.GATEWAY)
-    SELECTOR = (NodeKind.SELECTOR,)
-    SURVIVOR = (NodeKind.ALGORITHM,)
-    ADAPTER = (NodeKind.LLM,)
-    CONTROLLER = (NodeKind.CONTROLLER,)
 
 
 @dataclass(frozen=True)
@@ -809,8 +786,8 @@ class Controller(NodeMember, Protocol):
         """The members it runs, each under its own context (``NodeContext.fire``)."""
         ...
 
-    def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
-        """Read the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
+    def bank_round(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
+        """Bank the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
         ...
 
     async def act(self, ctx: NodeContext, cause: str) -> None: ...

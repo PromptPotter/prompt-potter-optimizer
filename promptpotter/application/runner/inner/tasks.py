@@ -28,6 +28,7 @@ from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
+    DEFAULT_PIPELINE,
     ManifestNodeOverlay,
     NodeKind,
     NodeRole,
@@ -357,7 +358,9 @@ class InnerCell:
 
 
 def _chain(inner: SelectedOptimizer) -> list[str]:
-    return [n for n in inner.schema.pipelines["default"] if inner.node(n).kind in _OUTER_KINDS]
+    return [
+        n for n in inner.schema.pipelines[DEFAULT_PIPELINE] if inner.node(n).kind in _OUTER_KINDS
+    ]
 
 
 def _lever(inner: SelectedOptimizer, node: str) -> dict[str, Any]:

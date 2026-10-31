@@ -110,7 +110,7 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
 L2_PATIENCE_SPENT = "l2_patience_spent"
 L1_LAYOUT_REFUSED = "l1_layout_refused"
 
-# Its first rule holds a climb no cause reaches past `observe` (`--diag`) to the ladder's depth.
+# Its first rule holds a climb no cause reaches past `bank_and_route` (`--diag`) to the ladder's depth.
 CLIMB_RULES: list[EscalationRule[LadderInputs]] = [
     _l1_only(),
     EscalationRule(

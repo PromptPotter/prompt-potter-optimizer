@@ -126,6 +126,7 @@ export type {
   OriginQuestion,
   RaisedCommand,
   CandidateFacts,
+  MainLineStep,
   CourseFacts,
   CourseSpawn,
   RoundFacts,

@@ -116,16 +116,35 @@ export interface CladogramAnchor {
   candidateId: string;
 }
 
-// The chain that PRODUCED the anchor: its course to its round, each course above cut where the next
-// hangs off (a fork at its spawn candidate, an inner campaign at its spawner), the seed runs whole.
+// The campaigns hung inside a course: off its candidates, and off the course where none claims one.
+const campaignsIn = (course: SubtreeCourse): SubtreeCampaign[] => [
+  ...candidatesOf(course).flatMap((c) => c.children),
+  ...course.children.filter((c) => c.level === "campaign"),
+];
+
+function pointAt(campaign: SubtreeCampaign, anchor: CladogramAnchor): HierarchyCandidate | null {
+  for (const course of campaign.children) {
+    if (course.address === anchor.coursePathKey) {
+      const own = candidatesOf(course).find((c) => c.facts.individual === anchor.candidateId);
+      if (own) return own;
+    }
+    for (const inner of campaignsIn(course)) {
+      const found = pointAt(inner, anchor);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// The chain that PRODUCED the anchor is its served `main_line`, across forks and inner hosts; the
+// seed runs that measured it stay whole.
 export function extentKeys(
   root: SubtreeCampaign,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
-  const keys = new Set<string>();
-  const keepThrough = (course: SubtreeCourse, round: number): void => {
-    for (const c of candidatesOf(course)) if (roundOf(c) <= round) keys.add(c.address);
-  };
+  const point = pointAt(root, anchor);
+  if (point === null) return null;
+  const keys = new Set([point.address, ...point.facts.main_line.flatMap((s) => s.candidates)]);
   const addMeasurements = (cand: HierarchyCandidate): void => {
     for (const course of innerCourses(cand)) {
       if (course.facts.mint !== "inner") continue;
@@ -135,61 +154,14 @@ export function extentKeys(
       }
     }
   };
-  const walkCampaign = (campaign: SubtreeCampaign): boolean => {
-    const courses = campaign.children;
-    const byAddress = new Map(courses.map((c) => [c.address, c]));
-    const held = new Map(
-      courses.flatMap((c) => candidatesOf(c).map((cand) => [cand.address, [c, cand]] as const)),
-    );
-    // A fork that lifted rounds stands on its parent's line below its cut; one that lifted none
-    // stands on its from-candidate alone, wherever on the parent's line that ran.
-    const cutUpward = (course: SubtreeCourse): void => {
-      const spawn = course.facts.spawn;
-      const parent = spawn ? byAddress.get(spawn.parent) : undefined;
-      if (!spawn || !parent) return;
-      if (spawn.cut_round > 0) {
-        keepThrough(parent, spawn.cut_round - 1);
-        cutUpward(parent);
-        return;
-      }
-      const from = course.facts.from_candidate;
-      const hung = from === null ? undefined : held.get(from);
-      if (!hung) return;
-      keepThrough(hung[0], roundOf(hung[1]));
-      cutUpward(hung[0]);
-    };
-    for (const course of courses) {
-      const cands = candidatesOf(course);
-      const own =
-        course.address === anchor.coursePathKey
-          ? cands.find((c) => c.facts.individual === anchor.candidateId)
-          : undefined;
-      if (own) {
-        keepThrough(course, roundOf(own));
-        addMeasurements(own);
-        cutUpward(course);
-        return true;
-      }
-      for (const cand of cands) {
-        const holds = cand.children.some(walkCampaign);
-        if (holds) {
-          keepThrough(course, roundOf(cand));
-          cutUpward(course);
-          return true;
-        }
-      }
-      // An inner run no candidate claims hangs off the course itself: its lane is kept, no round.
-      const unplaced = course.children.filter((c) => c.level === "campaign");
-      if (unplaced.some(walkCampaign)) {
-        keys.add(course.address);
-        cutUpward(course);
-        return true;
-      }
-    }
-    return false;
-  };
-  return walkCampaign(root) ? keys : null;
+  addMeasurements(point);
+  return keys;
 }
+
+// A lane stands while it, or a run hung inside it, holds a kept candidate.
+const holdsKept = (course: SubtreeCourse, keep: ReadonlySet<string>): boolean =>
+  candidatesOf(course).some((c) => keep.has(c.address)) ||
+  campaignsIn(course).some((inner) => inner.children.some((c) => holdsKept(c, keep)));
 
 // Lanes key on the course address, never a cycle id: inner cycle ids repeat across `.inner/` sandboxes.
 export function layout(
@@ -211,8 +183,8 @@ export function layout(
     parentKey: string | null,
   ): void => {
     const key = course.address;
+    if (keep !== null && !holdsKept(course, keep)) return;
     const cands = candidatesOf(course).filter((c) => keep === null || keep.has(c.address));
-    if (keep !== null && cands.length === 0 && !keep.has(key)) return;
     const isExpanded = expanded.has(key);
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;

@@ -83,9 +83,8 @@ def crowning_cells(rounds: Sequence[RoundResult], parent: str) -> frozenset[str]
     crowned: set[str] = set()
     for at, rr in enumerate(rounds):
         election = rr.election
-        if election is None or election.selected != parent or election.reference is None:
+        if election is None or election.selected != parent or (bar := rr.reference) is None:
             continue
-        bar = election.reference.arm
         skip = crowning_cells(rounds[:at], bar)
         own, against = (
             paired_grades(election_rows(rr.rows(key), rr.overlap_results.get(key, NO_CELLS), skip))
