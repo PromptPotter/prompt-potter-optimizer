@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol
 
 from promptpotter.shared.errors import PotterError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -48,9 +49,29 @@ class BackendUnreachableError(PotterError):
 class WireAdapter(Protocol):
     def __call__(
         self,
-        query: str,
+        sample: Sample,
         pipeline_params: dict[str, Any] | None,
     ) -> dict[str, Any]: ...
+
+
+# A reply's JSON object -> the `data` of a `/matches` body; `None`: it holds nothing to read.
+ReplyReader = Callable[[dict[str, Any]], dict[str, Any] | None]
+
+
+class AuthScheme(NamedTuple):
+    """The header a backend's token rides in, sent as ``prefix + token``."""
+
+    header: str
+    prefix: str
+
+
+def bearer() -> AuthScheme:
+    return AuthScheme("Authorization", "Bearer ")
+
+
+def data_envelope(body: dict[str, Any]) -> dict[str, Any]:
+    data = body.get("data")
+    return data if isinstance(data, dict) else {}
 
 
 class CellEnvelopeSeconds(Protocol):

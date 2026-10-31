@@ -126,6 +126,13 @@ class Settings(BaseSettings):
     TERMNORM_URL: str = "http://127.0.0.1:8000"
     TERMNORM_TOKEN: SecretStr = SecretStr("")
 
+    # Read only by `connectors/n8n.py`: ONE eval-harness webhook per install, and its secret,
+    # sent as `<N8N_HARNESS_AUTH_HEADER>: <N8N_HARNESS_AUTH_PREFIX><N8N_HARNESS_TOKEN>`.
+    N8N_HARNESS_URL: str = ""
+    N8N_HARNESS_TOKEN: SecretStr = SecretStr("")
+    N8N_HARNESS_AUTH_HEADER: str = "X-Eval-Secret"
+    N8N_HARNESS_AUTH_PREFIX: str = ""
+
     # Empty is upstream's local compose stack; read only by `connectors/dbllmbench.py::harness_config`.
     DBLLMBENCH_DB_URL: str = ""
     DBLLMBENCH_DB_USERNAME: str = ""

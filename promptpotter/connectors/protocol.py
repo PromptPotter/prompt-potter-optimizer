@@ -5,12 +5,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.connector import (
+    AuthScheme,
     CellEnvelopeSeconds,
     CellHop,
     ConnectorExecution,
     MeasuredUnit,
+    ReplyReader,
     SessionProtocol,
     WireAdapter,
+    bearer,
+    data_envelope,
 )
 from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
 from promptpotter.domain.sample import Sample
@@ -105,6 +109,15 @@ class Connector:
     cell_envelope_s: CellEnvelopeSeconds
     """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
 
+    cell_path: str = "/matches"
+    """Appended to ``base_url()`` for a ``remote_http`` cell's POST; ``""`` posts to the endpoint itself."""
+
+    read_reply: ReplyReader = data_envelope
+    """A cell reply's JSON object, read into the ``/matches`` ``data`` shape."""
+
+    round_trip_is_latency: bool = False
+    """The backend reports no timings: an answered POST is clocked here as its ``terminal_node``'s."""
+
     session_factory: Callable[[], SessionProtocol] = NoopSession
     """Called per ``BackendClient``: a session holds per-client state."""
 
@@ -183,13 +196,16 @@ class Connector:
 
     auth_token: AuthTokenFn | None = None
 
+    auth_scheme: Callable[[], AuthScheme] = bearer
+    """Read beside ``auth_token``, so the header is operator config too."""
+
     completion_check: Callable[[], None] | None = None
     """Run where the table completes, so a raise stops the server at boot and a run at init."""
 
     pipeline_declaration: (
         Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, Any]] | None
     ) = None
-    """An ``in_process`` backend's answer in place of ``GET /pipeline``; ``dataset.yaml::pipeline`` overlays it."""
+    """The backend's graph, read in place of ``GET /pipeline``; ``dataset.yaml::pipeline`` overlays it."""
 
     identity_config: (
         Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, dict[str, Any]]]
@@ -215,6 +231,10 @@ class Connector:
     @property
     def owns_panel(self) -> bool:
         return self.extract_experiment is not None
+
+    @property
+    def serves_pipeline(self) -> bool:
+        return self.execution == "remote_http" and self.pipeline_declaration is None
 
     def base_url(self) -> str:
         return self.endpoint().rstrip("/") if self.endpoint is not None else ""

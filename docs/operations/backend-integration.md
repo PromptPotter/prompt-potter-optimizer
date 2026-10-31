@@ -42,11 +42,69 @@ A ceiling is enforced before a cell is SENT, at the most the cell may cost. With
 
 ## Connection security
 
-The endpoint and token reach the wire only through the connector (`Connector.endpoint` / `Connector.auth_token`; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`):
+The endpoint, token and the header it rides in reach the wire only through the connector (`Connector.endpoint` / `auth_token` / `auth_scheme`, `Authorization: Bearer` unless declared; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`, n8n's `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN`):
 
 - **Transport** — `https://` verifies the server cert; `http://` is cleartext.
 - **Auth** — a set `TERMNORM_TOKEN` sends `Authorization: Bearer …`; empty sends no header. The backend decides whether to require it (`TERMNORM_REQUIRE_AUTH=1`; mismatch → 401). The Linux deploy provisions a shared token and requires it **even on loopback** — defense-in-depth against a co-located compromised process. One token per install.
 - **Resilience** — a 429 is the run's backpressure (`infrastructure/llm/send_pacing.py::Backpressure`, one shared cooldown); a 5xx or a connection broken before any reply backs off 1→2→4→8 s unless the body says `detail.retryable: false`, which halts the cell; a connection never made waits for `GET /status` up to `infrastructure/backend.py::_OUTAGE_WAIT_S`, so a backend restart costs nothing; a cell open past the smaller of `cell_envelope_s` and the launch's wall clock left is cut `HALTED`; **a read timeout is never resent**, because the backend is still working — and billing — the first request.
+
+## A webhook backend — the n8n eval harness
+
+`connectors/n8n.py` drives one n8n workflow that holds a copy of a production LLM node behind an authenticated webhook. It speaks the harness's wire, not the three endpoints above, so it declares each difference on `Connector`: `cell_path: ""` (POST to the URL itself), `read_reply` (the reply is no `data` envelope), `round_trip_is_latency` (n8n reports no timings) and a `pipeline_declaration` (no `GET /pipeline`: the graph is one prompt node, `harness`).
+
+| Variable | Holds |
+|---|---|
+| `N8N_HARNESS_URL` | the harness webhook, e.g. `https://<instance>/webhook/eval-harness-classify`; one per install |
+| `N8N_HARNESS_TOKEN` | the secret the webhook's header-auth credential holds |
+| `N8N_HARNESS_AUTH_HEADER` / `N8N_HARNESS_AUTH_PREFIX` | the header it rides in and what precedes it; default `X-Eval-Secret`, no prefix |
+
+- **Request** — `{case_id, input, expected, prompt, params}`: `case_id` is `Sample.key`, `input` the row's query, `expected` its gold (informational; PromptPotter grades), each sent as the object where its text is a JSON object, `prompt` the rendered candidate (`""` asks for the production text), `params` the node's `output_schema` / `answer_fields` where its config holds them.
+- **Reply** — `{case_id, answer, raw}`: `answer` is graded, a label or the graded fields (`fields_match`) as an object or its JSON string. An HTTP error, a timeout or an empty `answer` is an errored cell, never a wrong answer.
+- **The model is the n8n node's.** The graph declares no model and the wire sends none, so no dataset can aim the call elsewhere. Cells are keyed on a hash of `N8N_HARNESS_URL`; a model changed inside n8n re-keys nothing, so measure it under a new dataset.
+- **No usage is reported.** A cell is unbounded and unpriced, so a dollar or token ceiling refuses it (`NO_RATE`) and a campaign bills only its optimizer calls; latency is the POST's round trip.
+- **Each `output_schema` property's description is a search axis the harness must apply** from `params.output_schema`, else its arms make the same call; one `output_schema` with one answer field opens the `response_format` toggle, whose `text` arm sends no `params`.
+
+One graded label (`rows` items as the harness's input; the gold a label):
+
+```yaml
+source:
+  recipe: rows
+  items:
+  - query: '{"from": "billing@example.com", "subject": "Your plan renewed", "body": "No action needed."}'
+    ground_truth: "false"
+  - query: '{"from": "lena@example.com", "subject": "Project sync?", "body": "Can we meet Thursday?"}'
+    ground_truth: "true"
+pipeline:
+  backend_type: n8n
+campaign:
+  scoring: label_match(predicted, ground_truth)
+```
+
+Several graded fields (the answer a JSON object string; `null` leaves a field ungraded on that row):
+
+```yaml
+source:
+  recipe: rows
+  items:
+  - query: '{"from": "lena@example.com", "subject": "Project sync?", "body": "Can we meet Thursday? Lena"}'
+    ground_truth: {requires_action: ["true"], contact_name: ["Lena Brunner", "Lena"]}
+  - query: '{"from": "billing@example.com", "subject": "Your plan renewed", "body": "No action needed."}'
+    ground_truth: {requires_action: ["false"], contact_name: null}
+pipeline:
+  backend_type: n8n
+  nodes:
+    harness:
+      config:
+        output_schema:
+          type: object
+          properties:
+            requires_action: {type: string, enum: ["true", "false"]}
+            contact_name: {type: string}
+          required: [requires_action, contact_name]
+        answer_fields: [requires_action, contact_name]
+campaign:
+  scoring: fields_match(predicted, ground_truth)
+```
 
 ## Self-healing a node
 

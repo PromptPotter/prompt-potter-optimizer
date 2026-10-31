@@ -57,3 +57,4 @@ Next: [Your first campaign](03-first-campaign.md).
 | `ANTHROPIC_API_KEY` | using Anthropic |
 | `TERMNORM_URL` | a TermNorm backend elsewhere than `http://127.0.0.1:8000` |
 | `TERMNORM_TOKEN` | a TermNorm backend that requires auth |
+| `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN` | the `n8n` connector: an eval-harness webhook and its secret (`N8N_HARNESS_AUTH_HEADER`, default `X-Eval-Secret`) |

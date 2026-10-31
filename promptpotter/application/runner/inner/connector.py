@@ -89,10 +89,10 @@ def _instrument(cells: InnerCells, cell: Seat) -> str:
 
 
 def promptpotter_wire_adapter(
-    query: str,
+    sample: Sample,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"query": query}
+    payload: dict[str, Any] = {"query": sample.query}
 
     optimizer_prompt_overrides = {k: dict(v) for k, v in node_config_items(pipeline_params) if v}
     if optimizer_prompt_overrides:
@@ -127,11 +127,11 @@ async def _in_process_run(
 
 def _cell_envelope_s(sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
     """Through this connector's OWN adapter, so the envelope and the run that spends it read one payload."""
-    return inner_cell_envelope_s(sample, promptpotter_wire_adapter(sample.query, pipeline_params))
+    return inner_cell_envelope_s(sample, promptpotter_wire_adapter(sample, pipeline_params))
 
 
 def _cell_hop(sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
-    return inner_cell_hop(sample, promptpotter_wire_adapter(sample.query, pipeline_params))
+    return inner_cell_hop(sample, promptpotter_wire_adapter(sample, pipeline_params))
 
 
 CONNECTOR = Connector(

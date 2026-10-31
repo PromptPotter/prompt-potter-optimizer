@@ -120,7 +120,7 @@ def probes() -> list[Probe]:
         *(
             _backend(name)
             for name, connector in connectors.CONNECTORS.table.items()
-            if connector.execution == "remote_http"
+            if connector.execution == "remote_http" and connector.base_url()
         ),
         *(_signin(provider, call, paths.provider_config) for provider, call in redeem.items()),
         *(_llm_key(provider, spec, key) for provider, (spec, key) in keyed_specs().items()),
