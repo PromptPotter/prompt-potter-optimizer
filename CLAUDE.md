@@ -35,9 +35,11 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 **The archive is filed by the dataset a row MEASURED, never the campaign that paid for it** — [`infrastructure/store/CLAUDE.md`](promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign.
 
-## STOP — no backward compatibility, ever
+## STOP — no backward compatibility in code or run data
 
-Zero released versions, zero data worth keeping. **The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers on-disk shape**: design the right shape, then wipe the data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
+**The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers run data's on-disk shape**: design the right shape, then wipe the run data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
+
+**What an account owns or agreed to is not run data: it is migrated, never wiped** — the SURVIVOR rows of `store/data_root.py` (users, identity, keys, charges, consent, and what the account authored). A reshape of one ships a migration that runs once at landing, under the landing code, before the proof ([`docs/decisions.md`](docs/decisions.md) § 0011); it is a release step, never a reader that accepts two shapes, and it is deleted once landed.
 
 **Names are distinct and self-describing.** Grep for collisions; a second word for something the repo already names is a deletion, not a synonym; a name that stopped describing its contents is renamed with its doc and `CLAUDE.md` row in the same commit.
 
