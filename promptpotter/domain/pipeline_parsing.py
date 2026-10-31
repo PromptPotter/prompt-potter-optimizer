@@ -332,21 +332,6 @@ def _check_member_structure(
 
     if not any(node.kind in MEMBER_KINDS for node in parsed.values()):
         return
-    default = list(pipelines.get(DEFAULT_PIPELINE) or [])
-    measurements = [n for n in default if kind(n) is NodeKind.GATEWAY]
-    if len(measurements) != 1:
-        _refuse(
-            "an optimizer manifest's `default` pipeline must name exactly one measurement node "
-            f"(found {measurements}): with none the round has no rows, with two nothing says "
-            "which set a selector reads.",
-            measurement_nodes=measurements,
-        )
-    controllers = [n for n in default if kind(n) is NodeKind.CONTROLLER]
-    if len(controllers) > 1:
-        _refuse(
-            f"`default` names {len(controllers)} controllers ({controllers}); a round has one.",
-            controller_nodes=controllers,
-        )
     for pipeline, steps in pipelines.items():
         for i, step in enumerate(steps):
             if kind(step) is NodeKind.ELIMINATOR and not any(

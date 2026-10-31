@@ -172,8 +172,7 @@ def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSc
     )
 
 
-# How many nodes a role holds: exactly one, at most one, at least one, any number.
-Holds = Literal["one", "optional", "some", "any"]
+Holds = Literal["exactly one", "at most one", "at least one", "any number of"]
 
 
 def _role(holds: Holds, *kinds: NodeKind) -> dict[str, Any]:
@@ -193,19 +192,19 @@ class RoundPlan:
     gate: ArmGateMode
     # The round walk, a field per role in the order it lists them (`_round_plan`): a node takes
     # the first role at or past the one before it that admits its kind, so one kind serves two.
-    sampler: Sampler = field(metadata=_role("one", NodeKind.SAMPLER))
+    sampler: Sampler = field(metadata=_role("exactly one", NodeKind.SAMPLER))
     proposers: tuple[Proposer, ...] = field(
-        metadata=_role("some", NodeKind.LLM, NodeKind.ALGORITHM)
+        metadata=_role("at least one", NodeKind.LLM, NodeKind.ALGORITHM)
     )
     # Races the measurement node's walk.
-    eliminator: Eliminator | None = field(metadata=_role("optional", NodeKind.ELIMINATOR))
+    eliminator: Eliminator | None = field(metadata=_role("at most one", NodeKind.ELIMINATOR))
     # The gateway is no member: the bench's scoring walks it, so the plan holds its name.
-    measurement: str = field(metadata=_role("one", NodeKind.GATEWAY))
-    selector: Selector = field(metadata=_role("one", NodeKind.SELECTOR))
+    measurement: str = field(metadata=_role("exactly one", NodeKind.GATEWAY))
+    selector: Selector = field(metadata=_role("exactly one", NodeKind.SELECTOR))
     # Absent, the selector's ``ranked`` is the next population whole.
-    survivor: Survivor | None = field(metadata=_role("optional", NodeKind.ALGORITHM))
-    adapters: tuple[Adapter, ...] = field(metadata=_role("any", NodeKind.LLM))
-    controller: Controller | None = field(metadata=_role("optional", NodeKind.CONTROLLER))
+    survivor: Survivor | None = field(metadata=_role("at most one", NodeKind.ALGORITHM))
+    adapters: tuple[Adapter, ...] = field(metadata=_role("any number of", NodeKind.LLM))
+    controller: Controller | None = field(metadata=_role("at most one", NodeKind.CONTROLLER))
 
     @property
     def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
@@ -262,19 +261,19 @@ def _round_plan(
     filled: dict[str, Any] = {}
     for role in roles:
         nodes, holds = held[role.name], role.metadata["holds"]
-        if (holds in ("one", "some") and not nodes) or (holds in ("one", "optional") and nodes[1:]):
+        many = holds in ("at least one", "any number of")
+        if (holds in ("exactly one", "at least one") and not nodes) or (not many and nodes[1:]):
+            kinds = "/".join(sorted(kind.value for kind in role.metadata["admits"]))
             raise _walk_refused(
                 name,
-                f"`default` walks {nodes} as its {role.name}, and a round holds {holds} — it "
-                f"walks {walk}.",
+                f"`default` walks {nodes or 'no node'} as its {role.name}, where a round holds "
+                f"{holds} {kinds} node: its walk is {walk}.",
             )
         # A gateway is no member: the plan holds its name.
         members = [
             n if declared[n] is NodeKind.GATEWAY else optimizers.NODE_MEMBERS.get(n) for n in nodes
         ]
-        filled[role.name] = (
-            tuple(members) if holds in ("some", "any") else next(iter(members), None)
-        )
+        filled[role.name] = tuple(members) if many else next(iter(members), None)
     initial = [
         cast("Proposer", optimizers.NODE_MEMBERS.get(n))
         for n in schema.pipelines.get(INITIAL_POPULATION, ())
