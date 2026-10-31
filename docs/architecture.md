@@ -92,7 +92,7 @@ reads past the declaration asks that predicate alone — owned by [`decisions.md
 arm is graded on one bench set under one budget. What controlled switches, one site each: the
 search is the prompt's own fields (`application/jobs/mint.py::_prompt_axes_only`); memory is the
 arm's own line (`infrastructure/store/archive_queries.py::ArmOf`) and the frozen ruler
-(`application/bench/difficulty.py::judging_ruler`), while the cache still replays; the bench pass
+(`promptpotter/application/bench/difficulty.py::judging_ruler`), while the cache still replays; the bench pass
 is the launch's own (`application/jobs/mint.py::declare`); every act on an arm is admitted and leaves
 the comparison as its event (`domain/run_records.py::LeftComparisonRecord`); the
 ceiling meters search beside bench (`domain/spend.py::CeilingMeter`). Each pair is labelled by one
@@ -279,7 +279,7 @@ A PR touching one states its case.
 - **`RoundResult.panel` means "proposed in THIS round"** — `application/intelligence/rasch.py::build_observations`
   flattens it undeduplicated, so a retained individual read off every cell is counted k+1 times.
 - **One tenant δ ruler, one clock** (`infrastructure/store/ruler_store.py::RulerStore`) — every θ is
-  read on it, less the parent line's rows (`application/bench/difficulty.py::judging_ruler`); every
+  read on it, less the parent line's rows (`promptpotter/application/bench/difficulty.py::judging_ruler`); every
   reading carries its `RulerStamp`.
 - **The discoverability injections** (`application/optimizers/potter/dispatch/injections/catalogues.py`).
 - **The `new` verb + `/potter-run` onboarding**, and **check-in's one `task_context` decomposition**.
