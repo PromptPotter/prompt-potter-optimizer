@@ -22,10 +22,11 @@ home's cells asks its owner. A store keyed by what one account holds (`tenant_da
 roots at the tenant, never the home. A MEMORY read past `store/archive_queries.py`'s scope
 (`bind_memory_scope`) is the bug.
 
-**`store/account_spend.py` banks what a subject still holds before a delete** — every destroyer calls
-it itself, so none can skip the bank; `mirrored` L4 inner copies are skipped, or that money bills twice.
-**A subject's COST and the account's BILL are two folds** (`_Cost`, `_Billed`): a campaign row reads
-`campaign_spend` (cost, an inner run's included); only a bill or a bank skips `mirrored`.
+**The account's bill is its charges, never its ledgers** (`store/wallet_store.py::ChargeBook`, written by
+`llm/spend_book.py::Admission` at every hold and every billed part), so no delete and no reshape reaches it.
+**`store/account_spend.py` banks a cycle's spend before a delete**, for its campaign's cost and ceilings —
+every destroyer calls it itself; `mirrored` L4 inner copies are skipped, or that money banks twice.
+A campaign row reads `campaign_spend` (`_Cost`, an inner run's included); a bank reads `_Billed`.
 
 **A cycle's own facts are ledger records, and `index.json` is their fold** — written by
 `projections/cycle_index.py::write_cycle_index`, read through `read_cycle_index` off the ledger, never

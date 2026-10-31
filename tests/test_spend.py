@@ -76,7 +76,12 @@ from promptpotter.application.head_to_head_price import (
     priced_head_to_head,
 )
 from promptpotter.application.jobs import mint
-from promptpotter.application.jobs.coupon import coupon_status, keyed_client, resolve_api_key
+from promptpotter.application.jobs.coupon import (
+    bind_account,
+    coupon_status,
+    keyed_client,
+    resolve_api_key,
+)
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_share,
@@ -106,6 +111,7 @@ from promptpotter.application.jobs.registry import (
     JobRegistry,
 )
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
+from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
@@ -239,12 +245,11 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.store.account_spend import (
-    account_ledgers,
+    account_bill,
     bank_spend,
     billed_spend,
     iter_user_token_usage,
     ledger_cost,
-    sum_user_spend,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_last,
@@ -262,7 +267,7 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.infrastructure.store.wallet_store import CouponGrant
+from promptpotter.infrastructure.store.wallet_store import BilledCharge, CouponGrant
 from promptpotter.presentation.api.routers import commands as commands_api
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
@@ -274,6 +279,7 @@ from promptpotter.shared.errors import (
     CycleBusyError,
     ErrorCategory,
     HostAllowanceExhaustedError,
+    LedgerUnreadableError,
     NoApiKeyError,
     NotFoundError,
     PayloadInvalidError,
@@ -2587,7 +2593,7 @@ def _account_stores(
     delegated: float | None = None,
 ) -> Stores:
     """`issuer` set makes this a WEB identity; the box operator has none and is unmetered. Its one
-    campaign's cycle is `_HELD_HOP`, which holds what the box's keys *spent* for it."""
+    campaign's cycle is `_HELD_HOP`; its charges hold what the box's keys *spent* for it."""
     stores = workspace(
         tmp_path,
         IdentityContext(
@@ -2606,13 +2612,13 @@ def _account_stores(
     stores.campaigns.create_campaign(minted_campaign(_HELD_HOP, config=_budgeted(Budget())))
     stores.campaigns.mint_cycle(_HELD_HOP)
     if spent is not None:
-        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(_HELD_HOP))).append(
-            billed_call(
-                kind="backend",
-                node="solve",
-                provider="openrouter",
-                timestamp="2026-01-01T00:00:00+00:00",
-                **spent,
+        stores.charges.append(
+            BilledCharge(
+                hold_id="spent",
+                key_source="host",
+                cost_usd=spent.get("cost_usd"),
+                rate_priced_usd=None,
+                tokens=spent["input_tokens"] + spent["output_tokens"],
             )
         )
     return stores
@@ -2686,7 +2692,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         provider="openrouter",
         key_source="host",
     )
-    priced = sum_user_spend(ledgers=[tmp_path / "bound.jsonl"]).host
+    priced = billed_spend([tmp_path / "bound.jsonl"]).host
     assert (priced.used_usd, priced.unpriced_tokens) == (0.0, 0), (
         "a price off our rate table was recorded as spend, or its tokens as unpriced"
     )
@@ -2871,11 +2877,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
     with pytest.raises(HostAllowanceExhaustedError):
         resolve_api_key(spent_out.identity, "openai", spent_out)
-    own_hop = CycleHop(campaign_id="own", cycle_id="cycle_own0")
-    spent_out.campaigns.create_campaign(minted_campaign(own_hop))
-    spent_out.campaigns.mint_cycle(own_hop)
-    CycleEventLog.open(CycleDir(spent_out.campaigns.cycle_dir(own_hop))).append(
-        billed_call(5.0, key_source="user", input_tokens=9_000_000)
+    spent_out.charges.append(
+        BilledCharge(
+            hold_id="own", key_source="user", cost_usd=5.0, rate_priced_usd=None, tokens=9_000_000
+        )
     )
     status = coupon_status(spent_out)
     assert (status.left_usd, status.exhausted) == (0.0, True), (
@@ -3126,9 +3131,12 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     forker.campaigns.mint_cycle(root)
 
     def bill(at: CycleHop, usd: float) -> None:
-        CycleEventLog.open(CycleDir(forker.campaigns.cycle_dir(at))).append(
-            billed_call(usd, input_tokens=1_000)
-        )
+        unbind = bind_account(forker)
+        try:
+            ledger = CycleEventLog.open(CycleDir(forker.campaigns.cycle_dir(at)))
+            _pay(ledger, usd, input_tokens=1_000, output_tokens=0)
+        finally:
+            unbind()
 
     bill(root, 0.1)
     root_dir = forker.campaigns.cycle_dir(root)
@@ -3302,6 +3310,34 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
 # 6. Spend outlives what spent it
 
 
+def _pay(ledger: CycleEventLog, cost_usd: float, *, input_tokens: int, output_tokens: int) -> None:
+    """One send through the one admission every paid call takes, on *ledger*."""
+    bound = telemetry.set_cycle_ledger(ledger)
+    bound_send = SendBound(input_tokens=input_tokens, output_tokens=output_tokens, usd=cost_usd)
+    try:
+        with (
+            spending_under(spend_book()),
+            admitted(
+                CallLabel("backend", "backend"),
+                bound_send,
+                model="openai/gpt-4o",
+                provider="openrouter",
+                paid_by="host",
+            ) as send,
+        ):
+            send.settle(Billed(TokenAccount(input=input_tokens, output=output_tokens), cost_usd))
+    finally:
+        telemetry.reset_cycle_ledger(bound)
+
+
+@pytest.fixture
+def account_bound(built_stores: Stores) -> Iterator[None]:
+    unbind = bind_account(built_stores)
+    yield
+    unbind()
+
+
+@pytest.mark.usefixtures("account_bound")
 def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3310,21 +3346,12 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     stub, retried = f"{root}_fork_aaaa", f"{root}_fork_bbbb"
     stores.campaigns.create_campaign(minted_campaign(CycleHop(campaign_id="camp-2", cycle_id=root)))
 
-    def spent_cycle(cycle_id: str, *, cost_usd: float) -> Path:
-        hop = CycleHop(campaign_id="camp-2", cycle_id=cycle_id)
+    def spent_cycle(cycle_id: str, *, cost_usd: float, campaign_id: str = "camp-2") -> Path:
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
         stores.campaigns.mint_cycle(hop)
         cycle_dir = stores.campaigns.cycle_dir(hop)
-        CycleEventLog.open(CycleDir(cycle_dir)).append(
-            billed_call(
-                cost_usd,
-                kind="backend",
-                node="backend",
-                model="openai/gpt-4o",
-                provider="openrouter",
-                input_tokens=2_000,
-                output_tokens=800,
-                timestamp="2026-01-01T00:00:00+00:00",
-            )
+        _pay(
+            CycleEventLog.open(CycleDir(cycle_dir)), cost_usd, input_tokens=2_000, output_tokens=800
         )
         return CycleLayout(cycle_dir).ledger
 
@@ -3333,7 +3360,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     retried_ledger = spent_cycle(retried, cost_usd=0.05)
 
     def account_usd() -> float:
-        return sum_user_spend(ledgers=account_ledgers(stores.campaigns)).host.used_usd
+        return account_bill(stores.charges).host.used_usd
 
     def cleanup(cycle_id: str) -> bool:
         return cleanup_stub_fork_if_empty(
@@ -3425,20 +3452,10 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         "a forwarded inner cycle was banked twice, or its own spend not at all"
     )
 
-    # A draft never minted banks under its own id, and a Start's claim on it holds off a discard.
+    # A draft never minted is charged at its sends, and a Start's claim on it holds off a discard.
     def spent_draft(draft_id: str, cost_usd: float) -> Path:
         draft_dir = stores.drafts.draft_dir(draft_id)
-        CycleEventLog.open(CycleDir(draft_dir)).append(
-            billed_call(
-                cost_usd,
-                kind="backend",
-                node="checkin",
-                model="openai/gpt-4o",
-                provider="openrouter",
-                input_tokens=300,
-                output_tokens=100,
-            )
-        )
+        _pay(CycleEventLog.open(CycleDir(draft_dir)), cost_usd, input_tokens=300, output_tokens=100)
         return draft_dir
 
     draft = new_draft(
@@ -3490,10 +3507,6 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     with pytest.raises(NotFoundError):
         command(edit)
     assert not draft_dir.exists(), "an edit on a closed draft wrote its dir back"
-    (draft_bank,) = [t for t in tombstones() if t.draft_id == draft.draft_id]
-    assert not draft_bank.campaign_id and draft_bank.spent["host"].used_usd == pytest.approx(
-        0.04
-    ), "a discarded draft banked under a campaign's id, or not its own spend"
     assert account_usd() == pytest.approx(with_draft), "discarding a spent draft un-spent it"
     with pytest.raises(NotFoundError):
         command(StartCheckinPayload(draft_id=draft.draft_id))
@@ -3501,18 +3514,9 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         stores.drafts.claim(draft.draft_id)
     assert not draft_dir.exists(), "a Start on a discarded draft wrote its dir back"
 
-    # A framing paid before its cycle exists bills a draft with no check-in, and its discard banks it.
+    # A framing paid before its cycle exists bills a draft with no check-in, and its discard keeps it.
     async def framed(*_: object, ledger: CycleEventLog, **__: object) -> None:
-        ledger.append(
-            billed_call(
-                0.03,
-                node="checkin",
-                model="openai/gpt-4o",
-                provider="openrouter",
-                input_tokens=500,
-                output_tokens=200,
-            )
-        )
+        _pay(ledger, 0.03, input_tokens=500, output_tokens=200)
         raise PayloadInvalidError("refused after the framing", code="refused")
 
     monkeypatch.setattr(mint, "commit_task_framing", framed)
@@ -3537,8 +3541,20 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
             )
         )
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
-    (framing_bank,) = [t for t in tombstones() if t.draft_id not in ("", draft.draft_id)]
-    assert not framing_bank.campaign_id and framing_bank.spent["host"].used_usd == pytest.approx(
-        0.03
-    ), "a refused mint's framing went unbanked, or banked under the campaign it never minted"
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
+
+    # A reset follows a reshape: it drops ledgers this build no longer reads and keeps the money.
+    framed_total = account_usd()
+    stores.campaigns.create_campaign(minted_campaign(CycleHop(campaign_id="camp-3", cycle_id=root)))
+    reshaped = spent_cycle(root, cost_usd=0.13, campaign_id="camp-3")
+    lines = [json.loads(line) for line in reshaped.read_text(encoding="utf-8").splitlines()]
+    for line in lines:
+        line.pop("key_source", None)
+    write_jsonl(reshaped, lines)
+    with pytest.raises(LedgerUnreadableError):
+        billed_spend([reshaped])
+    apply_reset(plan_reset(stores.projects_root, tenant_id=None))
+    assert not stores.campaigns.iter_campaign_dirs(), "a reset kept a campaign it cannot read"
+    assert account_usd() == pytest.approx(framed_total + 0.13), (
+        "a reset over a reshaped ledger dropped the account's spend with it"
+    )

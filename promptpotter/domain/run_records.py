@@ -525,14 +525,14 @@ class BankedSpend(FrozenModel):
 
 
 class SpendTombstoneRecord(FrozenModel):
-    """On the WORKSPACE ledger, so deleting what spent it cannot re-earn a spend ceiling."""
+    """On the WORKSPACE ledger, so deleting a campaign's cycle cannot re-earn its ceiling; the
+    account's charges are `store/wallet_store.py::ChargeBook`'s, which no delete reaches."""
 
     record_type: Literal["spend_tombstone"] = "spend_tombstone"
-    campaign_id: str = ""
+    campaign_id: str
     # Empty for a whole-campaign bank.
     cycle_id: str = ""
-    draft_id: str = ""
-    # By whose key paid it, so a deletion keeps the coupon's count as it keeps the account's.
+    # By whose key paid it, so the campaign's row keeps what its deleted cycles cost.
     spent: dict[KeySource, BankedSpend]
     # What the campaign's ceiling counted of it in each meter, so a bank needs no manifest to name one.
     metered: dict[CeilingMeter, Budget]
@@ -540,12 +540,7 @@ class SpendTombstoneRecord(FrozenModel):
 
     @property
     def subject(self) -> BankedSubject:
-        return BankedSubject(self.campaign_id, self.cycle_id, self.draft_id)
-
-    @model_validator(mode="after")
-    def _one(self) -> SpendTombstoneRecord:
-        _one_subject(self.subject)
-        return self
+        return BankedSubject(self.campaign_id, self.cycle_id)
 
 
 class BankedCommand(FrozenModel):

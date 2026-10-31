@@ -9,10 +9,10 @@ from promptpotter.application.jobs.coupon import face_of
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.spend import NOTHING_PAID, Budget, PaidSpend
 from promptpotter.infrastructure.identity.default_claim import is_host_tenant_dir
-from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
+from promptpotter.infrastructure.store.account_spend import account_bill
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.user_store import Torn, User, read_accounts
-from promptpotter.infrastructure.store.wallet_store import GrantStore
+from promptpotter.infrastructure.store.wallet_store import ChargeBook, GrantStore
 from promptpotter.shared.errors import LedgerUnreadableError
 
 
@@ -61,7 +61,7 @@ def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
     return AccountUsage(
         user_id=user.user_id,
         email=user.email,
-        spent=sum_user_spend(ledgers=account_ledgers(campaigns)),
+        spent=account_bill(ChargeBook(tenant_dir)),
         ceilings=face_of(
             GrantStore(tenant_dir).load(),
             host=is_host_tenant_dir(user.user_id),

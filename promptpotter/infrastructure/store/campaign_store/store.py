@@ -430,11 +430,6 @@ class CampaignStore:
             metered=_ledger_meters(self.campaign_cycle_ledgers(campaign_id)),
         )
 
-    def bank_all_before_removal(self) -> None:
-        """Removal only: banking a subject that keeps its rows counts the money twice."""
-        for campaign_dir in self.iter_campaign_dirs():
-            self._campaign_metered_bank(campaign_dir.name)
-
     def delete_campaign(
         self,
         campaign_id: str,

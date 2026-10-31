@@ -45,7 +45,8 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
   block_packs/{name}/pack.json          # the install's block packs, read-only to every account
   jobs/{job_id}.json                    # machine-global admission records
   projects/{tenant_id}/
-    .workspace/
+    charges.jsonl                       # the account's bill, one line per hold and billed send
+    .workspace/                         # run data: `reset` drops it with the campaigns it names
       active_session.json
       events.jsonl                      # workspace ledger — commands with no cycle, the account's events
     head_to_heads/{id}.json             # `domain/campaign.py::HeadToHeadRecord`

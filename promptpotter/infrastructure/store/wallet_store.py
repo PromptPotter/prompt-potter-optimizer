@@ -1,19 +1,27 @@
-"""An account's two wallet files: what the host grants it on the box's keys, and the keys it holds.
+"""An account's three wallet files: what the host grants it on the box's keys, the keys it holds,
+and what its sends were charged.
 
-Neither holds a balance: what the coupon has left is a fold of the account's ledgers
-(`application/jobs/coupon.py`), never a counter beside them.
+None holds a balance: what the coupon has left is a fold of the charges
+(`store/account_spend.py::account_bill`), never a counter beside them.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import Budget, KeySource
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import read_json_optional, take_lock, write_json
+from promptpotter.infrastructure.store.io import (
+    append_line,
+    read_json_optional,
+    take_lock,
+    write_json,
+)
 from promptpotter.shared.clock import utcnow_iso
 
 _KEYS_LOCK_WAIT_S = 5.0
@@ -93,3 +101,55 @@ class TenantApiKeyStore:
             )
         finally:
             lock.release()
+
+
+CHARGES_FILE = "charges.jsonl"
+
+
+class HeldCharge(FrozenModel):
+    """A send's hold, booked as it is placed: unclosed, it is what the send may have cost."""
+
+    record_type: Literal["held"] = "held"
+    hold_id: str
+    key_source: KeySource
+    input_tokens: int
+    # ``None`` where nothing capped the reply: such a send holds no tokens.
+    output_tokens: int | None
+    cost_usd: float | None
+    # The ledger the hold landed on, relative to the account: while its producer is attached the
+    # run's reservation already holds it.
+    ledger: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class BilledCharge(FrozenModel):
+    """One answered part of a send, booked as it lands; both figures ``None`` is unpriced."""
+
+    record_type: Literal["billed"] = "billed"
+    hold_id: str
+    key_source: KeySource
+    cost_usd: float | None
+    rate_priced_usd: float | None
+    tokens: int
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+ChargeRecord = HeldCharge | BilledCharge
+
+
+class ChargeBook:
+    """Written at the send by `spend_book.py::Admission`, so no delete and no reshape of run data reads a ledger to keep it."""
+
+    def __init__(self, account_dir: Path) -> None:
+        self.account_dir = account_dir
+        self.path = account_dir / CHARGES_FILE
+
+    def append(self, charge: ChargeRecord) -> None:
+        self.account_dir.mkdir(parents=True, exist_ok=True)
+        append_line(self.path, charge.model_dump_json().encode("utf-8"))
+
+    def held_on(self, ledger: Path) -> str:
+        return Path(os.path.relpath(ledger, self.account_dir)).as_posix()
+
+    def ledger_of(self, hold: HeldCharge) -> Path:
+        return self.account_dir / hold.ledger

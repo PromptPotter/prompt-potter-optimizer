@@ -205,15 +205,9 @@ import-graph script before and after; close each wave with `gate.py --only layer
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
-- **`reset` still refuses when the spend bank's OWN record kinds reshape** (`TokenUsageRecord`,
-  `SpendHoldRecord`, `SpendTombstoneRecord`): the bank cannot read the money it would bank, so it
-  drops nothing, and the wipe is by hand. Action: decide whether such a reshape migrates the bank
-  first or banks nothing on purpose. **Re-test:** a reset over a ledger with a reshaped `token_usage` line.
-- **`reset` drops a campaign directory with no manifest unbanked, and guards no live producer**:
-  `maintenance/reset.py::apply_reset` banks through `iter_campaign_dirs`, which skips such a
-  directory, and never takes the guard `delete` takes (`_guard_and_release`). Action: bank by
-  ledger, not manifest, and take the delete's guard. **Re-test:** a reset over a manifest-less
-  campaign whose ledger is billed.
+- **`reset` guards no live producer**: `maintenance/reset.py::apply_reset` never takes the guard
+  `delete` takes (`_guard_and_release`), so it removes a running cycle's directory under it.
+  Action: take the delete's guard per cycle. **Re-test:** a reset while a run holds its producer lock.
 - **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append
   an `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both
   reads derive from. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.

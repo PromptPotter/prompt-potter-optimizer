@@ -8785,21 +8785,15 @@
       },
       "SpendTombstoneRecord": {
         "additionalProperties": false,
-        "description": "On the WORKSPACE ledger, so deleting what spent it cannot re-earn a spend ceiling.",
+        "description": "On the WORKSPACE ledger, so deleting a campaign's cycle cannot re-earn its ceiling; the\naccount's charges are `store/wallet_store.py::ChargeBook`'s, which no delete reaches.",
         "properties": {
           "campaign_id": {
-            "default": "",
             "title": "Campaign Id",
             "type": "string"
           },
           "cycle_id": {
             "default": "",
             "title": "Cycle Id",
-            "type": "string"
-          },
-          "draft_id": {
-            "default": "",
-            "title": "Draft Id",
             "type": "string"
           },
           "metered": {
@@ -8840,6 +8834,7 @@
           }
         },
         "required": [
+          "campaign_id",
           "spent",
           "metered"
         ],

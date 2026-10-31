@@ -8,7 +8,6 @@ from typing import NamedTuple
 
 from promptpotter.config.paths import BLOCK_PACKS_DIR, SHARED_CACHE_DIRS
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import (
     iter_files,
@@ -25,21 +24,19 @@ from promptpotter.infrastructure.store.layout import (
     tenant_workspace,
 )
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
-from promptpotter.infrastructure.store.session_pointer import (
-    active_pointer_exists,
-    clear_active_pointer,
-)
 from promptpotter.infrastructure.store.tenant_dataset_store import (
     BANKS_DIR,
     MATERIALIZED_DIR,
     UPLOADS_DIR,
 )
+from promptpotter.infrastructure.store.wallet_store import CHARGES_FILE
 
 logger = logging.getLogger(__name__)
 
 
-# A head-to-head manifest and a ruler row name campaigns, so they go with them; a draft is a cycle not yet minted.
-_DROP_NAMES = ("campaigns", "head_to_heads", DRAFTS_DIR, RULER_FILE)
+# A head-to-head manifest, a ruler row and the workspace ledger (the active pointer beside it) name
+# campaigns, so they go with them; a draft is a cycle not yet minted.
+_DROP_NAMES = ("campaigns", "head_to_heads", DRAFTS_DIR, RULER_FILE, ".workspace")
 
 # Exhaustive, so a leftover surfaces as unrecognized; `SHARED_CACHE_DIRS` is spliced so a new cache is never destroyed.
 _PRESERVE_NAMES = (
@@ -53,9 +50,9 @@ _PRESERVE_NAMES = (
     BANKS_DIR,
     UPLOADS_DIR,
     "task-context",
-    ".workspace",
     ".cache",
     "user.json",
+    CHARGES_FILE,
 )
 
 
@@ -65,11 +62,6 @@ class TenantReset:
     drop: tuple[Path, ...]
     preserve: tuple[Path, ...]
     unrecognized: tuple[Path, ...]
-    holds_pointer: bool
-
-    @property
-    def pointer_label(self) -> str:
-        return f"projects/{self.workspace.name}/.workspace/active_session.json"
 
 
 class SandboxDrop(NamedTuple):
@@ -82,14 +74,13 @@ class ResetPlan:
     projects_root: Path
     tenants: tuple[TenantReset, ...]
     sandboxes: tuple[SandboxDrop, ...]
-    # Kept: no owner record names no workspace to bank into (as `jobs/reaper.py::reclaim_orphan_sandboxes`).
+    # Kept: with no owner record they name no tenant (as `jobs/reaper.py::reclaim_orphan_sandboxes`).
     unattributable_sandboxes: tuple[Path, ...]
 
     @property
     def drops(self) -> list[str]:
         return [
             *(str(p) for tenant in self.tenants for p in tenant.drop),
-            *(tenant.pointer_label for tenant in self.tenants if tenant.holds_pointer),
             *(str(target.sandbox) for target in self.sandboxes),
         ]
 
@@ -117,7 +108,6 @@ def _plan_tenant(workspace: WorkspaceDir) -> TenantReset:
         drop=tuple(drop),
         preserve=tuple(preserve),
         unrecognized=tuple(unrecognized),
-        holds_pointer=active_pointer_exists(workspace),
     )
 
 
@@ -170,8 +160,9 @@ def _remove(path: Path) -> None:
 
 
 def apply_reset(plan: ResetPlan) -> None:
+    """Reads no ledger: a reset follows a reshape this build cannot read, and the account's charges hold its spend."""
     with ExitStack() as held:
-        # Every draft's claim before any bank: one a Start holds refuses the reset with nothing banked.
+        # Every draft's claim before anything goes: one a Start holds refuses the reset whole.
         claims = {
             tenant.workspace: [
                 held.enter_context(DraftStore(tenant.workspace).hold(draft.name))
@@ -180,20 +171,13 @@ def apply_reset(plan: ResetPlan) -> None:
             for tenant in plan.tenants
         }
         for tenant in plan.tenants:
-            # Money first: banking after the drop banks nothing. A draft's destroyer banks it under its id.
-            CampaignStore(tenant.workspace).bank_all_before_removal()
             drafts = DraftStore(tenant.workspace)
             for claim in claims[tenant.workspace]:
-                drafts.discard(claim)
+                with claim:
+                    _remove(drafts.draft_dir(claim.draft_id))
             for path in tenant.drop:
                 _remove(path)
                 logger.info("reset: removed %s", path)
-    for tenant in plan.tenants:
-        if tenant.holds_pointer:
-            clear_active_pointer(tenant.workspace)
-            logger.info("reset: cleared active-session pointer for %s", tenant.workspace.name)
-    # After the campaign trees: outer totals, then the sandbox residue not already forwarded, sum exactly once.
     for target in plan.sandboxes:
-        store = CampaignStore(tenant_workspace(plan.projects_root, target.owner.tenant_id))
-        store.delete_inner_sandbox(target.sandbox, campaign_id=target.owner.campaign_id)
+        _remove(target.sandbox)
         logger.info("reset: removed inner sandbox %s", target.sandbox.name)

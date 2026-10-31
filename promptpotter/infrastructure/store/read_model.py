@@ -20,6 +20,7 @@ from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import append_line, open_text_robust
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import LedgerUnreadableError
 
@@ -572,26 +573,32 @@ HoldTrailRecord = SpendHoldRecord | TokenUsageRecord
 HOLD_TRAIL: RecordClasses = get_args(HoldTrailRecord)
 
 
-class HeldSends:
-    """A usage record with neither a bill nor a rate's price closes its hold in tokens alone: the money stays held."""
+class HeldSends[H]:
+    """A bill with neither a provider's figure nor a rate's price closes its hold in tokens alone: the money stays held."""
 
     def __init__(self) -> None:
-        self.open: dict[str, SpendHoldRecord] = {}
+        self.open: dict[str, H] = {}
         # The holds closed unpriced, whose `cost_usd` stays held.
-        self.unpriced: dict[str, SpendHoldRecord] = {}
-        self._holds: dict[str, SpendHoldRecord] = {}
+        self.unpriced: dict[str, H] = {}
+        self._holds: dict[str, H] = {}
 
-    def track(self, record: HoldTrailRecord) -> None:
+    def hold(self, hold_id: str, hold: H) -> None:
+        self.open[hold_id] = hold
+        self._holds[hold_id] = hold
+
+    def close(self, hold_id: str, *, priced: bool) -> None:
+        self.open.pop(hold_id, None)
+        # A bill names a hold of another trail where a nested run's copy is carried onto its root.
+        if hold_id in self._holds and not priced:
+            self.unpriced[hold_id] = self._holds[hold_id]
+
+    def track(self: HeldSends[SpendHoldRecord], record: HoldTrailRecord) -> None:
         if isinstance(record, SpendHoldRecord):
-            self.open[record.hold_id] = record
-            self._holds[record.hold_id] = record
-        elif (hold_id := record.hold_id) is not None:
-            self.open.pop(hold_id, None)
-            # A bill names a hold of another trail where a nested run's copy is carried onto its root.
-            if hold_id in self._holds and record.bill_or_rate_usd is None:
-                self.unpriced[hold_id] = self._holds[hold_id]
+            self.hold(record.hold_id, record)
+        elif record.hold_id is not None:
+            self.close(record.hold_id, priced=record.bill_or_rate_usd is not None)
 
 
-def held_tokens(hold: SpendHoldRecord) -> int:
+def held_tokens(hold: SpendHoldRecord | HeldCharge) -> int:
     """An uncapped reply holds no tokens: such a send is admitted only where no token ceiling stands."""
     return 0 if hold.output_tokens is None else hold.input_tokens + hold.output_tokens
