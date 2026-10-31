@@ -41,7 +41,10 @@ def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
     n = ctx["n_priors"]
     priors = f"(of {n} prior{'' if n == 1 else 's'})"
     if ctx["gate"] is EliminationGate.LOCK_IN:
-        return f"leader locked {q}  p_best={ctx['p_best']:.1%} {priors}"
+        return (
+            f"leader locked {q}  p_best={ctx['p_best']:.1%} >= admission={ctx['admission']:.0%}  "
+            f"{priors}"
+        )
     return (
         f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
         f"vs {labels[ctx['leader']]} {priors}"
@@ -156,6 +159,7 @@ class PoBBRace(CatchUpPool):
         super().__init__(
             PoBBCheck(
                 ctx.knobs(PoBBKnobs),
+                admission=ctx.read(Bounds).admission,
                 n_min=ctx.read(Bounds).elimination_n_min,
                 n_samples=len(panel.cells),
                 ruler=ctx.read(Ruler).difficulty.ruler,
@@ -214,13 +218,12 @@ class PoBBRace(CatchUpPool):
                 for pid, grades in fit.priors.items()
             },
         }
-        check = self._check
         if gate is EliminationGate.LOCK_IN:
             kind = PotterCheckpointKind.LEADER_LOCK_IN
-            inputs |= {"lock_in": float(check.lock_in), "lock_in_n_min": int(check.lock_in_n_min)}
+            inputs["admission"] = context["admission"]
         else:
             kind = PotterCheckpointKind.ELIMINATION_CUT
             inputs["epsilon"] = context["epsilon"]
         self._replay.decide(kind, inputs, True, data=data)
-        named = {**labels, check.parent: "parent"}
+        named = {**labels, self._check.parent: "parent"}
         return Elimination(reason=_reason(context, named), context=dict(context))

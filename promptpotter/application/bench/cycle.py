@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, cast
@@ -197,6 +198,12 @@ class Cycle:
             rounds=[origin_round],
             framing=framing,
         )
+
+    def rng(self, round_num: int, tag: str) -> random.Random:
+        """A function of the run's seed, *round_num* and *tag* alone, so a resume redraws the same."""
+        clamp = self.config.optimization.determinism
+        seed = self.session.campaign_id if clamp is None or clamp.seed is None else clamp.seed
+        return random.Random(f"{seed}:{round_num}:{tag}")
 
     @property
     def origin_round(self) -> RoundResult:

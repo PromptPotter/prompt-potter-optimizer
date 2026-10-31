@@ -720,9 +720,13 @@ def write_decisions(out: Path, decisions: dict[str, Any]) -> None:
 async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     """Potter resumed with `--from` under an L2 proposing the same fork at every fire: only the
     first changes something, and the line's forks spend one round budget between them."""
-    # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall.
+    # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall;
+    # no arm stops short, so the ruler a rewind needs spans the rows whatever PoBB would cut.
     config = campaign_config(
-        "potter", rounds, bench_trigger="manual", knobs={"escalation": EVERY_L2}
+        "potter",
+        rounds,
+        bench_trigger="manual",
+        knobs={"escalation": EVERY_L2, "pobb": {"early_stop": False}},
     )
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()

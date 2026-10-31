@@ -410,7 +410,6 @@ class ReadoutProjection(Projection):
             record.n_samples,
             record.p_best,
             record.paired_breakdown,
-            record.decision_grade,
         )
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
@@ -436,14 +435,8 @@ class ReadoutProjection(Projection):
         n_samples: int,
         p_best: float,
         paired_breakdown: dict[ArmKey, dict[str, float]],
-        decision_grade: bool,
     ) -> None:
-        if (
-            not self._block_racing
-            and current_id
-            and current_id != self._standing_printed_for
-            and decision_grade
-        ):
+        if not self._block_racing and current_id and current_id != self._standing_printed_for:
             self._standing_printed_for = current_id
             current_p = p_best
             if paired_breakdown:

@@ -309,7 +309,7 @@ class PairedTRace(nodes.NoCatchUps):
                 pid: {"p_better": p, "n_paired": float(width)} for pid, (p, width) in tested.items()
             }
             p_best = min(p for p, _ in tested.values())
-            snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown, True)
+            snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
             self._progress.race_standing(snapshot)
             # Uncorrected for the multiple tests, as CAPO races: a correction makes cuts rarer.
             beaten_by = sorted(pid for pid, (p, _) in tested.items() if p < self._alpha)

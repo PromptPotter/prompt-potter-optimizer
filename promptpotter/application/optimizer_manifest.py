@@ -369,6 +369,10 @@ class SelectedOptimizer:
         return self.plan.selector.elects_on
 
     @property
+    def admission(self) -> float | None:
+        return self.plan.selector.admission(self)
+
+    @property
     def sampler(self) -> Sampler:
         return self.plan.sampler
 

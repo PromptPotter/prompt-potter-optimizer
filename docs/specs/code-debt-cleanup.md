@@ -329,10 +329,10 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `Budget`'s axes. **Re-test:** `price-head-to-head paper/plans/comparability.yaml` — do one point's
   `search_cells` differ by arm?
 - **A pinned `determinism.seed` makes every replicate one draw.** `PINNED_LOOP_KEYS` pins
-  `optimization.determinism` across a head-to-head, and `bench/node_context.py::_rng` seeds every
+  `optimization.determinism` across a head-to-head, and `bench/cycle.py::Cycle.rng` seeds every
   member off the pin instead of the campaign id, so N replicates of an arm on a pinning dataset make
   the same draws and read as a tight interval. Action: a replicate's identity enters the seed under a
-  pin. **Rides with:** any change to `_rng` or `PINNED_LOOP_KEYS`. **Re-test:** two replicates under a
+  pin. **Rides with:** any change to `Cycle.rng` or `PINNED_LOOP_KEYS`. **Re-test:** two replicates under a
   pinned seed send the same first `l1_generate` request.
 - **The $0 price opens a backend session** (`application/head_to_head_price.py::price_head_to_head`
   through `jobs/launcher/head_to_head.py::dataset_arms`) only to resolve the node models and the

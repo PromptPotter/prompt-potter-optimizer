@@ -171,7 +171,7 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
-from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, is_leader_eligible
+from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, arm_end, is_leader_eligible
 from promptpotter.domain.bench import (
     BenchPass,
     BenchPasses,
@@ -1898,11 +1898,13 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 # 5. Elimination — who is cut, and when
 
 
-def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> None:
+def test_an_arm_is_cut_only_on_evidence_that_it_trails(
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
     # ε ramps in from its floor; the depths come from `fit_theta`'s dispersion rule.
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
-    parent = ArmKey("parent")
-    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
+    parent, bar = ArmKey("parent"), election_knobs().admission
+    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar)
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
@@ -1911,15 +1913,18 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
         n_samples=28,
         ruler=None,
         parent=parent,
+        admission=bar,
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30), "a floor at ε does not ramp"
-    shipped = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent)
+    shipped = PoBBCheck(
+        pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar
+    )
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon), (
         "the manifest sits floor and ε on the same value, so an untouched campaign never grades"
     )
 
     def behind_perfect_prior(n: int, misses: int, *, parent_cells: int = 28) -> Any:
-        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
+        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar)
         check.register_completed(sheet(measurements([1.0] * 28)), key=ArmKey("winner"))
         check.register_completed(sheet(measurements([1.0] * parent_cells)), key=parent)
         check.set_current(ArmKey("arm"))
@@ -1946,7 +1951,52 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     late = behind_perfect_prior(26, 4)
     assert late is not None and late.outcome == "eliminated"
     assert late.check_result["epsilon"] == pytest.approx(0.30)
-    unpaired = PoBBCheck(pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None, parent=parent)
+
+    # At the election's admission on every prior, the parent among them, the arm stops as the
+    # leader; one discordant cell (support 0.75) never reaches it, and a selector with no bar never.
+    def ahead_of_parent(n: int, wins: int, admission: float | None = bar, **bend: Any) -> Any:
+        knobs = pobb_knobs(**bend)
+        check = PoBBCheck(
+            knobs, n_min=6, n_samples=28, ruler=None, parent=parent, admission=admission
+        )
+        check.register_completed(sheet(measurements([0.0] * 28)), key=parent)
+        check.set_current(ArmKey("arm"))
+        return check.check(sheet(measurements([1.0] * wins + [0.0] * (n - wins))).cells)
+
+    assert ahead_of_parent(6, 1) is None, "one discordant cell locked an arm in"
+    locked = ahead_of_parent(6, 6)
+    assert locked is not None and locked.outcome == "locked_in", (
+        "an arm clearly ahead of the parent kept spending"
+    )
+    assert locked.check_result["admission"] == bar, "the lock-in archives the bar it met"
+    assert ahead_of_parent(6, 6, early_stop=False) is None, "early_stop off still locked in"
+    assert ahead_of_parent(6, 6, admission=None) is None, "a selector with no bar locked in"
+
+    # A locked-in leader is the bar every later arm races: one level with the parent and behind
+    # the leader is cut, never walked to its end against the parent alone.
+    def ace_or_as_parent(prompt: str, sample: Sample) -> bool:
+        return "Ace." in prompt or _PEER_READ_ORDER[sample.id] % 2 == 0
+
+    with _peer_cycle(
+        workspace(tmp_path / "locked"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 2}}},
+        ace_or_as_parent,
+    ) as (cycle, callbacks):
+        offline.llm.says = _potter_says("Ace.", "Same.")
+        raced = asyncio.run(execute_round(cycle, 1, callbacks)).result
+    ends = {
+        arm.individual.prompts["solve"].fields["instruction"]: arm_end(arm)
+        for arm in raced.panel.values()
+    }
+    assert ends == {"Ace.": "locked_in", "Same.": "eliminated"}, (
+        f"a locked-in leader never joined the priors the arm after it raced: {ends}"
+    )
+    unpaired = PoBBCheck(
+        pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None, parent=parent, admission=bar
+    )
     unpaired.register_completed(
         sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key=ArmKey("lucky_leader")
     )
@@ -1955,7 +2005,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
     assert unpaired.check(challenger.cells) is None, "an arm was cut on cells its rival never sat"
     longer, terse_parent = _charged_by_length()
-    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent)
+    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent, admission=bar)
     charged.register_completed(terse_parent, key=parent)
     standings: list[node_contract.RaceSnapshot] = []
     charged.set_current(ArmKey("l"), on_snapshot=standings.append)
@@ -1979,7 +2029,9 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
         ]
 
     constant = answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
-    unpaired_check = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent)
+    unpaired_check = PoBBCheck(
+        pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent, admission=bar
+    )
     assert unpaired_check.check(constant) is None, (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
     )

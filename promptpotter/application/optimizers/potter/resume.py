@@ -76,13 +76,11 @@ def _replay_elimination_cut(
 def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    if int(inputs_ref["queries_scored"]) < int(inputs_ref["lock_in_n_min"]):
-        return False
     p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if p_best is None:
         return False
     # ``min`` over priors is the lock-in metric; no separate leader guard.
-    return p_best >= float(inputs_ref["lock_in"])
+    return p_best >= float(inputs_ref["admission"])
 
 
 # The two escalation triggers are archived: each folds the cycle's escalation history, which no replayer holds.

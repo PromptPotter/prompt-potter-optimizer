@@ -331,6 +331,9 @@ class ThetaElection(nodes.Selector):
     def parent_read(self, panel: nodes.PanelSize) -> int:
         return panel.cells
 
+    def admission(self, selected: SelectedOptimizer) -> float:
+        return selected.knobs_of(self.name, ElectionKnobs).admission
+
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         return elect_on_theta(ctx, measured)
 

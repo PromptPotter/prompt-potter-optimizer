@@ -146,9 +146,10 @@ class L1GenerateKnobs(StrictModel):
 class PoBBKnobs(StrictModel):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
+    # Under 0.5, so it never reaches a selector's admission bar and the two stops never cross.
     epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         gt=0.0,
-        lt=1.0,
+        lt=0.5,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Smaller → fewer stops. A stop ends "
         "measurement only; what is promoted is ``theta_election.admission``'s.",
@@ -166,33 +167,13 @@ class PoBBKnobs(StrictModel):
             "``epsilon`` instead — the ``epsilon_floor_inverted`` coupling reports it."
         ),
     )
-    lock_in: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        gt=0.0,
-        lt=1.0,
-        description="Leader lock-in threshold — the P(best) at which a leading "
-        "candidate is crowned early and stops measuring. Applies only when "
-        "``leader_lock_in`` is on (that bool owns the on/off); this is purely the "
-        "threshold. Lower = lock in sooner on less evidence.",
-    )
-    lock_in_n_min: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        ge=1,
-        description="Samples-floor for lock-in — a leader can only lock in after at "
-        "least this many measurements. Applies only when ``leader_lock_in`` is on.",
-    )
-    epsilon_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    early_stop: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         description=(
-            "PoBB ε-stop: drop a candidate once its posterior probability of being "
-            "the round's best falls below ``epsilon``. The main loser-elimination rule. "
-            "Off → the rule never fires and candidates run their full budget."
-        ),
-    )
-    # Off everywhere yet not dead: the `abort:lock_in_off` lens exercises lock-in.
-    leader_lock_in: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        description=(
-            "Crown a decisive leader EARLY: stop measuring a candidate as the winner "
-            "once its P(best) against every prior reaches ``lock_in``, before it "
-            "spends its full budget. Off → only losers are eliminated "
-            "early; a leader measures its full budget."
+            "PoBB's two stops: a candidate stops measuring once its posterior probability of "
+            "being the round's best falls below ε(n) — eliminated — or reaches the selector's "
+            "own admission bar against the parent and every earlier arm — locked in. A "
+            "selector with no such bar locks none in. Off → neither fires and every candidate "
+            "runs its full budget."
         ),
     )
 

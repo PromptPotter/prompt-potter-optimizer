@@ -530,8 +530,10 @@ def _conclude_arm(
         if isinstance(signal, BrokenSignal)
         else None
     )
-    # Every cell taken, and not a walk the gateway gave up on, whose rows are synthetic.
+    # Every cell taken, or locked in, so a later arm races the leader, caught up where it stopped;
+    # never a walk the gateway gave up on, whose rows are synthetic.
     gave_up = signal is not None and signal.check_name == SCORING_ERROR_ABORT
-    if race is not None and scored.stopped is None and not gave_up:
+    locked = signal is not None and signal.outcome == "locked_in"
+    if race is not None and (scored.stopped is None or locked) and not gave_up:
         race.admit(key, results.cells, sp)
     return conclude(arm, scored, elimination=elimination, breakage=breakage), results

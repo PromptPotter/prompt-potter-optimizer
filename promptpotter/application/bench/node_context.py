@@ -147,15 +147,6 @@ async def measure_as_parent(
     return read
 
 
-def _rng(round_: RoundContext, node: str, tag: str) -> random.Random:
-    """A function of the run's seed, the round, the node and *tag* alone, so a resume redraws the same."""
-    cycle = round_.cycle
-    clamp = cycle.config.optimization.determinism
-    pinned = None if clamp is None else clamp.seed
-    seed = cycle.session.campaign_id if pinned is None else pinned
-    return random.Random(f"{seed}:{round_.round_num}:{node}{tag}")
-
-
 def _drawn(round_: RoundContext, member: NodeMember, kind: type[Pool]) -> tuple[Any, ...]:
     """The one reading of a pool, by its reader's draw: its entries in draw order, none where it draws none."""
     cycle = round_.cycle
@@ -286,6 +277,10 @@ class Bounds(CycleRead):
         return self._cycle.config.optimization.elimination_n_min
 
     @property
+    def admission(self) -> float | None:
+        return self._cycle.optimizer.admission
+
+    @property
     def budget_rounds(self) -> int | None:
         return self._cycle.config.optimization.budget.rounds
 
@@ -408,7 +403,7 @@ class Calls(CycleRead):
         session = self._cycle.session
         node = self._member.name
         # The seed keys the reuse cache: a resume replays its reply, a repeat anywhere else samples.
-        seed = _rng(self._round, node, f":{idx}:request").getrandbits(31)
+        seed = self._cycle.rng(self._round.round_num, f"{node}:{idx}:request").getrandbits(31)
         response = await llm_call(
             [{"role": "user", "content": prompt}],
             node=node,
@@ -556,7 +551,7 @@ class Replay(CycleRead):
     """What a resume re-derives as the run first did: its seeded draws, its decisions, its banked proposals."""
 
     def rng(self, tag: str = "") -> random.Random:
-        return _rng(self._round, self._member.name, tag)
+        return self._cycle.rng(self._round.round_num, f"{self._member.name}{tag}")
 
     def decide(
         self, kind: str, inputs: dict[str, Any], outcome: Any, *, data: dict[str, Any] | None = None

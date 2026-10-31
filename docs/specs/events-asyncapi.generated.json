@@ -6545,10 +6545,6 @@
             "title": "Current",
             "type": "string"
           },
-          "decision_grade": {
-            "title": "Decision Grade",
-            "type": "boolean"
-          },
           "member": {
             "title": "Member",
             "type": "string"
@@ -6592,8 +6588,7 @@
           "current",
           "n_samples",
           "p_best",
-          "paired_breakdown",
-          "decision_grade"
+          "paired_breakdown"
         ],
         "title": "RaceStandingRecord",
         "type": "object"
