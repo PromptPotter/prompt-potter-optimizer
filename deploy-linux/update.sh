@@ -6,11 +6,12 @@
 #
 #   ./update.sh                    # the tracked branch's tip
 #   ./update.sh v0.8.17            # a tag, branch or commit on origin — a release deploy names its tag
-#   ./update.sh v0.8.17 --reset    # and, where the landing code cannot load some run data, drop ALL
-#                                  # run data: every campaign, cycle and draft of every account
+#   ./update.sh v0.8.17 --reset    # and drop ALL run data: every campaign, cycle and draft of every
+#                                  # account, and every file no data-root row names
 #
 # Exits 0 landed and healthy; 1 not landed (the old code runs again) or a service down after a
-# landing; 3 a roll-back that failed, with the commit the checkout is really on printed.
+# landing; 3 stuck — a roll-back that failed, or a landing that may have written part of the data
+# root — with the commit the checkout is really on printed.
 set -euo pipefail
 REF=""
 RESET=""
@@ -132,15 +133,17 @@ fi
 # this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
-# A roll-back that cannot finish: the box is wherever this says, its services stopped.
+# A box that can go neither back nor on: it is wherever this says, its services stopped.
 stuck() {
-  bad "roll-back failed: $1"
+  bad "stuck: $1"
   bad "checkout at $(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo 'no readable HEAD'); services stopped"
   exit 3
 }
 # Puts back the commit the checkout left in ORIG_HEAD and starts it. Called after `||`, where
-# `set -e` is off for the whole body, so every step is checked here.
+# `set -e` is off for the whole body, so every step is checked here. Never once `land-data` may have
+# written: the old code would run on what the landing code wrote.
 roll_back() {
+  [[ -z "${DATA_TOUCHED:-}" ]] || stuck "$1, after the data root was written"
   bad "not landed: $1"
   local from verdict
   from="$(git -C "$INSTALL_DIR" rev-parse --verify ORIG_HEAD)" || stuck "ORIG_HEAD names no commit"
@@ -153,31 +156,13 @@ roll_back() {
   ok "back on $(git -C "$INSTALL_DIR" describe --tags --always)"
   exit 1
 }
-# Nothing writes the data root while the landed code proves it and a reset drops from it. A run is
-# its own process and stays up; `reset` refuses while one is live.
-sudo systemctl stop "$SERVICE_NAME"
-if has_bot; then sudo systemctl stop "$BOT_SERVICE_NAME"; fi
-# A survivor the landed code reshaped is migrated, never wiped. Each migration is idempotent and runs
-# at every landing, so what the old code writes after a roll-back below is carried at the next one.
-migrate_out="$(as_unit migrate)" || { printf '%s\n' "$migrate_out"; roll_back "a migration failed"; }
-ok "$migrate_out"
-# Before the restart, the landed code loads every file under the data root. A survivor that will not
-# load has no migration yet; run data or a cache that will not goes with `--reset`.
-# `prove-data` exits 3 on a file that does not load (`machine_status.py::PROOF_REFUSED`); any other
-# failure is a crash, and rolls back as one.
-proof_rc=0
-proof_out="$(as_unit prove-data)" || proof_rc=$?
-if (( proof_rc != 0 )); then
-  printf '%s\n' "$proof_out"
-  (( proof_rc == 3 )) || roll_back "the proof crashed (exit $proof_rc)"
-  if grep -qvE '^(unknown |unloadable (RUN|CACHE) )' <<< "$proof_out"; then
-    roll_back "a survivor above does not load under the landing code — its reshape ships no migration"
-  fi
-  [[ -n "$RESET" ]] || roll_back "run data above does not load under the landing code — re-run with --reset to drop it"
-  as_unit reset --all-tenants --yes || roll_back "the reset above failed"
-  proof_out="$(as_unit prove-data)" || { printf '%s\n' "$proof_out"; roll_back "the data root still does not load after the reset"; }
+# The landed code says, writing nothing, whether it can land the data root: its migrations staged,
+# every file proven as it would then stand. A refusal puts the old code back before the build.
+if ! dry_out="$(as_unit land-data --dry-run ${RESET:+--reset})"; then
+  printf '%s\n' "$dry_out"
+  roll_back "the data root does not land under this code"
 fi
-ok "$proof_out"
+printf '%s\n' "$dry_out"
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
 # shell does not load $ENV_FILE. The verb refuses a name naming no dataset, before the exact sync
 # drops what that name's extras were.
@@ -198,7 +183,18 @@ fi
 # install upstream at the next deploy.
 WEBAPP_TOUCHED=1
 build_webapp || roll_back "the webapp build failed"
-start_services || roll_back "the services did not start on the landed code"
+# The data root lands last of all, with nothing writing it: a run is its own process and stays up,
+# and `--reset` refuses while one is live. It plans again and writes only what it proved; exit 3 is
+# that refusal, with nothing written (`presentation/cli/commands/reset.py::REFUSED`).
+sudo systemctl stop "$SERVICE_NAME"
+if has_bot; then sudo systemctl stop "$BOT_SERVICE_NAME"; fi
+land_rc=0
+land_out="$(as_unit land-data ${RESET:+--reset})" || land_rc=$?
+printf '%s\n' "$land_out"
+(( land_rc != 3 )) || roll_back "the data root no longer lands; nothing was written"
+DATA_TOUCHED=1
+(( land_rc == 0 )) || stuck "land-data crashed (exit $land_rc) and may have written part of its landing"
+start_services || bad "the services did not start on the landed code"
 
 # --- backend (optional): sync → deps → restart ------------------------------
 if [[ -n "$BACKEND_DIR" ]]; then

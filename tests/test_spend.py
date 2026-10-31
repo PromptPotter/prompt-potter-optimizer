@@ -3603,3 +3603,38 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert activity.total_tokens == 4 * 2_800 + 400 + 700, (
         "the Activity pane lost the sends of what was deleted, reset or never minted"
     )
+
+    # A settle whose remainder's hold cannot be written still closes the book whole: its part
+    # billed and the remainder held, never the whole bound held again on top of the bill.
+    after_reset = CycleHop(campaign_id="camp-4", cycle_id=root)
+    stores.campaigns.create_campaign(minted_campaign(after_reset))
+    stores.campaigns.mint_cycle(after_reset)
+    ledger = telemetry.set_cycle_ledger(
+        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(after_reset)))
+    )
+    book = spend_book(1.0)
+    try:
+        with (
+            monkeypatch.context() as patched,
+            spending_under(book),
+            pytest.raises(OSError),
+            admitted(
+                CallLabel("backend", "backend"),
+                SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
+                model="openai/gpt-4o",
+                provider="openrouter",
+                paid_by="host",
+            ) as send,
+        ):
+            patched.setattr(
+                "promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable
+            )
+            send.settle(
+                Billed(TokenAccount(input=2_000, output=400), 0.2),
+                unknown=SendBound(input_tokens=0, output_tokens=400, usd=0.1),
+            )
+    finally:
+        telemetry.reset_cycle_ledger(ledger)
+    assert book.money_left().usd == pytest.approx(1.0 - 0.2 - 0.1), (
+        "a settle that raised left its book holding another sum than it billed and kept held"
+    )

@@ -1284,6 +1284,7 @@
               "spend_ceiling_usd": {
                 "anyOf": [
                   {
+                    "ge": 0,
                     "type": "number"
                   },
                   {
@@ -2183,6 +2184,13 @@
         "title": "LLMResponse",
         "type": "object"
       }
+    },
+    "model capability override": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/model_capabilities.yaml"
+      ],
+      "shape": null
     },
     "model rates": {
       "fate": "CACHE",

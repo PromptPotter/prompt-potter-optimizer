@@ -28,7 +28,7 @@ _FETCH_TIMEOUT_S = 15.0
 
 CAPABILITY_FILE = "model_capabilities.yaml"
 
-_CACHE_REL = Path(".cache") / "model_capabilities.json"
+CAPABILITIES_CACHE = ".cache/model_capabilities.json"
 
 _EFFORT_PARAM = "reasoning_effort"
 _REASONING_PARAM = "reasoning"
@@ -42,7 +42,7 @@ def _override_path(workspace: Path) -> Path:
 
 
 def _cache_path(workspace: Path) -> Path:
-    return workspace / _CACHE_REL
+    return workspace / CAPABILITIES_CACHE
 
 
 def _per_mtok(per_token: float | None) -> float | None:

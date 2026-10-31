@@ -8,7 +8,6 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from json import JSONDecodeError
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -34,12 +33,13 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.store.io import read_json, unlink_robust, write_json
+from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     JobUnreadableError,
     ServiceUnavailableError,
+    validation_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -256,20 +256,22 @@ class JobRegistry:
             self._tasks.pop(job_id, None)
 
     def get(self, job_id: str) -> Job | None:
-        path = self._path(job_id)
-        return self._read(path) if path.is_file() else None
+        return self._read(self._path(job_id))
 
     @staticmethod
     def _read(path: Path) -> Job | None:
+        """``None``: no such job, or one deleted since the listing; a file that does not load raises."""
         try:
-            raw = read_json(path)
-        except (OSError, JSONDecodeError):
-            logger.warning("job file %s unreadable", path)
+            with open_text_robust(path) as fh:
+                raw = fh.read()
+        except FileNotFoundError:
             return None
         try:
-            return JOB_ADAPTER.validate_python(raw)
+            return JOB_ADAPTER.validate_json(raw)
         except ValidationError as exc:
-            raise JobUnreadableError(path=str(path), reason=str(exc.errors()[0]["msg"])) from exc
+            raise JobUnreadableError(
+                path=str(path), reason=validation_reason(exc, shown=1)
+            ) from exc
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
         """A released job launched before today is deleted here: every reader past a release counts today's."""

@@ -12,7 +12,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.io import append_line, complete_lines
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR, CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerSpan,
     Moment,
@@ -87,7 +87,7 @@ class CycleEventLog:
     @staticmethod
     def workspace_path(workspace_dir: WorkspaceDir) -> Path:
         """Never creates it: a read must not mint a `.workspace/` in a tenant that wrote none."""
-        return Path(workspace_dir) / ".workspace" / "events.jsonl"
+        return Path(workspace_dir) / WORKSPACE_STATE_DIR / "events.jsonl"
 
     @classmethod
     def open_workspace(cls, workspace_dir: WorkspaceDir) -> CycleEventLog:

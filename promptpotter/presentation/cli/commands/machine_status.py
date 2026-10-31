@@ -7,15 +7,9 @@ from promptpotter.application import health
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.maintenance.migrate import migrate
-from promptpotter.application.maintenance.reset import prove
-from promptpotter.config.paths import default_projects_root, user_data_root
 from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-
-# A proof that ran and found a file that does not load; a crash exits 1, an argument error 2.
-PROOF_REFUSED = 3
 
 
 async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
@@ -61,40 +55,6 @@ async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
             [f"held {job.what} ({job.user_id}) on {job.code_revision[:12]}" for job in held]
             or [f"closed to all but {args.target}"]
         ),
-    )
-
-
-async def cmd_migrate(_args: argparse.Namespace) -> CommandResult:
-    said = migrate(default_projects_root())
-    return CommandResult(data={"migrated": said}, human="\n".join(said or ["nothing to migrate"]))
-
-
-async def cmd_prove_data(_args: argparse.Namespace) -> CommandResult:
-    proof = prove(user_data_root())
-    # The first two words, and `PROOF_REFUSED`, are what `deploy-linux/update.sh` reads.
-    lines = [
-        *(f"unknown {path}" for path in proof.unknown),
-        *(
-            f"unloadable {one.found.kind.fate.value} {one.found.kind.name} {one.path}: {one.why}"
-            for one in proof.unloadable
-        ),
-    ]
-    return CommandResult(
-        data={
-            "proven": proof.proven,
-            "unknown": [str(path) for path in proof.unknown],
-            "unloadable": [
-                {
-                    "path": str(one.path),
-                    "fate": one.found.kind.fate.value,
-                    "kind": one.found.kind.name,
-                    "why": one.why,
-                }
-                for one in proof.unloadable
-            ],
-        },
-        human="\n".join(lines or [f"proven {proof.proven} file(s)"]),
-        exit_code=PROOF_REFUSED if lines else 0,
     )
 
 

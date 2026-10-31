@@ -24,7 +24,11 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
-from promptpotter.shared.errors import PayloadInvalidError, StoredConfigInvalidError
+from promptpotter.shared.errors import (
+    PayloadInvalidError,
+    StoredConfigInvalidError,
+    validation_reason,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +92,9 @@ def validated_campaign_config(block: Mapping[str, Any], *, path: Path) -> Campai
     try:
         return CampaignConfig.model_validate(block)
     except ValidationError as exc:
-        reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
-        raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
+        raise StoredConfigInvalidError(
+            path=str(path), reason=validation_reason(exc, shown=3)
+        ) from exc
 
 
 def load_dataset_campaign_config(dataset_dir: Path) -> CampaignConfig:
@@ -106,9 +111,9 @@ def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> C
     try:
         out = CampaignConfig.model_validate(merged)
     except ValidationError as exc:
-        first = exc.errors()[0]
-        where = ".".join(str(p) for p in first["loc"])
-        raise PayloadInvalidError(f"{where}: {first['msg']}", code="optimization_invalid") from exc
+        raise PayloadInvalidError(
+            validation_reason(exc, shown=1), code="optimization_invalid"
+        ) from exc
     select_optimizer(out.optimization)
     return out
 

@@ -66,6 +66,16 @@ def install_cache_root() -> Path:
 
 
 PROJECTS_DIR = "projects"
+# Under the projects root: held while an account opens.
+ACCOUNTS_LOCK = ".accounts.lock"
+
+JOBS_DIR = "jobs"
+# Under the jobs dir, which is globbed for `*.json` only, so none of these reads as a job.
+ADMISSION_LOCK = ".admission.lock"
+LANDING_FILE = ".landing"
+PRODUCERS_DIR = "producers"
+MACHINE_DIR = "machine"
+JOB_LOGS_DIR = "logs"
 
 
 def default_projects_root() -> Path:
@@ -73,7 +83,7 @@ def default_projects_root() -> Path:
 
 
 def jobs_dir(projects_root: Path) -> Path:
-    return projects_root.parent / "jobs"
+    return projects_root.parent / JOBS_DIR
 
 
 def optimizers_root() -> Path:

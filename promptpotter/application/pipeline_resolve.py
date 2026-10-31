@@ -123,6 +123,7 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
     StoredConfigInvalidError,
+    validation_reason,
 )
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.plugin_registry import BUILT_IN
@@ -859,7 +860,7 @@ def resolve_campaign_config(
     except ValidationError as exc:
         raise ManifestUnreadableError(
             path=f"campaigns/{campaign.campaign_id}/campaign.json::declaration",
-            reason=f"{exc.error_count()} field(s) invalid — {exc.errors()[0]['msg']}",
+            reason=validation_reason(exc, shown=1),
         ) from exc
     root = _locked(stores, campaign.root_hop, declared)
     if hop is None:

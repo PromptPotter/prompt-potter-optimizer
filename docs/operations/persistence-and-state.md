@@ -80,10 +80,10 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 ```
 
 **Every file here is named by exactly one row of `infrastructure/store/data_root.py::KINDS`**: its fate
-(SURVIVOR, CACHE, RUN, MACHINE) and the shape its own reader loads. `migrate` rewrites each survivor a
-release reshaped, before `prove-data` loads the whole tree
-and names every file no row names; `reset` drops RUN files, unnamed files and caches that no longer
-load — owned by [`decisions.md`](../decisions.md) § 0011.
+(SURVIVOR, CACHE, RUN, MACHINE) and the shape its own reader loads. `land-data` stages each survivor
+a release reshaped, proves the whole tree as it would then stand, and writes only if nothing refuses,
+dropping the caches that no longer load; `reset` drops RUN files and unnamed files — owned by
+[`decisions.md`](../decisions.md) § 0011.
 
 **Why this shape.** Telemetry is temporal (each cycle owns its `dashboard.json`), audit is structural (frozen records keyed by the producing cycle), and cycles sit flat because a fork tree keyed by `parent` scales where nested directories don't. `measurements/` is a cross-cycle peer of `campaigns/`, so a fresh `new` cache-hits every origin sample under its own `campaign_id`. **`config/paths.py::SHARED_CACHE_DIRS` is the whole of the paid tier** — what `build_stores` roots at the archive home and what the storage report counts; `data_root.py` names each as a CACHE row, so a cache with no row is dropped by the first `reset`. No recycle bin: an archived campaign stays in `campaigns/`, hidden by `lifecycle_status`.
 

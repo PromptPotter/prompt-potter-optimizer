@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import ValidationError, field_serializer
+from pydantic import Field, ValidationError, field_serializer
 
 from promptpotter.domain.strict_model import FrozenModel, WireFloat
 from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import StoredConfigInvalidError, validation_reason
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ class PrincipalGrant(FrozenModel):
 
     delegated_by: str
     capabilities: frozenset[str]
-    spend_ceiling_usd: WireFloat | None
+    spend_ceiling_usd: Annotated[WireFloat, Field(ge=0)] | None
     note: str
 
     @property
@@ -36,15 +38,22 @@ class GrantsFile(FrozenModel):
 
 
 def _read(path: Path) -> GrantsFile:
-    """Raises on a file that does not validate; absent is no grants."""
+    """Absent is no grants; a file that does not validate, an empty one included, raises."""
     raw = read_bytes_optional(path)
-    return GrantsFile(grants={}) if raw is None else GrantsFile.model_validate_json(raw)
+    if raw is None:
+        return GrantsFile(grants={})
+    try:
+        return GrantsFile.model_validate_json(raw)
+    except ValidationError as exc:
+        raise StoredConfigInvalidError(
+            path=str(path), reason=validation_reason(exc, shown=1)
+        ) from exc
 
 
 def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
     try:
         grants = _read(path).grants
-    except ValidationError:
+    except StoredConfigInvalidError:
         # Deny-all: an invalid file promotes nobody to a delegate.
         logger.warning("grants.json does not validate; no grant is read")
         return None

@@ -200,17 +200,17 @@ knowing:
   changed. Re-run once that run pauses or ends. On a yes, every launch is refused until an API on the
   target starts, so nothing starts on the old code mid-deploy; a deploy that fails before the restart
   leaves launches refused until the next one lands.
-- **It refuses to land code that cannot load the data root.** After the checkout it stops the API
-  and the admin bot, so nothing writes the tree. The landed code's `migrate` verb rewrites every
-  survivor — a file that outlives a release, pinned in `docs/specs/data-root.generated.json` — whose
-  shape the release changed; survivors are migrated, never wiped. Its `prove-data` verb then loads
-  every file under the data root. On a failed migration or an `unloadable SURVIVOR` line, the script
-  checks the previous commit back out, reopens admission to it, starts it again and exits 1: that
-  reshape ships no migration yet. Run
-  data, a cache or a file no row names that will not load refuses the same way unless you pass
-  `--reset` (`./update.sh v0.8.19 --reset`), which runs `reset --all-tenants --yes` under the landing
-  code — every account's run data goes, and it refuses while a run is live — and proves again. A
-  roll-back that itself fails exits 3, naming the commit the checkout is on, with the services stopped.
+- **It refuses to land code that cannot load the data root, and never rolls back once it wrote it.**
+  Right after the checkout, the landed code's `land-data --dry-run` stages each migration of a
+  survivor — a file that outlives a release, pinned in `docs/specs/data-root.generated.json` — and
+  loads every file under the data root as it would then stand, writing nothing. On an `unloadable
+  SURVIVOR` line, the script checks the previous commit back out, reopens admission to it, starts it
+  again and exits 1: that reshape ships no migration yet. Run data or a file no row names that will
+  not load refuses the same way unless you pass `--reset` (`./update.sh v0.8.19 --reset`): every
+  account's run data goes, refused while a run is live. A cache that will not load is dropped
+  unasked. Last, with the API and the admin bot stopped, `land-data` plans again and writes; from
+  then on nothing rolls back. A roll-back that itself fails, or a `land-data` that crashed, exits 3,
+  naming the commit the checkout is on, with the services stopped.
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
   its env file — needs `./install-admin-bot.sh`.
 - **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing

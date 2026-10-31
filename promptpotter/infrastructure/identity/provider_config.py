@@ -12,6 +12,7 @@ from pydantic import Field, ValidationError
 
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import read_bytes_optional
+from promptpotter.shared.errors import validation_reason
 
 _NonEmpty = Annotated[str, Field(min_length=1)]
 
@@ -86,9 +87,6 @@ def load_provider_config(path: Path) -> ProviderConfigBundle:
     try:
         return ProviderConfigBundle.model_validate_json(raw)
     except ValidationError as exc:
-        # Inputs stay out of the message: a refused field may be the client secret.
-        reasons = "; ".join(
-            f"{'.'.join(map(str, e['loc'])) or '(file)'}: {e['msg']}"
-            for e in exc.errors(include_url=False, include_input=False)
-        )
-        raise OIDCConfigError(f"oidc.json does not validate: {reasons}") from exc
+        raise OIDCConfigError(
+            f"oidc.json does not validate: {validation_reason(exc, shown=3)}"
+        ) from exc

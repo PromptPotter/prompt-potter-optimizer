@@ -12,6 +12,7 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
+from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.shared.errors import LedgerUnreadableError
 
 if TYPE_CHECKING:
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def active_pointer_path(workspace: WorkspaceDir) -> Path:
-    return workspace / ".workspace" / "active_session.json"
+    return workspace / WORKSPACE_STATE_DIR / "active_session.json"
 
 
 def save_active_pointer(workspace: WorkspaceDir, hop: CycleHop) -> None:

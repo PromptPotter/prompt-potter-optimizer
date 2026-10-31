@@ -68,15 +68,12 @@ def handle_command(command: str, argument: str, actor: str) -> str:
     if command in ("block", "unblock"):
         if not argument:
             return f"Usage: /{command} <email>"
-        try:
-            if command == "block":
-                emails = block_email(argument, actor=actor)
-                verb = "Blocked"
-            else:
-                emails = unblock_email(argument, actor=actor)
-                verb = "Unblocked"
-        except ValueError as exc:
-            return f"Error: {exc}"
+        if command == "block":
+            emails = block_email(argument, actor=actor)
+            verb = "Blocked"
+        else:
+            emails = unblock_email(argument, actor=actor)
+            verb = "Unblocked"
         return f"{verb} {argument.strip().lower()}. {len(emails)} email{'' if len(emails) == 1 else 's'} blocked."
     if command in ("grant", "revoke", "grants"):
         return _handle_grant_command(command, argument, actor)
@@ -174,16 +171,10 @@ def _handle_grant_command(command: str, argument: str, actor: str) -> str:
     delegator = registered_user_id()
     if delegator is None:
         return "Cannot grant: no registered operator to delegate from (sign in once first)."
-    try:
-        caps = capabilities_from_names(caps_csv.split(","))
-    except ValueError as exc:
-        return f"Error: {exc}"
+    caps = capabilities_from_names(caps_csv.split(","))
     if not caps:
         return f"Error: name at least one capability ({', '.join(sorted(CAMPAIGN_CAP_BY_NAME))})."
-    try:
-        grant(sub_user_id, delegator=delegator, capabilities=caps, actor=actor)
-    except ValueError as exc:
-        return f"Error: {exc}"
+    grant(sub_user_id, delegator=delegator, capabilities=caps, actor=actor)
     return f"Granted {sub_user_id} [{', '.join(sorted(caps))}] as delegate of {delegator}."
 
 
@@ -313,7 +304,12 @@ def _process_update(
         logger.info("Ignoring message (%d chars, gated=%s)", len(text), passphrase is not None)
         return
     command, argument = parsed
-    reply = handle_command(command, argument, actor=f"telegram:{chat_id}")
+    try:
+        reply = handle_command(command, argument, actor=f"telegram:{chat_id}")
+    except Exception as exc:
+        # The refusal is the reply: an invalid identity file, a bad argument, a crash alike.
+        logger.exception("admin command /%s failed", command)
+        reply = f"Error: {exc}"
     _send_message(client, chat_id, reply)
 
 

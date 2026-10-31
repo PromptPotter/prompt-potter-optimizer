@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import StoredConfigInvalidError, validation_reason
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +31,25 @@ def _norm_email(email: str) -> str:
 
 
 def _read(path: Path) -> list[str] | None:
-    """``None`` = absent; raises on a file that does not validate."""
+    """``None`` = absent; a file that does not validate, an empty one included, raises."""
     raw = read_bytes_optional(path)
     if raw is None:
         return None
-    emails = Blocklist.model_validate_json(raw).emails
+    try:
+        emails = Blocklist.model_validate_json(raw).emails
+    except ValidationError as exc:
+        raise StoredConfigInvalidError(
+            path=str(path), reason=validation_reason(exc, shown=1)
+        ) from exc
     return sorted({_norm_email(e) for e in emails if e.strip()})
 
 
 def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
-    """Invalid blocks EVERYONE: absent and invalid are opposite security answers, and invalid is never the wider."""
+    """Invalid, an empty file included, blocks EVERYONE: absent and invalid are opposite security
+    answers, and invalid is never the wider."""
     try:
         blocked = _read(path)
-    except ValidationError:
+    except StoredConfigInvalidError:
         logger.warning("blocklist.json does not validate; treating as block-all")
         return BlocklistDecision(blocked=True, reason="blocklist_invalid")
     if blocked is None:

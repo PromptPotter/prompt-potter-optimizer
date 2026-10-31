@@ -271,10 +271,11 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "reset",
         "reset:cmd_reset",
-        help="Drop the selected tenant's run data, every file no row of "
-        "`infrastructure/store/data_root.py` names, and every cache file that no longer loads; "
-        "keep survivors (who an account is, what it holds and was charged) and the caches that "
-        "load, so the next `new` hits cache. The escape hatch after a reshape of run data.",
+        help="Drop the selected tenant's run data and every file no row of "
+        "`infrastructure/store/data_root.py` names; keep survivors (who an account is, what it "
+        "holds and was charged) and the caches, so the next `new` hits cache. Refused, exit 3, "
+        "while a run in reach is live or a draft is held. The escape hatch after a reshape of "
+        "run data.",
         args=(
             Arg(
                 "--all-tenants",
@@ -295,7 +296,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="List the paths that would be removed; touch nothing. Recommended first run.",
             ),
         ),
-        # `maintenance/reset.py` completes them itself.
         needs_registries=False,
     ),
     Verb(
@@ -676,21 +676,28 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         needs_registries=False,
     ),
     Verb(
-        "migrate",
-        "machine_status:cmd_migrate",
-        help="A landing's step before its proof: rewrite each survivor whose shape the landing code "
-        "changed (`application/maintenance/migrate.py::MIGRATIONS`). Every migration is idempotent, "
-        "so it runs at every landing until its release is landed everywhere. Prints one line per "
-        "account it changed. Zero spend.",
-        needs_registries=False,
-    ),
-    Verb(
-        "prove-data",
-        "machine_status:cmd_prove_data",
-        help="Load every file under the data root its row of `infrastructure/store/data_root.py` "
-        "shapes, under THIS code. Prints `proven N`, or one `unknown PATH` or `unloadable FATE KIND "
-        "PATH: WHY` line each and exits 3 — a landing's proof, before its restart. Read-only, zero "
-        "spend.",
+        "land-data",
+        "reset:cmd_land_data",
+        help="A landing's one write to the data root, under THIS code: stage each survivor "
+        "migration (`application/maintenance/migrate.py::MIGRATIONS`), load every file under the "
+        "data root as its row of `infrastructure/store/data_root.py` shapes it would then stand, and "
+        "write the migrations and drop each cache file that no longer loads only if nothing refuses. "
+        "A file no row names, or a survivor or run file that does not load, refuses: exit 3, "
+        "nothing written. Zero spend.",
+        args=(
+            Arg(
+                "--reset",
+                action="store_true",
+                help="Also drop every account's run data and every file no row names, as "
+                "`reset --all-tenants` does; refused while a run is live.",
+            ),
+            Arg(
+                "--dry-run",
+                dest="dry_run",
+                action="store_true",
+                help="Print what the landing would write, drop and refuse; write nothing.",
+            ),
+        ),
         needs_registries=False,
     ),
     Verb(

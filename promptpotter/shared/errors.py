@@ -261,6 +261,15 @@ class PayloadInvalidError(PotterError):
             raise cls.refusing(exc.errors()) from exc
 
 
+def validation_reason(exc: ValidationError, *, shown: int) -> str:
+    """Each failing field by its path and rule, never its value: a refused field may be a secret."""
+    errors = exc.errors(include_input=False, include_url=False)
+    said = "; ".join(
+        f"{'.'.join(map(str, e['loc'])) or 'the top level'}: {e['msg']}" for e in errors[:shown]
+    )
+    return said + (f"; and {len(errors) - shown} more" if len(errors) > shown else "")
+
+
 class ServiceUnavailableError(PotterError):
     http_status = 503
     code = "service_unavailable"
@@ -306,7 +315,7 @@ class JobUnreadableError(ConflictError):
 
 
 class LedgerUnreadableError(ConflictError):
-    """A ledger is never migrated: a line this build cannot read refuses every reader of its kind."""
+    """A ledger is run data, never migrated: a line this build cannot read refuses every reader of its kind."""
 
     code = "ledger_unreadable"
 

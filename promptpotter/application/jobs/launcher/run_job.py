@@ -29,7 +29,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
-from promptpotter.config.paths import READOUT_POINTER, user_data_root
+from promptpotter.config.paths import JOB_LOGS_DIR, READOUT_POINTER, user_data_root
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
@@ -89,7 +89,7 @@ class JobSpec(StrictModel):
 
 def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> asyncio.Task[None]:
     """Answers the task that ends when the run's process exits."""
-    log_path = spec.jobs_dir / "logs" / f"{spec.job_id}.log"
+    log_path = spec.jobs_dir / JOB_LOGS_DIR / f"{spec.job_id}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "ab") as log:

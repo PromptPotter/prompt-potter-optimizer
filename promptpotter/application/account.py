@@ -11,7 +11,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.config.paths import default_projects_root
+from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.infrastructure.identity import blocklist, default_claim
@@ -86,16 +86,13 @@ class AccountCeilingError(PotterError):
     code = "accounts_full"
 
 
-# Held from the count to the write, or two first sign-ins at the ceiling both read room for one.
-_OPENING_LOCK = ".accounts.lock"
-
-
 def arrive(stores: Stores, *, device: Device | None) -> Arrival:
     """The ONE place an account comes into being, whichever request reaches it first."""
     existing = stores.users.load()
     if existing is not None:
         return Arrival(existing, opened=False)
-    with held_lock(stores.projects_root / _OPENING_LOCK, wait_s=LOCK_TIMEOUT):
+    # Held from the count to the write, or two first sign-ins at the ceiling both read room for one.
+    with held_lock(stores.projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT):
         # A concurrent first request of this same person may have opened it while this one waited.
         existing = stores.users.load()
         if existing is not None:

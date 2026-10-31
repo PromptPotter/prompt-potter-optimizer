@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from promptpotter.config.paths import block_packs_root
 from promptpotter.domain.pool import PoolEntry, entry_id
 from promptpotter.domain.prompt_block import BlockPack, PackRefusal, Presumption
-from promptpotter.shared.errors import ConflictError, NotFoundError
+from promptpotter.shared.errors import ConflictError, NotFoundError, validation_reason
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -25,13 +25,10 @@ def _parsed(name: str, file: Path) -> BlockPack | PackRefusal:
     try:
         return BlockPack.model_validate_json(file.read_bytes())
     except ValidationError as exc:
-        fields = "; ".join(
-            f"{'.'.join(map(str, e['loc'])) or 'the file'}: {e['msg']}" for e in exc.errors()[:3]
-        )
         return PackRefusal(
             name=name,
             code="block_pack_invalid",
-            reason=f"its pack.json is no pack ({fields}); fix or remove it",
+            reason=f"its pack.json is no pack ({validation_reason(exc, shown=3)}); fix or remove it",
         )
 
 

@@ -39,11 +39,12 @@ version exists.
 - [ ] Back up the data root first: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
 - [ ] `git diff <last tag> -- docs/specs/data-root.generated.json` names every survivor whose shape
       moved: survivors are migrated, so each ships a migration in
-      `application/maintenance/migrate.py::MIGRATIONS`, which `update.sh` runs before its proof. A
-      BREAKING run-data or cache shape deploys as `update.sh <tag> --reset`; survivors stay.
+      `application/maintenance/migrate.py::MIGRATIONS`, which `update.sh` stages and proves before it
+      writes. A BREAKING run-data shape deploys as `update.sh <tag> --reset`; survivors stay, and a
+      cache that no longer loads is dropped either way.
 - [ ] Deploy `main` as `/potter-box` says, which owns the commands, the sudo and the TermNorm restart.
 - [ ] Verify on the box: health on 127.0.0.1 and on the public host, both units active,
-      `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `proven N file(s)` line.
+      `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `landed: proven N file(s)` line.
 - [ ] Anything that fails here is fixed on `main`, and steps 2 to 4 run again.
 
 ## 5. Tag, publish, confirm

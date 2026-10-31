@@ -10,6 +10,7 @@ from promptpotter.domain.projection_envelope import (
     bearing_record,
 )
 from promptpotter.domain.run_records import RECORD_ADAPTER
+from promptpotter.infrastructure.store.io import complete_lines
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
@@ -52,20 +53,14 @@ class CycleLedgerTail:
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
-        """A trailing PARTIAL line, a write still in flight, is left for the next call."""
         if not self._ledger_path.exists():
             return []
         with self._ledger_path.open("rb") as fh:
             fh.seek(self._byte_pos)
-            chunk = fh.read()
-        nl = chunk.rfind(b"\n")
-        if nl == -1:
-            return []
-        self._byte_pos += nl + 1
+            lines = list(complete_lines(fh))
         out: list[ProjectionEnvelope] = []
-        for raw in chunk[: nl + 1].split(b"\n"):
-            if not raw.strip():
-                continue
+        for raw in lines:
+            self._byte_pos += len(raw)
             envelope = self._to_envelope(raw)
             self._line_index += 1
             if envelope is not None:

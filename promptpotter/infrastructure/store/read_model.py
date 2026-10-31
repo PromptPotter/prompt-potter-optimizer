@@ -22,7 +22,7 @@ from promptpotter.infrastructure.store.io import append_line, complete_lines, op
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import LedgerUnreadableError, validation_reason
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +136,7 @@ def line_dict(raw: bytes) -> dict[str, Any]:
 
 
 def _refusal(ledger: Path, offset: int, exc: ValueError) -> LedgerUnreadableError:
-    if isinstance(exc, ValidationError):
-        err = exc.errors()[0]
-        reason = f"{'.'.join(map(str, err['loc'])) or 'the record'}: {err['msg']}"
-    else:
-        reason = str(exc)
+    reason = validation_reason(exc, shown=1) if isinstance(exc, ValidationError) else str(exc)
     cycle_dir = CycleLayout.of_ledger(ledger).cycle_dir
     campaign_dir = cycle_dir.parent.parent
     held = campaign_cycles_dir(campaign_dir) == cycle_dir.parent

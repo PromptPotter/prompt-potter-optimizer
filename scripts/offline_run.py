@@ -62,7 +62,7 @@ from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.maintenance.reset import prove
+from promptpotter.application.maintenance.landing import plan_landing
 from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     manifest_directories,
@@ -71,7 +71,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.runner.inner.connector import measurement_modules
-from promptpotter.config.paths import default_projects_root, install_datasets_root
+from promptpotter.config.paths import PROJECTS_DIR, default_projects_root, install_datasets_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
@@ -1404,13 +1404,16 @@ def is_harness(rel: Path) -> bool:
 
 
 def proven_home(workspace: Path) -> None:
-    """A landing's proof over what the run wrote: every file named by a row, and loading as it shapes."""
-    proof = prove(workspace)
-    unknown = [p for p in proof.unknown if not is_harness(p.relative_to(workspace))]
-    if unknown or proof.unloadable:
+    """A landing's plan over what the run wrote: every file named by a row, loading as it shapes, and
+    nothing for a migration to stage."""
+    landing = plan_landing(workspace / PROJECTS_DIR, reset=False)
+    unknown = [p for p in landing.unknown if not is_harness(p.relative_to(workspace))]
+    refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches)]
+    if unknown or refused or landing.staged:
         raise SystemExit(
-            f"offline run: the run wrote what no data-root row names {unknown}, or what its row's "
-            f"reader refuses {[f'{u.path}: {u.why}' for u in proof.unloadable]}"
+            f"offline run: the run wrote what no data-root row names {unknown}, what its row's "
+            f"reader refuses {refused}, or a shape a migration rewrites "
+            f"{[one.said for one in landing.staged]}"
         )
 
 

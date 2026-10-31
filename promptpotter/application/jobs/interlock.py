@@ -11,6 +11,7 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 
+from promptpotter.config.paths import ADMISSION_LOCK, LANDING_FILE, PRODUCERS_DIR
 from promptpotter.config.settings import CODE_REVISION, LOCK_TIMEOUT
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.io import (
@@ -23,12 +24,6 @@ from promptpotter.shared.errors import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
-# All live INSIDE the jobs dir: it is globbed for `*.json` only, so none reads as a job.
-_ADMISSION_LOCK = ".admission.lock"
-_PRODUCERS_DIR = "producers"
-# The code a landing admits alone; never removed, since the restarted API runs that code.
-_LANDING = ".landing"
-
 _token_lock = threading.Lock()
 _tokens: dict[Path, str] = {}
 
@@ -37,8 +32,9 @@ class AdmissionGate:
     """ONE per registry, reentrant in its holding thread: an admission nests through `request_slot`."""
 
     def __init__(self, jobs_dir: Path) -> None:
-        self._path = jobs_dir / _ADMISSION_LOCK
-        self._landing = jobs_dir / _LANDING
+        self._path = jobs_dir / ADMISSION_LOCK
+        # The code a landing admits alone; never removed, since the restarted API runs that code.
+        self._landing = jobs_dir / LANDING_FILE
         self._nest = threading.RLock()
         self._depth = 0
 
@@ -113,4 +109,4 @@ def _retire(path: Path) -> None:
 
 def _producer_path(jobs_dir: Path, producer_id: str) -> Path:
     validate_path_component(producer_id)
-    return jobs_dir / _PRODUCERS_DIR / f"{producer_id}.lock"
+    return jobs_dir / PRODUCERS_DIR / f"{producer_id}.lock"

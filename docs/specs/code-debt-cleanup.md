@@ -126,6 +126,11 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **The pre-commit hook runs bare `python`**, so a commit in a worktree builds and syncs a `.venv` there.
   Action: the hook resolves the clone's venv like `_BORROWED` does. **Re-test:** a commit in a fresh
   worktree creates no `.venv`.
+- **The whole suite peaks over `tests_owning.py::WIN32_CEILING_MB` on main itself**: 225 MB
+  against 202 on the venv `uv sync --locked --all-extras` built on 2026-10-31, so every
+  `gate.py --changed` that falls back to `--record` fails. Action: find what the suite holds past the
+  measured 168 MB, or re-measure the ceiling on the pinned extras. **Re-test:** run
+  `pytest tests/` on main and print `processes.py::peak_mb`.
 
 ### The webapp's vanilla pass (audit 2026-10-29)
 
@@ -207,16 +212,29 @@ import-graph script before and after; close each wave with `gate.py --only layer
   landing that moves no record shape refuses while a run is live.
 - **Run files read as dicts have no shape row**: `data_root.py::KINDS` proves `draft.json`,
   `checkin.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
-  `diagnostics/`, `banks/cuts.jsonl`, `rates.json` and the langfuse mirror by
-  presence alone, because their readers walk `dict`s (`read_json_optional`, `read_json_tolerant`,
-  `fold_jsonl`). A reshape there passes `prove-data` and is read around. Action: a model per file,
-  its reader's, then its row's shape. **Re-test:** `git grep -n ", None)" -- promptpotter/infrastructure/store/data_root.py`.
-- **Data-root names spelled at the writer and again in `data_root.py`**: `jobs/.landing`,
-  `.admission.lock`, `producers/`, `machine/`, `logs/`, `projects/.accounts.lock`, `diagnostics/`,
-  `task-context/`, `head_to_heads/`, `.workspace/` and `.cache/` are literals in both, since
-  `application/jobs/interlock.py` and its peers sit above `infrastructure/`. A renamed one reads as
-  unknown and is dropped by `reset`. Action: one constant per name in `config/paths.py` or `layout.py`,
-  read by both. **Re-test:** rename `_LANDING` and run `prove-data` on a box with a landing open.
+  `diagnostics/`, `banks/cuts.jsonl`, `rates.json`, the langfuse mirror and the account's
+  `model_capabilities.yaml` by presence alone, because their readers walk `dict`s
+  (`read_json_optional`, `read_json_tolerant`, `read_yaml_optional`, `fold_jsonl`). A reshape there
+  passes `land-data` and is read around. Action: a model per file, its reader's, then its row's
+  shape. **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
+- **`iter_jsonl` reads past a line it cannot decode** (`store/read_model.py`), and `fold_jsonl`,
+  the bank labels and cuts with it, so a torn or reshaped line is silently absent. Action: the
+  complete-line rule and a refusal, as `ledger_record`. **Re-test:** `git grep -n "except json.JSONDecodeError" -- promptpotter/infrastructure/store/read_model.py`.
+- **`CycleEventLog.__init__` counts an unterminated last line as an offset** (`infrastructure/ledger.py`)
+  where `iter` and every tail skip it, so a torn tail shifts the next append's offset by one against
+  a refold. Action: count through `io.py::complete_lines` and decide what an append does past a torn
+  tail. **Re-test:** `git grep -n "for line in fh" -- promptpotter/infrastructure/ledger.py`.
+- **`_Billed` is `_Cost` with a flag flipped** (`store/account_spend.py::_Cost.counts_mirrored`): a
+  flag keeping a bank's spend and a campaign's cost apart over one fold of the same lines. Action:
+  one fold whose value carries both sums, read by `billed_spend` and `ledger_cost`. **Re-test:** `git grep -n "counts_mirrored" -- promptpotter`.
+- **Two `ValidationError` formatters remain beside `shared/errors.py::validation_reason`**:
+  `application/datasets/draft_patch.py` (prefixes the field) and `PayloadInvalidError.refusing`
+  (carries `ctx`). Action: both read `validation_reason`, the prefix and the context as its data.
+  **Re-test:** `git grep -n "exc.errors()" -- promptpotter`.
+- **A ledger subscriber that raises after `Admission._write` lands a charge leaves it in `_unlanded`**
+  (`llm/spend_book.py`), so the book counts that part twice until the run ends — conservative, never
+  under. Action: the record lands before any subscriber runs. **Re-test:** the outlives journey in
+  `tests/test_spend.py` with a raising projection.
 - **`CampaignOwner` reads `campaign.json` beside `Campaign`** (`campaign_store/store.py::campaign_owner`),
   a second, tolerant model of one file. Action: one model. **Re-test:** `git grep -n "CampaignOwner" -- promptpotter`.
 - **Writers with no reader**: `dashboard.json` and `index.json` (checkouts nothing reads back), and

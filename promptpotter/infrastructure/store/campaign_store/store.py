@@ -119,6 +119,7 @@ from promptpotter.shared.errors import (
     ManifestUnreadableError,
     NotFoundError,
     graceful,
+    validation_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,7 +201,7 @@ class CampaignStore:
         except ValidationError as exc:
             raise ManifestUnreadableError(
                 path=str(path.relative_to(self._base_dir)),
-                reason=f"{exc.error_count()} field(s) — {exc.errors()[0]['msg']}",
+                reason=validation_reason(exc, shown=1),
             ) from exc
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:

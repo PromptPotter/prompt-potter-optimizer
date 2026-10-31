@@ -1,15 +1,18 @@
-"""Sign-ins, openings and terms acceptances leave the workspace ledger, which is run data, for the
-account's consent trail; the account events left there lose the `device` only a sign-in carried."""
+"""A workspace ledger older than the consent trail holds the account's sign-ins, openings and terms
+acceptances: each is staged onto its `consent.jsonl`. The ledger is run data and is never rewritten;
+its account lines do not load, so the landing that carries them is asked to reset."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, get_args
+from typing import get_args
 
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store.io import read_lines, rewrite_lines
+from promptpotter.infrastructure.store.data_root import Staged
+from promptpotter.infrastructure.store.io import read_lines
 from promptpotter.infrastructure.store.user_store import (
+    CONSENT_FILE,
     ConsentEvent,
     ConsentLine,
     UserStore,
@@ -19,14 +22,9 @@ from promptpotter.infrastructure.store.user_store import (
 _CONSENT = frozenset(get_args(ConsentEvent))
 
 
-def _account_event(raw: str) -> dict[str, Any] | None:
-    record = json.loads(raw)
-    return record if record.get("record_type") == "account_event" else None
-
-
 def _consent_of(raw: str) -> ConsentLine | None:
-    record = _account_event(raw)
-    if record is None or record["event"] not in _CONSENT:
+    record = json.loads(raw)
+    if record.get("record_type") != "account_event" or record["event"] not in _CONSENT:
         return None
     return ConsentLine(
         event=record["event"],
@@ -37,33 +35,30 @@ def _consent_of(raw: str) -> ConsentLine | None:
     )
 
 
-def _reshaped(lines: list[str]) -> tuple[list[str] | None, None]:
-    kept: list[str] = []
-    for raw in lines:
-        record = _account_event(raw)
-        if record is None:
-            kept.append(raw)
-        elif record["event"] not in _CONSENT:
-            record.pop("device", None)
-            kept.append(json.dumps(record, ensure_ascii=False) + "\n")
-    return (None if kept == lines else kept), None
-
-
-def migrate(projects_root: Path) -> list[str]:
-    said: list[str] = []
+def staged(projects_root: Path) -> list[Staged]:
+    out: list[Staged] = []
     for workspace in account_dirs(projects_root):
-        ledger = CycleEventLog.workspace_path(workspace)
-        users = UserStore(workspace)
-        held = set(users.consent_trail())
+        held = UserStore(workspace).consent_trail()
         moved = [
             line
-            for raw in read_lines(ledger)
+            for raw in read_lines(CycleEventLog.workspace_path(workspace))
             if (line := _consent_of(raw)) is not None and line not in held
         ]
-        # Appended before the ledger drops them, so a crash between the two loses no consent.
-        for line in moved:
-            users.record(line)
-        rewrite_lines(ledger, _reshaped)
-        if moved:
-            said.append(f"{workspace.name}: {len(moved)} consent line(s) off the workspace ledger")
-    return said
+        if not moved:
+            continue
+        trail = Path(workspace) / CONSENT_FILE
+        lines = [
+            *read_lines(trail),
+            *(
+                json.dumps(line.model_dump(mode="json"), ensure_ascii=False) + "\n"
+                for line in moved
+            ),
+        ]
+        out.append(
+            Staged(
+                trail,
+                "".join(lines).encode("utf-8"),
+                f"{workspace.name}: {len(moved)} consent line(s) off the workspace ledger",
+            )
+        )
+    return out
