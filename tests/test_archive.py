@@ -1397,7 +1397,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # A course lifting no round continues the line of the candidate it hangs from, through it.
     steer = [(0, [o]), (0, [at(steered, 0, "s")])]
     rivals = [(0, [o]), (0, [at(rival, 0, "c")])]
-    [seed] = [
+    [own_seed] = [
         e.address
         for e in entries_under(tree)
         if isinstance(e, HierarchyCandidate) and e.facts.individual == seed_key
@@ -1409,7 +1409,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         **{c: [*head, (2, [c])] for c in (at(family, 2, "a"), at(family, 2, "z"), at(kid, 2, "y"))},
         x: [*head, crownless, (3, [x])],
         at(great, 4, "v"): [*head, crownless, (3, [x]), (4, [at(great, 4, "v")])],
-        seed: [*head, crownless, (3, [x]), (0, [seed])],
+        own_seed: [*head, crownless, (3, [x]), (0, [own_seed])],
         at(steered, 0, "s"): steer,
         at(rewound, 1, "w"): [(0, [o]), (1, [at(rewound, 1, "w")])],
         at(rewound, 1, "k"): [(0, [o]), (1, [at(rewound, 1, "k")])],
