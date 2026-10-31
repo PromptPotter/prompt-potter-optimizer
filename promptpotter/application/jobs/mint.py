@@ -663,7 +663,7 @@ async def _mint_after_framing(
         ]
         minted = _mint_all(framed, campaign_ids, billed=checkin_ledger.path)
     except BaseException:
-        drafts.discard(draft_id)
+        drafts.discard(drafts.hold(draft_id))
         raise
     drafts.close(draft_id)
     return minted

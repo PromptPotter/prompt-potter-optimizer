@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -169,15 +170,24 @@ def _remove(path: Path) -> None:
 
 
 def apply_reset(plan: ResetPlan) -> None:
-    for tenant in plan.tenants:
-        # Money first: banking after the drop banks nothing. A draft's destroyer banks it under its id.
-        CampaignStore(tenant.workspace).bank_all_before_removal()
-        drafts = DraftStore(tenant.workspace)
-        for draft in draft_dirs(tenant.workspace):
-            drafts.discard(draft.name)
-        for path in tenant.drop:
-            _remove(path)
-            logger.info("reset: removed %s", path)
+    with ExitStack() as held:
+        # Every draft's claim before any bank: one a Start holds refuses the reset with nothing banked.
+        claims = {
+            tenant.workspace: [
+                held.enter_context(DraftStore(tenant.workspace).hold(draft.name))
+                for draft in draft_dirs(tenant.workspace)
+            ]
+            for tenant in plan.tenants
+        }
+        for tenant in plan.tenants:
+            # Money first: banking after the drop banks nothing. A draft's destroyer banks it under its id.
+            CampaignStore(tenant.workspace).bank_all_before_removal()
+            drafts = DraftStore(tenant.workspace)
+            for claim in claims[tenant.workspace]:
+                drafts.discard(claim)
+            for path in tenant.drop:
+                _remove(path)
+                logger.info("reset: removed %s", path)
     for tenant in plan.tenants:
         if tenant.holds_pointer:
             clear_active_pointer(tenant.workspace)

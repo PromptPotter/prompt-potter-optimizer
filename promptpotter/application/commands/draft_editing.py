@@ -56,7 +56,7 @@ def edit_draft_campaign(
 def discard_draft(dispatched: Dispatched[DiscardDraftPayload]) -> Applier[object]:
     stores = dispatched.dispatcher.stores
     draft_id = owned_draft(stores, dispatched.payload.draft_id).draft_id
-    return Applier.silent(lambda: stores.drafts.discard(draft_id))
+    return Applier.silent(lambda: stores.drafts.discard(stores.drafts.hold(draft_id)))
 
 
 async def dispatch_draft_patch(
