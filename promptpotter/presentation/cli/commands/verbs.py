@@ -669,6 +669,15 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "stand in line. Read-only, zero spend.",
     ),
     Verb(
+        "close-admission",
+        "machine_status:cmd_close_admission",
+        help="A landing's first act, before its checkout moves: close this box's admission to every "
+        "process not running TARGET, until the restarted server runs it. Prints `closed …`, or one "
+        "`held …` line per live run on other code and closes nothing. Zero spend.",
+        args=(Arg("target", help="The full commit the landing checks out."),),
+        needs_registries=False,
+    ),
+    Verb(
         "trail",
         "trail:cmd_trail",
         help="What an account did, oldest first, in UTC: its sign-ins, its consent, every upload, every attempt "

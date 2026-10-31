@@ -195,9 +195,11 @@ knowing:
   flight finishes and the returning API reads it off its lock. The app's unit is rewritten only by
   `./install-service.sh`.
 - **It refuses to land while a run on other code is live**: such a run writes ledger shapes the
-  landed code may refuse. The synced checkout's `machine-status` exits 1 on any live producer whose
-  job names another `code_revision`, and the script puts the checkout back on the commit it ran.
-  Re-run once that run pauses or ends.
+  landed code may refuse. Before anything moves, the running checkout's `close-admission <target>`
+  names every live job whose `code_revision` is not the target, and the script exits with nothing
+  changed. Re-run once that run pauses or ends. On a yes, every launch is refused until an API on the
+  target starts, so nothing starts on the old code mid-deploy; a deploy that fails before the restart
+  leaves launches refused until the next one lands.
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
   its env file — needs `./install-admin-bot.sh`.
 - **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing

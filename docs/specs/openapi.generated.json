@@ -9579,7 +9579,7 @@
       },
       "MachineNotice": {
         "additionalProperties": false,
-        "description": "What the machine's occupancy means for the CALLER, in words: their own launch waiting, or\na full machine a launch would wait on. Built by :meth:`of` alone.",
+        "description": "What the machine's occupancy means for the CALLER, in words: a landing refusing every launch,\ntheir own launch waiting, or a full machine a launch would wait on. Built by :meth:`of` alone.",
         "properties": {
           "detail": {
             "title": "Detail",
@@ -9665,11 +9665,6 @@
         "additionalProperties": false,
         "description": "One held slot, whoever holds it: a campaign run or a paid verb's scoring pass.",
         "properties": {
-          "code_revision": {
-            "description": "The code its producer runs: a checkout's commit, else the installed release",
-            "title": "Code Revision",
-            "type": "string"
-          },
           "cycle": {
             "anyOf": [
               {
@@ -9739,8 +9734,7 @@
           "cycle",
           "user",
           "mine",
-          "started_at",
-          "code_revision"
+          "started_at"
         ],
         "title": "MachineSlot",
         "type": "object"
@@ -9763,11 +9757,6 @@
             "title": "Ceiling",
             "type": "integer"
           },
-          "code_revision": {
-            "description": "The code the answering process runs",
-            "title": "Code Revision",
-            "type": "string"
-          },
           "held_back": {
             "anyOf": [
               {
@@ -9789,16 +9778,11 @@
                 "type": "null"
               }
             ],
-            "description": "`busy` and the caller's place in `queue`, worded once for the terminal and the alert bar; null where a slot is free and nothing of theirs waits."
+            "description": "A landing in progress, `busy` and the caller's place in `queue`, worded once for the terminal and the alert bar; null where a slot is free and nothing of theirs waits."
           },
           "occupied": {
             "description": "Slots held machine-wide, whoever holds them — the occupancy figure, which `running` may list fewer of.",
             "title": "Occupied",
-            "type": "integer"
-          },
-          "producers_behind": {
-            "description": "Live producers machine-wide (runs, embedded and inner runs, scoring passes) running code other than `code_revision`: each writes ledger shapes this code may refuse, so a landing waits while it is non-zero (`deploy-linux/update.sh`).",
-            "title": "Producers Behind",
             "type": "integer"
           },
           "queue": {
@@ -9839,9 +9823,7 @@
           "running",
           "queued",
           "busy",
-          "notice",
-          "code_revision",
-          "producers_behind"
+          "notice"
         ],
         "title": "MachineStatusResponse",
         "type": "object"

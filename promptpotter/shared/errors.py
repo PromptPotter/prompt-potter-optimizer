@@ -292,6 +292,19 @@ class ManifestUnreadableError(ConflictError):
         )
 
 
+class JobUnreadableError(ConflictError):
+    """A job file is never migrated: one this build cannot read refuses every reader of the jobs dir by name."""
+
+    code = "job_unreadable"
+
+    def __init__(self, *, path: str, reason: str) -> None:
+        super().__init__(
+            f"{path} was written in a shape this build does not read ({reason}). No migration "
+            "exists: delete it once no run it names is live.",
+            details={"path": path, "reason": reason},
+        )
+
+
 class LedgerUnreadableError(ConflictError):
     """A ledger is never migrated: a line this build cannot read refuses every reader of its kind."""
 

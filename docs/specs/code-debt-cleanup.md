@@ -108,11 +108,9 @@ acting.
   and the rewrite keeps the new file's bytes past `mark.end` as a tail. Action: one identity check
   in `io.py`, read by both. **Re-test:** `git grep -n "st_ino" -- promptpotter/infrastructure/store`.
 - **A landing waits on every live producer on another commit, whether or not the ledger shape
-  moved** (`jobs/machine_status.py::producers_behind`), so a busy box may never land. Action: key it
-  on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a landing
-  that moves no record shape refuses while a run is live.
-- **`producers_behind` is served, and no webapp surface reads it**: only the terminal words it.
-  Action: the usage tab's machine row says it. **Re-test:** `git grep -n "producers_behind" -- webapp/components`.
+  moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
+  key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
+  landing that moves no record shape refuses while a run is live.
 - **`reset` still refuses when the spend bank's OWN record kinds reshape** (`TokenUsageRecord`,
   `SpendHoldRecord`, `SpendTombstoneRecord`): the bank cannot read the money it would bank, so it
   drops nothing, and the wipe is by hand. Action: decide whether such a reshape migrates the bank

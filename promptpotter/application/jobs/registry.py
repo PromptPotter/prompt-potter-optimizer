@@ -13,7 +13,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, assert_never, get_args
 
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import (
@@ -28,7 +28,11 @@ from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import read_json, unlink_robust, write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError
+from promptpotter.shared.errors import (
+    ConflictError,
+    JobUnreadableError,
+    ServiceUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +123,7 @@ class Job:
     started_at: str | None
     # A release is its own act, never a fourth stage: `stage` stays where the launch got to.
     released_at: str | None
-    # The code its producer runs, stamped with `producer_id`: a landing waits on a job holding another.
+    # The code its producer runs, stamped with `producer_id`: a landing waits on a live job on another.
     code_revision: str
     # What the account holds back for it, which its run's book reads live; its cycle's share of the
     # campaign's ceiling is the cycle's (`CycleShareRecord`).
@@ -213,25 +217,30 @@ class JobRegistry:
         holder: JobHolder,
         stage: JobStage = RunPhase.STARTING,
     ) -> Job:
-        job_id = secrets.token_urlsafe(12)
-        now = utcnow_iso()
-        job = Job(
-            job_id=job_id,
-            user_id=user_id,
-            principal_id=principal_id,
-            workspace=str(workspace),
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            holder=holder,
-            stage=stage,
-            created_at=now,
-            started_at=None,
-            released_at=None,
-            code_revision=CODE_REVISION,
-            # Not at construction: the token takes a process-lifetime lock, and a reader is no producer.
-            producer_id=this_producer(self._dir),
-        )
-        self._persist(job)
+        with self.admission_gate():
+            if (landing := self._gate.landing()) is not None:
+                raise ServiceUnavailableError(
+                    f"This box is landing code {landing[:12]} and admits nothing else until it "
+                    "restarts on it. Nothing was started; launch again shortly.",
+                    code="landing",
+                )
+            job = Job(
+                job_id=secrets.token_urlsafe(12),
+                user_id=user_id,
+                principal_id=principal_id,
+                workspace=str(workspace),
+                campaign_id=hop.campaign_id,
+                cycle_id=hop.cycle_id,
+                holder=holder,
+                stage=stage,
+                created_at=utcnow_iso(),
+                started_at=None,
+                released_at=None,
+                code_revision=CODE_REVISION,
+                # Not at construction: the token takes a process-lifetime lock, and a reader is no producer.
+                producer_id=this_producer(self._dir),
+            )
+            self._persist(job)
         return job
 
     @contextmanager
@@ -292,7 +301,8 @@ class JobRegistry:
         with self.admission_gate():
             running = self.list_running()
             live = len(running)
-            if live >= self._capacity(live):
+            # A landing holds the queue: what an older process promotes, it starts on older code.
+            if live >= self._capacity(live) or self._gate.landing() is not None:
                 return False
             first = next(iter(self.queue_order()), None)
             if first is None or first.job_id != job_id:
@@ -353,6 +363,18 @@ class JobRegistry:
             self._persist(job)
             return True
 
+    def landing(self) -> str | None:
+        return self._gate.landing()
+
+    def close_for_landing(self, target: str) -> list[Job]:
+        """Admission closes to every process not on *target*, unless a live job on other code holds it
+        open; those are returned, and nothing is closed."""
+        with self.admission_gate():
+            held = [job for job in self.list_holding_spend() if job.code_revision != target]
+            if not held:
+                self._gate.close_for(target)
+            return held
+
     def attach_task(self, job_id: str, task: asyncio.Task[None]) -> None:
         with self._lock:
             self._tasks[job_id] = task
@@ -377,25 +399,27 @@ class JobRegistry:
 
     def get(self, job_id: str) -> Job | None:
         path = self._path(job_id)
-        if not path.is_file():
-            return None
+        return self._read(path) if path.is_file() else None
+
+    @staticmethod
+    def _read(path: Path) -> Job | None:
         try:
             raw = read_json(path)
         except (OSError, JSONDecodeError):
-            logger.warning("job %s file unreadable", job_id)
+            logger.warning("job file %s unreadable", path)
             return None
-        return _JOB.validate_python(raw)
+        try:
+            return _JOB.validate_python(raw)
+        except ValidationError as exc:
+            raise JobUnreadableError(path=str(path), reason=str(exc.errors()[0]["msg"])) from exc
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
         """A released job launched before today is deleted here: every reader past a release counts today's."""
         today = utcnow_iso()[:10]
         out: list[Job] = []
         for path in self._dir.glob("*.json"):
-            try:
-                raw = read_json(path)
-            except (OSError, JSONDecodeError):
+            if (job := self._read(path)) is None:
                 continue
-            job = _JOB.validate_python(raw)
             if job.released and not job.launched_on(today):
                 unlink_robust(path)
                 continue

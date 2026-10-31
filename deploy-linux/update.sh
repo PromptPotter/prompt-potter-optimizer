@@ -45,13 +45,23 @@ resolve_ref() {
     || git -C "$1" rev-parse --verify --quiet "refs/tags/$2^{commit}" \
     || git -C "$1" rev-parse --verify --quiet "$2^{commit}"
 }
-# Mirror ONE commit of origin and say which: a deploy that cannot name its commit cannot be checked.
-sync() {
-  local sha
+# Fetch and print the ONE commit of origin $2 names: a deploy that cannot name its commit cannot be checked.
+fetch_target() {
   git -C "$1" fetch --quiet --tags origin
-  sha="$(resolve_ref "$1" "$2")" || { bad "'$2' names nothing on origin — a tag, a branch or a commit"; exit 1; }
-  git -C "$1" reset --hard --quiet "$sha"
+  resolve_ref "$1" "$2" || { bad "'$2' names nothing on origin — a tag, a branch or a commit" >&2; exit 1; }
+}
+# Mirror commit $2 and say which.
+checkout() {
+  git -C "$1" reset --hard --quiet "$2"
   ok "$(basename "$1") at $(git -C "$1" describe --tags --always) ($(git -C "$1" rev-parse --short HEAD))"
+}
+# A verb under the unit's environment: this shell holds neither its keys, its bot token nor its data
+# root, so a verb run here would judge whatever the checkout's .env happens to hold.
+as_unit() {
+  sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" \
+    -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
+    -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
+    "$INSTALL_DIR/.venv/bin/python" -m promptpotter "$@"
 }
 
 # --- preflight: refuse the placeholder fallback -----------------------------
@@ -68,34 +78,36 @@ fi
 say "app: $INSTALL_DIR"
 self_sha() { sha256sum "$HERE/update.sh" 2>/dev/null | cut -d' ' -f1; }
 self_before="$(self_sha)"
-# The commit the live processes run, carried across the re-exec: the landing check rolls back to it.
-landed_from="${UPDATE_LANDED_FROM:-$(git -C "$INSTALL_DIR" rev-parse HEAD)}"
-sync "$INSTALL_DIR" "$REF"
-# `sync` can replace THIS script, and bash keeps reading the descriptor it already opened — so the
-# remainder of the run is the PRE-sync copy, and every fix to this file lands one deploy late while
-# printing the old behaviour's output. Re-exec the new copy once, guarded against a loop.
-if [[ -z "${UPDATE_REEXECED:-}" && -n "$self_before" && "$(self_sha)" != "$self_before" ]]; then
-  ok "update.sh changed in this sync — re-running the new copy"
-  export UPDATE_REEXECED=1 UPDATE_LANDED_FROM="$landed_from"
-  exec bash "$HERE/update.sh" "$@"
+# The re-exec'd copy below runs on a checkout this block already landed.
+if [[ -z "${UPDATE_REEXECED:-}" ]]; then
+  target="$(fetch_target "$INSTALL_DIR" "$REF")"
+  # A run is its own process and outlives the restart (`KillMode=process`), so the landed code would
+  # read the ledger shapes an older producer still writes. The RUNNING code asks before anything
+  # moves, and on a yes closes admission to all but $target until an API on it starts.
+  if ! landing_out="$(as_unit close-admission "$target")"; then
+    printf '%s\n' "$landing_out"
+    bad "landing check crashed — nothing changed"
+    exit 1
+  fi
+  if [[ "$landing_out" != closed* ]]; then
+    printf '%s\n' "$landing_out"
+    bad "not landed: a live run is on other code — nothing changed; re-run once it pauses or ends"
+    exit 1
+  fi
+  checkout "$INSTALL_DIR" "$target"
+  # The checkout can replace THIS script, and bash keeps reading the descriptor it already opened —
+  # so the rest of the run would be the old copy. Re-exec the new copy once, guarded against a loop.
+  if [[ -n "$self_before" && "$(self_sha)" != "$self_before" ]]; then
+    ok "update.sh changed in this checkout — re-running the new copy"
+    export UPDATE_REEXECED=1
+    exec bash "$HERE/update.sh" "$@"
+  fi
 fi
 # Install the exact pinned graph from uv.lock — same source of truth as CI. Two syncs: the first
 # `--inexact`, removing nothing, only so the synced code can run; the second exact, once the datasets
 # this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
-# A run is its own process and outlives the restart (`KillMode=process`), so the landed code would
-# read the ledger shapes an older producer still writes. The synced code asks, under the unit's
-# environment as `health` below, and a refusal puts the checkout back on the commit they run.
-if ! landing_out="$(sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" \
-  -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
-  -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
-  "$INSTALL_DIR/.venv/bin/python" -m promptpotter machine-status)"; then
-  printf '%s\n' "$landing_out"
-  git -C "$INSTALL_DIR" reset --hard --quiet "$landed_from"
-  bad "not landed: a live run is on other code — the checkout is back on $(git -C "$INSTALL_DIR" rev-parse --short HEAD); re-run once it pauses or ends"
-  exit 1
-fi
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
 # shell does not load $ENV_FILE. The verb refuses a name naming no dataset, and `set -e` stops the
 # deploy there, before the exact sync drops what that name's extras were.
@@ -125,7 +137,8 @@ systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1 && sudo systemctl rest
 # --- backend (optional): sync → deps → restart ------------------------------
 if [[ -n "$BACKEND_DIR" ]]; then
   say "backend: $BACKEND_DIR"
-  sync "$BACKEND_DIR" ""   # REF names a commit of THIS repo; the backend rides its own tracked tip
+  # REF names a commit of THIS repo; the backend rides its own tracked tip.
+  checkout "$BACKEND_DIR" "$(fetch_target "$BACKEND_DIR" "")"
   [[ -x "$BACKEND_DIR/.venv/bin/pip" ]] && "$BACKEND_DIR/.venv/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt"
   [[ -n "$BACKEND_SERVICE" ]] && sudo systemctl restart "$BACKEND_SERVICE"
 fi
@@ -142,13 +155,8 @@ if systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; then
   if systemctl is-active --quiet "$BOT_SERVICE_NAME"; then ok "admin bot up"; else bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"; down=1; fi
 fi
 # Everything the box answers for that /health cannot see (a backend, a sign-in provider's view of
-# oidc.json): the verb exits 1 on a broken one, and records and tells it as the bot would. It runs
-# under the unit's EnvironmentFile: this shell holds neither its keys nor its bot token, so a probe
-# run here would judge whatever the checkout's .env happens to hold instead of what the app serves.
-health_out="$(sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" \
-  -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
-  -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
-  "$INSTALL_DIR/.venv/bin/python" -m promptpotter health)" || down=1
+# oidc.json): the verb exits 1 on a broken one, and records and tells it as the bot would.
+health_out="$(as_unit health)" || down=1
 while read -r state row; do
   if [[ "$state" == held ]]; then ok "$row"; elif [[ -n "$state" ]]; then bad "$row"; fi
 done <<< "$health_out"

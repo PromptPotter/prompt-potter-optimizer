@@ -2871,16 +2871,10 @@ export interface MachineStatusResponse {
   /** The CALLER's own launches refused today, newest first. A launch that queued
    * was answered before it was refused, so this is where its refusal is read. */
   refused: MachineRefusal[];
-  /** `busy` and the caller's place in `queue`, worded once for the terminal and the
-   * alert bar; null where a slot is free and nothing of theirs waits. */
+  /** A landing in progress, `busy` and the caller's place in `queue`, worded once
+   * for the terminal and the alert bar; null where a slot is free and nothing
+   * of theirs waits. */
   notice: MachineNotice | null;
-  /** The code the answering process runs */
-  code_revision: string;
-  /** Live producers machine-wide (runs, embedded and inner runs, scoring passes)
-   * running code other than `code_revision`: each writes ledger shapes this
-   * code may refuse, so a landing waits while it is non-zero (`deploy-
-   * linux/update.sh`). */
-  producers_behind: number;
 }
 
 /** One held slot, whoever holds it: a campaign run or a paid verb's scoring pass. */
@@ -2904,8 +2898,6 @@ export interface MachineSlot {
   mine: boolean;
   /** ISO time the holder started running; null while it is still starting */
   started_at: string | null;
-  /** The code its producer runs: a checkout's commit, else the installed release */
-  code_revision: string;
 }
 
 /** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
@@ -2947,7 +2939,7 @@ export interface MachineRefusal {
   reason: string;
 }
 
-/** What the machine's occupancy means for the CALLER, in words: their own launch waiting, or */
+/** What the machine's occupancy means for the CALLER, in words: a landing refusing every launch, */
 export interface MachineNotice {
   title: string;
   detail: string;
