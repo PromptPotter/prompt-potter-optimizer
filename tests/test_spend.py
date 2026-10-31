@@ -1658,6 +1658,11 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     # A third fork is refused: its siblings hold the ceiling whole.
     with pytest.raises(QuotaExceededError):
         launch(fork_c, 1.0)
+    # A fork arms its campaign's ceiling, which the launch that moved it wrote on the root.
+    armed = _change_run_limits(CommandDispatcher(built_stores, shared), fork_b, Budget(rounds=4))
+    assert armed.usd == pytest.approx(1.0), (
+        "a fork armed its own ledger's ceiling, not the campaign's"
+    )
 
     # An embedded run holds a share through the same admission, and never a machine slot.
     async def embedded() -> None:

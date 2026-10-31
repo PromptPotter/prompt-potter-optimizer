@@ -842,6 +842,16 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert (origin.facts.stands, held.facts.stands) == (True, False), (
         "an uncrowned re-run took the stand"
     )
+    # A ledger re-minted onto its freed inode, grown past the old one, is read as itself: an inode
+    # number outlives its file, so only the bytes tell the old file's tail from a new file.
+    _, regrown = _minted(stores, "cycle_regrown")
+    regrown_rounds: list[RoundResult] = []
+    grown = [_emit_round(closing, regrown, regrown_rounds, f"d{n}") for n in range(6)]
+    assert regrown.path.stat().st_size > ledger.path.stat().st_size, "guard"
+    ledger.path.write_bytes(regrown.path.read_bytes())
+    assert stores.campaigns.standing_rounds(hop, moment=None).crowns == dict(enumerate(grown)), (
+        "a re-minted ledger was read as the tail of the file it replaced"
+    )
 
     # A close this build cannot read refuses its cycle to every reader of rounds, never half-read;
     # the remedy it names deletes the campaign, paused as it is, and keeps the paid measurement.

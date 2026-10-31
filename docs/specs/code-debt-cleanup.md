@@ -115,6 +115,26 @@ acting.
   `SpendHoldRecord`, `SpendTombstoneRecord`): the bank cannot read the money it would bank, so it
   drops nothing, and the wipe is by hand. Action: decide whether such a reshape migrates the bank
   first or banks nothing on purpose. **Re-test:** a reset over a ledger with a reshaped `token_usage` line.
+- **`reset` drops a campaign directory with no manifest unbanked, and guards no live producer**:
+  `maintenance/reset.py::apply_reset` banks through `iter_campaign_dirs`, which skips such a
+  directory, and never takes the guard `delete` takes (`_guard_and_release`). Action: bank by
+  ledger, not manifest, and take the delete's guard. **Re-test:** a reset over a manifest-less
+  campaign whose ledger is billed.
+- **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append
+  an `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both
+  reads derive from. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
+- **A deleted fork takes its `LeftComparisonRecord` with it**, so its arm reads `controlled` again
+  while the fork's spend stays banked. Action: the exit outlives the fork. **Re-test:** delete a
+  fork off an arm, then read the arm's `evidence`.
+- **A campaign's root is found two ways**: `ledger_scan.py::scan_campaign_ceiling` parses the
+  directory name (`store/layout.py::root_cycle_id`) where its writer takes `Campaign.root_hop`. Action:
+  the reader takes the root hop. **Re-test:** `git grep -n "root_cycle_id(" -- promptpotter`.
+- **A fold that raises is logged and folded past** (`store/read_model.py::feed_fold`), so a read
+  serves a value missing that line. Action: refuse as `ledger_record` does. **Re-test:**
+  `git grep -n "logger.exception" -- promptpotter/infrastructure/store/read_model.py`.
+- **An unparseable job file is logged and skipped** (`jobs/registry.py::JobRegistry.list_all`), so
+  occupancy undercounts a live slot; a parseable one that fails validation raises
+  `JobUnreadableError`. Action: one refusal for both. **Re-test:** `git grep -n "logger" -- promptpotter/application/jobs/registry.py`.
 
 ### The member backbone
 
