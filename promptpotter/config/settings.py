@@ -3,6 +3,7 @@ import locale
 import re
 import tomllib
 from importlib.metadata import version
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
@@ -35,6 +36,46 @@ def _app_version() -> str:
 
 
 APP_VERSION: str = _app_version()
+
+
+# A checkout git cannot name: it equals no landing's target, so a producer on it holds every landing.
+UNVERSIONED = "unversioned-checkout"
+
+
+def _git_head(checkout: Path) -> str:
+    """HEAD's commit off git's own files, a worktree's included: no process spawned per import."""
+    dot_git = checkout / ".git"
+    if not dot_git.exists():
+        return UNVERSIONED
+    git_dir = (
+        checkout / dot_git.read_text(encoding="utf-8").removeprefix("gitdir:").strip()
+        if dot_git.is_file()
+        else dot_git
+    )
+    head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+    if not head.startswith("ref: "):
+        return head
+    ref = head.removeprefix("ref: ")
+    common = git_dir / "commondir"
+    refs = git_dir / common.read_text(encoding="utf-8").strip() if common.is_file() else git_dir
+    if (loose := refs / ref).is_file():
+        return loose.read_text(encoding="utf-8").strip()
+    for line in (refs / "packed-refs").read_text(encoding="utf-8").splitlines():
+        sha, _, name = line.partition(" ")
+        if name == ref:
+            return sha
+    raise RuntimeError(f"{checkout}: HEAD names {ref}, which no ref under {refs} holds")
+
+
+def _code_revision() -> str:
+    """A checkout's commit, else the installed release: a version is bumped per release, not per landing."""
+    checkout = source_checkout_root()
+    return f"v{APP_VERSION}" if checkout is None else _git_head(checkout)
+
+
+# Read at import: a sync of the checkout after it never relabels a process still running the old
+# code, which is what a landing compares every live producer by (`jobs/registry.py::close_for_landing`).
+CODE_REVISION: str = _code_revision()
 
 # Bumping it re-prompts every user for consent; keep in sync with the site's /terms + /privacy.
 TERMS_VERSION: str = "2026-10-11"

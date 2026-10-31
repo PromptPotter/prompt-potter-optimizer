@@ -5,10 +5,9 @@ import inspect
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.command_kinds import (
     CampaignPayload,
     CommandAcceptedBody,
@@ -26,6 +25,7 @@ from promptpotter.domain.run_records import (
     CommandAckStatus,
     CommandEffect,
     CommandRecord,
+    NoEffect,
 )
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -136,19 +136,6 @@ class Applier[R]:
             raise RejectedError(reason)
 
         return Applier(_refuse, replay=None)
-
-
-def refused_on_an_arm(campaign: Campaign) -> Applier[object] | None:
-    match purpose := campaign.declaration.purpose:
-        case Optimize():
-            return None
-        case Compare(arm=arm):
-            return Applier.refusing(
-                f"{campaign.campaign_id} is arm {arm.arm_key} of head-to-head "
-                f"{arm.head_to_head_id}: its search and steer are the declaration's"
-            )
-        case _:
-            assert_never(purpose)
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,12 +300,14 @@ class CommandDispatcher:
                 ack_status = "rejected"
                 ack_detail = exc.reason
             except Exception as exc:
-                emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
+                emit_command_ack(
+                    command_id=command_id, status="rejected", detail=str(exc), effect=NoEffect()
+                )
                 raise
             effect = (
                 applier.effect_fn()
                 if (applier.effect_fn is not None and ack_status != "rejected")
-                else None
+                else NoEffect()
             )
             emit_command_ack(
                 command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
@@ -351,4 +340,4 @@ class CommandDispatcher:
             idempotency_key=command_id,
             issued_by=acting_principal(self.stores.identity),
         )
-        emit_command_ack(command_id=command_id, status="accepted")
+        emit_command_ack(command_id=command_id, status="accepted", effect=NoEffect())

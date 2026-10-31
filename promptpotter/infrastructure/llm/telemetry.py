@@ -17,7 +17,6 @@ from promptpotter.domain.run_records import (
     CommandEffect,
     CommandRecord,
     CycleRecord,
-    NoEffect,
     PricedKeyRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
@@ -335,15 +334,10 @@ def emit_command_ack(
     command_id: str,
     status: CommandAckStatus,
     detail: str = "",
-    effect: CommandEffect | None = None,
+    effect: CommandEffect,
 ) -> None:
     _append_record(
-        CommandAckRecord(
-            command_id=command_id,
-            status=status,
-            detail=detail,
-            effect=NoEffect() if effect is None else effect,
-        )
+        CommandAckRecord(command_id=command_id, status=status, detail=detail, effect=effect)
     )
 
 

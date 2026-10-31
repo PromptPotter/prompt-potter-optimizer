@@ -26,6 +26,7 @@ import pytest
 from factories import (
     SANDBOX_CAMPAIGN,
     arm_state,
+    billed_call,
     inner_sandbox,
     minted_campaign,
     round_result,
@@ -51,6 +52,7 @@ from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import CampaignLaunch, JobRegistry
 from promptpotter.application.library import library
+from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -66,7 +68,7 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
-from promptpotter.config.settings import TERMS_VERSION
+from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
@@ -141,6 +143,7 @@ from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     NotFoundError,
+    ServiceUnavailableError,
     UnauthorizedError,
 )
 from promptpotter.shared.identity import (
@@ -400,6 +403,32 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         ], why
     monkeypatch.setattr(settings_mod.settings, "MACHINE_STATUS_SCOPE", "all")
     assert machine_status(registry, identity=who("eve-id")).running, "`all` still hid the slot"
+
+    # A landing closes admission only once no live job runs other code, and to all but its target.
+    waiting = registry.request_slot(
+        user_id="ada-id",
+        principal_id="ada-id",
+        workspace=WorkspaceDir(tmp_path),
+        holder=CampaignLaunch("ds1"),
+    )
+    elsewhere = "f" * 40
+    assert [job.job_id for job in registry.close_for_landing(elsewhere)] == [held.job_id], (
+        "a live run on other code did not hold the landing open"
+    )
+    assert registry.landing() is None, "a refused landing closed admission anyway"
+    registry.release(held.job_id)
+    assert registry.close_for_landing(elsewhere) == [] and registry.landing() == elsewhere
+    assert not registry.claim_next(waiting.job_id), "a landing let old code start a queued launch"
+    with pytest.raises(ServiceUnavailableError):
+        registry.create(
+            user_id="ada-id",
+            principal_id="ada-id",
+            workspace=WorkspaceDir(tmp_path),
+            hop=ada_hop,
+            holder=CampaignLaunch("ds1"),
+        )
+    registry.close_for_landing(CODE_REVISION)
+    assert registry.claim_next(waiting.job_id), "code on the target refused its own launches"
 
     # An account's own block pack is its alone: an edit banked in one is no snippet of another's.
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
@@ -1025,3 +1054,20 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert not a.exists() and (b / "tenant").is_dir(), (
         "one campaign's delete took another's sandbox"
     )
+
+    # A reset takes every draft's claim before it banks: one a Start holds refuses it whole, so
+    # the retry that follows banks each campaign once.
+    campaigns.create_campaign(minted_campaign(hop))
+    CycleEventLog.open(CycleDir(cycle_dir)).append(billed_call(0.5))
+    built_stores.drafts.write_draft("held-draft", {})
+    bank = CycleEventLog.workspace_path(campaigns.workspace)
+
+    def banked() -> bytes:
+        return bank.read_bytes() if bank.exists() else b""
+
+    before = banked()
+    with built_stores.drafts.hold("held-draft"), pytest.raises(ConflictError):
+        apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
+    assert banked() == before, "a refused reset banked a campaign it left in place"
+    apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
+    assert banked() != before, "a reset dropped a campaign's spend unbanked"

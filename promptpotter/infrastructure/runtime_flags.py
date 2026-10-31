@@ -4,7 +4,6 @@ import sys
 import time
 from pathlib import Path
 
-from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
@@ -18,19 +17,18 @@ from promptpotter.domain.phases import (
     RunState,
 )
 from promptpotter.domain.run_records import RunPhaseRecord, StandingBudgetRecord
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     Controls,
     Progress,
+    scan_campaign_ceiling,
     scan_last,
     scan_launch_claim,
     scan_ledger_controls,
     scan_ledger_progress,
 )
-from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -63,10 +61,12 @@ def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
 
 
 def armed_run_limits(cycle_dir: Path, declared: RunLimits) -> RunLimits:
-    manifest = read_json_optional(CampaignLayout(_campaign_dir(cycle_dir)).manifest)
-    money = Budget() if manifest is None else Campaign.model_validate(manifest).standing_budget
     return declared.model_copy(
-        update={"budget": declared.budget.over(money, standing_budget(cycle_dir).budget)}
+        update={
+            "budget": declared.budget.over(
+                scan_campaign_ceiling(cycle_dir), standing_budget(cycle_dir).budget
+            )
+        }
     )
 
 

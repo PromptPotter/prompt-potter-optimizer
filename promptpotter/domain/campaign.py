@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
@@ -13,7 +13,7 @@ from promptpotter.domain.paired_reading import CellSet, instrument_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.run_records import LaunchClockRecord
-from promptpotter.domain.spend import Budget, CeilingMeter, money_axes_only
+from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.hashing import stable_hash
@@ -288,7 +288,6 @@ class CampaignEdit(TypedDict, total=False):
     lifecycle_reason: str
     backend_id: str
     backend_url: str
-    standing_budget: Budget
 
 
 class CampaignOwner(FrozenModel):
@@ -320,10 +319,6 @@ class Campaign(CampaignOwner):
     lifecycle_status: LifecycleStatus = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
-    # The money axes an operator named (`set-limits`, a launch flag), laid over the declared budget.
-    standing_budget: Budget = Budget()
-
-    _money_axes = field_validator("standing_budget")(money_axes_only)
 
     @property
     def root_hop(self) -> CycleHop:

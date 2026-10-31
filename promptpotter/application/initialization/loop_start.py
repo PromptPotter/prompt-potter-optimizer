@@ -330,9 +330,9 @@ async def init_optimization_loop(
     if resume_from_round_override is not None:
         # Only an admitted launch retracts rounds: whatever refuses it raised above.
         session.store.campaigns.rewind_to_round(session.hop, resume_from_round_override)
-        session.leave_comparison(ComparisonExit.REWIND, on=session.hop)
+        session.store.campaigns.leave_comparison(session.hop, ComparisonExit.REWIND)
     if no_divergence_check and session.state.resumed_from_round > 1:
-        session.leave_comparison(ComparisonExit.NO_DIVERGENCE_CHECK, on=session.hop)
+        session.store.campaigns.leave_comparison(session.hop, ComparisonExit.NO_DIVERGENCE_CHECK)
     cycle = Cycle.start(
         origin.origin,
         framing=origin.framing,

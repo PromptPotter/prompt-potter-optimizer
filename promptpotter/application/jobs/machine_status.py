@@ -82,16 +82,26 @@ class MachineRefusal(StrictModel):
 
 
 class MachineNotice(StrictModel):
-    """What the machine's occupancy means for the CALLER, in words: their own launch waiting, or
-    a full machine a launch would wait on. Built by :meth:`of` alone."""
+    """What the machine's occupancy means for the CALLER, in words: a landing refusing every launch,
+    their own launch waiting, or a full machine a launch would wait on. Built by :meth:`of` alone."""
 
     title: str
     detail: str
 
     @classmethod
     def of(
-        cls, *, busy: bool, oldest: MachineSlot | None, queue: list[MachineQueueEntry]
+        cls,
+        *,
+        landing: str | None,
+        busy: bool,
+        oldest: MachineSlot | None,
+        queue: list[MachineQueueEntry],
     ) -> MachineNotice | None:
+        if landing is not None:
+            return cls(
+                title="Landing new code",
+                detail=f"a launch is refused until the box restarts on {landing[:12]}",
+            )
         if queue:
             # Ordered and scoped to the caller: the first entry IS their place.
             position = queue[0].position
@@ -156,8 +166,8 @@ class MachineStatusResponse(StrictModel):
         "was answered before it was refused, so this is where its refusal is read.",
     )
     notice: MachineNotice | None = Field(
-        description="`busy` and the caller's place in `queue`, worded once for the terminal and "
-        "the alert bar; null where a slot is free and nothing of theirs waits."
+        description="A landing in progress, `busy` and the caller's place in `queue`, worded once "
+        "for the terminal and the alert bar; null where a slot is free and nothing of theirs waits."
     )
 
 
@@ -194,7 +204,10 @@ def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineSt
         queue=queue,
         # Named only where the caller may see the machine's oldest slot.
         notice=MachineNotice.of(
-            busy=busy, oldest=held[0] if held and held[0] in running else None, queue=queue
+            landing=jobs.landing(),
+            busy=busy,
+            oldest=held[0] if held and held[0] in running else None,
+            queue=queue,
         ),
         refused=[
             MachineRefusal(

@@ -15,6 +15,7 @@ from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
     CampaignOwner,
+    Compare,
     HeadToHeadRecord,
     LifecycleFilter,
     LifecycleStatus,
@@ -28,6 +29,7 @@ from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     BankedSubject,
+    CampaignCeilingRecord,
     ComparisonExit,
     CycleFinal,
     CycleFinalRecord,
@@ -75,6 +77,7 @@ from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
     StandingRounds,
+    scan_campaign_ceiling,
     scan_cycle_facts,
     scan_cycle_share,
     scan_last,
@@ -520,11 +523,19 @@ class CampaignStore:
     def record_intervention(self, hop: CycleHop, *, kind: str) -> None:
         self._append(hop, InterventionRecord(kind=kind))
 
-    def record_left_comparison(self, hop: CycleHop, *, act: ComparisonExit) -> None:
-        self._append(hop, LeftComparisonRecord(act=act))
+    def leave_comparison(self, hop: CycleHop, act: ComparisonExit) -> None:
+        """decisions.md § 0009: every act on an arm is admitted, and this is the event it leaves by."""
+        campaign = self.load_campaign(hop.campaign_id)
+        if campaign is None:
+            raise NotFoundError(f"campaign not found: {hop.campaign_id}")
+        if isinstance(campaign.declaration.purpose, Compare):
+            self._append(hop, LeftComparisonRecord(act=act))
 
-    def left_comparison(self, hop: CycleHop) -> list[ComparisonExit]:
-        return scan_left_comparison(self._chain(hop))
+    def left_comparison(self, campaign_id: str) -> list[ComparisonExit]:
+        """Off every cycle of the campaign: the arm is the campaign, whichever line an act ran on."""
+        return scan_left_comparison(
+            LedgerSpan(ledger) for ledger in self.campaign_cycle_ledgers(campaign_id)
+        )
 
     def record_spawned(self, hop: CycleHop, spawned_by: SpawnedBy) -> None:
         self._append(hop, SpawnedRecord(spawned_by=spawned_by))
@@ -756,6 +767,16 @@ class CampaignStore:
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
         return standing_budget(self.cycle_dir(hop))
+
+    def write_campaign_ceiling(self, campaign: Campaign, money: Budget) -> None:
+        """Whole, last wins, on the campaign's root: an axis it leaves unnamed stands no more."""
+        CycleEventLog.open(CycleDir(self.cycle_dir(campaign.root_hop))).append(
+            CampaignCeilingRecord(budget=money)
+        )
+
+    def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
+        """Off any cycle of the campaign: each reads its root's."""
+        return scan_campaign_ceiling(self.cycle_dir(hop))
 
     def write_cycle_share(self, hop: CycleHop, allotment: Budget) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(

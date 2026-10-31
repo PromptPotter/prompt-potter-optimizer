@@ -48,8 +48,8 @@ or pass `--against` to rerun all. A default-argument green by hand is the gate's
 potter and capo by default) in one act through `application/embedded_run.py::run_head_to_head`, as
 the `head-to-head` verb mints them, and running them one after another, one workspace after a
 foreign campaign on the dataset — the one layout putting
-several optimizers' campaigns in ONE workspace, for the webapp's Compare tab. It fails unless a
-skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory holds only
+several optimizers' campaigns in ONE workspace, for the webapp's Compare tab. It fails unless an
+arm searches its prompt's fields alone, each arm's memory holds only
 runs it filed, and every election read its head-to-head's freeze plus its own lines; whether the
 foreign campaign moved the decisions is printed as a reading. `head_to_head.json` is the evidence read.
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.commands.dispatcher import Applier, refused_on_an_arm
+from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -40,15 +40,13 @@ def origin_gate_decision(
 
 
 def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Applier[object]:
-    return refused_on_an_arm(dispatched.campaign) or Applier.for_loop(
+    return Applier.for_loop(
         dispatched.dispatcher.run_state(dispatched.hop).arms_refusal(dispatched.payload.keep)
     )
 
 
 def skip_searchpoint(dispatched: DispatchedToCycle[SkipSearchpointPayload]) -> Applier[object]:
-    return refused_on_an_arm(dispatched.campaign) or Applier.for_loop(
-        dispatched.dispatcher.run_state(dispatched.hop).admission.skip_refusal
-    )
+    return Applier.for_loop(dispatched.dispatcher.run_state(dispatched.hop).admission.skip_refusal)
 
 
 def set_sample_lookahead(

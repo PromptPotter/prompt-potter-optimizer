@@ -67,6 +67,7 @@ UNREPORTED_KINDS: frozenset[str] = frozenset(
         "health",  # the box health report's (`application/health.py`)
         "priced_key",  # scanned off the ledger (`ledger_scan.py`)
         "bank_partition",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "campaign_ceiling",  # a campaign fact scanned off its root's ledger (`runtime_flags.py`)
         "cycle_final",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "cycle_minted",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "cycle_share",  # a cycle fact scanned off the ledger (`ledger_scan.py`)

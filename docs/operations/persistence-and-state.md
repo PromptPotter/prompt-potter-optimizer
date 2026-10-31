@@ -50,6 +50,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
       events.jsonl                      # workspace ledger — commands with no cycle, the account's events
     head_to_heads/{id}.json             # `domain/campaign.py::HeadToHeadRecord`
     drafts/{draft_id}/                  # an open check-in, until Start or Discard
+    ruler.jsonl                         # the tenant's δ ruler, `store/ruler_store.py`
     campaigns/{campaign_id}/
       campaign.json  log.md
       cycles/{cycle_id}/                # root + forks + diags, ALL FLAT
@@ -121,7 +122,7 @@ The declaration is the runner's own `run_phase` record, written by the process t
 
 ### Commands ride the ledger
 
-`.runtime/` holds no control file. A command is acked `accepted` into the cycle's inbox (`ledger_scan.py::Controls`) and `applied` at the checkpoint that takes it; a new `running` declaration or any stop clears what stood, and one no loop will take is refused at dispatch. **The standing budget is the last `standing_budget` record on the cycle's own ledger** (`runtime_flags.py::standing_budget`), so `set-limits` from another process binds at one stat; its money axes bound the whole campaign.
+`.runtime/` holds no control file. A command is acked `accepted` into the cycle's inbox (`ledger_scan.py::Controls`) and `applied` at the checkpoint that takes it; a new `running` declaration or any stop clears what stood, and one no loop will take is refused at dispatch. **The standing budget is the last `standing_budget` record on the cycle's own ledger** (`runtime_flags.py::standing_budget`), so `set-limits` from another process binds at one stat; its money axes bound the whole campaign, the last `campaign_ceiling` record on the campaign ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
 
 ### Where the error text is
 

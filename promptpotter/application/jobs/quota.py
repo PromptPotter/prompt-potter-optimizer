@@ -546,10 +546,11 @@ def move_campaign_money(
         campaign = stores.campaigns.load_campaign(campaign_id)
         if campaign is None:
             raise NotFoundError(f"campaign not found: {campaign_id}")
-        standing = campaign.standing_budget.over(money)
-        if standing == campaign.standing_budget:
+        prior = stores.campaigns.read_campaign_ceiling(campaign.root_hop)
+        standing = prior.over(money)
+        if standing == prior:
             return
-        stores.campaigns.update_campaign(campaign_id, standing_budget=standing)
+        stores.campaigns.write_campaign_ceiling(campaign, standing)
         _reshare_campaign_ceiling(
             money, stores=stores, job_registry=job_registry, campaign_id=campaign_id
         )
@@ -626,10 +627,11 @@ def declare_run_budget(
         cycle_seed = stores.campaigns.read_cycle_seed(hop)
         if cycle_seed is not None:
             seed = cycle_seed.config_overrides.budget
-        campaign = stores.campaigns.load_campaign(hop.campaign_id)
-        if campaign is None:
+        if stores.campaigns.load_campaign(hop.campaign_id) is None:
             raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-        asked = campaign.standing_budget.over(stores.campaigns.read_standing_budget(hop).budget)
+        asked = stores.campaigns.read_campaign_ceiling(hop).over(
+            stores.campaigns.read_standing_budget(hop).budget
+        )
     asked = asked.over(requested)
     return config.optimization.budget.over(seed, asked), asked
 

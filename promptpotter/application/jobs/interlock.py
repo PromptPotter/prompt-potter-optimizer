@@ -11,16 +11,23 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 
-from promptpotter.config.settings import LOCK_TIMEOUT
+from promptpotter.config.settings import CODE_REVISION, LOCK_TIMEOUT
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.io import take_lock, validate_path_component
+from promptpotter.infrastructure.store.io import (
+    read_text_optional,
+    take_lock,
+    validate_path_component,
+    write_text,
+)
 from promptpotter.shared.errors import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
-# Both live INSIDE the jobs dir: it is globbed for `*.json` only, so neither reads as a job.
+# All live INSIDE the jobs dir: it is globbed for `*.json` only, so none reads as a job.
 _ADMISSION_LOCK = ".admission.lock"
 _PRODUCERS_DIR = "producers"
+# The code a landing admits alone; never removed, since the restarted API runs that code.
+_LANDING = ".landing"
 
 _token_lock = threading.Lock()
 _tokens: dict[Path, str] = {}
@@ -31,8 +38,17 @@ class AdmissionGate:
 
     def __init__(self, jobs_dir: Path) -> None:
         self._path = jobs_dir / _ADMISSION_LOCK
+        self._landing = jobs_dir / _LANDING
         self._nest = threading.RLock()
         self._depth = 0
+
+    def landing(self) -> str | None:
+        """The code a landing admits alone, while THIS process runs other code; ``None`` admits."""
+        target = read_text_optional(self._landing).strip()
+        return target if target and target != CODE_REVISION else None
+
+    def close_for(self, target: str) -> None:
+        write_text(self._landing, target)
 
     @contextlib.contextmanager
     def held(self) -> Iterator[None]:

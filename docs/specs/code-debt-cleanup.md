@@ -10,34 +10,6 @@ acting.
 
 **Rides with:** any pass in the file named.
 
-- **Inputs that change a run but leave no event** (audit 2026-10-29, `decisions.md` § 0009's last
-  bullets). Left:
-  - **An arm's fork, `submit_arms` and skip are refused** (`refused_on_an_arm`) while a rewind,
-    `fork_on_divergence` and `no_divergence_check` are admitted as a `LeftComparisonRecord`: one door
-    shape per act is `decisions.md` § 0009's open proposal.
-  - **Today's ledgers are read by tolerance until the 2026-10-30 wipe**: the new `ResolvedRunRecord`
-    fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
-    fields required and tag the union with the wipe.
-  - **`reset` cannot run after a shape change**, which is the only time it is needed. It banks spend
-    by folding the ledgers that the strict readers refuse (`UnregisteredStatePartError
-    'descriptor_calibration'` on 2026-10-30), so that day's wipe was a plain delete and nothing was
-    banked. `reset` also does not recognise `drafts/` or `ruler.jsonl`. Action: the bank reads
-    something that survives a reshape, or a reshape wipes without banking.
-  - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
-  - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
-    `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
-  **Re-test:** each input either hashed into the declaration or written as a record.
-- **A backend revision drift is served, not refused — until a connector's numbers read the revision
-  unchecked** (`initialization/wiring.py::_read_backend_revision` → `RunWiringRecord.backend_revision`,
-  the dashboard and the readout's ⚠ line). Served, because every contract a wrong number rides is
-  checked on its own and raises (the schema, `required_observation_keys`, the package cache): a
-  revision gate would stop each backend upgrade that moved none of them, and an unreachable `/status`
-  would stop a run whose cells answer. A refusal is right only where a measurement reads the
-  backend's layout with no check of its own: harbor's `_digest` reads the task layout of its `0.22`
-  series. Action: harbor checks the layout `_digest` reads and raises, so the revision stays a fact.
-  **Re-test:** `git grep -n "EXPECTED_HARBOR_SERIES" -- promptpotter/connectors/harbor.py` still
-  stands in for a layout check.
-
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
   `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.
@@ -128,16 +100,41 @@ acting.
   carries no meaning. Action: one ink. **Re-test:** read `FreqChart.tsx::colors`.
 - **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
-- **A running server keeps serving a ledger refusal after the ledger is replaced**: `/hierarchy`
-  answered `ledger_unreadable` for a cycle whose ledger was rewritten whole, until restart. Action: key a
-  refusal on the file's identity (size + mtime) like the fold it guards. **Re-test:** delete a refused
-  campaign and re-mint the same content under a live server; the next read answers 200.
-- **A live producer started on older code writes shapes the landed code refuses**: landing a ledger
-  shape change while any run writes breaks it.
-  Action: a run records its code revision and the landing refuses while a producer of an older one
-  holds a cycle. **Re-test:** `machine-status` before a shape-moving landing.
 - **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
   session. **Rides with:** that session landing.
+- **A file's identity is tested twice, by two rules**: `store/read_model.py::_LedgerTail._holds_last`
+  re-reads the last fed line, while `store/io.py::_swap` trusts `_FileMark.inode`. An inode
+  outlives its file, so a delete and re-mint between `_read_marked` and the swap passes that test,
+  and the rewrite keeps the new file's bytes past `mark.end` as a tail. Action: one identity check
+  in `io.py`, read by both. **Re-test:** `git grep -n "st_ino" -- promptpotter/infrastructure/store`.
+- **A landing waits on every live producer on another commit, whether or not the ledger shape
+  moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
+  key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
+  landing that moves no record shape refuses while a run is live.
+- **`reset` still refuses when the spend bank's OWN record kinds reshape** (`TokenUsageRecord`,
+  `SpendHoldRecord`, `SpendTombstoneRecord`): the bank cannot read the money it would bank, so it
+  drops nothing, and the wipe is by hand. Action: decide whether such a reshape migrates the bank
+  first or banks nothing on purpose. **Re-test:** a reset over a ledger with a reshaped `token_usage` line.
+- **`reset` drops a campaign directory with no manifest unbanked, and guards no live producer**:
+  `maintenance/reset.py::apply_reset` banks through `iter_campaign_dirs`, which skips such a
+  directory, and never takes the guard `delete` takes (`_guard_and_release`). Action: bank by
+  ledger, not manifest, and take the delete's guard. **Re-test:** a reset over a manifest-less
+  campaign whose ledger is billed.
+- **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append
+  an `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both
+  reads derive from. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
+- **A deleted fork takes its `LeftComparisonRecord` with it**, so its arm reads `controlled` again
+  while the fork's spend stays banked. Action: the exit outlives the fork. **Re-test:** delete a
+  fork off an arm, then read the arm's `evidence`.
+- **A campaign's root is found two ways**: `ledger_scan.py::scan_campaign_ceiling` parses the
+  directory name (`store/layout.py::root_cycle_id`) where its writer takes `Campaign.root_hop`. Action:
+  the reader takes the root hop. **Re-test:** `git grep -n "root_cycle_id(" -- promptpotter`.
+- **A fold that raises is logged and folded past** (`store/read_model.py::feed_fold`), so a read
+  serves a value missing that line. Action: refuse as `ledger_record` does. **Re-test:**
+  `git grep -n "logger.exception" -- promptpotter/infrastructure/store/read_model.py`.
+- **An unparseable job file is logged and skipped** (`jobs/registry.py::JobRegistry.list_all`), so
+  occupancy undercounts a live slot; a parseable one that fails validation raises
+  `JobUnreadableError`. Action: one refusal for both. **Re-test:** `git grep -n "logger" -- promptpotter/application/jobs/registry.py`.
 
 ### The member backbone
 
@@ -594,6 +591,11 @@ word's `git grep -c` for that sense is 0.
   junctions that a later recursive temp delete could follow. Action: the next `--push` sweeps stale
   `pp-push-*` (unlink, then `git worktree prune`). **Re-test:** kill a push mid-run, then run
   `--push` again and list `%TEMP%\pp-push-*`.
+- **`scripts/offline_run.py --controlled` crashes on main** (fd51d06 and after): the potter arm's
+  `_variant_edit` asserts `no framing to cite`, since the controlled leg's prompt holds no
+  `task_context`, so its arm-exit check (`run_controlled`: a fork takes its arm out) never runs.
+  Action: the leg declares the framing its fake proposer cites. **Re-test:**
+  `PROMPTPOTTER_HOME=<dir> python scripts/offline_run.py --controlled` exits 0.
 - **Seen bounding the perimeter** (2026-10-29):
   - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
     `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against

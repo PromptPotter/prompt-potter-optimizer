@@ -35,6 +35,12 @@ class DraftClaim:
     def release(self) -> None:
         self._lock.retire()
 
+    def __enter__(self) -> DraftClaim:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
 
 class DraftStore:
     """A draft's one owner is its CLAIM: a write, a discard and a second Start refuse while it is held."""
@@ -61,7 +67,7 @@ class DraftStore:
             ),
         )
 
-    def _take(self, draft_id: str) -> DraftClaim:
+    def hold(self, draft_id: str) -> DraftClaim:
         lock = take_lock(draft_claim_path(self._base_dir, draft_id), wait_s=0)
         if lock is None:
             raise ConflictError(
@@ -72,7 +78,7 @@ class DraftStore:
 
     def claim(self, draft_id: str) -> DraftClaim:
         """Taken first, then the draft asked for: a discard that won the race leaves nothing to mint."""
-        claim = self._take(draft_id)
+        claim = self.hold(draft_id)
         if self.read_draft(draft_id) is None:
             claim.release()
             raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
@@ -112,17 +118,15 @@ class DraftStore:
         """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing reads."""
         rmtree_robust(self.draft_dir(draft_id))
 
-    def discard(self, draft_id: str) -> None:
-        """A destroyer: what its check-in cost and what was commanded on it outlive it, under its id."""
-        claim = self._take(draft_id)
-        try:
-            draft_dir = self.draft_dir(draft_id)
+    def discard(self, claim: DraftClaim) -> None:
+        """A destroyer, under the claim it releases: what its check-in cost and what was commanded on
+        it outlive it, under its id."""
+        with claim:
+            draft_dir = self.draft_dir(claim.draft_id)
             bank_before_removal(
                 workspace=self._base_dir,
                 cycle_dirs=[draft_dir],
-                subject=BankedSubject(draft_id=draft_id),
+                subject=BankedSubject(draft_id=claim.draft_id),
                 metered=dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED),
             )
             rmtree_robust(draft_dir)
-        finally:
-            claim.release()

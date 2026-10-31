@@ -15,6 +15,7 @@ from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_
 
 from pydantic import ValidationError
 
+from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import append_line, open_text_robust
@@ -227,9 +228,21 @@ class _LedgerTail(ABC):
         self._sig: Signature | None = None
         self._bytes = 0
         self._lines = 0
+        # The last line fed, which an append leaves where it was: a refusal rides the fold, so
+        # whatever reads a re-created file as this one's tail serves this one's refusal.
+        self._last = b""
 
     @abstractmethod
     def _feed(self, raw: bytes) -> None: ...
+
+    def _holds_last(self) -> bool:
+        """An inode number outlives its file, so a delete and re-mint passes every stat test."""
+        try:
+            with open(self._path, "rb") as fh:
+                fh.seek(self._bytes - len(self._last))
+                return fh.read(len(self._last)) == self._last
+        except FileNotFoundError:
+            return False
 
     def _refresh(self) -> None:
         sig = file_sig(self._path)
@@ -242,6 +255,7 @@ class _LedgerTail(ABC):
             and sig[0] == self._sig[0]
             and sig[1] >= self._bytes
             and sig[2] >= self._sig[2]
+            and self._holds_last()
         )
         if not appended:
             self._reset()
@@ -252,6 +266,7 @@ class _LedgerTail(ABC):
                 self._feed(raw)
                 self._lines += 1
                 self._bytes += len(raw)
+                self._last = raw
         except FileNotFoundError:
             self._reset()
             return
@@ -264,6 +279,7 @@ class _LedgerTail(ABC):
             self._feed(raw)
             self._lines += 1
             self._bytes = at.stop
+            self._last = raw + b"\n"
             sig = file_sig(self._path)
             # Another process may have appended past ours already: a stale signature has the next view read it.
             if sig is not None and sig[0] == self._sig[0] and sig[1] == at.stop:
@@ -293,8 +309,11 @@ class _Feeder:
             kind.encode(): model for kind, model in _by_record_type(folds.values()).items()
         }
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
-        # By kind, so the folds that never take a refused line (run state, spend) still read whole.
-        self.refused: dict[type[StrictModel], LedgerUnreadableError] = {}
+        # By kind, so the folds that never take a refused line (run state, spend) still read whole:
+        # a reshape of one kind leaves the spend bank readable, so a reset can bank before it wipes.
+        self.refused: dict[
+            type[StrictModel], LedgerUnreadableError | UnregisteredStatePartError
+        ] = {}
 
     def line(self, offset: int, raw: bytes) -> None:
         for placed in self._placed:
@@ -308,7 +327,7 @@ class _Feeder:
             record = ledger_record(
                 model.model_validate_json, raw, ledger=self._ledger, offset=offset
             )
-        except LedgerUnreadableError as refusal:
+        except (LedgerUnreadableError, UnregisteredStatePartError) as refusal:
             self.refused.setdefault(model, refusal)
             return
         if record is None:

@@ -1368,7 +1368,7 @@ export interface RoundAudit {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -2878,8 +2878,9 @@ export interface MachineStatusResponse {
   /** The CALLER's own launches refused today, newest first. A launch that queued
    * was answered before it was refused, so this is where its refusal is read. */
   refused: MachineRefusal[];
-  /** `busy` and the caller's place in `queue`, worded once for the terminal and the
-   * alert bar; null where a slot is free and nothing of theirs waits. */
+  /** A landing in progress, `busy` and the caller's place in `queue`, worded once
+   * for the terminal and the alert bar; null where a slot is free and nothing
+   * of theirs waits. */
   notice: MachineNotice | null;
 }
 
@@ -2945,7 +2946,7 @@ export interface MachineRefusal {
   reason: string;
 }
 
-/** What the machine's occupancy means for the CALLER, in words: their own launch waiting, or */
+/** What the machine's occupancy means for the CALLER, in words: a landing refusing every launch, */
 export interface MachineNotice {
   title: string;
   detail: string;

@@ -57,9 +57,11 @@ from promptpotter.application.embedded_run import (
     run_campaign,
     run_head_to_head,
 )
+from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     manifest_directories,
@@ -77,7 +79,7 @@ from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
 )
-from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest, SkipSearchpointPayload
+from promptpotter.domain.command_kinds import ArmRequest, ForkCyclePayload, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
@@ -102,7 +104,6 @@ from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
-from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 
@@ -893,15 +894,6 @@ async def run_controlled(
     arms = await run_arms(workspace, arm_names, rounds=rounds, rows=rows)
     subjects += [cid for _, cid in arms.values()]
     stores = build_stores(default_identity(), projects_root=default_projects_root())
-    cycle, cid = arms[arm_names[0]]
-    try:
-        await CommandDispatcher(stores).dispatch(
-            CommandCall(SkipSearchpointPayload(campaign_id=cid, cycle_id=cycle.name), "skip-arm")
-        )
-    except ConflictError as exc:
-        print(f"skip on an arm: {exc.http_status} {exc}")
-    else:
-        raise SystemExit("offline run: a skip on a controlled arm was applied")
 
     def walks(campaign_id: str) -> CampaignWalks:
         return CampaignWalks(stores.campaigns, campaign_id)
@@ -953,6 +945,22 @@ async def run_controlled(
         f"{[(c.a.optimizer, c.b.optimizer, c.guard.state.value) for c in table.contrasts]}, "
         f"guard {[(r.optimizer, r.guard.state.value) for r in table.rows]}"
     )
+    # An act on an arm is admitted, and takes its campaign out (decisions.md § 0009).
+    name, (cycle, cid) = next(iter(arms.items()))
+    forked = await CommandDispatcher(stores, inline=Inline()).dispatch(
+        CommandCall(
+            ForkCyclePayload(campaign_id=cid, cycle_id=cycle.name, round=1, keep_rounds=True)
+        )
+    )
+    launched = forked.result
+    assert isinstance(launched, Launched) and launched.held is not None
+    await launched.held.run_inline(mode=RunMode(), readout_sink=print)
+    after = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects]).head_to_head
+    assert after is not None
+    row = next(r for r in after.rows if r.campaign_id == cid)
+    if row.guard.state is not GuardState.UNCONTROLLED:
+        raise SystemExit(f"offline run: arm {name} forked and still reads {row.guard.state}")
+    print(f"arm {name}: forked, and left its comparison: {row.guard.sentence}")
 
 
 def _graded(bench: dict[str, Any] | None) -> bool:
@@ -1603,7 +1611,7 @@ def main() -> int:
             ).read_bytes()
             print(f"{arm}: decisions {'UNMOVED' if same else 'MOVED'} by the foreign campaign")
         lines = (beside / "run.log").read_text(encoding="utf-8").splitlines()
-        print("\n".join(line for line in lines if line.startswith(("skip on", "arm ", "head-to-"))))
+        print("\n".join(line for line in lines if line.startswith(("arm ", "head-to-"))))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
     # Filed under the flags it ran with, and only where the sources read the same as before it.
     if kept is not None:

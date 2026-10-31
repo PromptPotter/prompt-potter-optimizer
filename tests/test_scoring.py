@@ -234,6 +234,8 @@ from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
     CommandAckRecord,
     ComparisonExit,
+    ForkSpec,
+    ForkTrigger,
     PhaseRecord,
     RunPhaseRecord,
 )
@@ -273,6 +275,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import ConflictError, ErrorCategory
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
@@ -3603,11 +3606,14 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "waiting": ("capo", 14),
         "capped": ("capo", 15),
         "rewound": ("capo", 16),
+        "forked": ("capo", 17),
     }
     for h2h_id, arms, verdict, guards in (
         ("real4", ("potter", "capo"), True, ["controlled"] * 2),
         # An arm a launch rewound in place stays admitted, and leaves the comparison as that event.
         ("real4", ("potter", "rewound"), True, ["controlled", "uncontrolled"]),
+        # A fork spends its campaign's ceiling: the arm leaves though the act landed on the fork.
+        ("real4", ("potter", "forked"), True, ["controlled", "uncontrolled"]),
         ("real4", ("potter", "capo", "gepa", "levi"), True, ["controlled"] * 3 + ["uncontrolled"]),
         (
             "real6",
@@ -3634,14 +3640,34 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
                 )
             )
         if "capped" in arms:
-            capped = f"capo_capped_{h2h_id}"
-            h2h_stores.campaigns.update_campaign(capped, standing_budget=Budget(usd=1.0))
+            capped = h2h_stores.campaigns.load_campaign(f"capo_capped_{h2h_id}")
+            assert capped is not None
+            h2h_stores.campaigns.write_campaign_ceiling(capped, Budget(usd=1.0))
         if "rewound" in arms:
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
             assert rewound is not None
-            h2h_stores.campaigns.record_left_comparison(
-                h2h_stores.campaigns.line_holder(rewound.root_hop), act=ComparisonExit.REWIND
+            h2h_stores.campaigns.leave_comparison(
+                h2h_stores.campaigns.line_holder(rewound.root_hop), ComparisonExit.REWIND
             )
+        if "forked" in arms:
+            forked = h2h_stores.campaigns.load_campaign(f"capo_forked_{h2h_id}")
+            assert forked is not None
+            line = h2h_stores.campaigns.line_holder(forked.root_hop)
+            parent = h2h_stores.campaigns.cycle_dir(line)
+            fork = CycleHop(campaign_id=line.campaign_id, cycle_id=f"{line.cycle_id}_fork_r1")
+            h2h_stores.campaigns.mint_fork_cycle(
+                fork,
+                parent,
+                ForkSpec(
+                    trigger=ForkTrigger.OPERATOR_REWIND,
+                    reason="",
+                    issued_by=SYSTEM_PRINCIPAL,
+                    from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+                ),
+                cut=CycleEventLog.open(CycleDir(parent)).next_offset,
+                cut_round=1,
+            )
+            h2h_stores.campaigns.leave_comparison(fork, ComparisonExit.FORK)
         h2h = subject_evidence(h2h_stores, arm_subjects).head_to_head
         assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case
         assert [r.guard.state.value for r in h2h.rows] == guards, (

@@ -189,7 +189,7 @@ class GuardMember(NamedTuple):
     bench_defaults_pin: str
     optimizer_models: tuple[str, ...]
     human_intervened: bool
-    # The line's `LeftComparisonRecord` acts: an arm with any stands outside its head-to-head.
+    # The campaign's `LeftComparisonRecord` acts, on any line: an arm with any stands outside its head-to-head.
     left_comparison: tuple[ComparisonExit, ...]
 
 
@@ -635,7 +635,7 @@ def _read(
         bench_defaults_pin=campaign.declaration.bench_defaults_pin,
         optimizer_models=tuple(optimizer_models),
         human_intervened=reading.human_intervened,
-        left_comparison=tuple(stores.campaigns.left_comparison(hop)),
+        left_comparison=tuple(stores.campaigns.left_comparison(hop.campaign_id)),
     )
     return _Graded(
         row=HeadToHeadRow(

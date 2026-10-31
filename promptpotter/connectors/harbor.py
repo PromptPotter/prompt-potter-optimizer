@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, get_args
 
 import httpx
 
@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from harbor.environments.docker.docker import DockerEnvironment
+    from harbor.models.trial.paths import TrialPaths
     from harbor.models.trial.result import TrialResult
     from harbor.trial.trial import Trial
 
@@ -142,10 +143,24 @@ _DOCKER_OVERLAY = Path(__file__).parent / "resources" / "harbor-docker-compose.y
 # Verifier only: a proxy in the agent's environment is observable by the agent.
 PACKAGE_CACHE_SCOPES = frozenset({"verifier"})
 
-# terminus-2 declares no `SYSTEM_PACKAGES`; this mirrors `TmuxSession._install_recording_tools`.
-_AGENT_TOOLS: dict[str, tuple[tuple[str, str], ...]] = {
-    "terminus-2": (("tmux", "tmux -V"), ("asciinema", "asciinema --version")),
+# The ATIF file an agent writes into its logs dir, which Harbor names but never reads back.
+_TRAJECTORY = "trajectory.json"
+
+
+class _AgentDeclares(NamedTuple):
+    tools: tuple[tuple[str, str], ...]
+    # Written into its logs dir by every step it runs: `_layout_fault` refuses a clean step without one.
+    logs: tuple[str, ...]
+
+
+# Absent declares nothing: oracle and nop write no logs, an installed agent's ATIF is best-effort.
+# terminus-2's tools mirror `TmuxSession._install_recording_tools`; `run` dumps its trajectory in `finally`.
+_AGENTS: dict[str, _AgentDeclares] = {
+    "terminus-2": _AgentDeclares(
+        tools=(("tmux", "tmux -V"), ("asciinema", "asciinema --version")), logs=(_TRAJECTORY,)
+    ),
 }
+_UNDECLARED = _AgentDeclares(tools=(), logs=())
 # `TmuxSession._detect_system_info`'s probe order, which decides the install command it runs.
 _PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "apk", "pacman", "brew", "pkg", "zypper")
 
@@ -468,7 +483,8 @@ def _identity_config(
     return {AGENT_NODE: {INSTRUMENT_KEY: fingerprint}}
 
 
-# A minor series, not a version: a patch release moves no layout `_digest` reads.
+# The minor series the layout reads were written against: a recorded fact beside what the install
+# reports (`RunWiringRecord.backend_revision`), never a gate — `_layout_fault` refuses a moved layout.
 EXPECTED_HARBOR_SERIES = "0.22"
 
 
@@ -650,15 +666,47 @@ def _trial_root(result: TrialResult) -> Path:
     return _TRIALS_ROOT / str(result.trial_name)
 
 
-def _trajectory_sources(result: TrialResult) -> list[tuple[Path, str | None]]:
-    root = _trial_root(result)
+class _StepLogs(NamedTuple):
+    """One step's logs where Harbor's own `TrialPaths` puts them; a one-step trial is its own step."""
+
+    step: str | None
+    paths: TrialPaths
+    # The step raised, so a log missing from it says nothing of the layout.
+    failed: bool
+
+
+def _step_logs(result: TrialResult) -> list[_StepLogs]:
+    from harbor.models.trial.paths import TrialPaths
+
+    trial = TrialPaths(_trial_root(result))
     steps = getattr(result, "step_results", None) or []
     if steps:
         return [
-            (root / "steps" / str(sr.step_name) / "agent" / "trajectory.json", str(sr.step_name))
+            _StepLogs(
+                str(sr.step_name),
+                TrialPaths(trial.step_dir(str(sr.step_name))),
+                sr.exception_info is not None,
+            )
             for sr in steps
         ]
-    return [(root / "agent" / "trajectory.json", None)]
+    return [_StepLogs(None, trial, result.exception_info is not None)]
+
+
+def _layout_fault(result: TrialResult, agent_logs: tuple[str, ...]) -> str | None:
+    """A SCORED trial lacks Harbor's verifier stdout, or a log its agent declares, only where Harbor's layout moved."""
+    for logs in _step_logs(result):
+        if not logs.paths.test_stdout_path.is_file():
+            return f"no verifier stdout at {logs.paths.test_stdout_path}"
+        if logs.failed:
+            continue
+        for name in agent_logs:
+            if not (path := logs.paths.agent_dir / name).is_file():
+                return f"no {name} at {path}, which its agent writes every step"
+    return None
+
+
+def _trajectory_sources(result: TrialResult) -> list[tuple[Path, str | None]]:
+    return [(logs.paths.agent_dir / _TRAJECTORY, logs.step) for logs in _step_logs(result)]
 
 
 def _turns(result: TrialResult) -> list[dict[str, Any]]:
@@ -666,8 +714,6 @@ def _turns(result: TrialResult) -> list[dict[str, Any]]:
     for path, step in _trajectory_sources(result):
         for raw in _read_trajectory(path):
             turns.append(_turn(raw, len(turns) + 1, step))
-    if not turns:
-        _warn_layout_drift(f"no agent trajectory under {_trial_root(result)}")
     return turns
 
 
@@ -704,16 +750,12 @@ def _answer(result: TrialResult) -> str:
     from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
 
     source = str(EnvironmentPaths.artifacts_dir / ANSWER_FILENAME)
-    root = _trial_root(result)
-    roots = [root] + [
-        root / "steps" / str(sr.step_name) for sr in getattr(result, "step_results", None) or []
-    ]
     answer = ""
-    for base in roots:
+    # The trial's own first: a multi-step trial leaves its last answer in its last step.
+    for paths in (TrialPaths(_trial_root(result)), *(logs.paths for logs in _step_logs(result))):
         try:
             text = (
-                TrialPaths(base)
-                .host_artifact_path(MAIN_SERVICE_NAME, source)
+                paths.host_artifact_path(MAIN_SERVICE_NAME, source)
                 .read_text(encoding="utf-8", errors="replace")
                 .strip()
             )
@@ -812,21 +854,6 @@ def _unscoreable_step(result: TrialResult) -> str | None:
     return None
 
 
-_LAYOUT_WARNED: set[str] = set()
-
-
-def _warn_layout_drift(what: str) -> None:
-    if what in _LAYOUT_WARNED:
-        return
-    _LAYOUT_WARNED.add(what)
-    logger.warning(
-        "harbor connector: %s — the digest loses its TERMINAL/VERIFIER tail and the optimizer "
-        "sees only scalars. Expected if the trial never started; otherwise Harbor's trial layout "
-        "moved and `_digest` needs updating (the extra is pinned <0.23 for this reason).",
-        what,
-    )
-
-
 def _agent_decisions(turns: list[dict[str, Any]]) -> str:
     said = [
         f"turn {t.get('index')}: {msg}"
@@ -868,21 +895,18 @@ def _digest(
     if said := _agent_decisions(turns):
         lines.append(f"\nAGENT DECISIONS:\n{said}")
 
-    root = _trial_root(result)
-    panes = sorted(root.glob("agent/*.pane")) if root.is_dir() else []
+    # The last step's: the state the verifier closed on. A pane is an agent's own (terminus-2's).
+    last = _step_logs(result)[-1].paths
+    panes = sorted(last.agent_dir.glob("*.pane"))
     if panes and (pane := _read_tail(panes[0], _TERMINAL_TAIL_CAP)):
         lines.append(f"\nTERMINAL (tail):\n{pane}")
-    else:
-        _warn_layout_drift(f"no agent pane under {root}")
-    if verdict := _read_tail(root / "verifier" / "test-stdout.txt", _VERIFIER_TAIL_CAP):
+    if verdict := _read_tail(last.test_stdout_path, _VERIFIER_TAIL_CAP):
         lines.append(f"\nVERIFIER (tail):\n{verdict}")
-    else:
-        _warn_layout_drift(f"no verifier stdout under {root}")
     return "\n".join(lines)
 
 
 def _outcome_note(result: TrialResult) -> str | None:
-    log = _trial_root(result) / "verifier" / "test-stdout.txt"
+    log = _step_logs(result)[-1].paths.test_stdout_path
     try:
         text = log.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -983,6 +1007,7 @@ class _Episode:
     prompt: str | None
     in_system_prompt: bool
     tools: tuple[tuple[str, str], ...]
+    agent_logs: tuple[str, ...]
 
     @property
     def harbor_model_name(self) -> str | None:
@@ -1010,6 +1035,7 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
     agent_kwargs = dict(agent_cfg.get("kwargs") or {})
     agent_kwargs.update(payload.get("agent_kwargs") or {})
     agent_name = agent_cfg.get("name") or "terminus-2"
+    declared = _AGENTS.get(agent_name, _UNDECLARED)
     return _Episode(
         query=sample.query,
         task=task,
@@ -1027,9 +1053,10 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
         tools=tuple(
             (tool, probe)
-            for tool, probe in _AGENT_TOOLS.get(agent_name, ())
+            for tool, probe in declared.tools
             if tool != "asciinema" or agent_kwargs.get("record_terminal_session") is not False
         ),
+        agent_logs=declared.logs,
     )
 
 
@@ -1357,6 +1384,14 @@ async def _in_process_run(
     episode = _episode(workload, sample, payload)
     result, attempt_s, bill = await _run_episode(episode)
     reward = _reward(result, episode, bill)
+    if (fault := _layout_fault(result, episode.agent_logs)) is not None:
+        raise cell_failure(
+            f"harbor task {episode.query!r} scored with {fault}: Harbor's trial layout moved "
+            f"under a connector written against series {EXPECTED_HARBOR_SERIES}, and the digest "
+            "and the skill arrival read it.",
+            ErrorCategory.PIPELINE,
+            spent=bill,
+        )
     return {"data": _episode_data(result, episode, reward, attempt_s, bill)}
 
 

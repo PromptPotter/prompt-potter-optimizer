@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.config.paths import SHARED_CACHE_DIRS
+from promptpotter.config.paths import BLOCK_PACKS_DIR, SHARED_CACHE_DIRS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import (
     iter_files,
     rmtree_robust,
@@ -15,11 +17,14 @@ from promptpotter.infrastructure.store.io import (
     write_lock_name,
 )
 from promptpotter.infrastructure.store.layout import (
+    DRAFTS_DIR,
     SandboxOwner,
+    draft_dirs,
     inner_sandboxes_dir,
     read_sandbox_owner,
     tenant_workspace,
 )
+from promptpotter.infrastructure.store.ruler_store import RULER_FILE
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
@@ -33,12 +38,13 @@ from promptpotter.infrastructure.store.tenant_dataset_store import (
 logger = logging.getLogger(__name__)
 
 
-# A head-to-head manifest names campaigns, so it goes with them.
-_DROP_NAMES = ("campaigns", "head_to_heads")
+# A head-to-head manifest and a ruler row name campaigns, so they go with them; a draft is a cycle not yet minted.
+_DROP_NAMES = ("campaigns", "head_to_heads", DRAFTS_DIR, RULER_FILE)
 
 # Exhaustive, so a leftover surfaces as unrecognized; `SHARED_CACHE_DIRS` is spliced so a new cache is never destroyed.
 _PRESERVE_NAMES = (
     *SHARED_CACHE_DIRS,
+    BLOCK_PACKS_DIR,
     "diagnostics",
     "traces",
     "backends",
@@ -164,12 +170,24 @@ def _remove(path: Path) -> None:
 
 
 def apply_reset(plan: ResetPlan) -> None:
-    for tenant in plan.tenants:
-        # Money first: every ledger lives inside `campaigns/`, so banking after the drop banks nothing.
-        CampaignStore(tenant.workspace).bank_all_before_removal()
-        for path in tenant.drop:
-            _remove(path)
-            logger.info("reset: removed %s", path)
+    with ExitStack() as held:
+        # Every draft's claim before any bank: one a Start holds refuses the reset with nothing banked.
+        claims = {
+            tenant.workspace: [
+                held.enter_context(DraftStore(tenant.workspace).hold(draft.name))
+                for draft in draft_dirs(tenant.workspace)
+            ]
+            for tenant in plan.tenants
+        }
+        for tenant in plan.tenants:
+            # Money first: banking after the drop banks nothing. A draft's destroyer banks it under its id.
+            CampaignStore(tenant.workspace).bank_all_before_removal()
+            drafts = DraftStore(tenant.workspace)
+            for claim in claims[tenant.workspace]:
+                drafts.discard(claim)
+            for path in tenant.drop:
+                _remove(path)
+                logger.info("reset: removed %s", path)
     for tenant in plan.tenants:
         if tenant.holds_pointer:
             clear_active_pointer(tenant.workspace)

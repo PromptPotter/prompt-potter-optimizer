@@ -9,6 +9,8 @@ from typing import Any
 from promptpotter.domain.ruler import RulerFold, RulerOwn, RulerReach, RulerRow, RulerScope
 from promptpotter.infrastructure.store.read_model import LineIndex, append_row
 
+RULER_FILE = "ruler.jsonl"
+
 
 class _Folds:
     def __init__(self) -> None:
@@ -28,7 +30,7 @@ class RulerStore:
     """Rooted at the TENANT, never the archive home, which accounts may share."""
 
     def __init__(self, tenant_dir: Path) -> None:
-        self.path = tenant_dir / "ruler.jsonl"
+        self.path = tenant_dir / RULER_FILE
 
     def _folds(self) -> tuple[RulerFold | None, ...]:
         return LineIndex.of(self.path, (_Folds,)).view(_Folds)
