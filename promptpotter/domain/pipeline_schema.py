@@ -22,9 +22,11 @@ MOVABLE_AGENTS: tuple[MovableAgent, ...] = tuple(MOVABLE_AGENT_LABELS)
 
 # The parser types `output_schema` as `object`, so a fork's overlay merges one level.
 OUTPUT_SCHEMA_KEY: Annotated[str, shapes_optimizer_prompt] = "output_schema"
+# The slots the backend posts back: one is its value, several the object of them (`fields_match`).
+ANSWER_FIELDS_KEY: Annotated[str, shapes_optimizer_prompt] = "answer_fields"
 OUTPUT_CONTRACT_KEYS: Annotated[tuple[str, str], shapes_optimizer_prompt] = (
     OUTPUT_SCHEMA_KEY,
-    "answer_field",
+    ANSWER_FIELDS_KEY,
 )
 
 # Fenced off from the OPTIMIZER only — a search rule, never a display one: served rows carry them.

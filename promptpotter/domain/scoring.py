@@ -405,6 +405,18 @@ class ScoringTermMissingError(ScoringFormulaError):
     """PER-CELL, unlike its parent: ``Scorer.grade`` reads the row UNSCORED and keeps the paid."""
 
 
+# Each graded field's verdict in the gold's order; a tuple so a grade stays hashable.
+FieldHits = tuple[tuple[str, bool], ...]
+
+
+def _read_field_hits(value: object) -> FieldHits:
+    if not isinstance(value, Mapping) or not all(
+        isinstance(name, str) and isinstance(hit, bool) for name, hit in value.items()
+    ):
+        raise TypeError(f"Grade.field_hits is {value!r}, not an object of booleans")
+    return tuple(value.items())
+
+
 class Grade(NamedTuple):
     """ERRORED is both ``0.0``, graded without the formula; UNSCORED is both ``None`` + a reason."""
 
@@ -417,10 +429,14 @@ class Grade(NamedTuple):
     # reads none. A `None` rank beside a width is a value: the truth was not in the ranking.
     ground_truth_rank: int | None
     n_candidates: int | None
+    # `None` where the formula grades one answer, not several fields.
+    field_hits: FieldHits | None = None
 
     @classmethod
     def from_wire(cls, row: Mapping[str, object]) -> Grade:
-        fitness, objective, unscored, span, rank, width = (row.get(key) for key in cls._fields)
+        fitness, objective, unscored, span, rank, width, hits = (
+            row.get(key) for key in cls._fields
+        )
         return cls(
             None if fitness is None else real(fitness, "Grade.fitness"),
             None if objective is None else real(objective, "Grade.objective"),
@@ -428,6 +444,7 @@ class Grade(NamedTuple):
             None if span is None else text(span, "Grade.span"),
             None if rank is None else whole(rank, "Grade.ground_truth_rank"),
             None if width is None else whole(width, "Grade.n_candidates"),
+            None if hits is None else _read_field_hits(hits),
         )
 
     def wire(self) -> dict[str, object]:
@@ -439,6 +456,8 @@ class Grade(NamedTuple):
         if self.n_candidates is not None:
             out["ground_truth_rank"] = self.ground_truth_rank
             out["n_candidates"] = self.n_candidates
+        if self.field_hits is not None:
+            out["field_hits"] = dict(self.field_hits)
         return out
 
 
@@ -603,6 +622,8 @@ class Scorer:
     span: Callable[[str], str] | None
     # Where the truth sits in the ranking the formula reads, and its width; `None` on a cell in none.
     ranking: Callable[[MeasuredCell], tuple[int | None, int] | None] | None
+    # That matcher's per-field verdicts over ``(predicted, ground_truth)``; `None` where it has none.
+    fields: Callable[[str, str], dict[str, bool]] | None
     fitness: Callable[[MeasuredCell, Grade], float]
     # Reads the cell WITH its fitness: every shipped composite names it.
     objective: Callable[[MeasuredCell, Grade], float] | None
@@ -621,7 +642,15 @@ class Scorer:
         except ScoringTermMissingError as exc:
             return GradedCell.of(facts, Grade(None, None, str(exc), None, None, None))
         span = None if self.span is None else self.span(facts.predicted)
-        return GradedCell.of(facts, read._replace(objective=objective, span=span))
+        hits = None if self.fields is None else self.fields(facts.predicted, facts.ground_truth)
+        return GradedCell.of(
+            facts,
+            read._replace(
+                objective=objective,
+                span=span,
+                field_hits=None if hits is None else tuple(hits.items()),
+            ),
+        )
 
     def sheet(self, facts: Iterable[MeasuredCell]) -> CellSheet:
         return CellSheet(self.id, tuple(self.grade(cell) for cell in facts))

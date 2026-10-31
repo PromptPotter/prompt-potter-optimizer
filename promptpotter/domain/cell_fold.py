@@ -18,6 +18,8 @@ class CellFold(FrozenModel):
     degraded: int
     # :func:`recall_at`; empty where the formula reads no ranking.
     recall_at: dict[int, float]
+    # :func:`field_accuracy`; empty where the formula grades no fields.
+    field_accuracy: dict[str, float]
 
 
 class ScoreSummary(CellFold):
@@ -47,6 +49,15 @@ def recall_at(results: Iterable[GradedCell]) -> dict[int, float]:
     return {
         k: sum(1 for rank in ranks if rank is not None and rank <= k) / len(ranks) for k in (1, 5)
     }
+
+
+def field_accuracy(scoreable: Iterable[GradedCell]) -> dict[str, float]:
+    """Each field's share of the cells whose gold grades it; an errored cell graded none."""
+    verdicts: dict[str, list[bool]] = {}
+    for cell in scoreable:
+        for name, hit in cell.grade.field_hits or ():
+            verdicts.setdefault(name, []).append(hit)
+    return {name: sum(hits) / len(hits) for name, hits in verdicts.items()}
 
 
 @shapes_optimizer_prompt

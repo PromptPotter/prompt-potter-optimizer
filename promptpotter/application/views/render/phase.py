@@ -14,6 +14,7 @@ from promptpotter.application.views.render.primitives import (
     _node_line,
     bench_readout,
     fmt_coverage,
+    fmt_field_accuracy,
     fmt_fitness,
     fmt_pct,
     overlap_series,
@@ -169,6 +170,8 @@ def render_round_stats(
         lines.append(
             _node_line("Recall: " + " ".join(f"top-{k}={share:.0%}" for k, share in recall.items()))
         )
+    if fold is not None and (fields := fold.field_accuracy):
+        lines.append(_node_line(fmt_field_accuracy(fields)))
     return "\n".join(lines)
 
 

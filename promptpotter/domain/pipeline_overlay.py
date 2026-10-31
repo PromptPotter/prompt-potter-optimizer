@@ -180,7 +180,7 @@ def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> d
         }
         folded = {key: value for key, value in cfg.items() if description_path(key) is None}
         if folded.get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
-            # BOTH keys go: `answer_field` read off a slotless response is "" on every sample (NO_RESULT).
+            # BOTH keys go: `answer_fields` read off a slotless response is "" on every sample (NO_RESULT).
             out[node] = {k: v for k, v in folded.items() if k not in OUTPUT_CONTRACT_KEYS}
             continue
         out[node] = folded

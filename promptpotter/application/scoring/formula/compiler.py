@@ -458,6 +458,7 @@ def compile_scorer(
     matcher = matcher_of(per_sample)
     span = None if matcher is None else MATCHERS[matcher].answer
     own = None if matcher is None else MATCHERS[matcher].ranking
+    fields = None if matcher is None else MATCHERS[matcher].fields
     # A rank is a position against a LABEL: a labelless cell sits in no ranking.
     ranking = None if verifier_graded else backend_rank if own is None else own
 
@@ -473,6 +474,7 @@ def compile_scorer(
             matcher=matcher,
             span=span,
             ranking=ranking,
+            fields=fields,
             fitness=_fitness,
             objective=None,
         )
@@ -501,6 +503,7 @@ def compile_scorer(
         matcher=matcher,
         span=span,
         ranking=ranking,
+        fields=fields,
         fitness=_fitness,
         objective=_objective,
     )

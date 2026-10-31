@@ -169,6 +169,7 @@ from promptpotter.application.scoring.selection import (
     level_band,
     readable_lifts,
 )
+from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, arm_end, is_leader_eligible
@@ -554,6 +555,78 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert halved.grade(channels()).grade.fitness == 0.5, (
         "a helper's string argument or float arithmetic was refused"
     )
+
+    # Several graded fields: each is matched alone, the cell scores their share, θ reads the share.
+    joint = scorer_of("fields_match(predicted, ground_truth)")
+    gold = json.dumps(
+        {
+            "type_of_document": ["invoice"],
+            "requires_action": [True],
+            "extract_depth": [2, 3],
+            "who": [""],
+            "issuer": None,
+        }
+    )
+
+    def classified(sid: int, said: str) -> MeasuredCell:
+        cell: dict[str, Any] = {"query": f"q{sid}", "predicted": said, "ground_truth": gold}
+        return measurement(sid, None, **cell).facts
+
+    fields = ("type_of_document", "requires_action", "extract_depth", "who")
+    for said, missed in (
+        (
+            '{"type_of_document":" Invoice ","requires_action":"TRUE","extract_depth":3,"who":" "}',
+            [],
+        ),
+        (
+            '{"type_of_document":"invoice","requires_action":"yes","extract_depth":2.0,"who":""}',
+            ["requires_action"],
+        ),
+        (
+            '{"type_of_document":"invoice","requires_action":true,"extract_depth":1,"who":null}',
+            ["extract_depth", "who"],
+        ),
+        ('{"type_of_document":"invoice","requires_action":true,"extract_depth":"2"}', ["who"]),
+        ("NO_RESULT", list(fields)),
+    ):
+        graded = joint.grade(classified(0, said))
+        hits = dict(graded.grade.field_hits or ())
+        assert [name for name, hit in hits.items() if not hit] == missed, (
+            f"{said!r} must miss exactly {missed}: case, spacing, a bool's or a number's spelling "
+            "never decide, a listed gold accepts any of its values, '' is a value and a null "
+            "gold grades nothing"
+        )
+        assert graded.grade.fitness == pytest.approx(1 - len(missed) / len(fields)), (
+            "a cell's fitness is the share of its graded fields it got right"
+        )
+        assert GradedCell.from_wire(graded.wire()) == graded, "the per-field verdicts left the wire"
+    walked = joint.sheet(
+        [
+            classified(
+                0,
+                '{"type_of_document":"invoice","requires_action":true,"extract_depth":3,"who":""}',
+            ),
+            classified(
+                1,
+                '{"type_of_document":"receipt","requires_action":true,"extract_depth":1,"who":""}',
+            ),
+        ]
+    )
+    assert sorted(responses_of(walked).values()) == [0.5, 1.0], (
+        "θ is fit on each cell's share of fields, never on one item per field"
+    )
+    assert compute_composite_fitness(walked, _LLM_ONLY).field_accuracy == {
+        "type_of_document": 0.5,
+        "requires_action": 1.0,
+        "extract_depth": 0.5,
+        "who": 1.0,
+    }, "the arm's fold says which field moved"
+    assert "MISS type_of_document,extract_depth" in fmt_query_result(
+        1, walked.cells[1].facts, walked.cells[1].grade, display_tags={}
+    ), "the readout names the fields a cell missed"
+    for refused in ("not json", '{"who": "x"}', '{"issuer": null}'):
+        with pytest.raises(ScoringFormulaError):
+            joint.grade(measurement(0, None, predicted="{}", ground_truth=refused).facts)
 
     # A dial reads its term against the origin and never sums a raw unit.
     def solve(

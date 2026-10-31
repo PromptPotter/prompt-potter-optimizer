@@ -20,6 +20,7 @@ from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, Optim
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
+    ANSWER_FIELDS_KEY,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     description_key,
@@ -169,13 +170,14 @@ def _authored_contract(overlay: dict[str, Any], edit: NodeOutputEdit) -> dict[st
     config = _block(prev.get("config"))
     fields = list(_block(edit.output_schema.get("properties")))
     first = not _block(config.get(OUTPUT_SCHEMA_KEY))
-    named = [f for f in (edit.answer_field, config.get("answer_field")) if f in fields]
+    authored = [f for f in edit.answer_fields or () if f in fields]
+    kept = [f for f in config.get(ANSWER_FIELDS_KEY) or () if f in fields]
     # The LAST field: fields generate in order, reasoning first.
     fallback = ["answer"] if "answer" in fields else fields[-1:]
     config[OUTPUT_SCHEMA_KEY] = edit.output_schema
-    config.pop("answer_field", None)
-    for field in (named or fallback)[:1]:
-        config["answer_field"] = field
+    config.pop(ANSWER_FIELDS_KEY, None)
+    if answers := authored or kept or fallback:
+        config[ANSWER_FIELDS_KEY] = answers
     block = {**prev, "config": config}
     if first:
         # A narrowing written before any schema existed could only tick `text`: re-open the axis.

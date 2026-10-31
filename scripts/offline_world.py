@@ -258,18 +258,18 @@ class FakeBackend:
                 signal.raise_signal(signal.SIGINT)
         query = payload["query"]
         node_cfg = payload["node_config"]["llm_only"]
-        cfg_key = json.dumps(node_cfg, sort_keys=True, ensure_ascii=False)
+        # The prompt the skill is read off keys every draw: a wire key's spelling moves none.
         prompt = str(node_cfg["prompt"])
         marks = MARKER.findall(prompt)
         tag = marks[-1] if marks else None
         k = self.SKILL.get(tag, 1 + draw("skill", tag) % 9)
         k += self.hardness * (draw("hard", query) % 3 - 1)
         gt = self.truth[query]
-        if draw("cell", cfg_key, query) % 10 < k:
+        if draw("cell", prompt, query) % 10 < k:
             label = gt
         else:
             wrong = [lab for lab in LABELS if lab != gt]
-            label = wrong[draw("wrong", cfg_key, query) % len(wrong)]
+            label = wrong[draw("wrong", prompt, query) % len(wrong)]
         return {
             "status": "success",
             "message": "ok",
@@ -281,7 +281,7 @@ class FakeBackend:
                 "step_tokens": {
                     "llm_only": {
                         "input": 400 + len(prompt) // 4,
-                        "output": 200 + draw("out", cfg_key) % 400,
+                        "output": 200 + draw("out", prompt) % 400,
                         "cost_usd": 0.0,
                         "model": str(node_cfg["model"]),
                         "served_by": "OfflineHost",

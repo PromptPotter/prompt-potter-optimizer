@@ -96,12 +96,12 @@ export function authoredOutputSchema(
   return Object.keys(schema).length > 0 ? schema : undefined;
 }
 
-export function authoredAnswerField(
+export function authoredAnswerFields(
   overlay: Record<string, unknown>,
   node: string,
-): string | undefined {
-  const field = asObj(asObj(overlay[node]).config).answer_field;
-  return typeof field === "string" ? field : undefined;
+): string[] | undefined {
+  const fields = asObj(asObj(overlay[node]).config).answer_fields;
+  return Array.isArray(fields) ? fields.filter((f): f is string => typeof f === "string") : undefined;
 }
 
 export function descriptionSubtree(keys: readonly string[], path: string): string[] {

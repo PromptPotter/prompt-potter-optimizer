@@ -174,7 +174,11 @@ _BANK_SEED: int = 42
 
 
 def _query_and_truth(row: Row) -> Drawn:
-    return row["query"], row["ground_truth"]
+    truth = row["ground_truth"]
+    # An object gold is graded field by field (`fields_match`): its one spelling keys the sample.
+    if isinstance(truth, dict):
+        truth = json.dumps(truth, ensure_ascii=False, separators=(",", ":"))
+    return row["query"], truth
 
 
 @dataclass(frozen=True, slots=True)

@@ -11119,18 +11119,21 @@
       },
       "NodeOutputEdit": {
         "additionalProperties": false,
-        "description": "One node's authored output contract: the schema whole, and the field carrying the answer\nwhere the operator named one.",
+        "description": "One node's authored output contract: the schema whole, and the fields carrying the answer\nwhere the operator named them.",
         "properties": {
-          "answer_field": {
+          "answer_fields": {
             "anyOf": [
               {
-                "type": "string"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Answer Field"
+            "title": "Answer Fields"
           },
           "node": {
             "minLength": 1,

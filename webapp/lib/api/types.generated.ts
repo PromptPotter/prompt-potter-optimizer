@@ -2633,11 +2633,11 @@ export interface ParamIntent {
   allowed: string[];
 }
 
-/** One node's authored output contract: the schema whole, and the field carrying the answer */
+/** One node's authored output contract: the schema whole, and the fields carrying the answer */
 export interface NodeOutputEdit {
   node: string;
   output_schema: Record<string, unknown>;
-  answer_field: string | null;
+  answer_fields: string[] | null;
 }
 
 /** One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``. */

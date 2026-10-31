@@ -319,6 +319,38 @@ import-graph script before and after; close each wave with `gate.py --only layer
 
 **Rides with:** "The optimizer climbs" in [`roadmap.md`](roadmap.md) § Sequence.
 
+- **PoBB locks in a leader the election then refuses (high-accuracy regime)**: seen on tenant
+  `inbox-requires-action-v6` round 1 (parent 92.5% of 40). The round order puts the parent's misses first
+  (`build_round_order`, "win-opportunities first"), so after 6 cells a candidate that fixes them reads
+  `P(c>p)=93.8%` and `pobb` locks it in at `theta_election.admission: 0.85` (C1.2 locked at q6, C1.4 at
+  q13, both 100%). The election then refuses both: `θ lift +0.400 logits, se 1.165`, `collapsed_band`
+  caveat. The round's cells went to the three losers (38, 35, 27 cells) and the two leaders got 6 and 13,
+  so the round held at the price of a full round. Two bars spelled twice: the lock-in reads P(best) on
+  the cells drawn so far (front-loaded with the parent's losses), the election reads θ with its se over
+  the whole ruler. Action: the lock-in asks the election's own question (would `theta_election` admit
+  this arm now?), or a locked leader keeps buying cells until it does or the round's budget ends; a lock
+  at q6 against a 92.5% parent needs at least the cells that could show one parent-level error.
+  **Rides with:** any change to `early_stop` / `Selector.admission`. **Re-test:** rerun round 1 of
+  `inbox-requires-action-v6__e1bda1`; an arm that is locked in is either elected or not locked.
+- **L1 spends a round on zero candidates**: tenant `crm-extract-names__29f63f` round 2 (parent 97.5% of 40, fields
+  graded with `fields_match`): `l1_generate_r2` returned 5 variants, all no-ops ("every variant is a no-op — zero
+  candidates"), and the round went on to MEASURE 0 candidates. One call bought nothing, and the stall counter is the only
+  thing that moves. Action: a no-op batch is retried once with the no-op named in the prompt, or the round escalates at
+  once instead of closing empty. **Rides with:** any change to `potter/l1/candidate_source.py`. **Re-test:** resume that
+  campaign; round 2 measures at least one candidate or names why it escalated.
+- **A campaign's crash is caused by another campaign's ledger**: `crm-extract-names__29f63f` crashed entering round 1 on
+  `LedgerUnreadableError` for `inbox-requires-action-v6__e1bda1`'s ledger (written before `field_accuracy` joined
+  `round_complete.fold`). A new run reads every campaign's ledger, so one stale campaign halts all of them, and only
+  after origin scoring is paid. Action: the reader that spans campaigns refuses at mint (before origin), or skips a
+  ledger it cannot read with one named warning. **Re-test:** with one pre-shape-change campaign on disk, `new` refuses
+  before spending or runs to round 1.
+- **A strict reader blocks `new` on leftovers the wipe skips**: on 2026-10-31 `new` refused twice
+  before minting: `user.json` still held `spend_budget_usd_total` / `token_budget_total` (`null`; the
+  `User` model forbids extras), then `drafts/d_*/.runtime/ledger.jsonl` lacked `key_source`. Neither is
+  in `.scratch/wipe_run_data.py`'s list, and the error names no verb ("no verb repairs it"). Action: a
+  shape change lists every store it invalidates, the wipe covers drafts and the account file's dropped
+  keys, and the refusal names the wipe. **Re-test:** after a shape change, `new <dataset>` on an old
+  tree either runs or names the one command that clears it.
 - **A resumed walk re-walks a later proposer's arms**: `runner/round.py::bank_walk` banks the walk
   whole, and the opener's replay (`potter/l1/candidate_source.py::_generate_or_load`) returns it whole,
   so `mating` adds its children again and `locus_crossover` re-crosses the banked ones on a shifted rng;

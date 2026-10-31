@@ -90,7 +90,7 @@ The decisions the models cannot state:
   request carries a schema is decided here — PromptPotter composes the wire config — so the toggle
   (`SCHEMA_TOGGLE_PARAM`) is synthesized at parse time onto every node `PipelineNode.tunes_llm`
   names — a thinking `type` whose `optimizer.param_keys` opens an axis — and resolved at the wire
-  seam: `json` sends `output_schema` + `answer_field`, `text` sends NEITHER. A node declaring the
+  seam: `json` sends `output_schema` + `answer_fields`, `text` sends NEITHER. A node declaring the
   key in its own `param_keys` opens an axis its `output_schema` silently outranks — every arm makes
   the identical call. What a connector owes instead is the READING: **a schema
   on the wire means structured output, its absence means prose**, and `json` arriving with no

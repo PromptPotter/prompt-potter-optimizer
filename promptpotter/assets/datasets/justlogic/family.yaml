@@ -43,7 +43,8 @@ pipeline:
             - reasoning
             - answer
           additionalProperties: false
-        answer_field: answer
+        answer_fields:
+          - answer
 
 campaign:
   display_metric: ability

@@ -52,12 +52,12 @@ class OptimizationOverrides(StrictModel):
 
 
 class NodeOutputEdit(StrictModel):
-    """One node's authored output contract: the schema whole, and the field carrying the answer
-    where the operator named one."""
+    """One node's authored output contract: the schema whole, and the fields carrying the answer
+    where the operator named them."""
 
     node: str = Field(min_length=1)
     output_schema: dict[str, Any]
-    answer_field: str | None = None
+    answer_fields: list[str] | None = None
 
 
 class EditDraftPatch(StrictModel):

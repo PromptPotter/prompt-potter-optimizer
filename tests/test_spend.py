@@ -670,6 +670,7 @@ _HIT = Scorer(
     matcher=None,
     span=None,
     ranking=None,
+    fields=None,
     fitness=lambda _row, _grade: 1.0,
     objective=None,
 )

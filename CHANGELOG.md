@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Several graded fields, one item per call.** `fields_match(predicted, ground_truth)` grades a node's JSON reply field by field against an object gold (`{field: [accepted, …]}`, `null` ungraded); a cell's fitness is the share right, and `field_accuracy` reaches the readout per arm and per round.
+
+### Changed
+
+- **BREAKING — a node's `answer_field` is `answer_fields: list[str]`** (node config, `NodeOutputEdit`, the TermNorm wire); a node naming several is pinned to `response_format: json`. A measurement filed under `answer_field` matches no config.
+
 ## [0.8.18] — 2026-10-31
 
 > One shape end to end: an individual is its prompts, a dataset is its content, one `Budget` bounds a run, every run input is a record, and a head-to-head is minted in one act. The optimizer climbs: L1 holds `answer_format`, PoBB stops a clear leader at the election's bar, and the climb is served per minute, candidate and $. Breaking on disk: run data is wiped. 134 commits since `v0.8.17`.

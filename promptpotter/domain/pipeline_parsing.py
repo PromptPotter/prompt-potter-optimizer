@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
+    ANSWER_FIELDS_KEY,
     DEFAULT_PIPELINE,
     MEMBER_KINDS,
     OUTPUT_CONTRACT_KEYS,
@@ -55,7 +56,7 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
     "answer_format": "string",
     # Typed, not inferred: both must resolve on a node declaring NO schema.
     "output_schema": "object",
-    "answer_field": "string",
+    "answer_fields": "array",
 }
 
 # Every other key replaces wholesale: a shallow-merged `output_schema` keeps a `required` naming a dropped property.
@@ -441,14 +442,19 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                 {"json_schema": nc["output_schema"]}
             )
             # Checked at load: an undeclared field reads "" on every sample, and the run grades NO_RESULT.
-            answer_field = nc.get("answer_field")
+            answer_fields = nc.get(ANSWER_FIELDS_KEY)
             props = step_kwargs["output_schema"].json_schema.get("properties") or {}
-            if answer_field is not None and answer_field not in props:
+            if answer_fields is not None and (
+                not isinstance(answer_fields, list)
+                or not answer_fields
+                or len(set(answer_fields)) != len(answer_fields)
+                or not set(answer_fields) <= set(props)
+            ):
                 _refuse(
-                    f"node {name!r}: answer_field {answer_field!r} is not a property of its "
-                    f"output_schema (have: {sorted(props)})",
+                    f"node {name!r}: {ANSWER_FIELDS_KEY} {answer_fields!r} is not a list of "
+                    f"distinct properties of its output_schema (have: {sorted(props)})",
                     node=name,
-                    answer_field=answer_field,
+                    answer_fields=answer_fields,
                 )
 
         # Schema-driven, never a `param_keys` opt-in; the field NAME stays locked (`SCHEMA_OWNED_FIELDS`).
@@ -467,6 +473,10 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
         # Synthesized, never connector-declared: whether a request carries a schema is ours to decide.
         if step_kwargs["tunes_llm"]:
+            modes = [ANSWER_AS_TEXT, ANSWER_AS_JSON] if out_schema else [ANSWER_AS_TEXT]
+            # Several graded slots have no prose form: the toggle is pinned to the schema.
+            if out_schema and len(nc.get(ANSWER_FIELDS_KEY) or ()) > 1:
+                modes = [ANSWER_AS_JSON]
             step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
             # Types only: outside `param_keys`, so no layer's `narrow` can intersect the row away.
             step_kwargs["param_types"] = {
@@ -476,9 +486,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             }
             step_kwargs["param_allowed_values"] = {
                 **step_kwargs["param_allowed_values"],
-                SCHEMA_TOGGLE_PARAM: (
-                    [ANSWER_AS_TEXT, ANSWER_AS_JSON] if out_schema else [ANSWER_AS_TEXT]
-                ),
+                SCHEMA_TOGGLE_PARAM: modes,
             }
             # Operator-facing only: L1 reads this axis through `catalogues::_schema_toggle_block`.
             step_kwargs["param_descriptions"] = {

@@ -100,6 +100,10 @@ def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:
     return "—" if x is None else spec.format(x)
 
 
+def fmt_field_accuracy(shares: dict[str, float]) -> str:
+    return "fields: " + " · ".join(f"{name} {share:.0%}" for name, share in shares.items())
+
+
 def fmt_fitness(score: float | None) -> str:
     return "—" if score is None else f"{score:.4f}"
 

@@ -124,7 +124,9 @@ only the bank and the call-identity policy below.
 - **The bank** is synthetic JustLogic-shaped rows for `justlogic/d234`, written to the workspace's
   benchmark rows before the session opens, so nothing is downloaded and nothing licensed is copied.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
-  `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt. Potter's markers follow
+  `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt, each cell's draw keyed on
+  that prompt and the row, never the rest of the node config — renaming a wire key moves no
+  decision, and a config edit that leaves the prompt alone answers alike. Potter's markers follow
   a scripted trajectory whose stalls fire L2 at the leg's pinned `l1_patience`; every other marker draws its `k` from its name.
   `FakeBackend(hardness=…)` spreads `k` per row, so a δ ruler fits; at `0` the ruler is flat and a
   rewind is dropped.

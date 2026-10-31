@@ -70,22 +70,28 @@ function withChild(field: Schema): Schema {
 
 export function SchemaTreeEditor({
   schema,
-  answer,
+  answers,
   onChange,
   ...lock
 }: Locks & {
   schema: Schema;
-  answer: string | undefined;
-  onChange: (schema: Schema, answer?: string) => void;
+  answers: readonly string[] | undefined;
+  onChange: (schema: Schema, answers?: string[]) => void;
 }) {
   const names = fieldsOf(schema).map(([k]) => k);
+  // Graded slots keep schema order; the last one stays, since a node answers in at least one.
+  const toggled = (field: string) => {
+    const held = answers ?? [];
+    const next = held.includes(field) ? held.filter((a) => a !== field) : [...held, field];
+    if (next.length > 0) onChange(schema, names.filter((n) => next.includes(n)));
+  };
   return (
     <>
       <FieldList
         obj={schema}
         prefix=""
-        answer={answer}
-        onAnswer={(field) => onChange(schema, field)}
+        answers={answers}
+        onAnswer={toggled}
         onChange={onChange}
         {...lock}
       />
@@ -105,16 +111,16 @@ export function SchemaTreeEditor({
 function FieldList({
   obj,
   prefix,
-  answer,
+  answers,
   onAnswer,
   onChange,
   ...lock
 }: Locks & {
   obj: Schema;
   prefix: string;
-  answer?: string | undefined;
+  answers?: readonly string[] | undefined;
   onAnswer?: (field: string) => void;
-  onChange: (obj: Schema, answer?: string) => void;
+  onChange: (obj: Schema, answers?: string[]) => void;
 }) {
   const fields = fieldsOf(obj);
   const names = fields.map(([k]) => k);
@@ -129,9 +135,14 @@ function FieldList({
           path={prefix + name}
           field={field}
           taken={names}
-          isAnswer={name === answer}
+          isAnswer={answers?.includes(name) === true}
           onAnswer={onAnswer ? () => onAnswer(name) : undefined}
-          onRename={(to) => onChange(objectOf(obj, put(i, [to, field])), name === answer ? to : undefined)}
+          onRename={(to) =>
+            onChange(
+              objectOf(obj, put(i, [to, field])),
+              answers?.includes(name) ? answers.map((a) => (a === name ? to : a)) : undefined,
+            )
+          }
           onChange={(next) => onChange(objectOf(obj, put(i, [name, next])))}
           onRemove={
             fields.length > 1
@@ -205,7 +216,7 @@ function FieldRow({
         ) : null}
         {onAnswer ? (
           <span className="schema-field-answer">
-            <Chip on={isAnswer} onClick={onAnswer} title="The slot graded against the ground truth">
+            <Chip on={isAnswer} onClick={onAnswer} title="A slot graded against the ground truth; several are graded field by field">
               answer
             </Chip>
           </span>

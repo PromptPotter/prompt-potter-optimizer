@@ -7,7 +7,7 @@ from promptpotter.application.scoring.evaluators import materialize_round_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import level_band
 from promptpotter.domain.arms import arm_end
-from promptpotter.domain.cell_fold import CellFold, ScoreSummary, recall_at
+from promptpotter.domain.cell_fold import CellFold, ScoreSummary, field_accuracy, recall_at
 from promptpotter.domain.results_health import is_degraded, is_deprecated
 from promptpotter.domain.scoring import ROW_GRADES
 from promptpotter.domain.spend import TokenAccount
@@ -44,6 +44,7 @@ def fold_cells(sheet: CellSheet) -> CellFold:
         deprecated=sum(1 for cell in sheet if is_deprecated(cell.facts)),
         degraded=sum(1 for cell in sheet if is_degraded(cell.facts)),
         recall_at=recall_at(sheet),
+        field_accuracy=field_accuracy(sheet.scoreable),
     )
 
 

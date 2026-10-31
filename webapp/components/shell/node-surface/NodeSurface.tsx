@@ -5,7 +5,7 @@ import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
 import type { NodeSchemaReading } from "@/lib/types";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import {
-  authoredAnswerField,
+  authoredAnswerFields,
   authoredOutputSchema,
   descriptionSubtree,
   nodeLockPatch,
@@ -84,9 +84,9 @@ export function NodeSurface({
     kind === "llm" &&
     rows?.some((p) => p.key === "schema_family") !== true &&
     (authored !== undefined || (!ownOutput && asksForSchema))
-      ? (next: Record<string, unknown>, answer?: string) =>
+      ? (next: Record<string, unknown>, answers?: string[]) =>
           author({
-            node_output: { node: nodeId, output_schema: next, answer_field: answer ?? null },
+            node_output: { node: nodeId, output_schema: next, answer_fields: answers ?? null },
           })
       : undefined;
   const lockKeys =
@@ -102,7 +102,7 @@ export function NodeSurface({
   const described = ofKind("description").map((p) => p.key);
   const tree: ContractTree = {
     authored,
-    answer: nodeId ? authoredAnswerField(overlay, nodeId) : undefined,
+    answers: nodeId ? authoredAnswerFields(overlay, nodeId) : undefined,
     locks: lockKeys ? locksOf("description", SCHEMA_DESCRIPTION_PREFIX) : undefined,
     onLock: lockKeys
       ? (path: string, locked: boolean) => lockKeys(descriptionSubtree(described, path), locked)
@@ -159,11 +159,11 @@ export function NodeSurface({
   );
 }
 
-type AuthorSchema = (schema: Record<string, unknown>, answer?: string) => void;
+type AuthorSchema = (schema: Record<string, unknown>, answers?: string[]) => void;
 
 interface ContractTree {
   authored: Record<string, unknown> | undefined;
-  answer: string | undefined;
+  answers: string[] | undefined;
   locks: Record<string, boolean> | undefined;
   onLock: ((path: string, locked: boolean) => void) | undefined;
   onAuthor: AuthorSchema | undefined;
@@ -237,7 +237,7 @@ const STARTER = {
 
 function SchemaAuthor({
   authored,
-  answer,
+  answers,
   locks,
   onLock,
   onAuthor,
@@ -260,7 +260,7 @@ function SchemaAuthor({
       {authored ? (
         <SchemaTreeEditor
           schema={authored}
-          answer={answer}
+          answers={answers}
           locks={onLock ? locks : undefined}
           onLock={onLock}
           onChange={onAuthor}

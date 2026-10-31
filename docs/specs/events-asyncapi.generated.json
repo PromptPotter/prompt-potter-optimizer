@@ -8359,6 +8359,13 @@
             "title": "Evaluators",
             "type": "object"
           },
+          "field_accuracy": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Field Accuracy",
+            "type": "object"
+          },
           "mean_fitness_ci_hi": {
             "anyOf": [
               {
@@ -8414,6 +8421,7 @@
           "deprecated",
           "degraded",
           "recall_at",
+          "field_accuracy",
           "walked",
           "cached",
           "evaluators",

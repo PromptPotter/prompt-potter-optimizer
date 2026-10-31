@@ -224,6 +224,7 @@ def score_summary(
         deprecated=0,
         degraded=0,
         recall_at={},
+        field_accuracy={},
         walked=total if walked is None else walked,
         cached=0,
         evaluators={},

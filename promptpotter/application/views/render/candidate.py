@@ -10,6 +10,7 @@ from promptpotter.application.views.render.primitives import (
     RESET,
     YELLOW,
     fmt_ci,
+    fmt_field_accuracy,
     fmt_pct,
 )
 from promptpotter.domain.arms import Broken, Concluded, Cut, arm_elimination, arm_end
@@ -103,6 +104,8 @@ def individual_summary(
 
     if (comp := fold.composite_fitness) is not None:
         detail_lines.append(render_composite_fitness_oneliner(comp, reference=None))
+    if fold.field_accuracy:
+        detail_lines.append(fmt_field_accuracy(fold.field_accuracy))
 
     return IndividualSummary(
         tag=tag,

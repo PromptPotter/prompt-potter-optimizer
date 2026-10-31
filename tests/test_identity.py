@@ -159,6 +159,7 @@ from promptpotter.domain.pipeline_overlay import (
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
+    ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
     ManifestNodeOverlay,
@@ -956,11 +957,17 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     authored = frozen(
         node_output={"node": "llm_only", "output_schema": answer_schema}
     ).pipeline_overlay
-    contract = {"output_schema": answer_schema, "answer_field": "code", "response_format": "json"}
+    contract = {
+        "output_schema": answer_schema,
+        "answer_fields": ["code"],
+        "response_format": "json",
+    }
     assert (
         authored == frozen(pipeline_overlay={"llm_only": {"config": contract}}).pipeline_overlay
     ), "an authored output froze another contract than the overlay spells"
-    assert authored["llm_only"]["answer_field"] == "code", "the answer slot is not the last field"
+    assert authored["llm_only"]["answer_fields"] == ["code"], (
+        "the answer slot is not the last field"
+    )
     # A check-in names only a connector that runs its upload; a container one is never chosen there.
     for foreign in ("dbllmbench", "harbor", "dspy", "no-such"):
         with pytest.raises(PayloadInvalidError):
@@ -1345,7 +1352,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert text_pipeline is not None
     text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
-    assert {"output_schema", "answer_field"} <= base["llm_only"].keys(), (
+    assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (
         "the instrument declares no contract — the rest proves nothing"
     )
     assert fold_output_contract(base, text_schema) == base, (
@@ -1355,7 +1362,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
     chose_text["llm_only"][description_key("answer")] = "IGNORED"
     folded = fold_output_contract(chose_text, text_schema)["llm_only"]
-    assert not {"output_schema", "answer_field", description_key("answer")} & folded.keys(), (
+    assert not {"output_schema", "answer_fields", description_key("answer")} & folded.keys(), (
         "a point answering in text still carries the contract it left"
     )
     assert resolved_output_schemas(text_schema, base)["llm_only"] is not None, (
@@ -1364,6 +1371,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     text_point = {**base, "llm_only": {**base["llm_only"], SCHEMA_TOGGLE_PARAM: ANSWER_AS_TEXT}}
     assert resolved_output_schemas(text_schema, text_point)["llm_only"] is None, (
         "a point answering in TEXT was sent a contract to answer INTO"
+    )
+    joint_pipeline = copy.deepcopy(text_pipeline)
+    joint_pipeline["nodes"]["llm_only"]["config"]["answer_fields"] = ["reasoning", "answer"]
+    joint_schema = parse_pipeline_response(joint_pipeline)
+    joint_node = joint_schema.get_node("llm_only")
+    assert joint_node is not None
+    assert joint_schema.param_options(joint_node, SCHEMA_TOGGLE_PARAM) == [ANSWER_AS_JSON], (
+        "a node graded on several slots was offered prose, where every field misses"
     )
     amount_items: dict[str, Any] = {"type": "object", "properties": {"amount": {"type": "string"}}}
     invoice = {"lines": {"type": "array", "items": amount_items}, "total": {"type": "number"}}

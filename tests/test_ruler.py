@@ -449,6 +449,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
         matcher=None,
         span=None,
         ranking=None,
+        fields=None,
         fitness=lambda _row, _grade: 0.0,
         objective=None,
     )

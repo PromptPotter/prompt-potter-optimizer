@@ -1,4 +1,4 @@
-"""The LABEL arm only: the backend destructures ``answer_field`` first, outside this repo."""
+"""The LABEL arm only: the backend destructures ``answer_fields`` first, outside this repo."""
 
 from __future__ import annotations
 
@@ -273,6 +273,59 @@ def _blocksworld_plan_match(predicted: str, ground_truth: str) -> float:
     return 1.0 if all(below.get(top) == under for top, under in gold["goal"]) else 0.0
 
 
+_NUMBER_RE = re.compile(r"[+-]?\d+(?:\.\d+)?")
+
+
+def _field_value(value: object) -> str | None:
+    """One spelling per value: case, inner whitespace, a bool's spelling and ``2.0`` never decide."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        number = float(value)
+        return str(int(number)) if number.is_integer() else str(number)
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split()).lower()
+    return _field_value(float(text)) if _NUMBER_RE.fullmatch(text) else text
+
+
+def _accepted(name: str, expected: object) -> set[str]:
+    """``""`` is a value, "not stated"."""
+    spelled = [_field_value(v) for v in expected] if isinstance(expected, list) else [None]
+    if not spelled or None in spelled:
+        raise ValueError(
+            f"the gold of field {name!r} is {expected!r}, not a list of accepted values"
+        )
+    return {value for value in spelled if value is not None}
+
+
+def _field_hits(predicted: str, ground_truth: str) -> dict[str, bool]:
+    """Keyed by the gold's GRADED fields, in its order: a ``null`` gold grades its field on no row."""
+    gold = json.loads(ground_truth)
+    accepted = (
+        {name: _accepted(name, values) for name, values in gold.items() if values is not None}
+        if isinstance(gold, dict)
+        else {}
+    )
+    if not accepted:
+        raise ValueError(f"fields_match grades an object gold naming a field: {ground_truth!r}")
+    try:
+        said = json.loads(predicted)
+    except json.JSONDecodeError:
+        said = {}
+    if not isinstance(said, dict):
+        said = {}
+    return {
+        name: name in said and _field_value(said[name]) in values
+        for name, values in accepted.items()
+    }
+
+
+def _fields_match(predicted: str, ground_truth: str) -> float:
+    hits = _field_hits(predicted, ground_truth)
+    return sum(hits.values()) / len(hits)
+
+
 def _number_answer(read: Callable[[str], float | None]) -> Callable[[str], str]:
     def answer(text: str) -> str:
         n = read(text)
@@ -304,6 +357,8 @@ class Matcher(NamedTuple):
     # Where the truth sits in a ranking `score` reads of its own, and its width; `None` where it
     # reads none, so its cells carry the backend's (`backend_rank`).
     ranking: Callable[[MeasuredCell], tuple[int | None, int]] | None
+    # Each graded field's verdict, by name; `None` where `score` grades one answer.
+    fields: Callable[[str, str], dict[str, bool]] | None = None
 
 
 _LAST_LINE = frozenset({Presumption.LAST_LINE_ANSWER})
@@ -361,6 +416,17 @@ MATCHERS: dict[str, Matcher] = {
         "equals sign inside the box.",
         _LAST_LINE,
         None,
+    ),
+    "fields_match": Matcher(
+        _fields_match,
+        None,
+        "Scoring reads the reply as one JSON object and compares each graded field to its gold "
+        "value, ignoring case, extra whitespace and how a true/false or a number is spelled; a "
+        "field whose gold lists several values accepts any of them, and an empty string is a real "
+        "answer meaning not stated. The score is the share of graded fields right.",
+        frozenset(),
+        None,
+        _field_hits,
     ),
     "list_rr": Matcher(
         _list_rr,

@@ -33,6 +33,16 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
+def _miss_tag(grade: Grade) -> str:
+    if grade.field_hits is not None:
+        return "MISS " + ",".join(name for name, hit in grade.field_hits if not hit)
+    gt_rank = grade.ground_truth_rank
+    n_cand = grade.n_candidates or 0
+    if gt_rank is not None:
+        return f"MISS {gt_rank}/{n_cand}"
+    return f"MISS --/{n_cand}" if n_cand else "MISS"
+
+
 def fmt_query_result(
     position: int,
     facts: MeasuredCell,
@@ -63,14 +73,7 @@ def fmt_query_result(
     elif is_hit(grade.fitness):
         tag = "HIT"
     else:
-        gt_rank = grade.ground_truth_rank
-        n_cand = grade.n_candidates or 0
-        if gt_rank is not None:
-            tag = f"MISS {gt_rank}/{n_cand}"
-        elif n_cand:
-            tag = f"MISS --/{n_cand}"
-        else:
-            tag = "MISS"
+        tag = _miss_tag(grade)
 
     cache_marker = "\U0001f4d6" if cached else ""
 

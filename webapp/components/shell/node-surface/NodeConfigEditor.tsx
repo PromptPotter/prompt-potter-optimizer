@@ -389,7 +389,7 @@ function ConfigRowView({
 
 function lockReason(row: ConfigRow, readOnly: boolean): string {
   if (row.neverAxis === "schema_owned") {
-    return "The structured-output contract — the shape this node answers in, and which slot carries the answer. No optimizer may search it; set it here to steer a fork onto a different contract.";
+    return "The structured-output contract — the shape this node answers in, and which slots carry the answer. No optimizer may search it; set it here to steer a fork onto a different contract.";
   }
   if (row.neverAxis === "cost_lever") {
     const held =

@@ -258,9 +258,9 @@ describe("configRows (values mode)", () => {
   // `schema_owned` fences only the OPTIMIZER, never the operator setting the value.
   it("lets the operator set a schema-owned key, and never makes it an axis", () => {
     const owned: NodeConfigParam = {
-      key: "answer_field",
-      value: "answer",
-      kind: "string",
+      key: "answer_fields",
+      value: ["answer"],
+      kind: "nested",
       options: [],
       description: "",
       never_axis: "schema_owned",
@@ -271,23 +271,23 @@ describe("configRows (values mode)", () => {
       permitted_stated: false,
     };
     const withOwned = { llm_only: [...schema.llm_only!, owned] };
-    const rows = configRows(withOwned, { llm_only: { answer_field: "answer" } }, "values");
-    expect(rows.find((r) => r.key === "answer_field")!.value).toBe("answer");
-    expect(seedOverlayFromRows(rows, { "llm_only.answer_field": "reasoning" })).toEqual({
-      llm_only: { answer_field: "reasoning" },
+    const rows = configRows(withOwned, { llm_only: { answer_fields: ["answer"] } }, "values");
+    expect(JSON.parse(rows.find((r) => r.key === "answer_fields")!.value)).toEqual(["answer"]);
+    expect(seedOverlayFromRows(rows, { "llm_only.answer_fields": '["reasoning"]' })).toEqual({
+      llm_only: { answer_fields: ["reasoning"] },
     });
 
     const patch = nodeOverlayPatch(
       {},
       "llm_only",
       configRows(withOwned, {}, "search-space", "llm_only").map((r) =>
-        r.key === "answer_field" ? { ...r, value: "reasoning" } : r,
+        r.key === "answer_fields" ? { ...r, value: '["reasoning", "answer"]' } : r,
       ),
     );
     expect(patch.pipeline_overlay!.llm_only).toHaveProperty("config", {
-      answer_field: "reasoning",
+      answer_fields: ["reasoning", "answer"],
     });
-    expect(patch.node_narrowing!.llm_only!.find((r) => r.key === "answer_field")!.open).toBe(false);
+    expect(patch.node_narrowing!.llm_only!.find((r) => r.key === "answer_fields")!.open).toBe(false);
   });
 
   // A row left out of the emission reads as the operator holding it.
