@@ -21,6 +21,7 @@ from promptpotter.application.optimizers.nodes import (
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.arm_gate import operator_arms
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
+from promptpotter.application.runner.campaign_result import line_outlay
 from promptpotter.application.runner.inner.spawn_context import pin_inner_ruler
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (
@@ -541,6 +542,7 @@ async def close_round(
         session.bank.slot_of,
         cycle.difficulty,
         lives=cycle.config.optimization.lives,
+        outlay=line_outlay(session),
     )
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
     write_hard_samples_artifacts(session, cycle)

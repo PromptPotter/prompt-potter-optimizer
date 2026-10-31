@@ -190,6 +190,27 @@ def _selection_line(selection: ArmName | None, pair: PairedReading) -> str:
     )
 
 
+class LineOutlay(NamedTuple):
+    """What the campaign's line had paid when a round closed: the denominators of its climb."""
+
+    search_usd: float | None
+    elapsed_s: float | None
+
+
+def _climb_line(pair: PairedReading, candidates: int, outlay: LineOutlay) -> str | None:
+    if pair.headline is None:
+        return None
+    points = 100 * pair.headline.estimate.value
+    usd, elapsed = outlay.search_usd, outlay.elapsed_s
+    rates = [
+        f"{points / (elapsed / 60):+.2f}/min" if elapsed else None,
+        f"{points / candidates:+.2f}/candidate" if candidates else None,
+        "$ unpriced" if usd is None else f"{points / usd:+.1f}/$" if usd > 0 else None,
+    ]
+    shown = " · ".join(rate for rate in rates if rate is not None)
+    return f"{points:+.1f} pts: {shown}" if shown else f"{points:+.1f} pts"
+
+
 class RunStanding(FrozenModel):
     """Where the run stands after a round: its selection, over whom, and how it reads against C0."""
 
@@ -225,6 +246,22 @@ class RunStanding(FrozenModel):
         description="Of those, how many closed `advanced`: their pick separated from C0 on the "
         "origin panel — the verdict clock. Never summed with `improved`."
     )
+    candidates: int = Field(
+        description="Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read "
+        "leader once per read."
+    )
+    search_usd: float | None = Field(
+        description="USD the SEARCH had incurred at this close, every cycle of the line read "
+        "whole (`SpendRollup.search_incurred_usd`); null on unpriced search tokens."
+    )
+    elapsed_s: float | None = Field(
+        description="Wall clock of the line's launches to this close: each ended launch's own, "
+        "then the closing one's; null where an ended launch's endpoints did not parse."
+    )
+
+    @property
+    def outlay(self) -> LineOutlay:
+        return LineOutlay(search_usd=self.search_usd, elapsed_s=self.elapsed_s)
 
     @property
     def selection_line(self) -> str:
@@ -232,21 +269,12 @@ class RunStanding(FrozenModel):
         the reason there is no pair. Never the selection's rate alone; derived, never served."""
         return _selection_line(self.selection, self.vs_origin)
 
-    @classmethod
-    def opening(cls, lives: tuple[int, int] | None) -> RunStanding:
-        return cls(
-            rounds_without_advance=0,
-            lives=None
-            if lives is None
-            else LivesReading(left=stalls_left([], lives), cap=lives[1]),
-            selection=None,
-            parent=None,
-            changes="",
-            vs_origin=PairedReading.unread(ReadingState.NO_SELECTION),
-            rounds_closed=0,
-            improved=0,
-            advanced=0,
-        )
+    @property
+    def climb_line(self) -> str | None:
+        """`vs_origin`'s lift in points — a bare point estimate — per minute, per candidate and
+        per search dollar the line paid for it; ``None`` where there is no pair. Derived, never
+        served."""
+        return _climb_line(self.vs_origin, self.candidates, self.outlay)
 
     @classmethod
     def after(
@@ -254,6 +282,7 @@ class RunStanding(FrozenModel):
         rounds: Sequence[RoundOutcome],
         *,
         lives: tuple[int, int] | None,
+        outlay: LineOutlay,
     ) -> RunStanding:
         declared = declared_selection(rounds)
         picked = [key for rr in rounds if rr.election and (key := rr.election.selected) is not None]
@@ -287,6 +316,9 @@ class RunStanding(FrozenModel):
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),
+            candidates=sum(rr.candidates_scored for rr in after_origin),
+            search_usd=outlay.search_usd,
+            elapsed_s=outlay.elapsed_s,
         )
 
 

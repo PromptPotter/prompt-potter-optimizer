@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
@@ -20,6 +21,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LaunchClockRecord
+from promptpotter.domain.run_standing import LineOutlay
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -78,6 +80,21 @@ def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]
     """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
     return scan_launch_clocks(
         LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
+
+
+def line_outlay(session: Session) -> LineOutlay:
+    """What the line has paid by now: every cycle's spend read whole, each ended launch's wall
+    clock, then this one's."""
+    stores, clock = session.store, session.state.clock
+    campaign = stores.campaigns.load_campaign(session.hop.campaign_id)
+    assert campaign is not None and clock is not None, "a closing round's launch is on a line"
+    ended = [launch.clock.elapsed_s for launch in line_launches(stores, campaign)]
+    return LineOutlay(
+        search_usd=read_line_spend(stores, campaign).spend.search_incurred_usd,
+        elapsed_s=None
+        if None in ended
+        else sum(s for s in ended if s is not None) + time.monotonic() - clock.monotonic,
     )
 
 

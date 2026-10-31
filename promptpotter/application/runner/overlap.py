@@ -12,7 +12,7 @@ from promptpotter.application.scoring.paired import (
     grade_measurands,
     read_pair,
 )
-from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_point
+from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_points
 from promptpotter.domain.arms import Measured, arm_name, walked_short
 from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.origin_panel import (
@@ -36,7 +36,7 @@ from promptpotter.domain.run_standing import LineStep, best_line
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
@@ -77,23 +77,25 @@ async def read_origin_panel(
     """Each member on the panel cells its draw left, for the election to pool: a held cell
     replays free, and where *buys* is false the archive alone answers."""
     want = set(panel)
-    read: dict[str, CellSheet] = {}
-    for step, drawn in members:
-        sat = {cell.key for cell in drawn}
-        samples = [s for s in scoring_pool if s.id in want and s.key not in sat]
-        if not samples:
-            continue
-        read[step.opt_sp.id] = (
-            (await _measure_gaps(cycle, samples, step=step)).sheet
-            if buys
-            else reread_cells(
-                cycle.points.job(step.opt_sp),
-                samples,
-                cycle.session,
-                label=MeasurementRole.OVERLAP,
-            )
+    gaps = {
+        step.opt_sp.id: (step, samples)
+        for step, drawn in members
+        if (
+            samples := [
+                s for s in scoring_pool if s.id in want and s.key not in {c.key for c in drawn}
+            ]
         )
-    return read
+    }
+    if buys:
+        return {
+            member: scored.sheet for member, scored in (await _measure_gaps(cycle, gaps)).items()
+        }
+    return {
+        member: reread_cells(
+            cycle.points.job(step.opt_sp), samples, cycle.session, label=MeasurementRole.OVERLAP
+        )
+        for member, (step, samples) in gaps.items()
+    }
 
 
 async def measure_overlap(
@@ -128,17 +130,8 @@ async def measure_overlap(
             vs_parent=None,
         )
 
-    async def whole(step: LineStep) -> bool:
-        gaps = keep - pairs.measured(pairs.cells_of(step, held))
-        if not gaps:
-            return True
-        if step.opt_sp.id in passed:
-            return False
-        scored = await _measure_gaps(cycle, [s for s in scoring_pool if s.id in gaps], step=step)
-        if scored.stopped is not None:
-            return False
-        bought[step.opt_sp.id] = scored.sheet
-        return True
+    def gaps(step: LineStep) -> set[int]:
+        return keep - pairs.measured(pairs.cells_of(step, held))
 
     on_line = {s.opt_sp.id for s in ordered}
     fired = [
@@ -158,15 +151,27 @@ async def measure_overlap(
         )
         return not_read(ReadingState.NOT_HELD), bought
 
-    for step in ordered:
-        if not await whole(step):
-            # A member short of the set breaks the one claim the reading makes.
-            return not_read(ReadingState.PASS_STOPPED), bought
-    held_whole: list[tuple[LineStep, PanelTrigger]] = []
-    stopped: list[tuple[LineStep, PanelTrigger]] = []
-    for step, trigger in fired:
-        # Monitoring, never the line's claim: an arm short of the set reads as stopped, the line stands.
-        (held_whole if await whole(step) else stopped).append((step, trigger))
+    # A member short of the set breaks the one claim the reading makes; one the election's pass
+    # left short is never topped up, so it breaks the claim before anything is bought.
+    if any(gaps(step) and step.opt_sp.id in passed for step in ordered):
+        return not_read(ReadingState.PASS_STOPPED), bought
+    owed = {
+        step.opt_sp.id: (step, [s for s in scoring_pool if s.id in short])
+        for step in [*ordered, *(step for step, _ in fired)]
+        if (short := gaps(step)) and step.opt_sp.id not in passed
+    }
+    scored = await _measure_gaps(cycle, owed)
+    bought |= {member: walk.sheet for member, walk in scored.items() if walk.stopped is None}
+
+    def whole(step: LineStep) -> bool:
+        topped = scored.get(step.opt_sp.id)
+        return not gaps(step) or (topped is not None and topped.stopped is None)
+
+    if not all(whole(step) for step in ordered):
+        return not_read(ReadingState.PASS_STOPPED), bought
+    # Monitoring, never the line's claim: an arm short of the set reads as stopped, the line stands.
+    held_whole = [(step, trigger) for step, trigger in fired if whole(step)]
+    stopped = [(step, trigger) for step, trigger in fired if not whole(step)]
 
     # Read again off the round as it will CLOSE, so what was bought joins by the one read.
     closing = round_result.model_copy(update={"overlap_results": bought})
@@ -319,27 +324,38 @@ class _OriginPanelPairs:
         )
 
 
-async def _measure_gaps(cycle: Cycle, samples: list[Sample], *, step: LineStep) -> ScoredWalk:
-    """*step*'s OWN configuration, never the round subject's."""
-    logger.info(
-        "overlap: measuring %s on %d cell(s) of the origin panel", step.arm.label, len(samples)
-    )
-    scored = await score_search_point(
-        cycle.points.job(step.opt_sp),
-        samples,
+async def _measure_gaps(
+    cycle: Cycle, gaps: Mapping[str, tuple[LineStep, list[Sample]]]
+) -> dict[str, ScoredWalk]:
+    """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's;
+    no sample history, so the pass re-sends no degraded cached cell."""
+    if not gaps:
+        return {}
+    for step, samples in gaps.values():
+        logger.info(
+            "overlap: measuring %s on %d cell(s) of the origin panel", step.arm.label, len(samples)
+        )
+    scored = await score_search_points(
+        {
+            member: (
+                cycle.points.job(step.opt_sp),
+                samples,
+                MeasuredPass(individual_id=step.opt_sp.id, role=MeasurementRole.OVERLAP),
+            )
+            for member, (step, samples) in gaps.items()
+        },
         cycle.session,
         # One run per (member, cell set), so a re-run of the same round replays it free.
         label=MeasurementRole.OVERLAP,
-        # No sample history: the pass re-sends no degraded cached cell.
-        sample_index=None,
-        measured=MeasuredPass(individual_id=step.opt_sp.id, role=MeasurementRole.OVERLAP),
     )
-    if scored.stopped is not None:
-        logger.warning(
-            "overlap: %s stopped after %d/%d cell(s) (%s)",
-            step.arm.label,
-            len(scored.sheet),
-            len(samples),
-            scored.stopped,
-        )
+    for member, walk in scored.items():
+        if walk.stopped is not None:
+            step, samples = gaps[member]
+            logger.warning(
+                "overlap: %s stopped after %d/%d cell(s) (%s)",
+                step.arm.label,
+                len(walk.sheet),
+                len(samples),
+                walk.stopped,
+            )
     return scored

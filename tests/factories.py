@@ -106,7 +106,7 @@ from promptpotter.domain.ruler import (
     flat_ruler_id,
 )
 from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord, TokenUsageRecord
-from promptpotter.domain.run_standing import RunStanding
+from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
 from promptpotter.domain.search_point import TaskDecomposition
@@ -631,6 +631,7 @@ def close_round(
         cycle.session.bank.slot_of,
         cycle.difficulty,
         lives=cycle.config.optimization.lives,
+        outlay=LineOutlay(search_usd=None, elapsed_s=None),
     )
 
 

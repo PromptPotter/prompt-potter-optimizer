@@ -2937,7 +2937,7 @@
         "additionalProperties": false,
         "properties": {
           "bench": {
-            "description": "Distinct samples held out as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them.",
+            "description": "Distinct samples the split ranks away from the search as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them. A row the bank declares `bench_only` is held out beside them, never counted here.",
             "minimum": 0,
             "title": "Bench",
             "type": "integer"
@@ -7820,10 +7820,27 @@
             "title": "Advanced",
             "type": "integer"
           },
+          "candidates": {
+            "description": "Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader once per read.",
+            "title": "Candidates",
+            "type": "integer"
+          },
           "changes": {
             "description": "What `selection` changed, in its proposer's words (its lineage's `changes_description`). Empty while it is the origin, which changed nothing.",
             "title": "Changes",
             "type": "string"
+          },
+          "elapsed_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wall clock of the line's launches to this close: each ended launch's own, then the closing one's; null where an ended launch's endpoints did not parse.",
+            "title": "Elapsed S"
           },
           "improved": {
             "description": "Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no interval), so it is the promotion clock and never a result; read `advanced`.",
@@ -7861,6 +7878,18 @@
             "title": "Rounds Without Advance",
             "type": "integer"
           },
+          "search_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "USD the SEARCH had incurred at this close, every cycle of the line read whole (`SpendRollup.search_incurred_usd`); null on unpriced search tokens.",
+            "title": "Search Usd"
+          },
           "selection": {
             "anyOf": [
               {
@@ -7886,7 +7915,10 @@
           "vs_origin",
           "rounds_closed",
           "improved",
-          "advanced"
+          "advanced",
+          "candidates",
+          "search_usd",
+          "elapsed_s"
         ],
         "title": "RunStanding",
         "type": "object"

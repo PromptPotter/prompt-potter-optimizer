@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.loop_start import open_diagnostic, verb_ledger
@@ -14,6 +15,7 @@ from promptpotter.application.runner.campaign_result import (
     bank_campaign_result,
     bench_origin,
     declare_line_bench,
+    line_passes,
     line_run,
     read_cycle_bench,
 )
@@ -73,17 +75,23 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
         ledger.bind(readout)
         cb = RunCallbacks(ledger)
         try:
-            banked = await bench_origin(
-                session,
-                origin_sp,
-                origin_id=rounds[0].origin.individual.id,
-                spend=dashboard.state.spend,
-                cb=cb,
-            )
-            assert banked is not None, "the line holder holds its origin's pass"
-            banked = await bench_selection(
-                session, rounds, points=opened.points, banked=banked, cb=cb
-            )
+            try:
+                banked = await bench_origin(
+                    session,
+                    origin_sp,
+                    origin_id=rounds[0].origin.individual.id,
+                    spend=dashboard.state.spend,
+                    cb=cb,
+                )
+                assert banked is not None, "the line holder holds its origin's pass"
+                banked = await bench_selection(
+                    session, rounds, points=opened.points, banked=banked, cb=cb
+                )
+            except (KeyboardInterrupt, asyncio.CancelledError) as stop:
+                # The pass banked itself stopped, so the line's reading over it is the answer.
+                if not session.state.control.paused(stop):
+                    raise
+                banked = line_passes(stores, hop.campaign_id)
             score = declare_line_bench(
                 session,
                 config,

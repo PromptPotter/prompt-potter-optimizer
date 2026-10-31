@@ -1050,7 +1050,6 @@ export interface MeteredSpend {
   calls_rate_priced: boolean;
   rate_known: boolean;
   bill_is_floor: boolean;
-  metered_is_bill: boolean;
   incurred_usd: number;
   billed_tokens: number;
   unpriced_tokens: number;
@@ -1781,8 +1780,10 @@ export interface BenchSet {
 }
 
 export interface DatasetSplit {
-  /** Distinct samples held out as the bench set, with every row that repeats one:
-   * no optimizer node ever reads one, and the headline is scored on them. */
+  /** Distinct samples the split ranks away from the search as the bench set, with
+   * every row that repeats one: no optimizer node ever reads one, and the
+   * headline is scored on them. A row the bank declares `bench_only` is held
+   * out beside them, never counted here. */
   bench: number;
   /** Distinct samples reserved as the demo pool — the rows an individual's `shots`
    * name by `Sample.key`, rendered into its prompt as query and ground truth,
@@ -3248,6 +3249,15 @@ export interface RunStanding {
   /** Of those, how many closed `advanced`: their pick separated from C0 on the
    * origin panel — the verdict clock. Never summed with `improved`. */
   advanced: number;
+  /** Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader
+   * once per read. */
+  candidates: number;
+  /** USD the SEARCH had incurred at this close, every cycle of the line read whole
+   * (`SpendRollup.search_incurred_usd`); null on unpriced search tokens. */
+  search_usd: number | null;
+  /** Wall clock of the line's launches to this close: each ended launch's own, then
+   * the closing one's; null where an ended launch's endpoints did not parse. */
+  elapsed_s: number | null;
 }
 
 /** A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`, */

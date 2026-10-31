@@ -17,7 +17,7 @@ from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.application.preflight import run_preflight_checks
+from promptpotter.application.preflight import refuse_below_reasoning_floor, run_preflight_checks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.spawn_context import (
     publish_inner_spawn_context,
@@ -144,6 +144,8 @@ def arm_diagnostic_scoring(
     *,
     source: RunSource,
 ) -> None:
+    # A run is refused at its mint (`jobs/mint.py::refuse_unrunnable`); a pass outside one, here.
+    refuse_below_reasoning_floor(node_config_items(dict(session.pipeline_params)))
     scope_memory(session)
     if bound_spend_book() is None:
         bind_spend_book(unbounded_spend_book())

@@ -5,7 +5,7 @@ import functools
 import logging
 import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -254,6 +254,23 @@ async def score_search_point(
         )
         await run_walks({label: walk}, session, keep_cut=False)
     return close_walk(walk)
+
+
+async def score_search_points[K: Hashable](
+    points: Mapping[K, tuple[JobSearchPoint, list[Sample], MeasuredPass | None]],
+    session: Session,
+    *,
+    label: str,
+) -> dict[K, ScoredWalk]:
+    """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their
+    sum, and rows land as a serial walk of *points*' order lands them."""
+    with filed_as(ROLE_SPEND_KIND.get(label)):
+        walks = {
+            key: open_walk(search_point, dataset, session, label=label, measured=measured)
+            for key, (search_point, dataset, measured) in points.items()
+        }
+        await run_walks(walks, session, keep_cut=False)
+    return {key: close_walk(walk) for key, walk in walks.items()}
 
 
 def reread_cells(

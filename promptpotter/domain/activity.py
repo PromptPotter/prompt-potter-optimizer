@@ -359,12 +359,16 @@ class ActivityFeed:
                 # Read by `_declared` alone, so a feed still takes them.
                 return None
             case RoundClosedRecord():
+                standing = record.run_standing
+                climb = standing.climb_line
                 return ActivityItem(
                     id=item_id,
                     kind="round",
                     icon="★",
                     label=f"Round {record.round}",
-                    detail=record.run_standing.selection_line,
+                    detail=standing.selection_line
+                    if climb is None
+                    else f"{standing.selection_line} · {climb}",
                     tone="good",
                     round=record.round,
                 )

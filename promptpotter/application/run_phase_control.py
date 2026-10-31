@@ -98,6 +98,15 @@ class RunControl:
             return True
         return any(standing_controls(outer).pause is not None for outer in self.enclosing)
 
+    def paused(self, stop: KeyboardInterrupt | asyncio.CancelledError) -> bool:
+        """*stop* is a pause this control was asked, never a cancel of the task itself: the one stop
+        a pass answers with the reading over what it banked."""
+        task = asyncio.current_task()
+        cancelled = (
+            isinstance(stop, asyncio.CancelledError) and task is not None and task.cancelling()
+        )
+        return not cancelled and self.pause_requested()
+
     def take_pause(self) -> tuple[PauseCause, str] | None:
         """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""
         asked = self._inbox().pause

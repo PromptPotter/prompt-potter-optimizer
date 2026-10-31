@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 from collections.abc import Iterable, Mapping, Sequence
@@ -22,7 +23,7 @@ from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import own_level
 from promptpotter.application.scoring.closed_rounds import cycle_instrument, walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
-from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_point
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
 from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -334,19 +335,34 @@ async def verify_candidate(
             view=VerifyEnterView(arm=arm, rows=len(picked), strategy=strategy),
         )
         try:
-            scored = await diagnostic_pass(
-                score_search_point(
-                    jsp,
-                    picked,
-                    session,
-                    label=MeasurementRole.VERIFY,
-                    measured=MeasuredPass(candidate_id, MeasurementRole.VERIFY),
-                ),
-            )
+            try:
+                cells = (
+                    await diagnostic_pass(
+                        score_search_point(
+                            jsp,
+                            picked,
+                            session,
+                            label=MeasurementRole.VERIFY,
+                            measured=MeasuredPass(candidate_id, MeasurementRole.VERIFY),
+                        ),
+                    )
+                ).cells
+            except (KeyboardInterrupt, asyncio.CancelledError) as stop:
+                if not session.state.control.paused(stop):
+                    raise
+                # A pause stops on no outcome, so the rows walked are a fresh pick of their own;
+                # each was unmeasured, so a row the archive holds now is one this pass bought.
+                walked = reread_cells(jsp, picked, session, label=MeasurementRole.VERIFY)
+                cells = [(key, answer, False) for key, answer, _ in walked.addresses()]
+                picked = [s for s in picked if s.key in {key for key, _, _ in cells}]
+                if not picked:
+                    raise DiagnosticError(
+                        f"the verify pass of {label!r} was paused before it measured a cell."
+                    ) from None
             banked = VerifyPass(
                 arm=arm,
                 sp_hash=sp_hash,
-                cells=scored.cells,
+                cells=cells,
                 positions=[s.id for s in picked],
                 strategy=strategy,
                 seed=seed,

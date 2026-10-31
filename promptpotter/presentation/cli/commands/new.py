@@ -93,6 +93,12 @@ def _checkin_line(step: str, detail: str) -> None:
     logger.info("✓ %-13s — %s", step, detail)
 
 
+def _value(raw: str) -> Any:
+    """YAML, except a word YAML 1.1 reads as a bool stays the word: `reasoning_effort=off`."""
+    value = yaml.safe_load(raw)
+    return raw if isinstance(value, bool) and raw.lower() not in ("true", "false") else value
+
+
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
     """Shape only: every bound is the patch model's and ``plan_draft_patch``'s, as for the browser."""
     patch_raw: dict[str, Any] = {}
@@ -105,13 +111,11 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
             knobs[field] = raw
         elif field.startswith(f"{_BUDGET}.") and field.count(".") == 1:
             axis = field.split(".")[1]
-            knobs.setdefault(_BUDGET, {})[axis] = (
-                None if raw.lower() == "none" else yaml.safe_load(raw)
-            )
+            knobs.setdefault(_BUDGET, {})[axis] = None if raw.lower() == "none" else _value(raw)
         elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
             _, node, knob = field.split(".")
             config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
-            config[knob] = yaml.safe_load(raw)
+            config[knob] = _value(raw)
         elif field in _SET_FIELDS:
             patch_raw[FINDING_PATCH_KEYS.get(field, field)] = raw
         else:
@@ -287,8 +291,6 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
         raise SystemExit(
             f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint(stores)
         ) from None
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
     held = held_run(outcome.result)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)

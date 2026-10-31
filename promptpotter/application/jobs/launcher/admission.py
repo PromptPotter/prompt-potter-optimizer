@@ -560,6 +560,8 @@ async def paid_pass(
             cycle_dir = stores.campaigns.cycle_dir(hop)
             hold_pass(cycle_dir)
             holding = hop
+            # Asked of a producer gone since, as a launch's RUNNING record empties the inbox.
+            _take_pause(stores, hop)
             # The rate-limit and slot waits poll it too, as a loop's do.
             set_abort_check(RunControl(cycle_dir=cycle_dir).pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
@@ -608,16 +610,20 @@ def _let_go(stores: Stores, holding: CycleHop | None) -> str | None:
     """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked."""
     if holding is None:
         return None
-    cycle_dir = stores.campaigns.cycle_dir(holding)
-    control = RunControl(cycle_dir=cycle_dir)
     try:
-        if not control.pause_requested():
-            return None
-        with verb_ledger(stores, holding):
-            taken = control.take_pause()
-        return None if taken is None else taken[1]
+        return _take_pause(stores, holding)
     finally:
-        release_pass(cycle_dir)
+        release_pass(stores.campaigns.cycle_dir(holding))
+
+
+def _take_pause(stores: Stores, hop: CycleHop) -> str | None:
+    """Acks the pause standing on *hop* applied; who asked it, ``None`` where none stands."""
+    control = RunControl(cycle_dir=stores.campaigns.cycle_dir(hop))
+    if not control.pause_requested():
+        return None
+    with verb_ledger(stores, hop):
+        taken = control.take_pause()
+    return None if taken is None else taken[1]
 
 
 def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:

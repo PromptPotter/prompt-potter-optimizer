@@ -94,14 +94,18 @@ def _rebank_on_branch(
     for t in rounds:
         if t.round not in retired:
             continue
+        # Under its round's own anchors and outlay, never the resuming launch's.
+        close = closes[t.round].close
         line, series, standing = stated_line(
-            t, rounds, cycle.difficulty, lives=cycle.config.optimization.lives
+            t,
+            rounds,
+            cycle.difficulty,
+            lives=cycle.config.optimization.lives,
+            outlay=close.run_standing.outlay,
         )
-        # Under its round's own anchors, never the resuming launch's.
-        anchors = closes[t.round].close.anchors
         offset = session.store.campaigns.rebank_round(
             branch,
-            RoundRestatedRecord.of(line, session.bank.slot_of, series, standing, anchors),
+            RoundRestatedRecord.of(line, session.bank.slot_of, series, standing, close.anchors),
         )
         # The restatement MOVES the document's address; the retired one re-folds to the holed round.
         restated[t.round] = t.model_copy(update={"at_offset": offset})

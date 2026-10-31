@@ -31,8 +31,9 @@ from promptpotter.shared.hashing import stable_hash
 class DatasetSplit(StrictModel):
     bench: int = Field(
         ge=0,
-        description="Distinct samples held out as the bench set, with every row that repeats "
-        "one: no optimizer node ever reads one, and the headline is scored on them.",
+        description="Distinct samples the split ranks away from the search as the bench set, with "
+        "every row that repeats one: no optimizer node ever reads one, and the headline is scored "
+        "on them. A row the bank declares `bench_only` is held out beside them, never counted here.",
     )
     demo: int = Field(
         0,
