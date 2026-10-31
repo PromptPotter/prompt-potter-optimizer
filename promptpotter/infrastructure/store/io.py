@@ -450,15 +450,20 @@ class _FileMark(NamedTuple):
     inode: int | None
 
 
+def complete_lines(fh: IO[bytes]) -> Iterator[bytes]:
+    """Every line reader's one rule: an unterminated last line is an append in flight, and is not read."""
+    for raw in fh:
+        if not raw.endswith(b"\n"):
+            return
+        yield raw
+
+
 def _read_marked(path: Path) -> tuple[list[str], _FileMark]:
     lines: list[str] = []
     end, inode = 0, None
     with contextlib.suppress(FileNotFoundError), open(_long_path(path), "rb") as f:
         inode = os.fstat(f.fileno()).st_ino
-        for raw in f:
-            # An unterminated line is an append in flight: the swap carries it past `end`.
-            if not raw.endswith(b"\n"):
-                break
+        for raw in complete_lines(f):
             lines.append(raw.decode("utf-8"))
             end += len(raw)
     return lines, _FileMark(end, inode)

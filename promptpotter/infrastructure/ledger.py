@@ -11,7 +11,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
-from promptpotter.infrastructure.store.io import append_line
+from promptpotter.infrastructure.store.io import append_line, complete_lines
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerSpan,
@@ -140,7 +140,7 @@ class CycleEventLog:
         if not self._path.exists():
             return
         with self._path.open("rb") as fh:
-            for offset, line in enumerate(fh):
+            for offset, line in enumerate(complete_lines(fh)):
                 if own_limit is not None and offset >= own_limit:
                     return
                 record: CycleRecord | None = ledger_record(

@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import append_line, open_text_robust
+from promptpotter.infrastructure.store.io import append_line, complete_lines, open_text_robust
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
@@ -65,10 +65,7 @@ def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
 def _complete_lines(path: Path, start: int) -> Iterator[bytes]:
     with open(path, "rb") as fh:
         fh.seek(start)
-        for raw in fh:
-            if not raw.endswith(b"\n"):
-                return
-            yield raw
+        yield from complete_lines(fh)
 
 
 def read_jsonl_from[R](path: Path, read: Callable[[bytes], R], offset: int) -> tuple[list[R], int]:
