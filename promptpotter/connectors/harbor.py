@@ -143,10 +143,24 @@ _DOCKER_OVERLAY = Path(__file__).parent / "resources" / "harbor-docker-compose.y
 # Verifier only: a proxy in the agent's environment is observable by the agent.
 PACKAGE_CACHE_SCOPES = frozenset({"verifier"})
 
-# terminus-2 declares no `SYSTEM_PACKAGES`; this mirrors `TmuxSession._install_recording_tools`.
-_AGENT_TOOLS: dict[str, tuple[tuple[str, str], ...]] = {
-    "terminus-2": (("tmux", "tmux -V"), ("asciinema", "asciinema --version")),
+# The ATIF file an agent writes into its logs dir, which Harbor names but never reads back.
+_TRAJECTORY = "trajectory.json"
+
+
+class _AgentDeclares(NamedTuple):
+    tools: tuple[tuple[str, str], ...]
+    # Written into its logs dir by every step it runs: `_layout_fault` refuses a clean step without one.
+    logs: tuple[str, ...]
+
+
+# Absent declares nothing: oracle and nop write no logs, an installed agent's ATIF is best-effort.
+# terminus-2's tools mirror `TmuxSession._install_recording_tools`; `run` dumps its trajectory in `finally`.
+_AGENTS: dict[str, _AgentDeclares] = {
+    "terminus-2": _AgentDeclares(
+        tools=(("tmux", "tmux -V"), ("asciinema", "asciinema --version")), logs=(_TRAJECTORY,)
+    ),
 }
+_UNDECLARED = _AgentDeclares(tools=(), logs=())
 # `TmuxSession._detect_system_info`'s probe order, which decides the install command it runs.
 _PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "apk", "pacman", "brew", "pkg", "zypper")
 
@@ -652,10 +666,6 @@ def _trial_root(result: TrialResult) -> Path:
     return _TRIALS_ROOT / str(result.trial_name)
 
 
-# The ATIF file an agent writes into its logs dir, which Harbor names but never reads back.
-_TRAJECTORY = "trajectory.json"
-
-
 class _StepLogs(NamedTuple):
     """One step's logs where Harbor's own `TrialPaths` puts them; a one-step trial is its own step."""
 
@@ -682,13 +692,16 @@ def _step_logs(result: TrialResult) -> list[_StepLogs]:
     return [_StepLogs(None, trial, result.exception_info is not None)]
 
 
-def _layout_fault(result: TrialResult) -> str | None:
-    """A SCORED trial lacks a log the digest and the skill arrival read only where Harbor's layout moved."""
+def _layout_fault(result: TrialResult, agent_logs: tuple[str, ...]) -> str | None:
+    """A SCORED trial lacks Harbor's verifier stdout, or a log its agent declares, only where Harbor's layout moved."""
     for logs in _step_logs(result):
         if not logs.paths.test_stdout_path.is_file():
             return f"no verifier stdout at {logs.paths.test_stdout_path}"
-        if not logs.failed and not (trajectory := logs.paths.agent_dir / _TRAJECTORY).is_file():
-            return f"no agent trajectory at {trajectory}"
+        if logs.failed:
+            continue
+        for name in agent_logs:
+            if not (path := logs.paths.agent_dir / name).is_file():
+                return f"no {name} at {path}, which its agent writes every step"
     return None
 
 
@@ -994,6 +1007,7 @@ class _Episode:
     prompt: str | None
     in_system_prompt: bool
     tools: tuple[tuple[str, str], ...]
+    agent_logs: tuple[str, ...]
 
     @property
     def harbor_model_name(self) -> str | None:
@@ -1021,6 +1035,7 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
     agent_kwargs = dict(agent_cfg.get("kwargs") or {})
     agent_kwargs.update(payload.get("agent_kwargs") or {})
     agent_name = agent_cfg.get("name") or "terminus-2"
+    declared = _AGENTS.get(agent_name, _UNDECLARED)
     return _Episode(
         query=sample.query,
         task=task,
@@ -1038,9 +1053,10 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
         tools=tuple(
             (tool, probe)
-            for tool, probe in _AGENT_TOOLS.get(agent_name, ())
+            for tool, probe in declared.tools
             if tool != "asciinema" or agent_kwargs.get("record_terminal_session") is not False
         ),
+        agent_logs=declared.logs,
     )
 
 
@@ -1368,7 +1384,7 @@ async def _in_process_run(
     episode = _episode(workload, sample, payload)
     result, attempt_s, bill = await _run_episode(episode)
     reward = _reward(result, episode, bill)
-    if (fault := _layout_fault(result)) is not None:
+    if (fault := _layout_fault(result, episode.agent_logs)) is not None:
         raise cell_failure(
             f"harbor task {episode.query!r} scored with {fault}: Harbor's trial layout moved "
             f"under a connector written against series {EXPECTED_HARBOR_SERIES}, and the digest "
