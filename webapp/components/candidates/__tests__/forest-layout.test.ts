@@ -89,13 +89,13 @@ const winnerAt = (c: SubtreeCourse, round: number): HierarchyCandidate =>
     (n) => n.facts.reading.arm.round === round && n.facts.reading.election.selected,
   )!;
 
-// A fork of `parent` cut at its round-`round` winner, numbering on from there.
+// A rewind of `parent` lifting its rounds through the round-`round` winner, numbering on from there.
 function forkAt(parent: SubtreeCourse, round: number, rounds: Rounds): SubtreeCourse {
   const spawn: CourseSpawn = {
     parent: parent.address,
     cut_round: round + 1,
-    trigger: "operator_steered",
-    direction: "offshoot",
+    trigger: "operator_rewind",
+    direction: "supersede",
     issued_by: "",
   };
   const from = winnerAt(parent, round);
@@ -224,13 +224,14 @@ describe("layout", () => {
       issued_by: "",
     };
     const from = winnerAt(a, 1);
-    const steered = course(C, [1], "fork", spawn, 1, from.facts.main_line);
+    // An offshoot numbers from its own origin, its line continuing its from-candidate's.
+    const steered = course(C, [1], "fork", spawn, 0, from.facts.main_line);
     const tree = campaign("camp", [
       a,
       forkAt(a, 2, [1]),
       { ...steered, facts: { ...steered.facts, from_candidate: from.address } },
     ]);
-    const keep = extentKeys(tree, { coursePathKey: C, candidateId: "c1_0" })!;
+    const keep = extentKeys(tree, { coursePathKey: C, candidateId: "c0_0" })!;
     const { laneByKey } = layout(tree, new Set([A]), keep);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1"]);
     expect(laneByKey.has(B)).toBe(false);

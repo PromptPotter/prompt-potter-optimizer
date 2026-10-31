@@ -257,6 +257,8 @@ class _Course:
     candidates: list[_Candidate] = field(default_factory=list)
     # Inner campaigns no arm of one of its rounds asked for.
     unplaced: list[SubtreeCampaign] = field(default_factory=list)
+    # The candidate it hangs from: a fork's from-candidate, an inner root course's host.
+    hangs_from: _Candidate | None = None
 
     @property
     def address(self) -> str:
@@ -303,11 +305,15 @@ def _status(c: _Candidate, superseding: list[_Course]) -> _Status:
 
 
 def _main_line(c: _Candidate) -> list[MainLineStep]:
-    """As it ran, on the line it was read on: every elected round up to it, then on to the first
-    crown after it — a retired crown stands behind every candidate after it."""
+    """As it ran, on the line it was read on: the line of the candidate the course holding its
+    first round hangs from, where that course lifts no round; every elected round up to it, then
+    on to the first crown after it — a retired crown stands behind every candidate after it."""
     line = c.read_in
-    steps: list[MainLineStep] = []
-    for round_ in sorted(line.owner.keys() | {c.round}):
+    rounds = sorted(line.owner.keys() | {c.round})
+    base = line.owner[rounds[0]].course if rounds[0] in line.owner else line.course
+    hung = None if base.index.cut_round else base.hangs_from
+    steps = [] if hung is None else _through(hung)
+    for round_ in rounds:
         if round_ == c.round:
             steps.append(MainLineStep(round=round_, candidates=[c.address]))
             continue
@@ -318,6 +324,11 @@ def _main_line(c: _Candidate) -> list[MainLineStep]:
             break
         steps.append(MainLineStep(round=round_, candidates=[] if crown is None else [crown]))
     return steps
+
+
+def _through(c: _Candidate) -> list[MainLineStep]:
+    line = _main_line(c)
+    return line[: next(i for i, step in enumerate(line) if c.address in step.candidates) + 1]
 
 
 def _unplaced(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
@@ -363,6 +374,7 @@ class _Build:
         held: CourseReads,
         *,
         depth: int,
+        host: _Candidate | None,
     ) -> SubtreeCampaign:
         entry = campaign_entry(stores, inside, campaign, held, depth=1)
         index_of = {hop.cycle_id: index for hop, index, _ in held.courses}
@@ -371,7 +383,7 @@ class _Build:
             for listed in entry.children
             for hop in (decode_cycle_path(listed.address)[-1],)
         ]
-        self._place(stores, courses)
+        self._place(stores, courses, host)
         for course in courses:
             sandbox = inner_sandbox_store(stores, course.hop.campaign_id, course.hop.cycle_id)
             if sandbox is not None and depth > 0:
@@ -387,10 +399,10 @@ class _Build:
             }
         )
 
-    def _place(self, stores: Stores, courses: list[_Course]) -> None:
+    def _place(self, stores: Stores, courses: list[_Course], host: _Candidate | None) -> None:
         """Every line first, off the recorded spawn alone — a read pulls its parent's as of its
         cut — then every candidate's status as a function of those lines: no order of courses,
-        and no fork placed before another, can change one."""
+        and no fork placed before another, can change one. *host* holds the root course."""
         by_address = {c.address: c for c in courses}
         for course in courses:
             spawn = course.entry.facts.spawn
@@ -405,6 +417,12 @@ class _Build:
                         c = _Candidate(candidate_address(course.address, *key), arm, read)
                         course.ran[key] = found[c.address] = c
                         course.candidates.append(c)
+        for course in courses:
+            spec, then = course.index.fork, course.head.below
+            if spec is None:
+                course.hangs_from = host
+            elif then is not None and (address := then.address(spec.from_candidate)) is not None:
+                course.hangs_from = found[address]
         for course in courses:
             for read in course.reads:
                 for key, ref in read.rereads.items():
@@ -456,7 +474,7 @@ class _Build:
             asker = None if spawned is None else by_cycle.get(spawned.cycle_id or "")
             arm = None if spawned is None else spawned.arm
             host = None if asker is None or arm is None else asker.ran.get((arm.round, arm.arm))
-            nested = self.campaign(sandbox, inside, listed, held, depth=depth)
+            nested = self.campaign(sandbox, inside, listed, held, depth=depth, host=host)
             if host is not None:
                 host.inner.append(nested.model_copy(update={"parent": host.address}))
                 continue
@@ -511,7 +529,7 @@ class _Build:
                     facts=RoundFacts(round=round_, elects_on=elects_on),
                 )
             )
-        spec, then = course.index.fork, head.below
+        hung = course.hangs_from
         return SubtreeCourse(
             **_fields(course.entry)
             | {
@@ -520,8 +538,8 @@ class _Build:
                     **_fields(course.entry.facts),
                     origin=head.crown(0) if 0 in head.owner else None,
                     from_candidate=None
-                    if spec is None or then is None
-                    else then.address(spec.from_candidate),
+                    if course.index.fork is None or hung is None
+                    else hung.address,
                     lens_criterion=None,
                     lens_shift=None,
                 ),
@@ -676,7 +694,9 @@ def hierarchy_subtree(
     """
     campaign = owned_campaign(stores, _top_campaign(address))
     held = campaign_courses(stores, campaign, moment=moment)
-    root = _answering(_Build(moment).campaign(stores, (), campaign, held, depth=MAX_COURSE_DEPTH))
+    root = _answering(
+        _Build(moment).campaign(stores, (), campaign, held, depth=MAX_COURSE_DEPTH, host=None)
+    )
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
     root = _read_under(root, lens, samples, moment)
@@ -713,7 +733,8 @@ def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
 
 def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:
     """One course and its rounds, unlensed and at the head: only its own campaign is built, so no
-    inner run hangs under its candidates and none of them answers for an id."""
+    inner run hangs under its candidates, none of them answers for an id, and an inner course's
+    lines start at its own origin."""
     owned_campaign(stores, path[0].campaign_id)
     inside, hop = path[:-1], path[-1]
     leaf = descend_store(stores, inside)
@@ -721,7 +742,7 @@ def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:
     address = encode_cycle_path(path)
     if campaign is not None:
         held = campaign_courses(leaf, campaign, moment=None)
-        built = _Build(None).campaign(leaf, inside, campaign, held, depth=0)
+        built = _Build(None).campaign(leaf, inside, campaign, held, depth=0, host=None)
         for course in built.children:
             if course.address == address:
                 return course
