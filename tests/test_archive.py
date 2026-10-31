@@ -1041,6 +1041,42 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert stood.crowns == {0: prefix[0], 1: mine[0]}
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
 
+    # A line stands on its origin until an election crowns another: a --diag line closes no round 0.
+    walked_only, origin_log = _minted(stores, "cycle_origin_only")
+    walked_origin = ArmKey(prompted(instruction="w_origin").id)
+    origin_slot = ArmSlot(round=0, idx=0, total=1)
+    origin_log.append(
+        ArmRecord(round=0, arm=walked_origin, state=arm_state("w_origin", slot=origin_slot))
+    )
+    on_origin = RoundArm(round=0, arm=walked_origin)
+    for cut_round in (0, 1):
+        assert fork_edge(store.standing_rounds(walked_only, moment=None), cut_round, None) == (
+            on_origin
+        ), "a fork of a line no election crowned hangs from no candidate, or from another"
+    crown = ArmKey(prompted(instruction="w_crown").id)
+    close_round(
+        origin_log,
+        [
+            # Held in memory, as a --diag run holds its origin round: only round 1 closes.
+            _round(
+                round=0,
+                arms={walked_origin: arm_state("w_origin", slot=origin_slot)},
+                election=election(walked_origin),
+            ),
+            _round(
+                round=1,
+                arms={crown: arm_state("w_crown", slot=ArmSlot(round=1, idx=0, total=1))},
+                election=election(crown),
+            ),
+        ],
+        cycle=closing,
+    )
+    standing_now = store.standing_rounds(walked_only, moment=None)
+    assert (fork_edge(standing_now, 0, None), fork_edge(standing_now, 2, None)) == (
+        on_origin,
+        RoundArm(round=1, arm=crown),
+    ), "a cut stands on a candidate other than the line's newest crown below it"
+
     # A step's silence is the family's, wherever a window happens to cut the ray.
     def gaps(limit: int) -> dict[str, float]:
         ray = open_family_ray(stores, (fork_hop,), limit=limit, before=None).window()
@@ -1225,7 +1261,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 slot=walked_slot(line, ArmKey(ident(row_reference))),
                 role=MeasurementRole.PARENT,
             )
-            assert line_reference(line).arm == ident(row_reference), (
+            root = next(iter(line[0].arms))
+            assert line_reference(line, origin=root).arm == ident(row_reference), (
                 f"guard: a row re-reads off {row_course}'s line"
             )
         row_ended = row_crown or row_reference or row_picks[0]
@@ -1233,7 +1270,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             _round(
                 round=n,
                 arms=arms,
-                reference=None if row_reference is None else line_reference(line),
+                reference=None if row_reference is None else line_reference(line, origin=root),
                 election=election(
                     None if row_crown is None else ident(row_crown),
                     ended_on=ident(row_ended),

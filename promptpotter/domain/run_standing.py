@@ -156,13 +156,17 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
     )
 
 
-def line_reference(rounds: Sequence[RoundOutcome]) -> RoundArm:
-    """The candidate a line of *rounds* stands on, by the round that crowned it: what the next
-    round re-reads."""
+def line_reference(rounds: Sequence[RoundOutcome], *, origin: ArmKey) -> RoundArm:
+    """The candidate a line of *rounds* stands on going into the round after them, by the round
+    that crowned it — its *origin* until an election crowns another: what that round re-reads, and
+    what a fork cut there hangs from."""
     return next(
-        RoundArm(round=rr.round, arm=picked)
-        for rr in reversed(rounds)
-        if rr.election is not None and (picked := rr.election.selected) is not None
+        (
+            RoundArm(round=rr.round, arm=picked)
+            for rr in reversed(rounds)
+            if rr.election is not None and (picked := rr.election.selected) is not None
+        ),
+        RoundArm(round=0, arm=origin),
     )
 
 

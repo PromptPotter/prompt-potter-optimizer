@@ -145,7 +145,7 @@ def _round_result(
     cells = {key: read.rows for key, read in measured.filed.items()}
     # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
     ended_on = winner or measured.parent.key
-    reference = line_reference(cycle.rounds)
+    reference = line_reference(cycle.rounds, origin=ArmKey(cycle.origin_round.origin.individual.id))
     assert reference.arm == measured.parent.key, "a round re-reads the candidate its line stands on"
     head, head_rows = arms[ended_on], cells[ended_on]
     assert isinstance(head, Concluded)
