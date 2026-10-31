@@ -7,6 +7,9 @@
 cache missing from it is destroyed or double-counted. `shared_root` equals `projects_root` except in an
 L4 inner sandbox, which isolates campaign state but never a content-keyed cache.
 
+**A file that outlives a release joins `application/maintenance/survivors.py::SURVIVORS`** — owned by
+[`decisions.md`](../../../docs/decisions.md) § 0011; a landing proves only what it lists loads.
+
 **`optimizer_reuse` and `judge_reuse` are separate `LLMReuseCache` instances** (`store/llm_reuse_cache.py`) —
 a grader reading the loop's cached answers would be a ruler fed by what it measures.
 

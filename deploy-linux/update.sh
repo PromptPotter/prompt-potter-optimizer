@@ -108,6 +108,18 @@ fi
 # this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
+# Before the restart, the landed code loads every file that outlives a release. One that will not load
+# puts back the commit the reset left in ORIG_HEAD, and admission reopens to the API still running it.
+if ! survivors_out="$(as_unit survivors)"; then
+  printf '%s\n' "$survivors_out"
+  from="$(git -C "$INSTALL_DIR" rev-parse --verify ORIG_HEAD)"
+  checkout "$INSTALL_DIR" "$from"
+  ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
+  as_unit close-admission "$from" >/dev/null
+  bad "not landed: a survivor above does not load under the landing code — rewrite it on the box, then re-run"
+  exit 1
+fi
+ok "$survivors_out"
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
 # shell does not load $ENV_FILE. The verb refuses a name naming no dataset, and `set -e` stops the
 # deploy there, before the exact sync drops what that name's extras were.

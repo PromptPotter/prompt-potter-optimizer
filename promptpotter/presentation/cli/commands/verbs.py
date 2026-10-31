@@ -678,6 +678,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         needs_registries=False,
     ),
     Verb(
+        "survivors",
+        "machine_status:cmd_survivors",
+        help="Load every file that outlives a release (`docs/specs/survivors.generated.json`) "
+        "under THIS code. Prints `held N`, or one `unloadable PATH: WHY` line each and exits 1 — "
+        "a landing's proof, before its restart. Read-only, zero spend.",
+        needs_registries=False,
+    ),
+    Verb(
         "trail",
         "trail:cmd_trail",
         help="What an account did, oldest first, in UTC: its sign-ins, its consent, every upload, every attempt "

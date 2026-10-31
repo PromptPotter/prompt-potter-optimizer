@@ -7,6 +7,8 @@ from promptpotter.application import health
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.survivors import check_survivors
+from promptpotter.config.paths import user_data_root
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult
@@ -56,6 +58,21 @@ async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
             [f"held {job.what} ({job.user_id}) on {job.code_revision[:12]}" for job in held]
             or [f"closed to all but {args.target}"]
         ),
+    )
+
+
+async def cmd_survivors(_args: argparse.Namespace) -> CommandResult:
+    checked = check_survivors(user_data_root())
+    return CommandResult(
+        data={
+            "held": checked.held,
+            "unloadable": {str(one.path): one.why for one in checked.unloadable},
+        },
+        human="\n".join(
+            [f"unloadable {one.path}: {one.why}" for one in checked.unloadable]
+            or [f"held {checked.held} survivor file(s)"]
+        ),
+        outcome=StopOutcome.FAILED if checked.unloadable else StopOutcome.SUCCESS,
     )
 
 

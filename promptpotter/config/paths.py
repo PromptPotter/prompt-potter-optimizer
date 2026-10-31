@@ -59,8 +59,11 @@ def install_cache_root() -> Path:
     return (checkout if checkout is not None else _os_app_data_dir()) / ".cache"
 
 
+PROJECTS_DIR = "projects"
+
+
 def default_projects_root() -> Path:
-    return user_data_root() / "projects"
+    return user_data_root() / PROJECTS_DIR
 
 
 def jobs_dir(projects_root: Path) -> Path:

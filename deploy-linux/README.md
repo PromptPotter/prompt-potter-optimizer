@@ -200,6 +200,11 @@ knowing:
   changed. Re-run once that run pauses or ends. On a yes, every launch is refused until an API on the
   target starts, so nothing starts on the old code mid-deploy; a deploy that fails before the restart
   leaves launches refused until the next one lands.
+- **It refuses to land code that cannot load a survivor** — a file that outlives a release, named in
+  `docs/specs/survivors.generated.json`. After the checkout and before the restart, the landed code's
+  `survivors` verb loads each one; on an `unloadable` line the script checks the previous commit back
+  out, reopens admission to the API still running it, and exits 1. Rewrite the named file on the
+  box, then re-run.
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
   its env file — needs `./install-admin-bot.sh`.
 - **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing

@@ -205,6 +205,13 @@ import-graph script before and after; close each wave with `gate.py --only layer
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
+- **The identity files outlive releases with no model**: `identity/grants.json`, `blocklist.json`,
+  `oidc.json` and `sessions/*.json` are hand-parsed with `.get` defaults
+  (`infrastructure/identity/{grants,blocklist,provider_config,session}.py`), so no shape is pinned and
+  a reshape is read around, never refused; a session missing `user_id` reads as user `""`. Action: a
+  model each whose `ValidationError` keeps today's fail-closed answer (deny-all, block-all, refuse,
+  signed out), then a row in `application/maintenance/survivors.py::SURVIVORS`. **Re-test:** a
+  landing over a `grants.json` with a renamed field.
 - **`reset` guards no live producer**: `maintenance/reset.py::apply_reset` never takes the guard
   `delete` takes (`_guard_and_release`), so it removes a running cycle's directory under it.
   Action: take the delete's guard per cycle. **Re-test:** a reset while a run holds its producer lock.

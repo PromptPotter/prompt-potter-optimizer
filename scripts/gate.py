@@ -1276,7 +1276,11 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _Probe(
             "scripts/build_specs.py",
-            ("docs/specs/openapi.generated.json", "docs/specs/events-asyncapi.generated.json"),
+            (
+                "docs/specs/openapi.generated.json",
+                "docs/specs/events-asyncapi.generated.json",
+                "docs/specs/survivors.generated.json",
+            ),
         ),
         on_commit=True,
     ),

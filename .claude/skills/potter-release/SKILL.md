@@ -36,12 +36,12 @@ version exists.
 ## 4. Deploy `main` to the box and verify there (`/potter-box`)
 
 - [ ] Back up the data root first: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
-- [ ] A BREAKING shape wipes run data on the box after the backup; only the API keys and the user
-      list must survive. Load a copy of the accounts and sessions under the release code first, and
-      delete the local copy afterwards, because it holds live session credentials.
+- [ ] `git diff <last tag> -- docs/specs/survivors.generated.json` names every survivor whose shape
+      moved: rewrite those files on the box before the deploy, or `update.sh` refuses to land. A
+      BREAKING run-data shape is `reset --all-tenants --yes` after the landing; survivors stay.
 - [ ] Deploy `main` as `/potter-box` says, which owns the commands, the sudo and the TermNorm restart.
 - [ ] Verify on the box: health on 127.0.0.1 and on the public host, both units active,
-      `offer_faults()` empty for the unit's `DATASET_OFFER`, every `user.json` loads.
+      `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `held N survivor file(s)` line.
 - [ ] Anything that fails here is fixed on `main`, and steps 2 to 4 run again.
 
 ## 5. Tag, publish, confirm

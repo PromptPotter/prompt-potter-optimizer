@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from promptpotter.application.maintenance.survivors import ACCOUNT_SURVIVORS
 from promptpotter.config.paths import BLOCK_PACKS_DIR, SHARED_CACHE_DIRS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.draft_store import DraftStore
@@ -29,7 +30,6 @@ from promptpotter.infrastructure.store.tenant_dataset_store import (
     MATERIALIZED_DIR,
     UPLOADS_DIR,
 )
-from promptpotter.infrastructure.store.wallet_store import CHARGES_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,7 @@ _PRESERVE_NAMES = (
     UPLOADS_DIR,
     "task-context",
     ".cache",
-    "user.json",
-    CHARGES_FILE,
+    *ACCOUNT_SURVIVORS,
 )
 
 

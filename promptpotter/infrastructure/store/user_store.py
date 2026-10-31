@@ -12,6 +12,8 @@ from promptpotter.infrastructure.store.io import (
     write_json,
 )
 
+USER_FILE = "user.json"
+
 
 class ConsentRecord(FrozenModel):
     """``accepted_at`` is SERVER-stamped, never client-supplied: its legal weight rests on that clock."""
@@ -42,7 +44,7 @@ class UserStore:
         self._base_dir = base_dir
 
     def _path(self) -> Path:
-        return self._base_dir / "user.json"
+        return self._base_dir / USER_FILE
 
     def load(self) -> User | None:
         raw = read_json_optional(self._path())
@@ -59,7 +61,7 @@ def account_dirs(projects_root: Path) -> list[WorkspaceDir]:
     if not projects_root.is_dir():
         return []
     return sorted(
-        WorkspaceDir(child) for child in projects_root.iterdir() if (child / "user.json").is_file()
+        WorkspaceDir(child) for child in projects_root.iterdir() if (child / USER_FILE).is_file()
     )
 
 

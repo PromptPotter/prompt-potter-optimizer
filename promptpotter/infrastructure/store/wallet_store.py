@@ -26,6 +26,10 @@ from promptpotter.shared.clock import utcnow_iso
 
 _KEYS_LOCK_WAIT_S = 5.0
 
+GRANT_FILE = "grant.json"
+API_KEYS_FILE = "api_keys.json"
+CHARGES_FILE = "charges.jsonl"
+
 
 class CouponGrant(FrozenModel):
     """The host's hand-set coupon for one account, replacing the box's default face in both units."""
@@ -40,7 +44,7 @@ class GrantStore:
     """Absent is the box's default coupon (`settings.HOST_COUPON`); corrupt raises, never reads as it."""
 
     def __init__(self, account_dir: Path) -> None:
-        self.path = account_dir / "grant.json"
+        self.path = account_dir / GRANT_FILE
 
     def load(self) -> CouponGrant | None:
         raw = read_json_optional(self.path)
@@ -63,7 +67,7 @@ class TenantApiKeyStore:
     """One key per provider; read on every send's resolution, so a removal binds the next send."""
 
     def __init__(self, account_dir: Path) -> None:
-        self.path = account_dir / "api_keys.json"
+        self.path = account_dir / API_KEYS_FILE
 
     def load(self) -> dict[str, HeldKey]:
         # Optional, not tolerant: a corrupt file read as "no keys" would bill the host's.
@@ -101,9 +105,6 @@ class TenantApiKeyStore:
             )
         finally:
             lock.release()
-
-
-CHARGES_FILE = "charges.jsonl"
 
 
 class HeldCharge(FrozenModel):

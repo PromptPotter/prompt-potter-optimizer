@@ -39,5 +39,8 @@ class IdentityPaths:
         return self.root / "grants_audit.jsonl"
 
 
+IDENTITY_DIR = "identity"
+
+
 def default_identity_paths() -> IdentityPaths:
-    return IdentityPaths(root=user_data_root() / "identity")
+    return IdentityPaths(root=user_data_root() / IDENTITY_DIR)

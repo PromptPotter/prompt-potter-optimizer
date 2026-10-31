@@ -5,8 +5,11 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.infrastructure.store.io import read_json, write_json
+from promptpotter.infrastructure.store.io import read_json, read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import TERMINAL_IDENTITY_ID
@@ -15,6 +18,14 @@ if TYPE_CHECKING:
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
+
+
+class DefaultClaim(FrozenModel):
+    """The host's account, written at its first sign-in; `renamed` is whether `default` became it."""
+
+    user_id: str = Field(min_length=1)
+    claimed_at: str
+    renamed: bool
 
 
 def maybe_claim_default(
@@ -35,23 +46,20 @@ def maybe_claim_default(
                 logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
             except OSError as exc:
                 logger.warning("Failed to claim default tenant for %s: %s", user_id, exc)
-        write_json(
-            marker_path,
-            {"user_id": user_id, "claimed_at": utcnow_iso(), "renamed": renamed},
-        )
+        claim = DefaultClaim(user_id=user_id, claimed_at=utcnow_iso(), renamed=renamed)
+        write_json(marker_path, claim.model_dump())
         if user_dir.is_dir():
             _rewrite_campaign_ownership(user_dir / "campaigns", user_id)
     return renamed
 
 
 def registered_user_id(marker_path: Path) -> str | None:
-    if not marker_path.is_file():
+    """Optional, not tolerant: a corrupt marker read as unclaimed would silently demote the host."""
+    raw = read_json_optional(marker_path)
+    if raw is None:
         return None
-    try:
-        uid = read_json(marker_path).get("user_id")
-    except (OSError, JSONDecodeError):
-        return None
-    return uid if isinstance(uid, str) and uid and uid != "default" else None
+    uid = DefaultClaim.model_validate(raw).user_id
+    return uid if uid != "default" else None
 
 
 def _is_host(*, terminal: bool, user_id: str) -> bool:
