@@ -1417,6 +1417,8 @@ def _lanes(
     return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
 
 
+# The one remote ref a push proves.
+_PROVEN_REF = "refs/heads/main"
 # What a pushed tip's checkout borrows from the pushing tree: its env. Its greens are the clone's.
 _BORROWED = (".venv", "webapp/node_modules")
 
@@ -1453,8 +1455,10 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
 
 def _prove_tips(refs: str, names: Sequence[str]) -> int:
     # *refs* is git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` a line.
-    # An all-zero local sha is a branch deletion: no tip to prove.
-    tips = sorted({sha for line in refs.splitlines() if set(sha := line.split()[1]) != {"0"}})
+    # Only main is proven: a branch is work in flight, proven when it lands. An all-zero local
+    # sha is a deletion: no tip to prove.
+    pushed = [line.split() for line in refs.splitlines()]
+    tips = sorted({sha for _, sha, ref, _ in pushed if ref == _PROVEN_REF and set(sha) != {"0"}})
     failed = 0
     for tip in tips:
         began = time.monotonic()
@@ -1565,7 +1569,7 @@ def main() -> int:
     scope.add_argument(
         "--push",
         action="store_true",
-        help="the pre-push hook: every CI check, in a clean checkout of each tip git names on stdin",
+        help="the pre-push hook: every CI check, in a clean checkout of the tip pushed to main",
     )
     scope.add_argument(
         "--changed",
