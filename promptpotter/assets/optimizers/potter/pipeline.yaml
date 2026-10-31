@@ -217,13 +217,12 @@ resolved_prompts:
           commit under uncertainty.
         - EVIDENCE — what it does with input that is missing, contradictory, or irrelevant.
         - SCOPE — what it is told to ignore, refuse, or stop doing.
-        - OUTPUT — how much the solver reasons before it answers: answer_format's reasoning budget is
-          an axis like any other; keep only its graded label line, which the scorer parses.
+        - OUTPUT — how much the solver reasons before it answers is an axis like any other.
         - RECOMBINATION — take a mechanism that MEASURABLY worked, on another cluster or in an earlier
           round, and apply it where it has not been tried. Cite the panel that measured it.
 
       TEMPERAMENT — read escalation_panel.exploration_budget and mutation_memory. If mutation_memory
-      shows a recent addition scored at or BELOW its parent, cut it rather than piling on. At wide (a
+      shows a recent addition scored BELOW its parent, cut it rather than piling on. At wide (a
       measured stall, or a round whose candidates regressed below the parent), abandon the attractor for
       a categorically different stance. This prompt becomes next round's parent, so text that makes the
       solver EMIT more is paid on every sample from here on.
@@ -245,33 +244,31 @@ resolved_prompts:
       Analyze the measurements below and produce a structured critique for the next optimization round.
     problem_description: ''
     instruction: >-
-      Read the measurements below. Extract the DISTINCT failure clusters — different root causes, not
-      different examples of one — name the axis that targets the largest, and write the concrete
-      change.
+      Extract the DISTINCT failure clusters — different root causes, not different examples of one —
+      name the axis that targets the largest, and write the concrete change.
 
 
       priority_fix: <axis> is EXACTLY one of: {{critique_axes}}.
       Do not reflexively route every failure to thinking_style: an execution slip (a skipped step, a mis-read
-      input, a formatting miss) is usually fixed better by instruction or answer_format; reserve thinking_style
+      input, a formatting miss) is usually fixed better by instruction; reserve thinking_style
       for when the reasoning STRATEGY itself is wrong. <concrete change> is a specific edit ("add a
       coordinate-verification step", not "improve reasoning") testing a mechanism no ALREADY TRIED row
       tested — another axis or another kind of edit, never a tried one reworded or made "mandatory".
 
 
-      failure_highlights: ONE ENTRY PER CLUSTER — a DIFFERENT root cause each, largest first, up to 3.
-      A cluster is a MECHANISM that at least two rows share: read every row of FAILING SAMPLES and put
-      each id in the cluster whose mechanism it shows; a row sharing none is no cluster and is left
-      out. Only an id a panel marks `[#id]` counts. The next L1 targets a cluster by its rows
-      and writes ONE edit that must hold for every row the cluster spans, so claim the mechanism
-      in GENERAL terms — the cognitive move that fails, never one row's answer or procedure — and
-      name the decisive step the rows' reasoning shares, as SAMPLE TRANSCRIPTS and each row's last
-      step show it. Diagnose WHY the model landed wrong, not just that it did; before claiming a bias
-      (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one
-      error class for another is not a fix. L2 and the next L1 see only these plus your priority_fix.
-      An empty list when two rows missed for one reason is a defect of THIS node, not a clean run.
+      failure_highlights: ONE ENTRY PER CLUSTER, largest first. A cluster is a MECHANISM that at least
+      two rows a panel marks `[#id]` share, and as many as DETECTABLE MOVE names, or it is dropped
+      mechanically: read every row of FAILING SAMPLES and put each id in the cluster whose mechanism
+      it shows; a row sharing none is no cluster and is left out. The next L1 targets a cluster by its
+      rows and writes ONE edit that must hold for every row the cluster spans, so claim the mechanism
+      in GENERAL terms and name the decisive step the rows' reasoning shares, as SAMPLE TRANSCRIPTS
+      and each row's last step show it. Before claiming a bias (e.g. "over-hedges"), check it against
+      the shown ground-truth labels — a fix that trades one error class for another is not a fix. L2
+      and the next L1 see only these plus your priority_fix. An empty list when that many rows missed
+      for one reason is a defect of THIS node, not a clean run.
 
 
-      suggested_axes: up to 4 more axes from the same list, for L2 to consider.
+      suggested_axes: more axes from the same list, for L2 to consider.
     thinking_style: >-
       Reason from the measurements, not from priors about what usually helps. If the data is thin on an
       axis, say so rather than guessing.
@@ -435,8 +432,9 @@ resolved_prompts:
       vocabulary or answer labels, is one the generator is FORBIDDEN to execute (measured: -2.2%); it
       then spends the round arguing with you instead of testing a hypothesis. Commit to ONE node — do NOT
       weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: the fewest
-      backup axes, from the same list. failure_highlights: up to 3 clusters,
-      each a MECHANISM at least two inner runs share, spanned by the `[#id]` marks of INNER RUN
+      backup axes, from the same list. failure_highlights: clusters,
+      each a MECHANISM at least two inner runs share, and as many as DETECTABLE MOVE names, or it is
+      dropped mechanically, spanned by the `[#id]` marks of INNER RUN
       NARRATIVES, its claim quoting concrete inner evidence ('the inner critique proposed the same axis
       2 rounds running, flat trajectory') — these are what L2 and the next outer L1 steer on. Be terse:
       a long answer is truncated and discarded.

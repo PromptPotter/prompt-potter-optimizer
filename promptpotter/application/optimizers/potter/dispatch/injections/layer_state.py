@@ -69,7 +69,7 @@ _TARGET_PROMPT_HEADER = (
 
 
 # Public: the behaviour scores read a round's held fields back off the prompt it rendered.
-HELD_PROMPT_FIELD_MARK = " — held by the operator, not yours to replace"
+HELD_PROMPT_FIELD_MARK = " — held, not yours to replace"
 
 
 _OPTIMIZER_PROMPT_HEADER = (
@@ -90,11 +90,10 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     sections: list[str] = []
     # Field by field: as one blob a replacement sweeps in neighbours, SPLICED it absorbs the framing.
     # A HELD field still renders: the fields replaced must fit around it.
-    schema = b.pipeline_schema
     prompts = b.parent.prompts
     fields = [
         (Locus(node.name, f).name, text, f not in node.open_prompt_fields)
-        for node in (schema.prompt_nodes() if schema is not None else ())
+        for node in b.prompt_nodes
         if (prompt := prompts.get(node.name)) is not None
         for f in node.prompt_fields
         if (text := prompt.fields.get(f, ""))
@@ -199,10 +198,7 @@ def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, .
     citable=False,
 )
 def _r_critique_axes(b: InjectionBundle) -> list[Item]:
-    schema = b.pipeline_schema
-    if schema is None:
-        return []
-    return [Item(", ".join(critique_axes(schema, offers_shots=b.offers_shots)))]
+    return [Item(", ".join(critique_axes(b.pipeline_schema, offers_shots=b.offers_shots)))]
 
 
 def format_l1_critique_for_prompt(
@@ -248,8 +244,7 @@ def format_l1_critique_for_prompt(
     citable=True,
 )
 def _r_critique(b: InjectionBundle) -> list[Item]:
-    schema = b.pipeline_schema
-    axes = None if schema is None else critique_axes(schema, offers_shots=b.offers_shots)
+    axes = critique_axes(b.pipeline_schema, offers_shots=b.offers_shots)
     return [Item(format_l1_critique_for_prompt(b.digest.critique, axes))]
 
 
@@ -298,11 +293,8 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
 def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
     if not b.rebase_capability or b.cycle_slice.exploration_budget == ExplorationBudget.TIGHT:
         return []
-    schema = b.pipeline_schema
-    unlockable = (
-        not b.schema_field_rename
-        and schema is not None
-        and any(SCHEMA_RENAME_PARAM in n.param_keys for n in schema.nodes)
+    unlockable = not b.schema_field_rename and any(
+        SCHEMA_RENAME_PARAM in n.param_keys for n in b.pipeline_schema.nodes
     )
     return [Item(_REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else ""))]
 

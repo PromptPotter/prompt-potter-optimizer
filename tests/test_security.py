@@ -84,6 +84,7 @@ from promptpotter.domain.phases import (
     RunPhase,
     StopReason,
 )
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -268,7 +269,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         l2=l2,
         l3=l3,
         framing=TaskDecomposition(),
-        pipeline_schema=None,
+        pipeline_schema=PipelineSchema(),
         cycle_slice=CycleSlice(
             round_num=1, l1_stall_depth=0, ladder=Ladder(), exploration_budget="tight"
         ),

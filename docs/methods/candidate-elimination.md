@@ -46,7 +46,10 @@ Admission is bounded; the election RANKS on the unbounded posterior (bounding it
 across a 0.0007 gap). **A pick's crowning cells are its discordant wins over its bar**, on the rows
 that election read (`selection.py::crowning_cells`): there its rows are the luck the selection kept,
 so `AdaptiveQueue.draw` and `election_rows` keep them out of every race it judges. A cell it tied on
-reads it as any draw would and stays in the pool. What the bar does not test is
+reads it as any draw would and stays in the pool. A held round's leader ahead of its parent on θ is
+kept beside it and walks the next round's panel once, ahead of L1's arms
+(`potter/election.py::elect_on_theta`): the cells that ranked it first are the ones its luck rode.
+What the bar does not test is
 [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § Open — multi-arc's.
 
 ## Two regimes

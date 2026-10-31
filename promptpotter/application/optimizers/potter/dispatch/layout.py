@@ -110,7 +110,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     "l1_critique": NodeLayoutSpec(
         # Every miss is admitted ahead of this, so it decides only how many transcripts fit beside them.
         discretionary_chars=7_500,
-        extras=frozenset({"measurand", "detectable_move", "axis_memory"}),
+        extras=frozenset({"measurand", "axis_memory"}),
         # The matched pair a cluster's rows come from, one silent where the other fires: a marked row always renders.
         # `mutation_memory` is the one carrier of the tried mechanisms a cluster must not restate.
         mandatory=frozenset(
@@ -118,6 +118,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         floor=L1Layout(
             problem_description=[
+                # The rows a cluster must span, or `l1/critique.py::spanning_clusters` drops it.
+                "detectable_move",
                 "confounds",
                 "budget_state",
                 "evidence_health",

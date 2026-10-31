@@ -52,11 +52,11 @@ def _running_template(
 
 
 def effective_optimizer_prompts(
-    schema: PipelineSchema | None,
+    schema: PipelineSchema,
     pipeline_params: dict[str, Any] | None,
     cells: InnerCells | None,
 ) -> dict[str, dict[str, str]]:
-    if schema is None or cells is None:
+    if cells is None:
         return {}
     keys_by_node = schema.node_param_keys()
     params = pipeline_params or {}

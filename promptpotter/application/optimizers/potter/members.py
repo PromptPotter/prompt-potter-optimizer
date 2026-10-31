@@ -83,6 +83,7 @@ from promptpotter.application.optimizers.potter.knobs import (
 )
 from promptpotter.application.optimizers.potter.l1.candidate_source import (
     propose_l1_population,
+    rejoining,
     variants_this_round,
 )
 from promptpotter.application.optimizers.potter.l1.critique import distil_critique
@@ -238,7 +239,8 @@ class L1Generate(LayoutNode, nodes.Proposer):
 
     def arms(self, selected: SelectedOptimizer) -> int:
         knobs = selected.knobs_of(self.name, L1GenerateKnobs)
-        return knobs.n_variants + knobs.recombine
+        # +1: the leader a held round keeps for one more read (`candidate_source.py::rejoining`).
+        return knobs.n_variants + knobs.recombine + 1
 
     def opening(self, ctx: NodeContext, _bench: nodes.RoundOpening) -> nodes.RoundOpening:
         knobs = ctx.knobs(L1GenerateKnobs)
@@ -256,7 +258,9 @@ class L1Generate(LayoutNode, nodes.Proposer):
         return nodes.RoundOpening(
             standing=standing,
             note=f"Prior critique: {critique}",
-            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory)) + knobs.recombine,
+            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory))
+            + knobs.recombine
+            + len(rejoining(ctx.read(Lineage))),
             proposer="L1",
             replayed=replayed,
         )

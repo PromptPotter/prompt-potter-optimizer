@@ -52,8 +52,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
     same_idea,
 )
-from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
+from promptpotter.domain.connector import unit_count, unit_plural
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
@@ -349,6 +348,23 @@ def _head_at_line(text: str, cap: int) -> str:
     return head + "\n[…truncated]"
 
 
+def _query_excerpt(cell: GradedCell) -> str:
+    """The head, where a context-carrying query states its question, and below the cut the ONE line
+    naming the gold answer: the paragraph a miss read wrong or never reached. Several name nothing."""
+    text = re.sub(r"\n\s*\n+", "\n", cell.facts.query.strip())
+    head = _head_at_line(text, TRANSCRIPT_QUERY_CAP)
+    truth = cell.facts.ground_truth.strip()
+    if head == text or not truth:
+        return head
+    names = re.compile(rf"(?<!\w){re.escape(truth)}(?!\w)", re.IGNORECASE)
+    gold = [line for line in text.split("\n") if line not in head and names.search(line)]
+    if len(gold) != 1:
+        return head
+    line = _head_at_line(gold[0], TRANSCRIPT_QUERY_CAP // 2)
+    head = _head_at_line(text, TRANSCRIPT_QUERY_CAP - len(line))
+    return f"{head}\nBELOW THE CUT, THE ONE LINE NAMING THE GOLD ANSWER:\n{line}"
+
+
 def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
     """Head+tail: a trace's quotable wrong step is usually its conclusion, which a head-keep drops."""
     text = re.sub(r"\n\s*\n+", "\n", text.strip())
@@ -431,9 +447,7 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
     )
     sections = [Item(header)]
     for r in plan.shown:
-        parts = [
-            f"[#{b.slot_of[r.key]}] QUERY:\n{_head_at_line(r.facts.query, TRANSCRIPT_QUERY_CAP)}"
-        ]
+        parts = [f"[#{b.slot_of[r.key]}] QUERY:\n{_query_excerpt(r)}"]
         if (loss := plan.losses.get(r.key)) is not None:
             parts.append(
                 f"THE PARENT'S RUN HIT THIS — {loss.lost} of {loss.tried} edits missed it; "
@@ -896,6 +910,12 @@ class _Edit:
         fit = self.round.fit(self.key)
         return None if fit is None else fit.vs_reference
 
+    @property
+    def verdict(self) -> bool:
+        """A lift off the noise on the parent's whole set: what an idea is judged on."""
+        whole = None if self.reading is None else self.reading.on_whole_set
+        return whole is not None and whole.estimate.side != "spans"
+
     def flipped(self) -> FlippedCells[str]:
         reference = self.round.reference_rows(self.key)
         return flipped_keys(
@@ -965,22 +985,6 @@ def _repeatedly_lost(edits: list[_Edit]) -> list[tuple[str, _Loss]]:
     )
 
 
-def _candidate_fate(cand: Concluded, fold: ScoreSummary | None, unit: MeasuredUnit) -> str:
-    kind = cand.kind if isinstance(cand, Cut) else None
-    if kind == "invalid" or fold is None:
-        return f"invalid — rejected before it cost a {unit}"
-    if fold.total == 0:
-        return f"never measured — no {unit_plural(unit)} scored, its 0% is absence of evidence"
-    cut = f"cut at {fold.walked}/{cand.expected_samples} {unit_plural(unit)}"
-    if kind == "broken":
-        return f"{cut} — BROKEN: its measurements kept failing; charged to this candidate"
-    if kind == "eliminated":
-        return f"{cut} — P(best) fell below ε; measurement stopped, NOT a verdict"
-    if kind == "skipped":
-        return "skipped mid-run by the operator"
-    return "scored in full"
-
-
 def _theta_fit_on_formula(b: InjectionBundle) -> bool:
     formula = b.cycle_slice.composite_formula
     return formula is not None and formula != DEFAULT_CELL_FORMULA
@@ -995,44 +999,50 @@ def _theta_fit_on_formula(b: InjectionBundle) -> bool:
 def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
     # This cycle alone under either purpose; an arm's own search is what is compared.
     edits = _edits(b)
-    if not edits:
-        return []
-    header = (
-        "ALREADY TRIED (this cycle, newest round first — each edit, its score against the parent, "
-        "and the parent's cells it gained and lost; a mutation measured and lost here does not "
-        "improve by being proposed again; ↺ marks an idea already tried in an earlier round, in "
-        "whatever field it was written into):"
-    )
     # First match wins: ↺ names the EARLIEST round, true whatever rows the composition affords.
     lines: list[str] = []
     seen: list[tuple[int, frozenset[str]]] = []
     charged = _theta_fit_on_formula(b)
     for edit in edits:
         echoes = [r for r, prev in seen if same_idea(edit.idea, prev, threshold=IDEA_MATCH_MARK)]
-        mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
         seen.append((edit.round.round, edit.idea))
-        row = _edit_row(edit, b.measured_unit, b.slot_of, charged=charged)
+        # An edit inside the noise says nothing of its idea; the ↺ count still holds it.
+        if not edit.verdict:
+            continue
+        mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
+        row = _edit_row(edit, b.slot_of, charged=charged)
         lines.append(f"  r{edit.round.round} {row}{mark}")
     lines.reverse()
-    items = [Item(header), *(Item(ln, trusted=False) for ln in lines)]
+    items = (
+        [
+            Item(
+                "ALREADY TRIED (this cycle, newest round first — each edit that separated from its "
+                "parent: its score, and the parent's cells it gained and lost; one that lost here "
+                "does not improve by being proposed again; ↺ marks an idea already tried in an "
+                "earlier round, in whatever field it was written into):"
+            ),
+            *(Item(ln, trusted=False) for ln in lines),
+        ]
+        if lines
+        else []
+    )
     if lost := _repeatedly_lost(edits):
         cells = " · ".join(f"#{b.slot_of[key]} in {c.lost} of {c.tried}" for key, c in lost)
         items.append(Item(f"CELLS THE PARENT'S RUN HIT THAT EDITS KEEP MISSING: {cells} edits"))
     return items
 
 
-def _edit_row(edit: _Edit, unit: MeasuredUnit, slot_of: Mapping[str, int], *, charged: bool) -> str:
+def _edit_row(edit: _Edit, slot_of: Mapping[str, int], *, charged: bool) -> str:
     cand = edit.candidate
     mutation = "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
     fold = edit.round.folds.get(edit.key)
-    # Quoted only where the arm covered its reference; short of that it is two levels over different cells.
-    reading = edit.reading if fold is not None and fold.total else None
+    # A verdict's reading covers the parent's whole set, so its two levels share their cells.
+    reading = edit.reading
     parent = reading.reference_level("fitness") if reading else None
-    scored = (
-        f"{fold.accuracy:.0%} vs parent {parent:.0%}"
-        if fold is not None and fold.accuracy is not None and parent is not None
-        else _candidate_fate(cand, fold, unit)
-    )
+    if fold is not None and fold.accuracy is not None and parent is not None:
+        scored = f"{fold.accuracy:.0%} vs parent {parent:.0%}"
+    else:
+        scored = "scored in full"
     composite = reading.reference_level("objective") if reading and charged else None
     if fold is not None and fold.composite_fitness is not None and composite is not None:
         scored += f", composite {fold.composite_fitness:.3f} vs {composite:.3f}"
@@ -1078,16 +1088,23 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
     return [Item("\n".join(lines))]
 
 
-@signal("detectable_move", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
-def _r_detectable_move(b: InjectionBundle) -> list[Item]:
+def detectable_rows(b: InjectionBundle) -> int | None:
+    """How many more of the round's rows than the parent an edit must win to separate from it (95%/80%); ``None`` with no θ se."""
     a = b.digest.ability
-    n = len(b.digest.latest_sample_keys)
-    if a is None or a.se is None or a.se <= 0.0 or not n:
-        return []
+    keys = b.digest.latest_sample_keys
+    if a is None or a.se is None or a.se <= 0.0 or not keys:
+        return None
     # A contrast against the parent, so both arms' error enters; equal precision is assumed.
     mde = min_detectable_effect(a.se * math.sqrt(2.0))
     ruler = None if b.ruler is None else b.ruler.entries()
-    rows = max(1, round(expected_score_gain(a.theta, mde, b.digest.latest_sample_keys, ruler)))
+    return max(1, round(expected_score_gain(a.theta, mde, keys, ruler)))
+
+
+@signal("detectable_move", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
+def _r_detectable_move(b: InjectionBundle) -> list[Item]:
+    if (rows := detectable_rows(b)) is None:
+        return []
+    n = len(b.digest.latest_sample_keys)
     return [
         Item(
             f"DETECTABLE MOVE — an edit must win ≈{rows} more of this round's {n} "

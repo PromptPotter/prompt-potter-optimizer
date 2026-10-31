@@ -11,6 +11,7 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
     clustered_sample_ids,
+    detectable_rows,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
@@ -31,15 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 def spanning_clusters(
-    clusters: Iterable[FailureClusterReadout], rows: Iterable[int]
+    clusters: Iterable[FailureClusterReadout], rows: Iterable[int], *, least: int
 ) -> tuple[list[FailureClusterReadout], list[FailureClusterReadout]]:
-    """The seam the wire cannot hold (``strict: False``): kept on the marked rows it names, ``CLUSTER_ROWS_MIN`` at least."""
+    """The seam the wire cannot hold (``strict: False``): kept on the marked rows it names, *least* at least."""
     marked = set(rows)
     kept: list[FailureClusterReadout] = []
     dropped: list[FailureClusterReadout] = []
     for cluster in clusters:
         ids = sorted({i for i in cluster["sample_ids"] if i in marked})
-        if len(ids) >= CLUSTER_ROWS_MIN:
+        if len(ids) >= least:
             kept.append({**cluster, "sample_ids": ids})
         else:
             dropped.append(cluster)
@@ -62,14 +63,18 @@ async def distil_critique(ctx: NodeContext) -> Critique:
         f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"
     )
     critique = cast(CritiqueReadout, result.model_dump())
-    kept, dropped = spanning_clusters(critique["failure_highlights"], clustered_sample_ids(bundle))
+    # A cluster an edit could fix whole and still not separate from its parent is noise to target.
+    least = max(CLUSTER_ROWS_MIN, detectable_rows(bundle) or 0)
+    kept, dropped = spanning_clusters(
+        critique["failure_highlights"], clustered_sample_ids(bundle), least=least
+    )
     if dropped:
         logger.info(
             "round %d critique: %d of %d clusters span fewer than %d marked rows — dropped",
             ctx.round_num,
             len(dropped),
             len(kept) + len(dropped),
-            CLUSTER_ROWS_MIN,
+            least,
         )
     critique["failure_highlights"] = kept
     return Critique(readout=critique)

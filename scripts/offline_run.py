@@ -272,7 +272,7 @@ def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller,
 class ByCallIdentity:
     """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
     prompt's wording nor the arrival order. *rebasing*, every L2 fire proposes a fork. *crossing*,
-    an odd variant rewrites a second field, so two arms can differ on two loci a crossover swaps."""
+    every variant rewrites a second field, so any two arms differ on two loci a crossover swaps."""
 
     def __init__(
         self,
@@ -410,7 +410,7 @@ class ByCallIdentity:
         }
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
         offered = item["properties"]["prompt_fields_updates"]["properties"]
-        second = ("thinking_style",) if self.crossing and i % 2 else ()
+        second = ("thinking_style",) if self.crossing else ()
         v["prompt_fields_updates"] = {
             node: {
                 field: _variant(
