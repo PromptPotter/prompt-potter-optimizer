@@ -112,9 +112,6 @@ class Election(FrozenModel):
         "selected; on a held round the retained parent, re-read on this round's cells as its "
         "reference arm — never the leading challenger."
     )
-    # The candidate the round's arms were read against, by the round that crowned it: `null` at
-    # round 0, which re-reads nothing. Written here, so no reader re-derives a line to find it.
-    reference: RoundArm | None
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
     fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
@@ -134,6 +131,9 @@ class RoundOutcome(FrozenModel):
     round: int
     # Its panel arms in slot order, then each reference the round re-read: one key, one state.
     arms: dict[ArmKey, ArmState] = Field(default_factory=dict)
+    # The candidate its line stood on entering it, which the election reads every arm against
+    # (`line_reference`); none at round 0 and on a diag round, which read nothing against one.
+    reference: RoundArm | None
     # Each arm's fold of the cells the round files for it, taken once as the round is measured
     # (`MeasuredRound.folds`); none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]

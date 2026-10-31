@@ -1324,18 +1324,11 @@ export interface Election {
    * selected; on a held round the retained parent, re-read on this round's
    * cells as its reference arm — never the leading challenger. */
   ended_on: string;
-  reference: RoundArm | null;
   electable: number;
   fit: Record<string, ArmFit>;
   elects_on: 'accuracy' | 'composite' | 'ability';
   verdict_reason: string | null;
   ruler: RulerStamp;
-}
-
-/** One arm of one round, by its record's own address: an id alone names no candidate, since a */
-export interface RoundArm {
-  round: number;
-  arm: string;
 }
 
 /** What the election read of one arm: θ lives here and nowhere else. */

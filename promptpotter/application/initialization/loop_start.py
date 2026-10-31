@@ -344,12 +344,9 @@ async def init_optimization_loop(
     # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
     if session.state.resumed_from_round > 1:
         fork = await resume_with_divergence_check(
-            session.store.campaigns,
-            session.hop,
-            session.state.resumed_from_round,
-            session,
             cycle,
             dataset,
+            cb,
             skip_divergence_check=no_divergence_check,
             fork_on_divergence=fork_on_divergence,
         )

@@ -14,6 +14,7 @@ from promptpotter.application.initialization.loop_start import (
 )
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, binding_optimizer
+from promptpotter.application.optimizers.nodes import Controller
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
@@ -84,6 +85,7 @@ async def _run_single_cycle(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
+    diagnosing: Controller | None,
     step_rounds: int | None,
 ) -> _CycleOutcome:
     origin = prep.origin
@@ -159,7 +161,7 @@ async def _run_single_cycle(
             campaign_config,
             session,
             cb,
-            diag=mode.diag,
+            diagnosing=diagnosing,
         )
         if stepped:
             pause_cause = PauseCause.STEP
@@ -196,7 +198,7 @@ async def _run_single_cycle(
         cycle_error=cycle_error,
         open_round=open_round,
         config=campaign_config,
-        diag=mode.diag,
+        diag=diagnosing is not None,
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
         rebasing=rebasing,
     )
@@ -259,9 +261,8 @@ def _mint_and_rebase_fork(
     )
     child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
     branch = store.standing_rounds(child, moment=None).rounds[cut - 1].close
-    store.restate_round(
-        child,
-        branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),
+    store.rebank_round(
+        child, branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices}))
     )
     session = session.bound(child, purpose=session.purpose)
     observers = _onto_fork(
@@ -289,6 +290,7 @@ async def _run_line(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
+    diagnosing: Controller | None,
     step_rounds: int | None,
 ) -> _CycleOutcome:
     while True:
@@ -298,6 +300,7 @@ async def _run_line(
             session=session,
             observers=observers,
             mode=mode,
+            diagnosing=diagnosing,
             step_rounds=step_rounds,
         )
         if outcome.fork is None:
@@ -336,7 +339,8 @@ async def run_optimization(
             at_round(0),
             binding_optimizer(optimizer, determinism=campaign_config.optimization.determinism),
         ):
-            if mode.diag and optimizer.plan.controller is None:
+            diagnosing = optimizer.plan.controller if mode.diag else None
+            if mode.diag and diagnosing is None:
                 raise PayloadInvalidError(
                     f"--diag shows what an optimizer's controller does at a round boundary, and "
                     f"{optimizer.name} declares no controller node"
@@ -376,7 +380,7 @@ async def run_optimization(
                         cycle_error=cycle_error,
                         open_round=None,
                         config=campaign_config,
-                        diag=mode.diag,
+                        diag=diagnosing is not None,
                         pause_cause=PauseCause.INTERRUPT,
                         rebasing=False,
                     ),
@@ -405,6 +409,7 @@ async def run_optimization(
                     session=session,
                     observers=observers,
                     mode=mode,
+                    diagnosing=diagnosing,
                     step_rounds=budget.step_rounds,
                 )
             if outcome.cancelled is not None:

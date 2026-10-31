@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.optimizers.nodes import (
+        Controller,
         MeasuredRound,
         Panel,
         Proposer,
@@ -89,7 +90,7 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
     # A replayed walk makes no call, so nothing it would read is re-sent.
     if prior.round == 0 or not prior.results or cycle.banked_proposals(ctx.round_num) is not None:
         return
-    at_prior = replace(ctx, round_num=prior.round)
+    at_prior = RoundContext(cycle=cycle, round_num=prior.round, callbacks=ctx.callbacks)
     for adapter in cycle.optimizer.plan.adapters:
         owed = [
             kind
@@ -144,7 +145,7 @@ def _round_result(
     cells = {key: read.rows for key, read in measured.filed.items()}
     # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
     ended_on = winner or measured.parent.key
-    reference = line_reference(cycle.rounds)
+    reference = line_reference(cycle.rounds, origin=ArmKey(cycle.origin_round.origin.individual.id))
     assert reference.arm == measured.parent.key, "a round re-reads the candidate its line stands on"
     head, head_rows = arms[ended_on], cells[ended_on]
     assert isinstance(head, Concluded)
@@ -152,6 +153,7 @@ def _round_result(
     elected_round = RoundResult(
         round=ctx.round_num,
         arms=arms,
+        reference=reference,
         folds=measured.folds,
         cells=cells,
         overlap_results=measured.on_panel,
@@ -159,7 +161,6 @@ def _round_result(
             selected=winner,
             leading=leading,
             ended_on=ended_on,
-            reference=reference,
             electable=len(measured.electable),
             fit=measured.fit,
             elects_on=elects_on,
@@ -367,11 +368,17 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
+class ControllerAct(NamedTuple):
+    """The rule a controller banked off its round, acted on once the round closes (`post_round`)."""
+
+    controller: Controller
+    rule: str
+
+
 class RoundWalked(NamedTuple):
     result: RoundResult
     cut: StopReason | None
-    # What the controller observed of the round, acted on once it closes (`post_round`).
-    rule: str | None
+    act: ControllerAct | None
 
 
 async def _proposed(ctx: RoundContext, panel: Panel) -> Proposals:
@@ -488,11 +495,12 @@ async def execute_round(
     result = await _adapt_beside_overlap(
         ctx, result, measured, population, pool, is_final_round=is_final_round
     )
-    rule = None
+    act = None
     if (controller := plan.controller) is not None:
         seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=callbacks)
-        rule = controller.observe(NodeContext(seat, controller), result)
-    return RoundWalked(result, measured.cut, rule)
+        if (rule := controller.bank_round(NodeContext(seat, controller), result)) is not None:
+            act = ControllerAct(controller, rule)
+    return RoundWalked(result, measured.cut, act)
 
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
@@ -579,8 +587,6 @@ async def post_round(
 
     if (stop := standing_tripped(cycle)) is not None:
         raise StopLoop(stop)
-    if walked.rule is not None and not is_final_round:
-        controller = cycle.optimizer.plan.controller
-        assert controller is not None, "only a controller observes a rule"
+    if (act := walked.act) is not None and not is_final_round:
         seat = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
-        await controller.act(NodeContext(seat, controller), walked.rule)
+        await act.controller.act(NodeContext(seat, act.controller), act.rule)

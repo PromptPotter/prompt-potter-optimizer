@@ -160,15 +160,18 @@ replaced, in every walk, by `of`'s node of the same type at `of`'s configuration
 together at each block's close (`blocks`); its catch-ups are the calls pairing a prior with the arm
 on turn.
 
-**Three structural rules reject a manifest at parse** — in `parse_pipeline_response`, the same
-parser a backend's file goes through; a backend pipeline declares none of the five types and passes:
+**`default` lists its nodes in round order, and the bench places them by role at load**
+(`optimizer_manifest.py::_round_plan`) — the roles are `RoundPlan`'s fields, in field order, each
+declaring the types it admits and how many it holds. A node takes the first role at or past the
+previous node's that admits its type, so **an `eliminator` is listed before the `measurement` it
+races**, and a walk out of that order is refused before a mint. Exactly one `measurement`: with
+none the round has no rows, with two nothing says which set a selector reads. At most one
+`controller`: a round has one boundary decision.
 
-- **A manifest declaring any `sampler`, `eliminator`, `selector`, `algorithm` or `controller`
-  node must name exactly one `measurement` node in its `default` pipeline.** With none the round
-  has no rows; with two it has two sets and nothing says which one a selector reads.
-- **An `eliminator` needs a `sampler` before it in the same pipeline.** A cut decides between
-  blocks, and only a sampler cuts the panel into blocks.
-- **`default` names at most one `controller`.** A round has one boundary decision.
+**One structural rule rejects a manifest at parse** — in `parse_pipeline_response`, the same parser
+a backend's file goes through; a backend pipeline declares none of the five types and passes:
+**an `eliminator` needs a `sampler` before it in the same pipeline**, since a cut decides between
+blocks and only a sampler cuts the panel into blocks.
 
 ## How the prediction is read
 

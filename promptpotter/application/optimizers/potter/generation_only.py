@@ -34,6 +34,7 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
     generated = RoundResult(
         round=round_num,
         arms=dict(population.arms(round_num)),
+        reference=None,
         folds={},
         election=None,
         health=compute_round_health(

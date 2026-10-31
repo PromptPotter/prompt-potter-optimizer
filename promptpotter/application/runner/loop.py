@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
 from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import RoundContext
+from promptpotter.application.optimizers.nodes import Controller, RoundContext
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
@@ -65,8 +64,9 @@ async def run_round_loop(
     session: Session,
     cb: RunCallbacks,
     *,
-    diag: bool = False,
+    diagnosing: Controller | None = None,
 ) -> LoopEnd:
+    """*diagnosing* is ``--diag``'s controller: the run closes the round it resumes on and stops."""
     opt = config.optimization
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
@@ -75,7 +75,7 @@ async def run_round_loop(
     try:
         run_init(cycle, cb)
         # Until an L1 round closes, EVERY launch re-closes round 0: a stopped run's file passed no gate.
-        if not diag and clean_rounds == 0:
+        if diagnosing is None and clean_rounds == 0:
             open_round = 0
             await emit_origin_round(cycle, session, cb)
             open_round = None
@@ -136,13 +136,13 @@ async def run_round_loop(
                 if budget_stop is not None:
                     return LoopEnd(budget_stop)
 
-                if diag:
-                    controller = cycle.optimizer.plan.controller
-                    assert controller is not None, "a --diag launch with no controller is refused"
+                if diagnosing is not None:
                     diagnosed = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
-                    await controller.diagnose(NodeContext(diagnosed, controller))
+                    await diagnosing.diagnose(NodeContext(diagnosed, diagnosing))
                     with at_round(round_num + 1):
-                        await controller.show_round(replace(diagnosed, round_num=round_num + 1))
+                        await diagnosing.show_round(
+                            RoundContext(cycle=cycle, round_num=round_num + 1, callbacks=cb)
+                        )
                     return LoopEnd(StopReason.DIAG_COMPLETE)
             round_num += 1
 

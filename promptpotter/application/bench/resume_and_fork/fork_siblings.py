@@ -24,6 +24,7 @@ from promptpotter.domain.run_records import (
     ForkSpec,
     ForkTrigger,
 )
+from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
@@ -121,8 +122,8 @@ def _sibling_id(campaign_store: CampaignStore, parent: CycleHop, payload: ForkSp
 
 def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) -> RoundArm:
     """The parent CANDIDATE a fork branches from: *named* — a round's re-read named as the
-    candidate it re-read — else the pick the parent's line stood on going into *cut_round*, its
-    origin for a cut lifting no round."""
+    candidate it re-read — else the pick the parent's line stood on going into *cut_round*: its
+    origin until an election crowned another."""
     if named is not None:
         arm = standing.arms.get((named.round, named.arm))
         if arm is None:
@@ -140,16 +141,19 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
                 "name the candidate itself"
             )
         return RoundArm(round=slot.round, arm=named.arm)
-    crowns = [
-        RoundArm(round=r, arm=picked)
-        for r, held in standing.rounds.items()
-        if r < max(cut_round, 1)
-        and held.close.election is not None
-        and (picked := held.close.election.selected) is not None
-    ]
-    if not crowns:
-        raise ConflictError("the parent's line stands on no elected candidate to branch from")
-    return max(crowns, key=lambda c: c.round)
+    # Off the announced arms: a --diag line walks its origin and closes no round 0.
+    origin = next(
+        (
+            key
+            for (r, key), arm in standing.arms.items()
+            if r == 0 and arm.state.role is MeasurementRole.ORIGIN
+        ),
+        None,
+    )
+    if origin is None:
+        raise ConflictError("the parent's line measured no origin to branch from")
+    below = [held.close for r, held in sorted(standing.rounds.items()) if r < max(cut_round, 1)]
+    return line_reference(below, origin=origin)
 
 
 def mint_fork(

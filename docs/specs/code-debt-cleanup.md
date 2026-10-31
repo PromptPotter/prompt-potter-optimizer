@@ -138,42 +138,21 @@ acting.
 
 ### The member backbone
 
-- **The cladogram re-derives fork lineage the server resolves.**
-  `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts client-side while each
-  `HierarchyCandidate` serves `main_line`; the cut is by proposal round, not line position. Action:
-  an extent is the served line; the client walk dies.
-- **A round's reference is recorded at SELECT**, so a measuring round serves `RoundFacts.reference`
-  null. Action: record it at round entry. Blocker: a repair fork's restated rounds must write one first.
-- **A round-0 fork whose parent's round 0 elected nobody is refused** (`ConflictError`), for both a
-  resume-divergence fork and a diag sibling, where the origin is the only candidate to hang on.
 - **The dev loop serializes where it need not:** sibling gates queue whole runs, `next-build` peaks
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:** five builders plus one full gate with no reap and no gate waiting
   longer than its own run.
-- **Ledger shapes left standing:** `round_restated` carries the whole round. **Re-test:** the
-  symbol deleted, read, or tested.
-- **A restatement has two writers** (backbone arc, 2026-10-29): `node_context.py::NodeContext._bank`
-  appends a `RoundRestatedRecord` to the run's own `CycleEventLog` on `session.hop`, while
-  `resume_and_fork/repair.py` writes one through `CampaignStore.restate_round` onto the branch. And
-  `NodeContext.bank_proposals` returns silently on an unbound ledger where `_bank` asserts one.
-  Action: one restatement seam taking the hop; one posture on a missing ledger. **Re-test:**
-  `git grep -n "restated_state(" -- promptpotter` names one caller.
-- **Fingerprinting a repair moves the live `Cycle`**: `repair.py::round_packages` and `_rederived`
-  seat the run's own cycle round by round (`Cycle.replay_priors`, which reseats `rounds`,
-  `population`, `slices` and the ruler) and reseat it after; `round_packages` holds no `finally`, so a
-  raising member leaves the cycle on a past round. Each seat also re-copies every round
-  (`Lineage.rounds`), and `_package_drift` / `restated_state` re-fold the ledger chain per round.
-  Action: a round's seat is a view, not the cycle. **Re-test:** `round_packages` leaves `Cycle` as
-  handed in.
-- **A repair takes `session` beside `cycle`** (`apply_correction`, `repair_incomplete_rounds`):
-  `cycle.session` is that session, two doors into one state. The re-bank warning also fires on zero
-  retired candidates. **Re-test:** neither takes a `Session`.
-- **`default` names two walks**: the optimizer manifest's round walk (a bare `"default"` at each
-  `optimizer_manifest.py` site, beside the `INITIAL_POPULATION` / `RUN_INIT` constants) and the
-  backend's pipeline (`domain/pipeline_schema.py`). **Re-test:** the round walk read through one
-  constant.
-- **`Escalation.observe` writes the `Ladder`** (`ctx.put`): a controller's observation mutates state
-  under a read's name. **Re-test:** the write named for what it does, or moved to `act`.
+- **`initialization/session.py::LaunchState.ledger` is `Optional` while a round needs it**:
+  `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
+  asserts presence and five other readers branch on `None`. Action: the run's state is built with its
+  ledger. **Re-test:** `git grep -n "state.ledger" -- promptpotter/application`.
+- **`node_context.py::Lineage.rounds` copies every round on each access** (`model_copy` to seal
+  `optimizer_state`), and a member reads it per step. Action: seal once at a round's close, or serve
+  a sealed view. **Re-test:** read `Lineage.rounds`.
+- **`run_records.py::RoundEnteredRecord.rewound` is a flag keeping two acts apart** — entering a round
+  and displacing what stood past it — that `ledger_scan.py::_Standing.feed` splits again. Action:
+  two records, or one whose displacement is its own field. **Rides with:** the `arc/records` arc.
+  **Re-test:** `git grep -n "rewound" -- promptpotter/domain/run_records.py`.
 
 ## Open — multi-arc
 

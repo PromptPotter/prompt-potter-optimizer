@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bench.difficulty import DifficultyView
@@ -92,13 +92,13 @@ def _origin_round(
     origin = RoundResult(
         round=0,
         arms={key: arm},
+        reference=None,
         cells={key: results},
         folds=arm_folds({key: arm}, {key: results}, schema),
         election=Election(
             selected=key,
             leading=key,
             ended_on=key,
-            reference=None,
             electable=0,
             fit=fit,
             elects_on=elects_on,
@@ -276,6 +276,23 @@ class Cycle:
         self.population = list(closed.population)
         self.slices.seat(closed)
         self.difficulty.seat(self.elected[1].ruler)
+
+    def seated(self, priors: list[RoundResult]) -> Cycle:
+        """A view of this cycle as it stood once *priors* closed, which a member reads in a past
+        round: this cycle stands as it is."""
+        view = replace(
+            self,
+            rounds=list(self.rounds),
+            slices=SliceMap(self.optimizer.slices),
+            difficulty=replace(self.difficulty),
+            outputs={},
+            pending_decisions=[],
+            _axes=None,
+            _pool=None,
+            _pool_theta={},
+        )
+        view.replay_priors(priors)
+        return view
 
     def reopen_origin(self) -> None:
         """A fork cut at round 0 keeps the origin's measurement and none of what its close banked."""

@@ -569,6 +569,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
 def _round(**kw: Any) -> RoundResult:
     return RoundResult(
         **{
+            "reference": None,
             "folds": {},
             "election": None,
             "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, False),
@@ -1050,6 +1051,42 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert stood.crowns == {0: prefix[0], 1: mine[0]}
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
 
+    # A line stands on its origin until an election crowns another: a --diag line closes no round 0.
+    walked_only, origin_log = _minted(stores, "cycle_origin_only")
+    walked_origin = ArmKey(prompted(instruction="w_origin").id)
+    origin_slot = ArmSlot(round=0, idx=0, total=1)
+    origin_log.append(
+        ArmRecord(round=0, arm=walked_origin, state=arm_state("w_origin", slot=origin_slot))
+    )
+    on_origin = RoundArm(round=0, arm=walked_origin)
+    for cut_round in (0, 1):
+        assert fork_edge(store.standing_rounds(walked_only, moment=None), cut_round, None) == (
+            on_origin
+        ), "a fork of a line no election crowned hangs from no candidate, or from another"
+    crown = ArmKey(prompted(instruction="w_crown").id)
+    close_round(
+        origin_log,
+        [
+            # Held in memory, as a --diag run holds its origin round: only round 1 closes.
+            _round(
+                round=0,
+                arms={walked_origin: arm_state("w_origin", slot=origin_slot)},
+                election=election(walked_origin),
+            ),
+            _round(
+                round=1,
+                arms={crown: arm_state("w_crown", slot=ArmSlot(round=1, idx=0, total=1))},
+                election=election(crown),
+            ),
+        ],
+        cycle=closing,
+    )
+    standing_now = store.standing_rounds(walked_only, moment=None)
+    assert (fork_edge(standing_now, 0, None), fork_edge(standing_now, 2, None)) == (
+        on_origin,
+        RoundArm(round=1, arm=crown),
+    ), "a cut stands on a candidate other than the line's newest crown below it"
+
     # A step's silence is the family's, wherever a window happens to cut the ray.
     def gaps(limit: int) -> dict[str, float]:
         ray = open_family_ray(stores, (fork_hop,), limit=limit, before=None).window()
@@ -1222,21 +1259,20 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             # A repair restates a lifted round WHOLE at its mint, so the round is the fork's own.
             for r in restated_at_mint.get(row_course, ()):
                 lifted = store.standing_rounds(hops[row_course], moment=None).rounds[r].close
-                store.restate_round(hops[row_course], lifted.restated(lifted.optimizer_state))
+                store.rebank_round(hops[row_course], lifted.restated(lifted.optimizer_state))
         line, n = line_of[row_course], len(line_of[row_course])
         arms = {
             ArmKey(ident(p)): arm_state(p, slot=ArmSlot(round=n, idx=i, total=len(row_picks)))
             for i, p in enumerate(row_picks)
         }
-        reference = None
         if row_reference is not None:
             arms[ArmKey(ident(row_reference))] = arm_state(
                 row_reference,
                 slot=walked_slot(line, ArmKey(ident(row_reference))),
                 role=MeasurementRole.PARENT,
             )
-            reference = line_reference(line)
-            assert reference.arm == ident(row_reference), (
+            root = next(iter(line[0].arms))
+            assert line_reference(line, origin=root).arm == ident(row_reference), (
                 f"guard: a row re-reads off {row_course}'s line"
             )
         row_ended = row_crown or row_reference or row_picks[0]
@@ -1244,10 +1280,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             _round(
                 round=n,
                 arms=arms,
+                reference=None if row_reference is None else line_reference(line, origin=root),
                 election=election(
                     None if row_crown is None else ident(row_crown),
                     ended_on=ident(row_ended),
-                    reference=reference,
                 ),
             )
         )
@@ -1316,6 +1352,20 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 task=f"t/{name}",
             ),
         )
+    # The run x asked closes its origin: its line continues the line of the candidate that asked.
+    seeded = CycleHop(campaign_id="own__20260101-000000", cycle_id="cycle_own")
+    seed_key = ArmKey(ident("w0"))
+    close_round(
+        CycleEventLog.open(CycleDir(sandbox.campaigns.cycle_dir(seeded))),
+        [
+            _round(
+                round=0,
+                arms={seed_key: arm_state("w0", slot=ArmSlot(round=0, idx=0, total=1))},
+                election=election(seed_key, ended_on=seed_key),
+            )
+        ],
+        cycle=closing,
+    )
     tree = hierarchy_subtree(
         stores, hierarchy_address((), family.campaign_id), None, None, moment=None
     )
@@ -1354,6 +1404,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # retirement that is anything but "off the fork's line, within its reach".
     head = [(0, [o]), (1, [first_pick])]
     crownless: tuple[int, list[str]] = (2, [])
+    # A course lifting no round continues the line of the candidate it hangs from, through it.
+    steer = [(0, [o]), (0, [at(steered, 0, "s")])]
+    rivals = [(0, [o]), (0, [at(rival, 0, "c")])]
+    [own_seed] = [
+        e.address
+        for e in entries_under(tree)
+        if isinstance(e, HierarchyCandidate) and e.facts.individual == seed_key
+    ]
     lines = {
         o: [(0, [o])],
         first_pick: head,
@@ -1361,15 +1419,16 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         **{c: [*head, (2, [c])] for c in (at(family, 2, "a"), at(family, 2, "z"), at(kid, 2, "y"))},
         x: [*head, crownless, (3, [x])],
         at(great, 4, "v"): [*head, crownless, (3, [x]), (4, [at(great, 4, "v")])],
-        at(steered, 0, "s"): [(0, [at(steered, 0, "s")])],
+        own_seed: [*head, crownless, (3, [x]), (0, [own_seed])],
+        at(steered, 0, "s"): steer,
         at(rewound, 1, "w"): [(0, [o]), (1, [at(rewound, 1, "w")])],
         at(rewound, 1, "k"): [(0, [o]), (1, [at(rewound, 1, "k")])],
         # Its parent re-ran round 1 in place after the cut; the fork's line still stands on w.
         at(carried, 2, "d"): [(0, [o]), (1, [at(rewound, 1, "w")]), (2, [at(carried, 2, "d")])],
         at(redone, 3, "q"): [*head, crownless, (3, [at(redone, 3, "q")])],
-        at(branched, 0, "p"): [(0, [at(branched, 0, "p")])],
-        at(rerun, 0, "r"): [(0, [at(rerun, 0, "r")])],
-        at(relift, 0, "l"): [(0, [at(relift, 0, "l")])],
+        at(branched, 0, "p"): [(0, [o]), (1, [b]), (0, [at(branched, 0, "p")])],
+        at(rerun, 0, "r"): [*head, (0, [at(rerun, 0, "r")])],
+        at(relift, 0, "l"): [(0, [o]), (0, [at(relift, 0, "l")])],
         # The restated round 1 is the repair's own, whole: its arms are copies on its own line.
         **{c: [(0, [o]), (1, [c]), crownless] for c in (at(mended, 1, "a"), at(mended, 1, "b"))},
         at(mended, 3, "m"): [
@@ -1378,36 +1437,34 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             crownless,
             (3, [at(mended, 3, "m")]),
         ],
-        at(rival, 0, "c"): [(0, [at(rival, 0, "c")])],
-        **{n: [(0, [at(rival, 0, "c")]), (1, [n])] for n in (at(rival, 1, "e"), at(rival, 1, "f"))},
-        at(first, 1, "i"): [(0, [at(rival, 0, "c")]), (1, [at(first, 1, "i")])],
-        at(first, 2, "n"): [
-            (0, [at(rival, 0, "c")]),
-            (1, [at(first, 1, "i")]),
-            (2, [at(first, 2, "n")]),
-        ],
+        at(rival, 0, "c"): rivals,
+        **{n: [*rivals, (1, [n])] for n in (at(rival, 1, "e"), at(rival, 1, "f"))},
+        # A cut lifting the rival's origin continues the line that origin hangs from.
+        at(first, 1, "i"): [*rivals, (1, [at(first, 1, "i")])],
+        at(first, 2, "n"): [*rivals, (1, [at(first, 1, "i")]), (2, [at(first, 2, "n")])],
         # Each read on the line it ran on: g on the rival's round 1 as the second's cut found it.
         **{
-            n: [(0, [at(rival, 0, "c")]), (1, [at(rival, 1, "e")]), (2, [n])]
+            n: [*rivals, (1, [at(rival, 1, "e")]), (2, [n])]
             for n in (at(rival, 2, "g"), at(rival, 2, "j"))
         },
         at(second, 3, "h"): [
-            (0, [at(rival, 0, "c")]),
+            *rivals,
             (1, [at(rival, 1, "e")]),
             (2, [at(rival, 2, "g")]),
             (3, [at(second, 3, "h")]),
         ],
         **{
-            n: [(0, [at(steered, 0, "s")]), (1, [n])]
+            n: [*steer, (1, [n])]
             for n in (at(steered, 1, "t"), at(steered, 1, "t2"), at(steered, 1, "t4"))
         },
-        at(steered, 2, "t3"): [
-            (0, [at(steered, 0, "s")]),
+        at(steered, 2, "t3"): [*steer, (1, [at(steered, 1, "t2")]), (2, [at(steered, 2, "t3")])],
+        at(glance, 0, "u"): [*steer, (0, [at(glance, 0, "u")])],
+        at(peek, 0, "u2"): [
+            *steer,
             (1, [at(steered, 1, "t2")]),
             (2, [at(steered, 2, "t3")]),
+            (0, [at(peek, 0, "u2")]),
         ],
-        at(glance, 0, "u"): [(0, [at(glance, 0, "u")])],
-        at(peek, 0, "u2"): [(0, [at(peek, 0, "u2")])],
     }
     assert {
         e.address: [(s.round, s.candidates) for s in e.facts.main_line]
@@ -1553,7 +1610,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 RoundProposedRecord(round=2, consumed="", proposals=[], submitted=False)
             )
         set_cycle(cycle, line=line)
-        before = round_packages(cycle, line)
+        before = round_packages(cycle, line, callbacks)
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             with (
@@ -1561,9 +1618,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 spending_under(cycle.session.state.control.book),
             ):
                 branch_id = asyncio.run(
-                    apply_correction(
-                        stores.campaigns, hop, line, before, cycle.session, cycle, repair_bank
-                    )
+                    apply_correction(cycle, line, before, repair_bank, callbacks)
                 )
         finally:
             reset_cycle_ledger(bound)
