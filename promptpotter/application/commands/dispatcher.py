@@ -25,6 +25,7 @@ from promptpotter.domain.run_records import (
     CommandAckStatus,
     CommandEffect,
     CommandRecord,
+    NoEffect,
 )
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -299,12 +300,14 @@ class CommandDispatcher:
                 ack_status = "rejected"
                 ack_detail = exc.reason
             except Exception as exc:
-                emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
+                emit_command_ack(
+                    command_id=command_id, status="rejected", detail=str(exc), effect=NoEffect()
+                )
                 raise
             effect = (
                 applier.effect_fn()
                 if (applier.effect_fn is not None and ack_status != "rejected")
-                else None
+                else NoEffect()
             )
             emit_command_ack(
                 command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
@@ -337,4 +340,4 @@ class CommandDispatcher:
             idempotency_key=command_id,
             issued_by=acting_principal(self.stores.identity),
         )
-        emit_command_ack(command_id=command_id, status="accepted")
+        emit_command_ack(command_id=command_id, status="accepted", effect=NoEffect())
