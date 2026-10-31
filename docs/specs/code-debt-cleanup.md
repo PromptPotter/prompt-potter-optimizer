@@ -33,6 +33,100 @@ acting.
 
 **Rides with:** the next arc's first builder wave.
 
+### Config resolution and run scope (backbone hunt 2026-10-31, ranked by impact radius)
+
+**Rides with:** one arc; 1 and 2 together remove most of 3 and the read-path fallbacks, 4 absorbs 7.
+
+1. **Pipeline params resolve as one layered fold spelled five ways** — `application/pipeline_resolve.py`:
+   `configure_and_apply_pipeline` (run), `_campaign_merge` + `resolve_pipeline_for_campaign`,
+   `_draft_merge` (lays backend `base_config`, which the run never lays), `_runs_with` (no identity
+   layer), `resolve_pipeline_for_dataset` each lay a different subset in a different order; the run's
+   seed goes on after the floors without provenance, so a seeded model is never re-floored and a served
+   "what this point ran" can differ from what was sent. `provenance` is an out-parameter threaded
+   through six functions. Action: one `ParamLayers` value — an ordered declared list (backend, dataset,
+   campaign, floor, identity, seed, evolved, recorded) each subject picks by data, provenance a product
+   of the fold; the served response models move out of the module. **Re-test:**
+   `git grep -c "apply_node_overlay(" -- promptpotter/application/pipeline_resolve.py` is 1.
+2. **`CycleSeed` is a four-part delta each reader re-lays** — `read_cycle_seed(` at 9 sites;
+   `domain/campaign_config.py::apply_cycle_seed` lays only `config_overrides` + `optimizer_narrowing`,
+   `pipeline_overlay` is laid at 4 sites, `origin_prompts` again in `mint.py::resolve_cycle_plan`;
+   `resolve_resume` resolves the plan twice to strip the seed off. Action: the seed folds whole into the
+   cycle's effective config, read once by 1. **Re-test:** `git grep -c "read_cycle_seed(" -- promptpotter` is 1.
+3. **The babysit verdict is computed at four sites against two narrowings** — `commands/launching.py::fork_cycle`,
+   `pipeline_resolve.py::fork_preview`, CLI `resume_command.py::_fork_operator_steer` read the root's
+   narrowing; `runner/run_prep.py::prepare_run` stamps after `apply_cycle_seed` (the seed's own
+   `ForkSeed.node_narrowing`), so a fork widening the narrowing and steering in one seed can pass one and
+   fail the other. The CLI also boots `init_services` only to type `--steer`. Action: the applier decides
+   once and stamps the verdict on the seed record; CLI and preview read it. **Re-test:** a fork seed
+   whose `node_narrowing` admits the steered model; read the cycle's interventions.
+4. **Run scope is ~21 ambient `ContextVar`s bound piecemeal** — telemetry, send pacing, spend book,
+   optimizer manifest, archive memory scope, coupon, measurement context, judges, spawn, harbor;
+   `set_cycle_ledger` bound at 6 sites, `bind_memory_scope` sets without a reset token, one ledger with
+   three doors (the var, `RunCallbacks.ledger`, `LaunchState.ledger`), an unbound memory scope defaulting
+   to `OpenAt()` (the whole archive). Action: one frozen `RunScope` bound once at the run seam.
+   **Re-test:** `git grep -c "ContextVar(" -- promptpotter`.
+5. **`Session` / `LaunchState` is a staged builder modelled as a bag of Optionals** —
+   `initialization/session.py`; ~62 guard or sentinel sites (`require_scorer()`, `launch_clock()`,
+   `campaign_id=""`); `run_observers.declare_running` skips silently on a None ledger. Action: each init
+   step returns the next typed stage. **Re-test:** `git grep -c "require_scorer\|require_partition" -- promptpotter`.
+6. **Slot lifetime is a hand-rolled `except BaseException: release…` at ~20 sites** (admission,
+   `run_job`, head-to-head, mint-and-start, check-in, embedded run). Action: the registry hands out a held
+   slot as a context manager. **Re-test:** `git grep -c "release_slot(\|job_registry.release(" -- promptpotter`.
+7. **Optimizer selection is ambient plus a fallback chain** — `optimizer_manifest.py` `_BOUND`,
+   `_DETERMINISM`, `_OPTIMIZER_PROMPT_OVERRIDES`; `llm_node_manifest` tries the check-in manifest then
+   `bound_optimizer()`; `resolve_optimizer(..., gate="off")` ×3; `_single_model` depends on node order.
+   Action: selection rides `RunScope` (4), keyed by node, no fallback. **Re-test:** `git grep -n 'gate="off"' -- promptpotter`.
+8. **A broad exception tuple turns programming errors into "did not resolve"** —
+   `pipeline_resolve.py::_ROOT_UNRESOLVED` catches `ValueError, KeyError, TypeError, OSError`;
+   `line_config` swallows silently, `application/hierarchy.py::_UNRESOLVED` serves it as data. Action: catch typed
+   `DatasetAccessError` / `StoredConfigInvalidError` only, served as a typed refusal. **Re-test:** read `_ROOT_UNRESOLVED`.
+9. **Reads fall back from the recorded fact to today's files** — `_campaign_merge`
+   (`read_resolved_run(hop).declaration` → `dataset_pipeline_declaration`),
+   `resolve_pipeline_for_campaign` (`recorded or experiment_outside_run`), `_dataset_of` swallowing
+   `DatasetAccessError`; `parse_cycle_seed` builds a whole served response to read schema rows. Action: a
+   minted cycle's recorded declaration or a refusal; the write path reads 1's fold. **Re-test:** `git grep -n "experiment_outside_run" -- promptpotter/application`.
+10. **Engine decisions narrated into `logger.warning`** — `bench/resume_and_fork/repair.py`, `origin_gate.py`,
+    `termination.py`, `escalation/firing.py`. Action: each decision a field of its step's record.
+    **Re-test:** `git grep -c "logger.warning" -- promptpotter/application/bench/resume_and_fork/repair.py`.
+11. **The `evidence` CLI is a 731-line renderer in presentation** — `presentation/cli/commands/evidence.py`.
+    Action: rows plus a label table in `application/views/evidence.py`. **Re-test:** `wc -l` of the file.
+12. **`connectors/harbor.py` patches litellm module globals** (`_billed_acompletion`, `_refused_aresponses`,
+    `_BLOCK`) and classifies failures by regex over stderr. Action: an injected client through the bench's
+    admitted send; typed exit data. **Re-test:** `git grep -n "_billed_acompletion" -- promptpotter`.
+
+### The file layout (import-graph pass 2026-10-31)
+
+**Rides with:** after the config/scope arc above; merges mostly cut duplicated import blocks (whole
+tree ≈ −10% cross-file edges, ≈ −600 LOC), the LOC win is the root fixes inside them. Measure with an
+import-graph script before and after; close each wave with `gate.py --only layering,help-imports,handler-tables,doc-claims,instruction-files`.
+
+- **Wave A — presentation and infrastructure, no digest re-key:** CLI collapse
+  (`cli/campaign_runner.py` + `parsers.py` + `commands/verbs.py` → `cli/main.py`; small read verbs →
+  `commands/reads.py`, measure verbs → `commands/measure.py`; `handler-tables` names
+  `campaign_runner._COMMANDS_PACKAGE`); `routers/datasets/` → one module; `infrastructure/identity/` 12 →
+  3 (`oidc`, `grants`, `accounts`); `tracing/` 7 → 4 with `TracingProjection` building its own sinks
+  (drops `Session.langfuse`, a second door into tracing); `projections/live_dashboard/` → one module;
+  LLM wire types into `llm/base.py`.
+- **Wave B — the application backbone:** `application/runner/` 18 → 7 files (loop, round, output,
+  entry, bench, mint, inner/spawn) deleting the ledger-scan forwarders (`_spent`, `read_line_spend`,
+  `fresh_campaign_id`); loose top-level modules regrouped (cycle reads, hierarchy, origin + `loop_start`);
+  the optimizer registry (`optimizers/__init__.py`'s 146 lines), `knobs.py`, `run_callbacks.py` into
+  `optimizers/nodes.py` — breaks the hidden 16-module cycle (`TYPE_CHECKING` / in-function imports hide 8 cycles).
+- **Wave C — the optimizers, one re-key batch:** `potter/l1/` → `l1.py`, `validators/` 7 → 2, peer
+  optimizers' `prompts` + `state` into `members.py`, `pobb/` and `escalation/` flattened, and
+  `runner/inner/tasks.InnerCells` moved into `domain/l4` (optimizer code imports a runner internal).
+- **Rejected:** a concept-first vertical re-cut (§0's "One rejected re-cut").
+
+### Tooling seen while landing #59–#62
+
+- **`scripts/offline_run.py` runs whatever package its interpreter imports**: run from a worktree with
+  the main tree's venv, its child runs import the main tree and it reports UNMOVED. Action: refuse when
+  `promptpotter.__file__` is not under the tree the script sits in. **Re-test:** run it from a worktree
+  with the main venv; it refuses.
+- **The pre-commit hook runs bare `python`**, so a commit in a worktree builds and syncs a `.venv` there.
+  Action: the hook resolves the clone's venv like `_BORROWED` does. **Re-test:** a commit in a fresh
+  worktree creates no `.venv`.
+
 ### The webapp's vanilla pass (audit 2026-10-29)
 
 - **Failures dropped to booleans before `FailureLine` can render them**: `useConnector` folds its read
