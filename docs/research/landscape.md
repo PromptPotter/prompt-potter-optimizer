@@ -35,6 +35,7 @@ a human-written prompt store. Acquired by ClickHouse 2026-01-16, stated to stay 
 **tool schemas and MCP tool signatures**; **Test Suites** of plain-text assertions as regression tests;
 and **Ollie**, a coding agent in the UI that reads traces and edits the agent's code
 ([Agent Optimizer](https://www.comet.com/docs/opik/agent_optimization/overview) ·
+[automatic prompt optimization](https://www.comet.com/site/products/opik/features/automatic-prompt-optimization/) ·
 [Ollie](https://www.comet.com/docs/opik/ollie)). Java + Python backends, React SPA over ClickHouse;
 not LangChain-based. Apache-2.0.
 
@@ -189,7 +190,10 @@ no dataset or scoring. **Verdict — weak:** name collision only. **Checked** 20
 Telemetry-first: [Phoenix](https://github.com/Arize-ai/phoenix) (Elastic License 2.0, span replay, a
 commercial meta-prompt optimizer "Prompt Learning") and [Weave](https://github.com/wandb/weave)
 (tracing, evaluations). **Verdict — weak.** **Worth taking:** span replay as a node-level probe.
-**Checked** 2026-09-24; Prompt Learning from summaries only.
+**Checked** 2026-09-24; Prompt Learning from summaries only. Its SDK, checked 2026-10-31:
+`PromptLearningOptimizer(...).optimize(dataset, output_column, feedback_columns)` runs the caller's
+evaluators in-process, an LLM writes text feedback and a meta-prompt rewrites; the README states
+Elastic 2.0 where the docs say fully open source — unreconciled.
 
 ## LangSmith
 
@@ -269,3 +273,86 @@ objective); Oracle Analysis (price an idea on trajectories already paid for); th
 held-out results.
 
 **Checked** 2026-10-20 — project page and README; paper, code and plug points not read.
+
+## NeMo Helix and NeMo Agent Toolkit (NVIDIA)
+
+**What.** NeMo Agent Toolkit (NAT, `nvidia-nat`, Apache-2.0): YAML agent workflows with `nat eval`,
+a profiler and `nat optimize` — Optuna over numeric knobs, and a genetic algorithm over prompts (LLM
+mutation steered by a `prompt_purpose`, LLM recombination, elitism) scored by weighted evaluator
+metrics with `reps_per_param_set` repeats. Its README deprecates it as of October 2026, end-of-life
+by the year's end, and sends its users to three successors: NeMo Relay, NeMo Helix and NeMo Fabric.
+Helix (`nemo-helix`, 0.x, its repository created 2026-05) is an agent control plane whose `optimize` runs NAT's
+two phases, a model-pair router or a single rewrite; a third-party strategy registers in its
+`nemo.jobs` entry-point group.
+
+**Verdict — weak:** not a standard. Its maker is retiring NAT, and Helix, a 0.x successor, has
+little developer uptake yet, so nothing here builds toward either; as an optimizer, each strategy
+runs its own way with its own repeats ([`related-work.md`](related-work.md) § A menu is not a bench).
+
+**Worth taking.** `prompt_purpose`, the operator's intent handed to the mutator.
+
+**Checked** 2026-10-31 — NAT's deprecation notice in its README, read directly; uptake by
+`gh search repos` (Helix 132 stars, OpenShell 20.8k); the optimizer and Helix pages through a
+summarizing fetch.
+
+## Agent Lightning (Microsoft)
+
+**What.** [`microsoft/agent-lightning`](https://github.com/microsoft/agent-lightning) (MIT, 1.0.2 of
+2026-09-29). Its v0.x: an algorithm server enqueues rollouts, runners anywhere dequeue them over REST
+and report OpenTelemetry spans that double as heartbeats, and silence past a timeout requeues the
+rollout as a new attempt; no auth. APO there is textual gradients plus a beam search over ONE prompt
+template, the proposer server-side and the rollouts client-side. v1.0 (August 2026,
+[2608.17528](https://arxiv.org/abs/2608.17528)) is an RL-only rewrite whose controller pushes
+rollouts; APO stays on the v0.x branch.
+
+**Verdict — reference** for the pull shape ([`../specs/roadmap.md`](../specs/roadmap.md) § Embedding (M15), R2);
+**weak** as an optimizer: one template, no budget meter, no stopping rule.
+
+**Worth taking.** Spans as liveness; a caller-chosen rollout id that makes a resubmission idempotent.
+Its requeue on timeout is a retry, which
+[`../architecture.md`](../architecture.md) § Errors heal upward refuses.
+
+**Checked** 2026-10-31 through a summarizing fetch — README, the v0.x store source, the APO page,
+the v1 docs.
+
+## Client-evaluated optimization services — OSS Vizier, Optuna, W&B Sweeps
+
+**What.** OSS Vizier (Apache-2.0, `google-vizier` 0.1.24): gRPC `SuggestTrials`, the client
+evaluates, `CompleteTrial`; a repeated `client_id` gets its pending trial back; no auth.
+[Optuna](https://github.com/optuna/optuna) 5.0.0 (MIT): `ask()` / `tell()`, many workers on one database or an experimental gRPC proxy, no auth. W&B
+Sweeps: a hosted controller and agents anywhere polling it, the heartbeat replying `run`, `resume`,
+`stop` or `exit`; API keys.
+
+**Verdict — reference:** the shape a service takes when the client evaluates
+([`../specs/roadmap.md`](../specs/roadmap.md) § Embedding (M15), R2); none optimizes prompts.
+
+**Worth taking.** Vizier's `client_id` — a lease idempotent per program; W&B's stop riding the poll
+reply, so the one stop ([`../decisions.md`](../decisions.md) § 0010) reaches a pulled program with no
+second channel.
+
+**Checked** 2026-10-31 through a summarizing fetch — Vizier's service proto and client, Optuna's
+docs, the wandb agent source.
+
+## Vertex AI Prompt Optimizer and Bedrock Advanced Prompt Optimization
+
+**What.** Vertex AI's data-driven optimizer, now documented under Gemini Enterprise Agent Platform
+([docs](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/prompts/prompt-optimizer)):
+the instruction, the demonstrations or both, Google target models only, rows in GCS, standard metrics
+plus at most one custom metric — a Cloud Run function the service calls. Bedrock's Advanced Prompt
+Optimization (2026-05-14; [how it works](https://docs.aws.amazon.com/bedrock/latest/userguide/advanced-prompt-optimization-how.html),
+[launch post](https://aws.amazon.com/blogs/aws/amazon-bedrock-introduces-new-advanced-prompt-optimization-and-migration-tool/)):
+a job over S3 JSONL, up to 10 templates of up to 100 samples each and up to five Bedrock target
+models, images and PDFs as inputs, scored by a judge rubric, plain-language steering criteria or the
+customer's Lambda, which the service invokes; it ends on "proprietary internal optimization
+parameters"; `advpo:optimize` and `advpo:exclude` tags scope what may be rewritten, and an option
+shortens the prompt.
+
+**Verdict — weak:** template text alone, one vendor's catalogue, no stopping rule or comparability.
+
+**Worth taking.** Bedrock's tags — a lock on a span inside one field, finer than our per-field lock;
+its shortening objective, which a composite fitness already prices. The customer-hosted scorer each
+calls is the push shape R2 avoids.
+
+**Checked** 2026-10-31 — Bedrock's how-it-works page read as served; Vertex's data-driven optimizer
+page and Bedrock's evaluation and `CreateAdvancedPromptOptimizationJob` pages through a summarizing
+fetch.

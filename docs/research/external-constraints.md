@@ -2,10 +2,10 @@
 
 External standards, published findings and review norms that take a design decision away from us —
 design our own shape first and conforming later means unravelling it. Each entry states the
-**decision it removes**, the **milestone it binds** (M13 plug point, M14 preprint, SKILL skilled-agent
-target, L4 self-optimization, TOOL callable as a tool / MCP), its **source**, and whether that source
-was **read**. An entry not marked *read* is unverified and is read at its source before anything is
-built or cited on it.
+**decision it removes**, the **milestone it binds** (M13 plug point, M14 preprint, M15 embedding,
+SKILL skilled-agent target, L4 self-optimization, TOOL callable as a tool / MCP), its **source**,
+and whether that source was **read**. An entry not marked *read* is unverified and is read at its
+source before anything is built or cited on it.
 
 Tools and competitors are [`landscape.md`](landscape.md)'s; the argument against the peers that
 matter is [`related-work.md`](related-work.md)'s. **Checked** 2026-09-24 — re-check before quoting;
@@ -198,6 +198,78 @@ Beyond ranked items 3 and 4:
   placeholders) earns a one-year ban (consistent secondary reporting). So every reference and number
   is hand-checked and AI use disclosed.
 
+## M15 — embedding
+
+Checked 2026-10-31 through a summarizing fetch: the wording and the authors' effect sizes are
+unverified against the sources, so re-read one before building on or quoting it.
+
+- **The service proposes; the program evaluates, pulling its work.** AlphaEvolve's service hands a
+  program out under a `lockToken` and takes its evaluation back (`acquirePrograms` →
+  `submitProgramsEvaluations`; a client timeout files a failure score); OSS Vizier, W&B Sweeps and
+  Agent Lightning v0.x pull too ([`landscape.md`](landscape.md) § Agent Lightning, and the
+  client-evaluated services beside it). A lease appears only where a crash must be told from a slow
+  answer, and none of the open-source services authenticates. **Removes:** whether the hosted box
+  calls a tenant's program — it never does; the program pulls its cells under a lease
+  ([`../specs/roadmap.md`](../specs/roadmap.md) § Embedding (M15), R2). Sources: [AlphaEvolve API](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/reference-guide/api-reference),
+  [Vizier](https://github.com/google/vizier), [wandb agent](https://github.com/wandb/wandb/blob/main/wandb/wandb_agent.py),
+  [Agent Lightning v0.x](https://github.com/microsoft/agent-lightning/tree/v0.x).
+- **A machine client is an OAuth client presenting a JWT.** MCP 2026-07-28 makes the server an OAuth
+  2.1 resource server (RFC 9728 metadata, PKCE, the RFC 8707 `resource`, an audience check); clients
+  register by Client ID Metadata Documents, dynamic client registration deprecated; machine clients
+  take the `io.modelcontextprotocol/oauth-client-credentials` extension (stable, unverified), a
+  JWT-bearer assertion (RFC 7523) recommended. A CI job's own OIDC token is such an assertion.
+  **Removes:** the shape of R1's workload mint — one client-credentials grant serves CI and MCP.
+  Sources:
+  [authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization),
+  [client credentials](https://modelcontextprotocol.io/extensions/auth/oauth-client-credentials).
+- **NVIDIA's free NIM access is for research, not for serving.** Developer Program access — the
+  hosted endpoints and self-hosted NIM on up to 16 GPUs — "is for prototyping, research, development
+  and testing purposes only"; production takes an NVIDIA AI Enterprise licence. Hosted NIM is
+  OpenAI-compatible chat at `integrate.api.nvidia.com/v1`; its speech, image and video NIMs are other
+  wires. **Removes:** which open-weight host the hosted tier runs for tenants — vLLM or SGLang — while
+  NIM serves the operator's own experiments, and a non-chat NIM is reached by a pulled program, never
+  an R4 line. Sources: [NIM product terms](https://docs.api.nvidia.com/nim/docs/product),
+  [LLM APIs](https://docs.api.nvidia.com/nim/reference/llm-apis).
+- **Most of a reported non-text lift is selection.** OPT2I's equal-budget random-paraphrase arm
+  recovers most of its text-to-image gain; RAISE's best-of-32 noise sampling alone reaches most of
+  its lift. **Removes:** what a non-text campaign is measured against — an equal-budget resample arm in a
+  head-to-head, read on the mean, never the best found. Sources: [OPT2I](https://arxiv.org/abs/2403.17804),
+  [RAISE](https://arxiv.org/abs/2603.00483).
+- **The judge that selects must not certify, and one axis must not regress.** A verifier and a judge
+  of one family inflate (NPC, GPT-4.1 as both; unverified); a reward model optimized against is
+  hacked (LeSAMP on HPSv3; unverified); Prompt-A-Video's aesthetic gain cost motion; POET's rewriter, tuned on one generator,
+  regressed another. **Removes:** who grades the bench set — a scorer of another family than the
+  in-loop judge — and a non-text dataset declares the axis that must not regress. Sources:
+  [NPC](https://arxiv.org/abs/2512.07702), [LeSAMP](https://arxiv.org/abs/2607.23488),
+  [Prompt-A-Video](https://arxiv.org/abs/2412.15156), [POET](https://arxiv.org/abs/2510.12041).
+- **A generator's seed spread is its noise floor.** CosmosAlign's structured-prompt gain sat inside
+  its seed spread ([2608.07693](https://arxiv.org/abs/2608.07693)). **Removes:** whether the seed is
+  free — it is a declared identity input or a replicate axis, and the noise floor is read before a
+  campaign is funded.
+- **Order by evidence and cell price.** Strongest at the cheapest cell: retrieval and RAG parameters,
+  where an LLM-agent proposer beat multi-objective TPE and random at equal trials
+  ([Agentic AutoRAG](https://arxiv.org/abs/2610.08452), [AutoRAG-HP](https://arxiv.org/abs/2406.19251));
+  VLM prompts, where a multimodal optimizer beat the best text-only one ([MPO](https://arxiv.org/abs/2510.09201),
+  ICLR 2026); ASR context prompts on deterministic WER ([2602.18966](https://arxiv.org/abs/2602.18966)).
+  Then text-to-image prompt and negative-prompt loops; physics-aware video last, Cosmos-Predict2
+  taking minutes per video on an H100 ([model matrix](https://docs.nvidia.com/cosmos/2.1.0/predict2/model_matrix.html)).
+  Weakest: TTS style prompts (inside the noise, unverified, [2505.17093](https://arxiv.org/abs/2505.17093)),
+  embedding instruction prefixes (large sensitivity, no search shown to beat the default,
+  [2605.22544](https://arxiv.org/abs/2605.22544)), raw CFG and step tuning, VLA paraphrases (π0 and
+  OpenVLA ignore them, [LIBERO-PRO](https://arxiv.org/abs/2510.03827)); no published optimization at
+  all for Genie 3, Veo or Sora 2 (unverified). **Removes:** which non-text target comes first.
+- **A world model's first target is its upsampler, and its critic is an unscreened judge.** Cosmos 3
+  (2026-05-31) replaced Predict, Transfer and Reason with one model that wants long structured
+  captions, written by an official upsampler that calls any OpenAI-compatible LLM. Cosmos Reason1's
+  documented video critic judges a rollout several times, scores the share of artifact-free verdicts
+  and keeps the best of N, with no published agreement with people; the Reason 2 and Cosmos 3 docs
+  describe no critic use. **Removes:** the first video target — the upsampler's instructions, an LLM
+  node ahead of the generator — and Cosmos Reason judges only after the screen every invented rubric
+  takes ([`../../promptpotter/application/scoring/judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md)).
+  Sources: [Cosmos3-Super](https://huggingface.co/nvidia/Cosmos3-Super),
+  [diffusers Cosmos 3](https://huggingface.co/docs/diffusers/en/api/pipelines/cosmos3),
+  [Reason1 video critic](https://docs.nvidia.com/cosmos/2.0.0/reason1/video_critic.html).
+
 ## Cost reporting — binds every run from now, not only the preprint
 
 - **Record raw token counts and the price table's date with every run**, so dollars recompute if
@@ -243,12 +315,20 @@ Beyond ranked items 3 and 4:
 
 - **MCP 2026-07-28** ([spec](https://modelcontextprotocol.io/specification/2026-07-28)): a long-running
   call returns a **task handle** via the Tasks extension (`tasks/get`, `tasks/update`,
-  `tasks/cancel`); auth is OAuth / OIDC with dynamic client registration. A campaign over MCP uses
-  that shape, no polling or webhook scheme of ours; it also meets the inbound-credential gap the
+  `tasks/cancel`); auth is OAuth 2.1 (§ M15 — embedding). The protocol is stateless, with no
+  session and no `initialize`, and a dropped stream loses the call in flight. A campaign over MCP
+  uses that shape, no polling or webhook scheme of ours; it also meets the inbound-credential gap the
   roadmap holds MCP on.
+- **Environments — Harbor's task directory is the shared format.** No standard won: verifiers v1
+  reads Harbor tasksets, NeMo Gym integrates Harbor, OpenEnv and verifiers, and the Hugging Face Hub
+  tags `rl-environment` per framework with no registry; Inspect AI is the de facto eval runner,
+  OpenEnv a runtime protocol still changing. So environments enter through `connectors/harbor.py`,
+  and no R-item adds a seam beside it. Checked 2026-10-31 through a summarizing fetch:
+  [HF](https://huggingface.co/blog/rl-environments), [verifiers](https://github.com/PrimeIntellect-ai/verifiers),
+  [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym), [OpenEnv](https://github.com/meta-pytorch/OpenEnv).
 - **Tracing — choose one primary.** **OpenTelemetry GenAI** (all `gen_ai.*` still *Development*,
-  v1.42.0, 2026-06-12, own repo — pin a version) vs **OpenInference** (Arize;
-  `openinference.span.kind` on every span). Langfuse and MLflow sit downstream of both.
+  v1.42.0, 2026-06-12, own repo — pin a commit, `gh release list` on its repo decides) vs
+  **OpenInference** (Arize; `openinference.span.kind` on every span). Langfuse and MLflow sit downstream of both.
 - **Prompt registries.** MLflow: `{{variable}}` placeholders, immutable integer versions, aliases for
   promotion; Langfuse: labels as the deployment pointer. Write-back maps onto those and invents no
   branch model. `.prompty` and dotprompt have not converged; all three (and SKILL.md) share

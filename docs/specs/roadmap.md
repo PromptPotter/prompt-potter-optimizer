@@ -25,7 +25,9 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
 5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A3
    anonymous preview.
 6. **Capability (Lane C), by dependency:** C2 composite fitness → C4 cross-user panel; C2b judged
-   scoring; C3 L4 closure; SIFT S1; the PUCT selector (§ Selector members — parent choice as one acquisition); C5, C6, C8, C10; C7 after v1.
+   scoring; C3 L4 closure; SIFT S1; the PUCT selector (§ Selector members — parent choice as one acquisition); C6, C7, C8, C10.
+7. **Embedding (§ Embedding (M15)):** headlined by the Langflow setup; R1 first (C5 and R2 wait on
+   it), then C5 and R2; the rest independent of each other.
 
 **Rides whenever it unblocks:** the webapp vanilla pass (code-debt § NEXT ARC), once the run-card
 session's files land; the operator's picked renames.
@@ -45,9 +47,9 @@ the rest of Lane C.
 - **C2b** Judged + turn-structured scoring: the per-step ruler (§ Judged and turn-structured scoring).
 - **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
 - **C4** Cross-user measurement panel, after P3.
-- **C5** MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
-- **C6** Public-service hardening: Docker, metrics, billing.
-- **C7** Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal; all but harnesses after v1.
+- **C5** MCP server mode (§ Agent-tool parity), on R1's credential · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
+- **C6** Public-service hardening: metrics, billing; the image is R9.
+- **C7** Agent harnesses (§ Evolving agent harnesses); non-prompt targets and multimodal are R5–R7 (§ Embedding (M15)).
 - **C8** Mask abstraction — the sample-set half (§ Lineage mask).
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
@@ -177,6 +179,146 @@ surface; model and provider are optimizer-locked.
   cap — priced against the served menu and `application/jobs/quota.py::launch_usd_bound`; the host's
   bound outranks the operator's words; an off-menu proposal is dropped at `_coerce`.
 
+## Embedding (M15)
+
+PromptPotter is the optimizer a program calls instead of holding one; a text LLM is one model kind
+among many; the hosted tier and the repository hold when many people arrive at once. **The bench
+stays small — it proposes, admits, measures, decides and archives; a program, a model kind or a
+framework arrives as a declaration, a program answering its own cells, or an entry-point plugin, and
+no R-item adds core code naming one.** R1 comes first (C5 and R2 wait on it), then R2; the rest are
+independent of each other, each closing on its own check. Findings:
+[`../research/external-constraints.md`](../research/external-constraints.md) § M15.
+
+**The headline setup — Langflow.** What PromptPotter recommends to someone who knows AI assistants,
+has never opened a shell, and wants AI infrastructure of their own at home rather than one campaign.
+Langflow builds the pipeline visually; PromptPotter tunes the flow through Langflow's per-run tweaks,
+held by `LANGFLOW_TWEAKS_POLICY=declared` to the fields the flow marks API, the declared-knob
+boundary enforced on Langflow's side — a flow that marks none is permissive, so the starter's flow
+marks its knobs and the pulled program refuses a flow with none. Shipped as one starter in
+`examples/`: a flow, the Langflow pulled program (R2) and an agent skill that walks the user's
+assistant through each step. NVIDIA OpenShell is the starter's optional sandbox — policy-bound, the
+editor's port forwarded (`openshell sandbox create --forward`) — until its maker commits to it with
+a 1.0 or a support statement; Windows, where it is experimental, runs Langflow Desktop alone.
+*Closes:* someone who has never used a shell reaches a finished campaign on their own flow, their
+assistant doing the typing.
+
+**Reachable**
+- **R1 The machine principal.** A delegate grant ([`../decisions.md`](../decisions.md) § 0005;
+  `infrastructure/identity/grants.py::grant_principal`) as `Authorization: Bearer` — an opaque
+  server-side id like the session cookie, resolved by `presentation/api/deps.py::resolve_identity`
+  under the same rate buckets. Both mints stay federated, so § 0002 holds: a workload's signed JWT
+  under OAuth client credentials (a CI job's OIDC token, MCP's machine-client extension), and an
+  interactive login — MCP's OAuth (C5), or a device code (RFC 8628) for a program with no browser. A
+  pulled program holds one new rung, `campaign.answer`. Never "API key": `/auth/api-keys` is a
+  provider's key. It opens with a [`../decisions.md`](../decisions.md) entry naming the
+  authorization server — MCP's OAuth 2.1 makes this server a resource server, a device-code mint
+  makes it the token issuer — and the [`../architecture.md`](../architecture.md) § Identity amendment
+  § 0002 asks of a new identity-bearing ingress. **No route takes an API key** — owned by
+  [`../developer/stable-api.md`](../developer/stable-api.md) § 8; R1 rewrites that line when it
+  ships. *Closes:* a CI job reads `evidence` and mints a head-to-head with no cookie.
+- **R2 Pulled cells.** `domain/connector.py::ConnectorExecution` gains `pulled`: the loop offers each
+  admitted cell on the cycle's ledger; the program leases one and answers through
+  the `CommandDispatcher` on R1's credential, the answer a `/matches` body read by the reader every
+  connector uses. The box dials nothing a tenant names and runs no tenant code, so the 3c trigger
+  ([`../operations/access-model.md`](../operations/access-model.md) § loop ↔ everything) stays
+  unpulled. An unleased offer waits like an unreachable backend; a leased cell past
+  `cell_envelope_s` is `HALTED`, never re-offered; answer text is untrusted (§ Connectors, Phase 2).
+  Open: whether `in_process` is `pulled` over a local transport. *Closes:* a program outside this
+  tree runs a hosted campaign, every cell answered on its own machine, nothing under `promptpotter/`
+  naming it.
+- **R3 One versioned wire.** The routes a delegate reaches and the cell wire join
+  [`stable-api.md`](../developer/stable-api.md), each carrying a version a peer refuses on; breaking
+  stays free. A Python client with no dependency, a TypeScript one generated from
+  `openapi.generated.json`. *Closes:* one pulled program per language against one spec.
+- **R4 Host-declared providers.** `infrastructure/llm/registry.py::_OPENAI_COMPAT_SPECS` becomes host
+  configuration, each entry with its rate, so any OpenAI-compatible host is a line; tenants still
+  name no provider. *Closes:* one campaign on build.nvidia.com and one on a self-hosted vLLM, with no
+  edit under `promptpotter/`.
+
+**Any model** — targets in the evidence order of [`../research/external-constraints.md`](../research/external-constraints.md)
+§ M15, retrieval parameters first and video last.
+- **R5 Typed parameter domains.** `PipelineNode.param_allowed_values` holds strings alone; a domain
+  becomes an enum or a numeric interval (`low`, `high`, `step`, `log`, as an Optuna distribution
+  declares it), checked at `application/bench/children.py::admission_failures` and stated in L1's
+  schema; one `algorithm` member proposes numbers with no model call. *Closes:* a `top_k` or
+  guidance-scale axis searched as a number.
+- **R6 Output refs, judged where the output is.** A row may carry an output ref — hash, media type,
+  size, never the bytes; the judge runs where the output lives, inside the pulled program, and enters
+  the scorer id with the program's revision; an image-capable proposer reads a bounded preview through
+  one injection renderer. *Closes:* a non-text campaign separates from an equal-budget resample arm
+  on the held-out bench, graded by a scorer of another family than the loop's judge.
+- **R7 One priced count.** `WebSpendBound` is renamed `PricedCountBound` (`item`, `count`,
+  `usd_per_item`): a GPU-second, an image, a simulator step or a connector phase's CPU-hour is a new
+  item, never a new `NodeSpendBound` kind. *Closes:* GPU-seconds beside tokens in one `SpendRollup`.
+
+**Holds a surge**
+- **R8 The surge rehearsal.** The offline world driven by many synthetic accounts on a box-shaped
+  install, reading which bound binds first — the provider window, the run queue, memory, disk, open
+  streams ([`../operations/access-model.md`](../operations/access-model.md) § What bounds resource
+  use); the first is fixed in the repo, never on the machine. *Closes:* the rehearsal ends on a
+  refusal the box serves — never an OOM, a 5xx or a dropped stream.
+- **R9 The image.** One OCI image built in CI; a deploy pulls a tag and a rollback the previous one,
+  never a checkout reset in place.
+- **R10 The box without its operator.** Restart and rollback with no interactive sudo; health pushed
+  through the outbound admin channel ([`../decisions.md`](../decisions.md) § 0004); a restore drill.
+  *Closes:* a deploy and a rollback with no one at the box.
+- **R11 Scale-out.** Pulled programs first (evaluation leaves the box), then boxes sharded by tenant —
+  a tenant's tree is self-contained, the identity zone the one shared part — never a shared database.
+
+**Maintained by many**
+- **R12 The conformance kit.** `gate.py --only optimizer-plugin`'s out-of-tree check, shipped as a
+  pytest plugin over the offline world for each plugin kind and the pulled program. *Closes:* a
+  connector, a judge and a pulled program from other repositories pass it and are listed, with no
+  maintainer edit here.
+- **R13 Every request routed to an answer.** Issue forms map "connect X" onto five answers — a
+  provider line (R4), a declaration plus a pulled program (R2), a judge (R6), a manifest
+  (`examples/optimizer-plugin/`), a Harbor task — and one that fits none is the §0 flag
+  [`../architecture.md`](../architecture.md) names. One issue per R-item collects demand.
+- **R14 Review past one person.** CODEOWNERS follows the layer `CLAUDE.md` files; a second
+  maintainer's first rights are `examples/` and the extras, outside core.
+
+**Ecosystems — each lands on one of R13's answers, none in core:**
+- *Model hosts:* NIM, Dynamo (past 1.0, NVIDIA's own serving stack), Triton, vLLM, SGLang, Ollama and the clouds' OpenAI-compatible
+  endpoints are R4 lines; the hosted tier serves tenants through vLLM or SGLang. Nemotron's reasoning
+  switch (`enable_thinking`, effort) rides `chat_template_kwargs` — a model-profile fact, never a
+  node key.
+- *Agent frameworks:* LangGraph, the OpenAI Agents SDK, Google ADK, CrewAI, LlamaIndex and
+  Microsoft Agent Framework (past 1.0, its maker's successor to Semantic Kernel and AutoGen) get one
+  reference pulled program each in `examples/`, each its own
+  distribution; NeMo Guardrails' prompts reach it the same way. A framework joins only as a
+  standard — adopted by developers and committed to by its maker; a new product stays in
+  [`../research/landscape.md`](../research/landscape.md) until it is one.
+- *Workflow builders:* Langflow is the headline setup; n8n (its templates ship in
+  `connectors/resources/`) gets a pulled-program node on the TypeScript client, Dify a plugin on the
+  Python one.
+- *Observability and registries:* Langfuse, MLflow, LangSmith and Phoenix — traces in, winners out.
+- *Environments:* Harbor's task format, which verifiers, NeMo Gym and the Hugging Face Hub already
+  read (0.x, admitted because `connectors/harbor.py` already runs it); R-items add no environment
+  seam beside `connectors/harbor.py`.
+- *Sandboxes:* NVIDIA OpenShell, under the headline's condition, enters at the containerized cell:
+  one Harbor environment class, contributed upstream (Harbor loads any class by `import_path` until
+  then) and picked by the cell's existing `environment` key; `connectors/harbor.py` passes any
+  environment class, and its compose overlay and image reuse serve every one. An agent already inside
+  an OpenShell sandbox is a pulled program (R2) once its network policy admits the API host.
+  *Closes:* a Harbor campaign whose cells run in OpenShell sandboxes, set by `environment` alone.
+- *Non-text targets* take the evidence order; GR00T's instructions sit with the VLA paraphrases it
+  ranks weakest.
+
+**Thin surfaces on R1–R3, each riding a verb that exists:** MCP (C5), a running campaign as an MCP
+Task; a GitHub Action running a head-to-head between `main`'s configuration and a PR's and
+commenting the paired lift; model migration — a campaign on the new model whose origin is the last
+winner; traces in (OTel GenAI JSONL first) beside § What PromptPotter emits.
+
+**Free compute — spend it where calls bind.** Through R4 an open-weight model on free GPUs answers on
+no provider's bill (its rate may be zero; R7 meters the GPU-seconds). First the models the instruments
+already run — another host is another instrument, so screen its agreement with the cloud host on one
+panel before a campaign moves; then the call-heavy rungs: L4 inner cycles, M14's seeds and budget
+points, the optimizer-model screen (§ Optimizer tuning — the standing board, step 3); then R6's
+exhibit, which needs the GPUs themselves.
+
+**Further out:** the archive as fine-tuning data — graded outputs per configuration, handed to a
+trainer; an edge device as a pulled program; a hosted media judge on uploaded outputs.
+
 ## Connectors
 
 - **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types, L1/critique
@@ -205,13 +347,12 @@ TermNorm toggle moves into the connector panel; (4) the dashboard inspector read
 
 An operating agent calls PromptPotter as one tool: the MCP server exposes mint, run, supervise and
 read. **Held on the inbound credential** — owned by [`../developer/stable-api.md`](../developer/stable-api.md)
-§ 8. The first caller is HuggingChat: a user-added server carries only a name and URL, so ours
+§ 8; R1 (§ Embedding (M15)) is that credential. The first caller is HuggingChat: a user-added server carries only a name and URL, so ours
 authenticates without headers; results are terse named fields, never a document; `run` returns an id
 at once and a status tool reads it. The tool set scopes along [`../decisions.md`](../decisions.md)
 § 0005's capabilities; `purge-cold` stays out.
 
-**Sandbox:** NVIDIA OpenShell is the sandbox seam, at the containerized cell. **Coding-agent
-optimization is deferred** until we have an expert or the field converges.
+**Coding-agent optimization is deferred** until we have an expert or the field converges.
 
 ## What PromptPotter emits
 
@@ -258,7 +399,6 @@ maintained and measured separately; measured lift is the only admission ticket.
   headroom; a horizon priced in expected waste would launch deeper.
 - **Cheap top-up** — a second `PanelTrigger`, blocked on the rule that prices a missing row against
   the round's marginal draw cell.
-- **CPU-hours** metered per phase beside `SpendRollup`, for every connector.
 - **Origin-relative weighting** — each archive observation weighted by its producing candidate's
   similarity and recency; `Observation` carries a timestamp and lineage hint once archive-wide drift or
   a per-node capability curve is chosen.

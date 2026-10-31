@@ -69,6 +69,8 @@ Whatever you built it with, PromptPotter meets it where it already runs:
 | **Langfuse / MLflow** | Every round fans out as traces; the winner lands in MLflow's Prompt Registry ([observability](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/observability.md)) |
 | **OpenRouter, OpenAI, Anthropic, Groq** | Any of them, for your pipeline and for the optimizer; OpenRouter is the default |
 
+The three endpoints are called by a PromptPotter you run yourself, at the address you configure. The hosted tier calls only endpoints its operator configured, never one a user names; your program pulling its work from the hosted tier instead is on the [roadmap](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md#reach-m15).
+
 ## What you get back
 
 `export.json` — the winning prompt and settings by field name, with the evidence behind them. We write that file and provide a reader; we never load, host, route or hot-swap anything in your production path.
@@ -230,7 +232,7 @@ One campaign, driven from wherever the work already happens:
 | **REST API** | Every control verb the webapp issues, for when another system drives the campaign. |
 | **Embedded in Python** | A host program drives one campaign inside its own event loop; the [DSPy optimizer](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) is the simple-case entry. |
 
-A sixth — PromptPotter as a tool another agent calls (MCP) — is open for discussion in [#27](https://github.com/PromptPotter/prompt-potter-optimizer/issues/27).
+A sixth — PromptPotter as a tool another agent calls (MCP) — is on the [roadmap](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md#agent-tool-parity).
 
 ## How the search works
 
@@ -334,7 +336,7 @@ A percentage in a round banner is an **in-campaign reading, computed on the rows
 ## Limitations
 
 - **Parameter-based optimization only.** It optimizes any pipeline that exposes tunable parameters — prompts, thresholds, model settings — but not model weights, neural architectures, or modality-specific representations.
-- **Requires a labeled dataset.** Input/output pairs are mandatory.
+- **Needs a known answer or a verifier.** Each answer is graded against the example's expected output, unless the backend's own verifier grades it, as a [Harbor](https://github.com/laude-institute/harbor) task's checker does.
 - **In-campaign figures are not held-out figures.** The winner's own number is read off the rows that selected it, so it overstates deployment performance. The headline is its score on a held-out bench set no optimizer sees: `python -m promptpotter bench`.
 
 ## Documentation
