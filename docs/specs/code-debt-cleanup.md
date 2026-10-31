@@ -220,6 +220,11 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `application/jobs/interlock.py` and its peers sit above `infrastructure/`. A renamed one reads as
   unknown and is dropped by `reset`. Action: one constant per name in `config/paths.py` or `layout.py`,
   read by both. **Re-test:** rename `_LANDING` and run `prove-data` on a box with a landing open.
+- **The latest-readout pointer is CWD-relative** (`launcher/run_job.py::_LATEST_READOUT_POINTER`), and
+  the box unit's `WorkingDirectory` is its data root (`deploy-linux/install-service.sh`), so a run
+  there writes `logs/latest-readout-path.txt` into the data root, which no `data_root.py` row names.
+  Action: anchor it at a root the table names, or give the unit a working directory outside the data
+  root. **Re-test:** `prove-data` on the box after a launch.
 - **`site_records/*.jsonl` reads around a torn line** (`store/site_records.py::_latest`), while
   `prove-data` refuses it, so a landing over a crash-torn row refuses while the site still serves.
   Action: decide one policy for a torn append-only line. **Re-test:** a site table with a half line.

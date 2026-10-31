@@ -14,6 +14,7 @@ import dataclasses
 import logging
 import os
 import re
+import subprocess
 import sys
 import threading
 import types
@@ -26,9 +27,12 @@ import pytest
 from factories import (
     SANDBOX_CAMPAIGN,
     arm_state,
+    close_round,
     inner_sandbox,
     minted_campaign,
+    optimizer_state,
     round_result,
+    seat,
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -174,6 +178,15 @@ from promptpotter.shared.identity import (
 )
 
 _FENCE, _FENCE_END = "<UNTRUSTED_DATASET_CONTENT", "</UNTRUSTED_DATASET_CONTENT>"
+
+_REPO = Path(__file__).resolve().parents[1]
+_PROVE_IN_A_FRESH_PROCESS = """
+import sys
+from pathlib import Path
+from promptpotter.application.maintenance.reset import prove
+proof = prove(Path(sys.argv[1]))
+sys.exit(0 if proof.held and not proof.unknown and not proof.unloadable else repr(proof))
+"""
 
 # 1. Leaks and the perimeter
 
@@ -1157,3 +1170,22 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert UserStore(campaigns.workspace).load() == user, "a reset dropped a survivor"
     after = prove(data_root)
     assert not after.unknown and not after.unloadable, "a reset left the data root unproven"
+
+    # A process that loaded no optimizer still proves a ledger banking one's state.
+    banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")
+    close_round(
+        CycleEventLog.open(CycleDir(campaigns.cycle_dir(banked))),
+        [round_result(0, optimizer_state=optimizer_state(), cells={})],
+        cycle=seat(built_stores).cycle,
+    )
+    banked_ledger = CycleLayout(campaigns.cycle_dir(banked)).ledger.read_text(encoding="utf-8")
+    assert '"l2_memory"' in banked_ledger, "the ledger banks no optimizer's own state kind"
+    fresh = await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, "-c", _PROVE_IN_A_FRESH_PROCESS, str(data_root)],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert fresh.returncode == 0, f"a fresh process could not prove a banked state: {fresh.stderr}"

@@ -542,6 +542,13 @@
         "type": "object"
       }
     },
+    "dataset fetch cache": {
+      "fate": "CACHE",
+      "patterns": [
+        ".cache/huggingface/**"
+      ],
+      "shape": null
+    },
     "environment": {
       "fate": "SURVIVOR",
       "patterns": [
@@ -1585,6 +1592,141 @@
       ],
       "shape": {
         "reader": "promptpotter.infrastructure.store.site_records::site_record"
+      }
+    },
+    "source facts": {
+      "fate": "CACHE",
+      "patterns": [
+        ".cache/source_facts.json"
+      ],
+      "shape": {
+        "$defs": {
+          "SourceFacts": {
+            "description": "A function of ONE source text: ``source_scan.py`` resolves another module's imports.",
+            "properties": {
+              "defs": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/UnitFacts"
+                },
+                "title": "Defs",
+                "type": "object"
+              },
+              "imports": {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "title": "Imports",
+                "type": "array"
+              },
+              "names": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Names",
+                "type": "array"
+              },
+              "reads": {
+                "$ref": "#/$defs/SourceReads"
+              },
+              "units": {
+                "items": {
+                  "$ref": "#/$defs/UnitFacts"
+                },
+                "title": "Units",
+                "type": "array"
+              }
+            },
+            "required": [
+              "names",
+              "imports",
+              "reads",
+              "units",
+              "defs"
+            ],
+            "title": "SourceFacts",
+            "type": "object"
+          },
+          "SourceReads": {
+            "description": "A whole module's own names are left out: they are hashed with it.",
+            "properties": {
+              "attrs": {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "title": "Attrs",
+                "type": "array"
+              },
+              "imports": {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "title": "Imports",
+                "type": "array"
+              },
+              "names": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Names",
+                "type": "array"
+              }
+            },
+            "required": [
+              "names",
+              "attrs",
+              "imports"
+            ],
+            "title": "SourceReads",
+            "type": "object"
+          },
+          "UnitFacts": {
+            "properties": {
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Name"
+              },
+              "reads": {
+                "$ref": "#/$defs/SourceReads"
+              },
+              "source": {
+                "title": "Source",
+                "type": "string"
+              },
+              "whole": {
+                "title": "Whole",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "whole",
+              "source",
+              "reads"
+            ],
+            "title": "UnitFacts",
+            "type": "object"
+          }
+        },
+        "additionalProperties": {
+          "$ref": "#/$defs/SourceFacts"
+        },
+        "type": "object"
       }
     },
     "upload": {

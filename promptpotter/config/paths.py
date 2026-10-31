@@ -53,10 +53,13 @@ def user_data_root() -> Path:
     return _os_app_data_dir()
 
 
+INSTALL_CACHE_DIR = ".cache"
+
+
 def install_cache_root() -> Path:
     """What derives from the installed code alone, so every home on one install shares it."""
     checkout = source_checkout_root()
-    return (checkout if checkout is not None else _os_app_data_dir()) / ".cache"
+    return (checkout if checkout is not None else _os_app_data_dir()) / INSTALL_CACHE_DIR
 
 
 PROJECTS_DIR = "projects"

@@ -295,6 +295,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="List the paths that would be removed; touch nothing. Recommended first run.",
             ),
         ),
+        # `maintenance/reset.py` completes them itself.
+        needs_registries=False,
     ),
     Verb(
         "verify",
@@ -680,6 +682,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "shapes, under THIS code. Prints `held N`, or one `unknown PATH` or `unloadable FATE KIND "
         "PATH: WHY` line each and exits 1 — a landing's proof, before its restart. Read-only, zero "
         "spend.",
+        needs_registries=False,
     ),
     Verb(
         "trail",

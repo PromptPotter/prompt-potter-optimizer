@@ -14,6 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from promptpotter.config.paths import (
     BLOCK_PACKS_DIR,
+    INSTALL_CACHE_DIR,
     JUDGE_REUSE_DIR,
     MEASUREMENTS_DIR,
     OPTIMIZER_REUSE_DIR,
@@ -55,6 +56,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
 from promptpotter.infrastructure.store.site_records import SITE_RECORDS_DIR, site_record
+from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE
 from promptpotter.infrastructure.store.tenant_dataset_store import (
     BANKS_DIR,
     CUTS_FILE,
@@ -72,6 +74,7 @@ from promptpotter.infrastructure.store.wallet_store import (
     ChargeRecord,
     CouponGrant,
 )
+from promptpotter.shared.hashing import SourceFacts
 
 
 class Fate(Enum):
@@ -153,6 +156,15 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     _install("optimizer manifest", "optimizers/*/pipeline.yaml", Fate.SURVIVOR, AUTHORED_MANIFEST),
     _install("check-in manifest", "checkin/pipeline.yaml", Fate.SURVIVOR, CHECKIN_MANIFEST),
     _install("model rates", "rates.json", Fate.CACHE),
+    # Under the data root where the install cache is its `.cache` (an install with no checkout).
+    _install(
+        "source facts",
+        f"{INSTALL_CACHE_DIR}/{SOURCE_FACTS_FILE}",
+        Fate.CACHE,
+        TypeAdapter(dict[str, SourceFacts]),
+    ),
+    # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
+    _install("dataset fetch cache", f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE),
     _install("job", f"{_JOBS}/*.json", Fate.RUN, JOB_ADAPTER),
     _install("job log", f"{_JOBS}/logs/*.log", Fate.RUN),
     _install("landing", f"{_JOBS}/.landing", Fate.MACHINE),

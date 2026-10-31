@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.data_root import (
     Fate,
@@ -79,6 +80,8 @@ class Proof(NamedTuple):
 
 def prove(data_root: Path) -> Proof:
     """Every file under the data root loads as its row shapes it: a landing's proof."""
+    # A ledger line holds the state kinds each optimizer package registers as it loads.
+    complete_registries(every_treatment=False)
     held = 0
     unknown: list[Path] = []
     unloadable: list[Unloadable] = []
@@ -105,6 +108,7 @@ def _drop(path: Path, size: int, data_root: Path) -> Drop | None:
 
 def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
     """A named tenant is the caller's resolved identity, never a literal `default`: the first web sign-in renames it."""
+    complete_registries(every_treatment=False)
     data_root = projects_root.parent
     if tenant_id is None:
         roots: tuple[Path, ...] = (data_root,)

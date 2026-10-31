@@ -58,8 +58,11 @@ def _module_path(module: str) -> Path | None:
     return next((p for p in (base.with_suffix(".py"), base / "__init__.py") if p.is_file()), None)
 
 
+SOURCE_FACTS_FILE = "source_facts.json"
+
+
 class _FactCache:
-    _FILE = Path("source_facts.json")
+    _FILE = Path(SOURCE_FACTS_FILE)
 
     def __init__(self) -> None:
         self._held: dict[str, SourceFacts] | None = None

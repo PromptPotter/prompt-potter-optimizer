@@ -44,6 +44,8 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 .promptpotter/
   block_packs/{name}/pack.json          # the install's block packs, read-only to every account
   jobs/{job_id}.json                    # machine-global admission records
+  .cache/source_facts.json              # the install cache, where an install has no checkout
+  .cache/huggingface/                   # the box unit's HF_HOME (`deploy-linux/install-service.sh`)
   projects/{tenant_id}/
     user.json  grant.json  api_keys.json
     charges.jsonl                       # the account's bill, one line per hold and billed send
