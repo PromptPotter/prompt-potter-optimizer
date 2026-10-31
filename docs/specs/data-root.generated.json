@@ -1,6 +1,375 @@
 {
   "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns\nunder the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before\n`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by\n`update.sh <ref> --reset`.\n",
   "kinds": {
+    "account block pack": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/block_packs/*/pack.json"
+      ],
+      "shape": {
+        "$defs": {
+          "Authored": {
+            "additionalProperties": false,
+            "properties": {
+              "author": {
+                "title": "Author",
+                "type": "string"
+              },
+              "date": {
+                "format": "date",
+                "title": "Date",
+                "type": "string"
+              },
+              "experiment": {
+                "title": "Experiment",
+                "type": "string"
+              },
+              "kind": {
+                "const": "authored",
+                "title": "Kind",
+                "type": "string"
+              },
+              "notes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Notes"
+              },
+              "supersedes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Supersedes"
+              },
+              "version": {
+                "minimum": 1,
+                "title": "Version",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "author",
+              "date",
+              "experiment",
+              "version",
+              "supersedes",
+              "notes"
+            ],
+            "title": "Authored",
+            "type": "object"
+          },
+          "Cited": {
+            "additionalProperties": false,
+            "properties": {
+              "evolved_on_model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Evolved On Model"
+              },
+              "evolved_or_authored": {
+                "enum": [
+                  "evolved",
+                  "authored",
+                  "selected"
+                ],
+                "title": "Evolved Or Authored",
+                "type": "string"
+              },
+              "kind": {
+                "const": "cited",
+                "title": "Kind",
+                "type": "string"
+              },
+              "locator": {
+                "title": "Locator",
+                "type": "string"
+              },
+              "notes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Notes"
+              },
+              "reported": {
+                "$ref": "#/$defs/Reported"
+              },
+              "role": {
+                "title": "Role",
+                "type": "string"
+              },
+              "technique_family": {
+                "title": "Technique Family",
+                "type": "string"
+              },
+              "verbatim": {
+                "title": "Verbatim",
+                "type": "boolean"
+              },
+              "via": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Via",
+                "type": "array"
+              },
+              "work": {
+                "title": "Work",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "work",
+              "locator",
+              "verbatim",
+              "via",
+              "technique_family",
+              "role",
+              "evolved_or_authored",
+              "evolved_on_model",
+              "reported",
+              "notes"
+            ],
+            "title": "Cited",
+            "type": "object"
+          },
+          "Presumption": {
+            "description": "What a block's text takes for granted of the run it lands in; a run lacking one makes it noise.",
+            "enum": [
+              "ranking",
+              "last_line_answer"
+            ],
+            "title": "Presumption",
+            "type": "string"
+          },
+          "PromptPart": {
+            "description": "A prompt field a snippet suits, one name for a target and an optimizer prompt alike: a drop elsewhere is shown, never refused.",
+            "enum": [
+              "persona",
+              "task_intent",
+              "problem_description",
+              "instruction",
+              "thinking_style",
+              "answer_format"
+            ],
+            "title": "PromptPart",
+            "type": "string"
+          },
+          "Reported": {
+            "additionalProperties": false,
+            "properties": {
+              "baseline": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Baseline"
+              },
+              "benchmark": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Benchmark"
+              },
+              "evaluated_on_models": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Evaluated On Models",
+                "type": "array"
+              },
+              "lift": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Lift"
+              },
+              "score": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Score"
+              },
+              "task_family": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Task Family"
+              }
+            },
+            "required": [
+              "task_family",
+              "benchmark",
+              "evaluated_on_models",
+              "score",
+              "lift",
+              "baseline"
+            ],
+            "title": "Reported",
+            "type": "object"
+          },
+          "Snippet": {
+            "additionalProperties": false,
+            "properties": {
+              "presumes": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/Presumption"
+                },
+                "title": "Presumes",
+                "type": "array",
+                "uniqueItems": true
+              },
+              "provenance": {
+                "discriminator": {
+                  "mapping": {
+                    "authored": "#/$defs/Authored",
+                    "cited": "#/$defs/Cited"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Cited"
+                  },
+                  {
+                    "$ref": "#/$defs/Authored"
+                  }
+                ],
+                "title": "Provenance"
+              },
+              "suits": {
+                "items": {
+                  "$ref": "#/$defs/PromptPart"
+                },
+                "minItems": 1,
+                "title": "Suits",
+                "type": "array",
+                "uniqueItems": true
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Tags",
+                "type": "array"
+              },
+              "text": {
+                "minLength": 1,
+                "title": "Text",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "suits",
+              "tags",
+              "provenance"
+            ],
+            "title": "Snippet",
+            "type": "object"
+          },
+          "Work": {
+            "additionalProperties": false,
+            "properties": {
+              "first_author": {
+                "title": "First Author",
+                "type": "string"
+              },
+              "license": {
+                "title": "License",
+                "type": "string"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              },
+              "year": {
+                "title": "Year",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "first_author",
+              "year",
+              "title",
+              "license"
+            ],
+            "title": "Work",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "snippets": {
+            "items": {
+              "$ref": "#/$defs/Snippet"
+            },
+            "title": "Snippets",
+            "type": "array"
+          },
+          "works": {
+            "additionalProperties": {
+              "$ref": "#/$defs/Work"
+            },
+            "title": "Works",
+            "type": "object"
+          }
+        },
+        "required": [
+          "works",
+          "snippets"
+        ],
+        "title": "BlockPack",
+        "type": "object"
+      }
+    },
     "api keys": {
       "fate": "SURVIVOR",
       "patterns": [
@@ -152,6 +521,37 @@
       ],
       "shape": {
         "reader": "promptpotter.infrastructure.store.tenant_dataset_store::read_bank"
+      }
+    },
+    "bank labels": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/banks/labels.jsonl"
+      ],
+      "shape": {
+        "additionalProperties": false,
+        "description": "A line of `labels.jsonl`: from ``labelled_at`` on, *label* names the bank *dataset_hash*.",
+        "properties": {
+          "dataset_hash": {
+            "title": "Dataset Hash",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "labelled_at": {
+            "title": "Labelled At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "dataset_hash",
+          "labelled_at"
+        ],
+        "title": "BankLabel",
+        "type": "object"
       }
     },
     "blocklist": {
@@ -578,12 +978,109 @@
         "type": "object"
       }
     },
+    "consent trail": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/consent.jsonl"
+      ],
+      "shape": {
+        "$defs": {
+          "Device": {
+            "enum": [
+              "phone",
+              "tablet",
+              "computer"
+            ],
+            "title": "Device",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "description": "An act the account's standing rests on; ``user_id`` is the acting principal, a delegate's own\nid in its delegator's tenant.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Device"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "event": {
+            "enum": [
+              "account_created",
+              "signed_in",
+              "terms_accepted"
+            ],
+            "title": "Event",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "user_id",
+          "at"
+        ],
+        "title": "ConsentLine",
+        "type": "object"
+      }
+    },
+    "dataset definition": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/datasets/**/dataset.yaml"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.dataset_access::definition_layer"
+      }
+    },
     "dataset fetch cache": {
       "fate": "CACHE",
       "patterns": [
         ".cache/huggingface/**"
       ],
       "shape": null
+    },
+    "dataset file": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/datasets/**"
+      ],
+      "shape": null
+    },
+    "dataset framing": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/datasets/**/task.md"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.dataset_access::dataset_framing"
+      }
+    },
+    "dataset origin": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/datasets/**/origin.yaml"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.dataset_access::origin_layer"
+      }
     },
     "environment": {
       "fate": "SURVIVOR",
@@ -862,12 +1359,692 @@
         "type": "object"
       }
     },
-    "install block packs": {
+    "install block pack": {
       "fate": "SURVIVOR",
       "patterns": [
-        "block_packs/**"
+        "block_packs/*/pack.json"
       ],
-      "shape": null
+      "shape": {
+        "$defs": {
+          "Authored": {
+            "additionalProperties": false,
+            "properties": {
+              "author": {
+                "title": "Author",
+                "type": "string"
+              },
+              "date": {
+                "format": "date",
+                "title": "Date",
+                "type": "string"
+              },
+              "experiment": {
+                "title": "Experiment",
+                "type": "string"
+              },
+              "kind": {
+                "const": "authored",
+                "title": "Kind",
+                "type": "string"
+              },
+              "notes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Notes"
+              },
+              "supersedes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Supersedes"
+              },
+              "version": {
+                "minimum": 1,
+                "title": "Version",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "author",
+              "date",
+              "experiment",
+              "version",
+              "supersedes",
+              "notes"
+            ],
+            "title": "Authored",
+            "type": "object"
+          },
+          "Cited": {
+            "additionalProperties": false,
+            "properties": {
+              "evolved_on_model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Evolved On Model"
+              },
+              "evolved_or_authored": {
+                "enum": [
+                  "evolved",
+                  "authored",
+                  "selected"
+                ],
+                "title": "Evolved Or Authored",
+                "type": "string"
+              },
+              "kind": {
+                "const": "cited",
+                "title": "Kind",
+                "type": "string"
+              },
+              "locator": {
+                "title": "Locator",
+                "type": "string"
+              },
+              "notes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Notes"
+              },
+              "reported": {
+                "$ref": "#/$defs/Reported"
+              },
+              "role": {
+                "title": "Role",
+                "type": "string"
+              },
+              "technique_family": {
+                "title": "Technique Family",
+                "type": "string"
+              },
+              "verbatim": {
+                "title": "Verbatim",
+                "type": "boolean"
+              },
+              "via": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Via",
+                "type": "array"
+              },
+              "work": {
+                "title": "Work",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "work",
+              "locator",
+              "verbatim",
+              "via",
+              "technique_family",
+              "role",
+              "evolved_or_authored",
+              "evolved_on_model",
+              "reported",
+              "notes"
+            ],
+            "title": "Cited",
+            "type": "object"
+          },
+          "Presumption": {
+            "description": "What a block's text takes for granted of the run it lands in; a run lacking one makes it noise.",
+            "enum": [
+              "ranking",
+              "last_line_answer"
+            ],
+            "title": "Presumption",
+            "type": "string"
+          },
+          "PromptPart": {
+            "description": "A prompt field a snippet suits, one name for a target and an optimizer prompt alike: a drop elsewhere is shown, never refused.",
+            "enum": [
+              "persona",
+              "task_intent",
+              "problem_description",
+              "instruction",
+              "thinking_style",
+              "answer_format"
+            ],
+            "title": "PromptPart",
+            "type": "string"
+          },
+          "Reported": {
+            "additionalProperties": false,
+            "properties": {
+              "baseline": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Baseline"
+              },
+              "benchmark": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Benchmark"
+              },
+              "evaluated_on_models": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Evaluated On Models",
+                "type": "array"
+              },
+              "lift": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Lift"
+              },
+              "score": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Score"
+              },
+              "task_family": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Task Family"
+              }
+            },
+            "required": [
+              "task_family",
+              "benchmark",
+              "evaluated_on_models",
+              "score",
+              "lift",
+              "baseline"
+            ],
+            "title": "Reported",
+            "type": "object"
+          },
+          "Snippet": {
+            "additionalProperties": false,
+            "properties": {
+              "presumes": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/Presumption"
+                },
+                "title": "Presumes",
+                "type": "array",
+                "uniqueItems": true
+              },
+              "provenance": {
+                "discriminator": {
+                  "mapping": {
+                    "authored": "#/$defs/Authored",
+                    "cited": "#/$defs/Cited"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Cited"
+                  },
+                  {
+                    "$ref": "#/$defs/Authored"
+                  }
+                ],
+                "title": "Provenance"
+              },
+              "suits": {
+                "items": {
+                  "$ref": "#/$defs/PromptPart"
+                },
+                "minItems": 1,
+                "title": "Suits",
+                "type": "array",
+                "uniqueItems": true
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Tags",
+                "type": "array"
+              },
+              "text": {
+                "minLength": 1,
+                "title": "Text",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "suits",
+              "tags",
+              "provenance"
+            ],
+            "title": "Snippet",
+            "type": "object"
+          },
+          "Work": {
+            "additionalProperties": false,
+            "properties": {
+              "first_author": {
+                "title": "First Author",
+                "type": "string"
+              },
+              "license": {
+                "title": "License",
+                "type": "string"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              },
+              "year": {
+                "title": "Year",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "first_author",
+              "year",
+              "title",
+              "license"
+            ],
+            "title": "Work",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "snippets": {
+            "items": {
+              "$ref": "#/$defs/Snippet"
+            },
+            "title": "Snippets",
+            "type": "array"
+          },
+          "works": {
+            "additionalProperties": {
+              "$ref": "#/$defs/Work"
+            },
+            "title": "Works",
+            "type": "object"
+          }
+        },
+        "required": [
+          "works",
+          "snippets"
+        ],
+        "title": "BlockPack",
+        "type": "object"
+      }
+    },
+    "job": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "jobs/*.json"
+      ],
+      "shape": {
+        "$defs": {
+          "Budget": {
+            "additionalProperties": false,
+            "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+            "properties": {
+              "rounds": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
+                "title": "Rounds"
+              },
+              "tokens": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
+                "title": "Tokens"
+              },
+              "usd": {
+                "anyOf": [
+                  {
+                    "ge": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
+                "title": "Usd"
+              },
+              "wall_clock_s": {
+                "anyOf": [
+                  {
+                    "gt": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
+                "title": "Wall Clock S"
+              }
+            },
+            "title": "Budget",
+            "type": "object"
+          },
+          "CampaignLaunch": {
+            "additionalProperties": false,
+            "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
+            "properties": {
+              "dataset_name": {
+                "title": "Dataset Name",
+                "type": "string"
+              },
+              "draft_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Draft Id"
+              },
+              "kind": {
+                "const": "campaign_launch",
+                "default": "campaign_launch",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "dataset_name"
+            ],
+            "title": "CampaignLaunch",
+            "type": "object"
+          },
+          "EmbeddedRun": {
+            "additionalProperties": false,
+            "description": "A host program's run: a share and a reservation, never a slot, since the host schedules itself.",
+            "properties": {
+              "dataset_name": {
+                "title": "Dataset Name",
+                "type": "string"
+              },
+              "kind": {
+                "const": "embedded_run",
+                "default": "embedded_run",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "dataset_name"
+            ],
+            "title": "EmbeddedRun",
+            "type": "object"
+          },
+          "InnerRun": {
+            "additionalProperties": false,
+            "description": "An L4 inner campaign: a share of what its enclosing run's book has left, and nothing more.",
+            "properties": {
+              "dataset_name": {
+                "title": "Dataset Name",
+                "type": "string"
+              },
+              "kind": {
+                "const": "inner_run",
+                "default": "inner_run",
+                "title": "Kind",
+                "type": "string"
+              }
+            },
+            "required": [
+              "dataset_name"
+            ],
+            "title": "InnerRun",
+            "type": "object"
+          },
+          "ScoringPass": {
+            "additionalProperties": false,
+            "description": "A paid verb scoring outside any run: its hop is the cycle it scores, or none at all.",
+            "properties": {
+              "kind": {
+                "const": "scoring_pass",
+                "default": "scoring_pass",
+                "title": "Kind",
+                "type": "string"
+              },
+              "verb": {
+                "enum": [
+                  "bench",
+                  "noise-floor",
+                  "probe-reasoning",
+                  "seed-screen",
+                  "verify"
+                ],
+                "title": "Verb",
+                "type": "string"
+              }
+            },
+            "required": [
+              "verb"
+            ],
+            "title": "ScoringPass",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Outlives its release to the end of its UTC day: the daily launch quota counts it.",
+        "properties": {
+          "admitted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Admitted At"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "code_revision": {
+            "title": "Code Revision",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "holder": {
+            "discriminator": {
+              "mapping": {
+                "campaign_launch": "#/$defs/CampaignLaunch",
+                "embedded_run": "#/$defs/EmbeddedRun",
+                "inner_run": "#/$defs/InnerRun",
+                "scoring_pass": "#/$defs/ScoringPass"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CampaignLaunch"
+              },
+              {
+                "$ref": "#/$defs/ScoringPass"
+              },
+              {
+                "$ref": "#/$defs/EmbeddedRun"
+              },
+              {
+                "$ref": "#/$defs/InnerRun"
+              }
+            ],
+            "title": "Holder"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "producer_id": {
+            "default": "",
+            "title": "Producer Id",
+            "type": "string"
+          },
+          "refusal": {
+            "default": "",
+            "title": "Refusal",
+            "type": "string"
+          },
+          "released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Released At"
+          },
+          "reserve": {
+            "$ref": "#/$defs/Budget"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "starting"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "running",
+                "type": "string"
+              }
+            ],
+            "title": "Stage"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "user_id",
+          "principal_id",
+          "workspace",
+          "campaign_id",
+          "cycle_id",
+          "holder",
+          "stage",
+          "created_at",
+          "started_at",
+          "released_at",
+          "code_revision"
+        ],
+        "title": "Job",
+        "type": "object"
+      }
     },
     "judge_reuse": {
       "fate": "CACHE",
@@ -1765,8 +2942,17 @@
         "type": "object"
       }
     },
+    "task context": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/task-context/*.yaml"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.tenant_dataset_store::read_task_context"
+      }
+    },
     "upload": {
-      "fate": "CACHE",
+      "fate": "SURVIVOR",
       "patterns": [
         "projects/*/uploads/**"
       ],

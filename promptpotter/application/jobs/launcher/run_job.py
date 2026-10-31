@@ -29,6 +29,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
+from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
@@ -59,8 +60,6 @@ if sys.platform == "win32":
     _DETACHED = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
 else:
     _DETACHED = {"start_new_session": True}
-# The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
-_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
 
 
 class JobSpec(StrictModel):
@@ -236,8 +235,9 @@ class HeldRun:
     ) -> tuple[CycleResult, RunObservers]:
         session = self.session
         readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
+        # The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
         with contextlib.suppress(OSError):
-            write_text(_LATEST_READOUT_POINTER, f"{readout}\n")
+            write_text(user_data_root() / READOUT_POINTER, f"{readout}\n")
         return await run_held_job(
             self.job_registry,
             self.job_id,

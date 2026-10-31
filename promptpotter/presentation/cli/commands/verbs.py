@@ -676,11 +676,20 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         needs_registries=False,
     ),
     Verb(
+        "migrate",
+        "machine_status:cmd_migrate",
+        help="A landing's step before its proof: rewrite each survivor whose shape the landing code "
+        "changed (`application/maintenance/migrate.py::MIGRATIONS`). Every migration is idempotent, "
+        "so it runs at every landing until its release is landed everywhere. Prints one line per "
+        "account it changed. Zero spend.",
+        needs_registries=False,
+    ),
+    Verb(
         "prove-data",
         "machine_status:cmd_prove_data",
         help="Load every file under the data root its row of `infrastructure/store/data_root.py` "
-        "shapes, under THIS code. Prints `held N`, or one `unknown PATH` or `unloadable FATE KIND "
-        "PATH: WHY` line each and exits 1 — a landing's proof, before its restart. Read-only, zero "
+        "shapes, under THIS code. Prints `proven N`, or one `unknown PATH` or `unloadable FATE KIND "
+        "PATH: WHY` line each and exits 3 — a landing's proof, before its restart. Read-only, zero "
         "spend.",
         needs_registries=False,
     ),

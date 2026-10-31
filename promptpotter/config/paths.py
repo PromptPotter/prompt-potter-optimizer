@@ -55,6 +55,9 @@ def user_data_root() -> Path:
 
 INSTALL_CACHE_DIR = ".cache"
 
+# From the data root: names the newest terminal launch's `readout.log`.
+READOUT_POINTER = "logs/latest-readout-path.txt"
+
 
 def install_cache_root() -> Path:
     """What derives from the installed code alone, so every home on one install shares it."""

@@ -205,12 +205,9 @@ import-graph script before and after; close each wave with `gate.py --only layer
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
-- **`reset` guards no live producer**: `maintenance/reset.py::apply_reset` never takes the guard
-  `delete` takes (`_guard_and_release`), so it removes a running cycle's files under it.
-  Action: take the delete's guard per cycle. **Re-test:** a reset while a run holds its producer lock.
 - **Run files read as dicts have no shape row**: `data_root.py::KINDS` proves `draft.json`,
   `checkin.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
-  `diagnostics/`, `banks/labels.jsonl` and `cuts.jsonl`, `rates.json` and the langfuse mirror by
+  `diagnostics/`, `banks/cuts.jsonl`, `rates.json` and the langfuse mirror by
   presence alone, because their readers walk `dict`s (`read_json_optional`, `read_json_tolerant`,
   `fold_jsonl`). A reshape there passes `prove-data` and is read around. Action: a model per file,
   its reader's, then its row's shape. **Re-test:** `git grep -n ", None)" -- promptpotter/infrastructure/store/data_root.py`.
@@ -220,14 +217,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `application/jobs/interlock.py` and its peers sit above `infrastructure/`. A renamed one reads as
   unknown and is dropped by `reset`. Action: one constant per name in `config/paths.py` or `layout.py`,
   read by both. **Re-test:** rename `_LANDING` and run `prove-data` on a box with a landing open.
-- **The latest-readout pointer is CWD-relative** (`launcher/run_job.py::_LATEST_READOUT_POINTER`), and
-  the box unit's `WorkingDirectory` is its data root (`deploy-linux/install-service.sh`), so a run
-  there writes `logs/latest-readout-path.txt` into the data root, which no `data_root.py` row names.
-  Action: anchor it at a root the table names, or give the unit a working directory outside the data
-  root. **Re-test:** `prove-data` on the box after a launch.
-- **`site_records/*.jsonl` reads around a torn line** (`store/site_records.py::_latest`), while
-  `prove-data` refuses it, so a landing over a crash-torn row refuses while the site still serves.
-  Action: decide one policy for a torn append-only line. **Re-test:** a site table with a half line.
 - **`CampaignOwner` reads `campaign.json` beside `Campaign`** (`campaign_store/store.py::campaign_owner`),
   a second, tolerant model of one file. Action: one model. **Re-test:** `git grep -n "CampaignOwner" -- promptpotter`.
 - **Writers with no reader**: `dashboard.json` and `index.json` (checkouts nothing reads back), and

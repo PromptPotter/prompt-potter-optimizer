@@ -1,18 +1,37 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.run_records import Device
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
+    append_jsonl,
     read_json_optional,
+    read_lines,
     write_json,
 )
 
 USER_FILE = "user.json"
+CONSENT_FILE = "consent.jsonl"
+
+ConsentEvent = Literal["account_created", "signed_in", "terms_accepted"]
+
+
+class ConsentLine(FrozenModel):
+    """An act the account's standing rests on; ``user_id`` is the acting principal, a delegate's own
+    id in its delegator's tenant."""
+
+    event: ConsentEvent
+    user_id: str
+    # The provider of a sign-in, the version a terms acceptance accepted.
+    subject: str = ""
+    # What a sign-in or an opening came from; unset where no request carried one.
+    device: Device | None = None
+    at: str
 
 
 class ConsentRecord(FrozenModel):
@@ -54,6 +73,15 @@ class UserStore:
 
     def save(self, user: User) -> None:
         write_json(self._path(), user.model_dump())
+
+    def record(self, line: ConsentLine) -> None:
+        append_jsonl(self._base_dir / CONSENT_FILE, line.model_dump(mode="json"))
+
+    def consent_trail(self) -> list[ConsentLine]:
+        return [
+            ConsentLine.model_validate_json(raw)
+            for raw in read_lines(self._base_dir / CONSENT_FILE)
+        ]
 
 
 def account_dirs(projects_root: Path) -> list[WorkspaceDir]:

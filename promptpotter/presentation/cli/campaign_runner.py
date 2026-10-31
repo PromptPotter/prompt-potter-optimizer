@@ -98,8 +98,8 @@ def main() -> None:
         print(json.dumps(result.data, indent=2, default=str))
     else:
         print(result.human)
-    if result.outcome is not None and (code := result.outcome.exit_code):
-        sys.exit(code)
+    if result.exit_code:
+        sys.exit(result.exit_code)
 
 
 if __name__ == "__main__":

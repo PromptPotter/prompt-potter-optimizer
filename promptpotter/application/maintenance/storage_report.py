@@ -12,7 +12,7 @@ from pydantic import Field
 from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.data_root import CAMPAIGN_ROWS, Leaf, classify_in_workspace
+from promptpotter.infrastructure.store.data_root import Leaf, campaign_row
 from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
 from promptpotter.infrastructure.store.layout import ArchiveHomeOwner
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
@@ -33,10 +33,9 @@ _CONNECTOR_ROUND_KEYS = tuple(
 _LEAVES = tuple(leaf.value for leaf in Leaf)
 
 
-def _leaf_of(path: Path, workspace: Path) -> Leaf:
+def _leaf_of(path: Path, campaign_dir: Path) -> Leaf:
     """A file no campaign row names counts as loop trace."""
-    found = classify_in_workspace(PurePosixPath(path.relative_to(workspace).as_posix()))
-    row = None if found is None else CAMPAIGN_ROWS.get(found.kind)
+    row = campaign_row(PurePosixPath(path.relative_to(campaign_dir).as_posix()))
     return Leaf.TRACE if row is None else row.leaf
 
 
@@ -55,7 +54,7 @@ def _campaign_split(root: Path) -> dict[str, int]:
         return acc
     # Walked per read, uncached: a directory's mtime stands still while a file below it grows.
     for path, st in iter_files(root):
-        leaf = _leaf_of(path, root.parent.parent)
+        leaf = _leaf_of(path, root)
         if leaf is Leaf.STATE:
             conn = min(_connector_bytes_of(str(path), st.st_mtime_ns, st.st_size), st.st_size)
             acc[Leaf.CONNECTOR.value] += conn

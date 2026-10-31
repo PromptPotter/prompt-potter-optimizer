@@ -626,9 +626,7 @@ class LLMCallRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-AccountEvent = Literal[
-    "account_created", "signed_in", "terms_accepted", "uploaded", "request_refused"
-]
+AccountEvent = Literal["uploaded", "request_refused"]
 
 HealthState = Literal["held", "broken", "unverified"]
 
@@ -670,11 +668,8 @@ class AccountEventRecord(FrozenModel):
     record_type: Literal["account_event"] = "account_event"
     event: AccountEvent
     user_id: str
-    # The provider of a sign-in, the version of a terms acceptance, the file an upload was kept as,
-    # what a refused request asked and was told.
+    # The file an upload was kept as, what a refused request asked and was told.
     subject: str = ""
-    # What a sign-in or an opening came from; unset where no request carried one.
-    device: Device | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

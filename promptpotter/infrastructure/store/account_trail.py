@@ -1,4 +1,4 @@
-"""What was done in one workspace, read off its ledgers; `account_spend.py` reads what it cost."""
+"""What was done in one workspace, read off its consent trail and ledgers; `account_spend.py` reads what it cost."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from promptpotter.infrastructure.store.layout import (
     read_sandbox_owner,
 )
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
+from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
@@ -46,7 +47,7 @@ class TrailLine(NamedTuple):
     at: str
     what: str
     # Where a command was addressed (campaign/cycle, blank on the workspace); what an account event
-    # carried; a run's stop is its address, then why.
+    # or a consent line carried; a run's stop is its address, then why.
     subject: str
     # The acting principal: a delegate's own id on a line in its delegator's workspace; blank on a stop.
     actor: str
@@ -87,14 +88,7 @@ class _Trail:
                 )
             case AccountEventRecord():
                 self._found.append(
-                    TrailLine(
-                        record.timestamp,
-                        record.event,
-                        record.subject,
-                        record.user_id,
-                        "",
-                        record.device,
-                    )
+                    TrailLine(record.timestamp, record.event, record.subject, record.user_id, "")
                 )
             case CommandRecord():
                 self._found.append(
@@ -133,7 +127,12 @@ def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
 
 
 def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:
-    """Unordered: the workspace's own ledgers, then the cycles of every inner sandbox it owns."""
+    """Unordered: the account's consent trail, the workspace's own ledgers, then the cycles of
+    every inner sandbox it owns."""
+    yield from (
+        TrailLine(line.at, line.event, line.subject, line.user_id, "", line.device)
+        for line in UserStore(campaigns.workspace).consent_trail()
+    )
     lines, _ = LedgerIndex.of(CycleEventLog.workspace_path(campaigns.workspace), _TRAIL_FOLDS).view(
         _Trail
     )

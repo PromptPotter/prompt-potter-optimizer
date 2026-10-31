@@ -62,6 +62,7 @@ from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
+from promptpotter.application.maintenance.reset import prove
 from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     manifest_directories,
@@ -132,6 +133,24 @@ SCRIPTED_L2 = {"l1_patience": 2}
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
+# A leg's home holds its own outputs beside the run's data root, and the legs nested in it.
+HARNESS = frozenset(
+    {
+        "requests",
+        "decisions.json",
+        "campaign.yaml",
+        "head_to_head.json",
+        "arms",
+        "foreign",
+        RESUMED,
+        DIVERGED,
+        REBASED,
+        CROSSED,
+        f"{CROSSED}-{RESUMED}",
+        f"{CROSSED}-l2",
+        *INTERRUPTED.values(),
+    }
+)
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
 RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers")
@@ -1378,10 +1397,37 @@ def read_straight_and_resumed(
     return failed
 
 
+def is_harness(rel: Path) -> bool:
+    """What this script writes into a leg's home beside the run: its outputs and the legs nested in it."""
+    top = rel.parts[0]
+    return top in HARNESS or top.startswith(("requests-", "arm-")) or top.endswith(".log")
+
+
+def proven_home(workspace: Path) -> None:
+    """A landing's proof over what the run wrote: every file named by a row, and loading as it shapes."""
+    proof = prove(workspace)
+    unknown = [p for p in proof.unknown if not is_harness(p.relative_to(workspace))]
+    if unknown or proof.unloadable:
+        raise SystemExit(
+            f"offline run: the run wrote what no data-root row names {unknown}, or what its row's "
+            f"reader refuses {[f'{u.path}: {u.why}' for u in proof.unloadable]}"
+        )
+
+
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
     workspace = Path(os.environ["PROMPTPOTTER_HOME"])
+    if args.terminal:
+        run_terminal(
+            args.child,
+            workspace,
+            args.terminal,
+            rounds=args.rounds,
+            rows=args.rows,
+            interrupts=args.interrupts,
+        )
+        return
     if args.child in CONTROLLED:
         asyncio.run(
             run_controlled(
@@ -1391,15 +1437,6 @@ def run_child_leg(args: argparse.Namespace) -> None:
                 rows=args.rows,
                 foreign=args.child == CONTROLLED[0],
             )
-        )
-    elif args.terminal:
-        run_terminal(
-            args.child,
-            workspace,
-            args.terminal,
-            rounds=args.rounds,
-            rows=args.rows,
-            interrupts=args.interrupts,
         )
     elif args.rebase:
         asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
@@ -1415,6 +1452,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             crossover=args.crossover,
         )
         print(asyncio.run(one)[0])
+    proven_home(workspace)
 
 
 def main() -> int:

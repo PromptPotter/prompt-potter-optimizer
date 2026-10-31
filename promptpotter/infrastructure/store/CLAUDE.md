@@ -7,9 +7,12 @@ and the storage report counts only what it lists, so a cache missing from it is 
 `shared_root` equals `projects_root` except in an L4 inner sandbox, which isolates campaign state but
 never a content-keyed cache.
 
-**A new file joins `store/data_root.py::KINDS` as exactly one row, its shape its reader's own model**
+**A new file joins `store/data_root.py::KINDS` as one row, its shape its reader's own model**
 — owned by [`decisions.md`](../../../docs/decisions.md) § 0011; a file no row names is dropped by
-`reset` and refuses a landing.
+`reset` and refuses a landing. **What an account authored or agreed to is migrated, never wiped** — a
+reshape of a SURVIVOR row ships a migration (`application/maintenance/migrate.py::MIGRATIONS`); a
+consent fact is a `user_store.py::ConsentLine` in `consent.jsonl`, never a workspace-ledger record,
+which is run data.
 
 **`optimizer_reuse` and `judge_reuse` are separate `LLMReuseCache` instances** (`store/llm_reuse_cache.py`) —
 a grader reading the loop's cached answers would be a ruler fed by what it measures.

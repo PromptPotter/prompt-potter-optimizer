@@ -11,6 +11,7 @@ from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -19,8 +20,9 @@ from promptpotter.infrastructure.store.dataset_access import (
     render_framing_file,
 )
 from promptpotter.infrastructure.store.io import (
+    parse_yaml,
     read_bytes_optional,
-    read_yaml_optional,
+    read_lines,
     validate_path_component,
     write_bytes,
     write_json,
@@ -40,6 +42,16 @@ UPLOADS_DIR = "uploads"
 LABELS_FILE = "labels.jsonl"
 # Which bank each fetched `source:` recipe cut: a content fact, so an inner sandbox shares it.
 CUTS_FILE = "cuts.jsonl"
+# Each dataset's decomposed framing, which shadows its definition's committed one.
+TASK_CONTEXT_DIR = "task-context"
+
+
+class BankLabel(FrozenModel):
+    """A line of `labels.jsonl`: from ``labelled_at`` on, *label* names the bank *dataset_hash*."""
+
+    label: str
+    dataset_hash: str
+    labelled_at: str
 
 
 class TenantDatasetStore:
@@ -99,15 +111,14 @@ class TenantDatasetStore:
         """A label moves; no bank and no measurement filed under either hash is rewritten."""
         validate_dataset_name(label)
         if self.hash_of(label) != digest:
-            append_row(
-                self._labels_path(),
-                {"label": label, "dataset_hash": digest, "labelled_at": utcnow_iso()},
-            )
+            moved = BankLabel(label=label, dataset_hash=digest, labelled_at=utcnow_iso())
+            append_row(self._labels_path(), moved.model_dump())
 
     def labels(self) -> dict[str, str]:
+        """The last line naming a label is where it stands."""
         return {
-            label: str(row["dataset_hash"])
-            for label, row in fold_jsonl(self._labels_path(), "label").items()
+            row.label: row.dataset_hash
+            for row in map(BankLabel.model_validate_json, read_lines(self._labels_path()))
         }
 
     def hash_of(self, label: str) -> str | None:
@@ -177,10 +188,11 @@ class TenantDatasetStore:
         return self._base_dir / UPLOADS_DIR / validate_path_component(name)
 
     def task_context_path(self, name: str) -> Path:
-        return self._base_dir / "task-context" / f"{dataset_id_prefix(name)}.yaml"
+        return self._base_dir / TASK_CONTEXT_DIR / f"{dataset_id_prefix(name)}.yaml"
 
     def load_task_context(self, name: str) -> TaskDecomposition:
-        return TaskDecomposition.from_dict(read_yaml_optional(self.task_context_path(name)))
+        raw = read_bytes_optional(self.task_context_path(name))
+        return TaskDecomposition() if raw is None else read_task_context(raw)
 
     def save_task_context(self, name: str, framing: TaskDecomposition) -> Path | None:
         """`None` on an empty record: this tier shadows the definition's committed framing, and an empty file buries it."""
@@ -216,6 +228,13 @@ class TenantDatasetStore:
         path = self.dataset_dir(slug) / CANDIDATE_LIBRARY_FILE
         write_text(path, "\n".join(library))
         return path
+
+
+def read_task_context(raw: bytes) -> TaskDecomposition:
+    data = parse_yaml(raw)
+    if not isinstance(data, dict | None):
+        raise ValueError("a task context is a mapping of its fields")
+    return TaskDecomposition.from_dict(data)
 
 
 def _bank_items(raw: bytes) -> list[dict[str, Any]]:

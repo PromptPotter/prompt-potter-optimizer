@@ -45,7 +45,7 @@ Re-read state from disk every time:
 2. That cycle's `dashboard.json` (`round`, `run_standing`, `error_count`; `declared_phase` is only the
    runner's claim — trust `run_phase` from `python -m promptpotter cycles`, which also says why a
    cycle is paused and which verb it admits) + the newest `rounds/round_NNNN.json`.
-3. That cycle's `readout.log` tail (`logs/latest-readout-path.txt` names only the newest launch's).
+3. That cycle's `readout.log` tail (the data root's `logs/latest-readout-path.txt` names only the newest terminal launch's).
 
 Then **one line**: `mode · what's live · next action`. Nothing before it.
 

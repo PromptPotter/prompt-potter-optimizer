@@ -7,12 +7,15 @@ from promptpotter.application import health
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.migrate import migrate
 from promptpotter.application.maintenance.reset import prove
-from promptpotter.config.paths import user_data_root
-from promptpotter.domain.phases import StopOutcome
+from promptpotter.config.paths import default_projects_root, user_data_root
 from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
+
+# A proof that ran and found a file that does not load; a crash exits 1, an argument error 2.
+PROOF_REFUSED = 3
 
 
 async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
@@ -61,9 +64,14 @@ async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
     )
 
 
+async def cmd_migrate(_args: argparse.Namespace) -> CommandResult:
+    said = migrate(default_projects_root())
+    return CommandResult(data={"migrated": said}, human="\n".join(said or ["nothing to migrate"]))
+
+
 async def cmd_prove_data(_args: argparse.Namespace) -> CommandResult:
     proof = prove(user_data_root())
-    # The first two words are what `deploy-linux/update.sh` reads.
+    # The first two words, and `PROOF_REFUSED`, are what `deploy-linux/update.sh` reads.
     lines = [
         *(f"unknown {path}" for path in proof.unknown),
         *(
@@ -73,7 +81,7 @@ async def cmd_prove_data(_args: argparse.Namespace) -> CommandResult:
     ]
     return CommandResult(
         data={
-            "held": proof.held,
+            "proven": proof.proven,
             "unknown": [str(path) for path in proof.unknown],
             "unloadable": [
                 {
@@ -85,8 +93,8 @@ async def cmd_prove_data(_args: argparse.Namespace) -> CommandResult:
                 for one in proof.unloadable
             ],
         },
-        human="\n".join(lines or [f"held {proof.held} file(s)"]),
-        outcome=StopOutcome.FAILED if lines else StopOutcome.SUCCESS,
+        human="\n".join(lines or [f"proven {proof.proven} file(s)"]),
+        exit_code=PROOF_REFUSED if lines else 0,
     )
 
 
@@ -96,9 +104,5 @@ async def cmd_health(_args: argparse.Namespace) -> CommandResult:
         data={one.probe.name: one.reading._asdict() for one in checked},
         # The state leads each line: `deploy-linux/update.sh` reads it.
         human="\n".join(f"{one.reading.state} {health.row(one)}" for one in checked),
-        outcome=(
-            StopOutcome.FAILED
-            if any(one.reading.state == "broken" for one in checked)
-            else StopOutcome.SUCCESS
-        ),
+        exit_code=int(any(one.reading.state == "broken" for one in checked)),
     )

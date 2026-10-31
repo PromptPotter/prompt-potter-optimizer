@@ -33,13 +33,10 @@ def site_record(line: str | bytes) -> SiteRecord:
 
 
 def _latest(lines: list[str]) -> list[SiteRecord]:
+    """Complete lines only (`read_lines`): a crash tears just the last, and every other one reads."""
     latest: dict[str | int, SiteRecord] = {}
     for number, line in enumerate(lines):
-        try:
-            record = site_record(line)
-        except (ValueError, TypeError):
-            # A line torn by a crash costs itself and no other.
-            continue
+        record = site_record(line)
         latest[record.key or number] = record
     return list(latest.values())
 

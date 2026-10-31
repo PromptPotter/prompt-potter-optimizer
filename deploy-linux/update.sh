@@ -6,7 +6,11 @@
 #
 #   ./update.sh                    # the tracked branch's tip
 #   ./update.sh v0.8.17            # a tag, branch or commit on origin — a release deploy names its tag
-#   ./update.sh v0.8.17 --reset    # and drop the run data the landing code cannot load
+#   ./update.sh v0.8.17 --reset    # and, where the landing code cannot load some run data, drop ALL
+#                                  # run data: every campaign, cycle and draft of every account
+#
+# Exits 0 landed and healthy; 1 not landed (the old code runs again) or a service down after a
+# landing; 3 a roll-back that failed, with the commit the checkout is really on printed.
 set -euo pipefail
 REF=""
 RESET=""
@@ -68,6 +72,21 @@ as_unit() {
     -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
     "$INSTALL_DIR/.venv/bin/python" -m promptpotter "$@"
 }
+has_bot() { systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; }
+# The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code leaves
+# it on the old one until something restarts it. Silent, because a bot still answering /blocked
+# looks healthy. Skipped where it was never installed.
+start_services() {
+  sudo systemctl restart "$SERVICE_NAME" || return 1
+  if has_bot; then sudo systemctl restart "$BOT_SERVICE_NAME" || return 1; fi
+}
+build_webapp() {
+  if [[ -f "$ENV_FILE" ]]; then brand_write_env "$ENV_FILE" || return 1; fi
+  brand_export_webapp || return 1
+  if [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]]; then
+    ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm ci --silent && npm run build ) || return 1
+  fi
+}
 
 # --- preflight: refuse the placeholder fallback -----------------------------
 # Without deploy.config, INSTALL_DIR defaults to a generic placeholder that
@@ -113,21 +132,46 @@ fi
 # this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
-# Puts back the commit the checkout left in ORIG_HEAD; admission reopens to the API still running it.
+# A roll-back that cannot finish: the box is wherever this says, its services stopped.
+stuck() {
+  bad "roll-back failed: $1"
+  bad "checkout at $(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo 'no readable HEAD'); services stopped"
+  exit 3
+}
+# Puts back the commit the checkout left in ORIG_HEAD and starts it. Called after `||`, where
+# `set -e` is off for the whole body, so every step is checked here.
 roll_back() {
-  from="$(git -C "$INSTALL_DIR" rev-parse --verify ORIG_HEAD)"
-  checkout "$INSTALL_DIR" "$from"
-  ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
-  as_unit close-admission "$from" >/dev/null
   bad "not landed: $1"
+  local from verdict
+  from="$(git -C "$INSTALL_DIR" rev-parse --verify ORIG_HEAD)" || stuck "ORIG_HEAD names no commit"
+  git -C "$INSTALL_DIR" reset --hard --quiet "$from" || stuck "the checkout of $from failed"
+  ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all ) || stuck "the sync of $from failed"
+  if [[ -n "${WEBAPP_TOUCHED:-}" ]]; then build_webapp || stuck "the webapp build of $from failed"; fi
+  verdict="$(as_unit close-admission "$from")" || stuck "close-admission on $from crashed"
+  [[ "$verdict" == closed* ]] || { printf '%s\n' "$verdict"; stuck "admission stays closed to the landing"; }
+  start_services || stuck "the services on $from did not start"
+  ok "back on $(git -C "$INSTALL_DIR" describe --tags --always)"
   exit 1
 }
+# Nothing writes the data root while the landed code proves it and a reset drops from it. A run is
+# its own process and stays up; `reset` refuses while one is live.
+sudo systemctl stop "$SERVICE_NAME"
+if has_bot; then sudo systemctl stop "$BOT_SERVICE_NAME"; fi
+# A survivor the landed code reshaped is migrated, never wiped. Each migration is idempotent and runs
+# at every landing, so what the old code writes after a roll-back below is carried at the next one.
+migrate_out="$(as_unit migrate)" || { printf '%s\n' "$migrate_out"; roll_back "a migration failed"; }
+ok "$migrate_out"
 # Before the restart, the landed code loads every file under the data root. A survivor that will not
-# load is rewritten on the box by hand; run data or a cache that will not goes with `--reset`.
-if ! proof_out="$(as_unit prove-data)"; then
+# load has no migration yet; run data or a cache that will not goes with `--reset`.
+# `prove-data` exits 3 on a file that does not load (`machine_status.py::PROOF_REFUSED`); any other
+# failure is a crash, and rolls back as one.
+proof_rc=0
+proof_out="$(as_unit prove-data)" || proof_rc=$?
+if (( proof_rc != 0 )); then
   printf '%s\n' "$proof_out"
-  if grep -q '^unloadable SURVIVOR ' <<< "$proof_out"; then
-    roll_back "a survivor above does not load under the landing code — rewrite it on the box, then re-run"
+  (( proof_rc == 3 )) || roll_back "the proof crashed (exit $proof_rc)"
+  if grep -qvE '^(unknown |unloadable (RUN|CACHE) )' <<< "$proof_out"; then
+    roll_back "a survivor above does not load under the landing code — its reshape ships no migration"
   fi
   [[ -n "$RESET" ]] || roll_back "run data above does not load under the landing code — re-run with --reset to drop it"
   as_unit reset --all-tenants --yes || roll_back "the reset above failed"
@@ -135,30 +179,26 @@ if ! proof_out="$(as_unit prove-data)"; then
 fi
 ok "$proof_out"
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
-# shell does not load $ENV_FILE. The verb refuses a name naming no dataset, and `set -e` stops the
-# deploy there, before the exact sync drops what that name's extras were.
-offer_out="$(cd "$INSTALL_DIR" && DATASET_OFFER="$(read_env_kv "$ENV_FILE" DATASET_OFFER)" .venv/bin/python -m promptpotter offer-extras)"
+# shell does not load $ENV_FILE. The verb refuses a name naming no dataset, before the exact sync
+# drops what that name's extras were.
+offer_out="$(cd "$INSTALL_DIR" && DATASET_OFFER="$(read_env_kv "$ENV_FILE" DATASET_OFFER)" .venv/bin/python -m promptpotter offer-extras)" \
+  || roll_back "DATASET_OFFER names what this code cannot offer"
 offer_extras=()
 for extra in $offer_out; do offer_extras+=(--extra "$extra"); done
-( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all "${offer_extras[@]}" )
+( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all "${offer_extras[@]}" ) || roll_back "the exact sync failed"
 ok "synced; offered datasets' extras: ${offer_extras[*]:-none}"
 # A dep rebuild relabels new .venv files user_home_t; re-apply the persisted
 # bin_t rule (set by install-service.sh) so systemd can still exec them under
 # SELinux enforcing — otherwise the service silently 203/EXEC crash-loops.
 if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == "Enforcing" ]]; then
-  sudo restorecon -RF "$INSTALL_DIR/.venv/bin"
+  sudo restorecon -RF "$INSTALL_DIR/.venv/bin" || roll_back "restorecon failed"
 fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes
 # NEXT_PUBLIC_* in at build time — so skipping this would silently repaint the
 # install upstream at the next deploy.
-[[ -f "$ENV_FILE" ]] && brand_write_env "$ENV_FILE"
-brand_export_webapp
-[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm ci --silent && npm run build )
-sudo systemctl restart "$SERVICE_NAME"
-# The admin bot is a SEPARATE unit running the SAME checkout, so a sync that touched its code
-# leaves it on the old one until something restarts it — and nothing did. Silent, because a bot
-# still answering /blocked looks healthy. Skip where it was never installed.
-systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1 && sudo systemctl restart "$BOT_SERVICE_NAME"
+WEBAPP_TOUCHED=1
+build_webapp || roll_back "the webapp build failed"
+start_services || roll_back "the services did not start on the landed code"
 
 # --- backend (optional): sync → deps → restart ------------------------------
 if [[ -n "$BACKEND_DIR" ]]; then

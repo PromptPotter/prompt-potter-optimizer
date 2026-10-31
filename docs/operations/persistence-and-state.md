@@ -43,15 +43,18 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 ```
 .promptpotter/
   block_packs/{name}/pack.json          # the install's block packs, read-only to every account
-  jobs/{job_id}.json                    # machine-global admission records
+  jobs/{job_id}.json                    # machine-global admission records; today's, what the daily quota counts
+  logs/latest-readout-path.txt          # names the newest terminal launch's `readout.log`
   .cache/source_facts.json              # the install cache, where an install has no checkout
   .cache/huggingface/                   # the box unit's HF_HOME (`deploy-linux/install-service.sh`)
   projects/{tenant_id}/
     user.json  grant.json  api_keys.json
+    consent.jsonl                       # the account's opening, sign-ins and terms acceptances
     charges.jsonl                       # the account's bill, one line per hold and billed send
+    datasets/  task-context/  block_packs/  uploads/  banks/labels.jsonl   # what the account authored
     .workspace/                         # run data: `reset` drops it with the campaigns
       active_session.json
-      events.jsonl                      # workspace ledger — commands with no cycle, the account's events
+      events.jsonl                      # workspace ledger — commands with no cycle, uploads, refusals
     head_to_heads/{id}.json             # `domain/campaign.py::HeadToHeadRecord`
     drafts/{draft_id}/                  # an open check-in, until Start or Discard
     ruler.jsonl                         # the tenant's δ ruler, `store/ruler_store.py`
@@ -77,7 +80,8 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 ```
 
 **Every file here is named by exactly one row of `infrastructure/store/data_root.py::KINDS`**: its fate
-(SURVIVOR, CACHE, RUN, MACHINE) and the shape its own reader loads. `prove-data` loads the whole tree
+(SURVIVOR, CACHE, RUN, MACHINE) and the shape its own reader loads. `migrate` rewrites each survivor a
+release reshaped, before `prove-data` loads the whole tree
 and names every file no row names; `reset` drops RUN files, unnamed files and caches that no longer
 load — owned by [`decisions.md`](../decisions.md) § 0011.
 
@@ -95,7 +99,7 @@ Each row's contract is its model; this table says only what the type cannot.
 | `export.json` | `domain/export.py`; written with `cycle_final`, absent when no round closed. |
 | `optimized.md` | Which resolved values the optimizer MOVES and whether the model sees each — a person's file. |
 | `hard_samples.json` | `domain/cells.py::HardSamples`, rewritten each round close. |
-| `readout.log` | Every launch writes it, whatever started it; one file per cycle, each launch opening with a `Readout:` line. A fork mid-run moves it to the fork. `logs/latest-readout-path.txt` names only the newest terminal launch's. |
+| `readout.log` | Every launch writes it, whatever started it; one file per cycle, each launch opening with a `Readout:` line. A fork mid-run moves it to the fork. The data root's `logs/latest-readout-path.txt` names only the newest terminal launch's. |
 | `rounds/round_NNNN.json` | A checkout of the round's last statement for the operator; no code reads it back. One writer, `closed_rounds.py::RoundFileProjection`. |
 | `.runtime/ledger.jsonl` | The only surface that says which optimizer node RAN (`llm_call` records); an `arm` record carries the individual's whole `lineage`. |
 | `measurements/*` | Each file is one `store/measurement_archive.py::ArchiveFile`, keyed by content; no standing walker rewrites one onto a new shape — the commit moving a shape runs a one-off script, then deletes it. |

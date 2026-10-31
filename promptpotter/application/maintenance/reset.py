@@ -9,8 +9,12 @@ from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.data_root import (
+    PRODUCER_LOCKS,
     Fate,
     Found,
     Kind,
@@ -20,12 +24,14 @@ from promptpotter.infrastructure.store.data_root import (
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import iter_files, unlink_robust
 from promptpotter.infrastructure.store.layout import (
+    draft_claim_path,
     draft_dirs,
     in_inner_sandbox,
     inner_sandboxes_dir,
     read_sandbox_owner,
     tenant_workspace,
 )
+from promptpotter.shared.errors import ConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +48,7 @@ class Drop:
 
 @dataclass(frozen=True, slots=True)
 class ResetPlan:
-    data_root: Path
+    projects_root: Path
     roots: tuple[Path, ...]
     # Whose draft claims the reset takes before anything goes.
     workspaces: tuple[WorkspaceDir, ...]
@@ -73,7 +79,7 @@ class Unloadable(NamedTuple):
 
 
 class Proof(NamedTuple):
-    held: int
+    proven: int
     unknown: tuple[Path, ...]
     unloadable: tuple[Unloadable, ...]
 
@@ -82,7 +88,7 @@ def prove(data_root: Path) -> Proof:
     """Every file under the data root loads as its row shapes it: a landing's proof."""
     # A ledger line holds the state kinds each optimizer package registers as it loads.
     complete_registries(every_treatment=False)
-    held = 0
+    proven = 0
     unknown: list[Path] = []
     unloadable: list[Unloadable] = []
     for path, _st in iter_files(data_root):
@@ -91,8 +97,8 @@ def prove(data_root: Path) -> Proof:
         elif (why := unloadable_why(path, found)) is not None:
             unloadable.append(Unloadable(path, found, why))
         else:
-            held += 1
-    return Proof(held, tuple(sorted(unknown)), tuple(sorted(unloadable)))
+            proven += 1
+    return Proof(proven, tuple(sorted(unknown)), tuple(sorted(unloadable)))
 
 
 def _drop(path: Path, size: int, data_root: Path) -> Drop | None:
@@ -129,7 +135,24 @@ def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
                 kept += 1
             else:
                 drops.append(drop)
-    return ResetPlan(data_root, roots, workspaces, tuple(sorted(drops, key=lambda d: d.path)), kept)
+    return ResetPlan(
+        projects_root, roots, workspaces, tuple(sorted(drops, key=lambda d: d.path)), kept
+    )
+
+
+def _refuse_live(plan: ResetPlan) -> None:
+    """`delete`'s guard over every cycle the reset reaches, and every run a job holds there."""
+    for drop in plan.drops:
+        if drop.kind in PRODUCER_LOCKS and producer_lock.held(drop.path):
+            raise ConflictError(
+                f"refusing to reset: {drop.path.parent} has a live producer — pause or stop it first"
+            )
+    roots = [root.resolve() for root in plan.roots]
+    for job in JobRegistry.attach(jobs_dir(plan.projects_root)).list_holding_spend():
+        if any(Path(job.workspace).resolve().is_relative_to(root) for root in roots):
+            raise ConflictError(
+                f"refusing to reset: {job.what} ({job.job_id}) holds spend — pause or stop it first"
+            )
 
 
 def _prune_empty(root: Path) -> None:
@@ -144,11 +167,16 @@ def apply_reset(plan: ResetPlan) -> None:
     """Reads no ledger: a reset follows a reshape this build cannot read, and the account's charges hold its spend."""
     with ExitStack() as held:
         # Every draft's claim before anything goes: one a Start holds refuses the reset whole.
+        claims: set[Path] = set()
         for workspace in plan.workspaces:
             for draft in draft_dirs(workspace):
                 held.enter_context(DraftStore(workspace).hold(draft.name))
+                claims.add(draft_claim_path(workspace, draft.name))
+        _refuse_live(plan)
         for drop in plan.drops:
-            unlink_robust(drop.path)
+            # A held claim goes as its hold retires: Windows refuses to delete a file held open.
+            if drop.path not in claims:
+                unlink_robust(drop.path)
     for root in plan.roots:
         _prune_empty(root)
     logger.info("reset: removed %d file(s), kept %d", len(plan.drops), plan.kept)

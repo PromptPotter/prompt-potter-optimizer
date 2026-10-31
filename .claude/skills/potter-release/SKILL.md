@@ -19,6 +19,7 @@ version exists.
 - [ ] Check every capability phrase in the notes against what shipped (0.8.11 shipped "read-only API/webapp" after the control plane landed).
 - [ ] Bump the version in `pyproject.toml`, `uv.lock` (the version hunk only), `CITATION.cff`, the `README.md` badge and the `CHANGELOG.md` entry.
 - [ ] Count the commits since the last tag by type, and quote the same count everywhere it appears.
+- [ ] Delete each migration the last release landed on the box: its module and its `MIGRATIONS` row.
 
 ## 2. Commit and gate the COMMITTED tree
 
@@ -37,11 +38,12 @@ version exists.
 
 - [ ] Back up the data root first: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
 - [ ] `git diff <last tag> -- docs/specs/data-root.generated.json` names every survivor whose shape
-      moved: rewrite those files on the box before the deploy, or `update.sh` refuses to land. A
+      moved: survivors are migrated, so each ships a migration in
+      `application/maintenance/migrate.py::MIGRATIONS`, which `update.sh` runs before its proof. A
       BREAKING run-data or cache shape deploys as `update.sh <tag> --reset`; survivors stay.
 - [ ] Deploy `main` as `/potter-box` says, which owns the commands, the sudo and the TermNorm restart.
 - [ ] Verify on the box: health on 127.0.0.1 and on the public host, both units active,
-      `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `held N survivor file(s)` line.
+      `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `proven N file(s)` line.
 - [ ] Anything that fails here is fixed on `main`, and steps 2 to 4 run again.
 
 ## 5. Tag, publish, confirm

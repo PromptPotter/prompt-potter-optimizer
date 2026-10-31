@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -16,7 +16,7 @@ from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.infrastructure.store.io import parse_yaml, read_bytes_optional, read_yaml_optional
 from promptpotter.infrastructure.store.read_model import file_sig
 from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError
 
@@ -72,23 +72,44 @@ def definition_files(dataset_dir: Path) -> list[Path]:
     return [_layer_file(d, dataset_dir) for d in definition_chain(dataset_dir)]
 
 
+_SECTIONS = ("pipeline", "campaign", "source", "panel")
+
+
+def definition_layer(raw: bytes) -> dict[str, Any] | None:
+    """One layer of a definition, ``None`` where the file is empty: a mapping of sections, each a
+    mapping where set."""
+    data = parse_yaml(raw)
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError("must be a mapping of sections")
+    for key in _SECTIONS:
+        if not isinstance(data.get(key) or {}, dict):
+            raise ValueError(f"`{key}` must be a mapping")
+    return data
+
+
+def _named[T](path: Path, read: Callable[[bytes], T]) -> T | None:
+    """*read* over the file at *path*, ``None`` where it is absent; a refusal names the file."""
+    raw = read_bytes_optional(path)
+    if raw is None:
+        return None
+    try:
+        return read(raw)
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+
+
 def _layers(dataset_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
-    out: list[tuple[Path, dict[str, Any]]] = []
-    for path in definition_files(dataset_dir):
-        data = read_yaml_optional(path)
-        if data is None:
-            continue
-        if not isinstance(data, dict):
-            raise ValueError(f"{path} must be a mapping of sections")
-        out.append((path, data))
-    return out
+    return [
+        (path, layer)
+        for path in definition_files(dataset_dir)
+        if (layer := _named(path, definition_layer)) is not None
+    ]
 
 
-def _section(layer: Mapping[str, Any], key: str, path: Path) -> dict[str, Any]:
-    value = layer.get(key) or {}
-    if not isinstance(value, dict):
-        raise ValueError(f"{path}: `{key}` must be a mapping")
-    return value
+def _section(layer: Mapping[str, Any], key: str) -> dict[str, Any]:
+    return dict(layer.get(key) or {})
 
 
 @dataclass(frozen=True)
@@ -124,17 +145,17 @@ def read_dataset_definition(dataset_dir: Path) -> DatasetDefinition | None:
     panel: dict[str, Any] = {}
     panel_dir: Path | None = None
     for path, layer in layers:
-        pipeline = _section(layer, "pipeline", path)
+        pipeline = _section(layer, "pipeline")
         declared = pipeline.get("nodes") or {}
         if path.name == DEFAULTS_FILE:
             templates = dict(declared)
         else:
             nodes = merge_node_blocks(nodes, declared)
         top |= {k: v for k, v in pipeline.items() if k != "nodes"}
-        campaign.append(_section(layer, "campaign", path))
-        source |= _section(layer, "source", path)
+        campaign.append(_section(layer, "campaign"))
+        source |= _section(layer, "source")
         if "panel" in layer:
-            panel |= _section(layer, "panel", path)
+            panel |= _section(layer, "panel")
             panel_dir = path.parent
     if nodes:
         top["nodes"] = {
@@ -181,25 +202,29 @@ class DatasetFraming:
     framing: TaskDecomposition
 
 
-def read_framing_file(path: Path | None) -> DatasetFraming:
-    if path is None:
-        return DatasetFraming("", TaskDecomposition())
-    text = path.read_text(encoding="utf-8")
+def dataset_framing(raw: bytes) -> DatasetFraming:
+    # Newlines as a text-mode read gives them.
+    text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     m = _FRONT_MATTER.match(text)
     if m is None:
         return DatasetFraming(text.strip(), TaskDecomposition())
     try:
         fields = yaml.safe_load(m.group(1)) or {}
     except yaml.YAMLError as exc:
-        raise ValueError(f"{path}: front matter is not valid YAML — {exc}") from exc
+        raise ValueError(f"front matter is not valid YAML — {exc}") from exc
     if not isinstance(fields, dict):
-        raise ValueError(f"{path}: front matter must be a mapping")
+        raise ValueError("front matter must be a mapping")
     body = text[m.end() :].strip()
     framing = TaskDecomposition.from_dict(fields)
     # Blank fields commit nothing: the shape `render_framing_file` writes, read back the same.
     if not framing:
         return DatasetFraming(body, TaskDecomposition())
     return DatasetFraming(body, TaskDecomposition.from_dict({**fields, "raw_description": body}))
+
+
+def read_framing_file(path: Path | None) -> DatasetFraming:
+    framing = None if path is None else _named(path, dataset_framing)
+    return DatasetFraming("", TaskDecomposition()) if framing is None else framing
 
 
 def read_dataset_framing(dataset_dir: Path) -> DatasetFraming:
@@ -216,17 +241,21 @@ def render_framing_file(description: str, framing: TaskDecomposition) -> str:
     return f"---\n{head}---\n{body}"
 
 
+def origin_layer(raw: bytes) -> dict[str, dict[str, Any]] | None:
+    data = parse_yaml(raw)
+    if data is None:
+        return None
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        raise ValueError("must map each node name to its starting prompt")
+    return data
+
+
 def read_dataset_origin(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     """Starting prompts keyed by node; a family's entry is the default for a node it names."""
     out: dict[str, dict[str, Any]] = {}
     for directory in definition_chain(dataset_dir):
-        path = directory / ORIGIN_FILE
-        data = read_yaml_optional(path)
-        if data is None:
-            continue
-        if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
-            raise ValueError(f"{path} must map each node name to its starting prompt")
-        out |= data
+        if (layer := _named(directory / ORIGIN_FILE, origin_layer)) is not None:
+            out |= layer
     return out
 
 

@@ -86,7 +86,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_resolved_run,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.data_root import CAMPAIGN_ROWS, classify_in_workspace
+from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
     read_json_optional,
@@ -132,9 +132,8 @@ def _prune_empty_dirs(root: Path) -> None:
             d.rmdir()
 
 
-def _keepsake(path: Path, workspace: Path) -> bool:
-    found = classify_in_workspace(PurePosixPath(path.relative_to(workspace).as_posix()))
-    row = None if found is None else CAMPAIGN_ROWS.get(found.kind)
+def _keepsake(path: Path, campaign_dir: Path) -> bool:
+    row = campaign_row(PurePosixPath(path.relative_to(campaign_dir).as_posix()))
     return row is not None and row.keepsake
 
 
@@ -144,9 +143,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
         for cdir in cycles_dir.iterdir():
             if not cdir.is_dir():
                 continue
-            for p in [
-                f for f, _st in iter_files(cdir) if not _keepsake(f, campaign_dir.parent.parent)
-            ]:
+            for p in [f for f, _st in iter_files(cdir) if not _keepsake(f, campaign_dir)]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)
 

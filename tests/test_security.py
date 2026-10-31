@@ -55,6 +55,7 @@ from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
+from promptpotter.application.maintenance.migrate import migrate
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset, prove
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
@@ -132,7 +133,7 @@ from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
 from promptpotter.infrastructure.store.data_root import Fate
-from promptpotter.infrastructure.store.io import write_json, write_jsonl
+from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     campaign_root_dir_for,
@@ -185,7 +186,7 @@ import sys
 from pathlib import Path
 from promptpotter.application.maintenance.reset import prove
 proof = prove(Path(sys.argv[1]))
-sys.exit(0 if proof.held and not proof.unknown and not proof.unloadable else repr(proof))
+sys.exit(0 if proof.proven and not proof.unknown and not proof.unloadable else repr(proof))
 """
 
 # 1. Leaks and the perimeter
@@ -1148,9 +1149,18 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     )
     with built_stores.drafts.hold("held-draft"), pytest.raises(ConflictError):
         apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
+    # And `delete`'s guard: a cycle its producer holds refuses the reset whole.
+    hold_cycle(cycle_dir)
+    with pytest.raises(ConflictError):
+        apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
+    release_cycle(cycle_dir)
     assert campaigns.iter_campaign_dirs(), "a refused reset dropped a campaign"
+    launched = len(registry.list_launched_today())
     apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
     assert not campaigns.iter_campaign_dirs() and not draft_dirs(campaigns.workspace)
+    assert launched == len(registry.list_launched_today()) == 1, (
+        "a reset refilled the account's daily launch quota"
+    )
 
     # A landing names a cache row a reshape left behind and a file no row names; a reset drops
     # both and keeps the account.
@@ -1170,6 +1180,25 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert UserStore(campaigns.workspace).load() == user, "a reset dropped a survivor"
     after = prove(data_root)
     assert not after.unknown and not after.unloadable, "a reset left the data root unproven"
+
+    # A landing migrates a survivor a reshape moved: a sign-in leaves the workspace ledger for the
+    # account's consent trail, once however often it lands.
+    events = CycleEventLog.workspace_path(campaigns.workspace)
+    old = {"record_type": "account_event", "user_id": "u", "timestamp": "2026-01-02T00:00:00Z"}
+    append_jsonl(events, old | {"event": "signed_in", "subject": "google", "device": "phone"})
+    append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
+    assert [u.path for u in prove(data_root).unloadable] == [events]
+    assert migrate(built_stores.projects_root), "a landing migrated nothing"
+    users = UserStore(campaigns.workspace)
+    trail = users.consent_trail()
+    assert [line.device for line in trail if line.at == old["timestamp"]] == ["phone"], (
+        "a sign-in was lost from the account's consent trail"
+    )
+    assert migrate(built_stores.projects_root) == [] and users.consent_trail() == trail, (
+        "a second landing migrated again"
+    )
+    migrated = prove(data_root)
+    assert not migrated.unknown and not migrated.unloadable, "a migration left a file unproven"
 
     # A process that loaded no optimizer still proves a ledger banking one's state.
     banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")

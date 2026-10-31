@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-_PACK_FILE = "pack.json"
+PACK_FILE = "pack.json"
 
 
 def _parsed(name: str, file: Path) -> BlockPack | PackRefusal:
@@ -48,7 +48,7 @@ class PackShelf:
         return (install,) if self.account is None else (install, self.account)
 
     def _files(self, name: str) -> list[Path]:
-        return [f for root in self._roots() if (f := root / name / _PACK_FILE).is_file()]
+        return [f for root in self._roots() if (f := root / name / PACK_FILE).is_file()]
 
     def _opened(self, name: str) -> BlockPack | PackRefusal | None:
         held = self._files(name)
@@ -67,7 +67,7 @@ class PackShelf:
             for root in self._roots()
             if root.is_dir()
             for p in root.iterdir()
-            if (p / _PACK_FILE).is_file()
+            if (p / PACK_FILE).is_file()
         }
         return {
             name: opened for name in sorted(found) if (opened := self._opened(name)) is not None
@@ -95,12 +95,12 @@ class PackShelf:
     def account_file(self, name: str) -> Path:
         """Where the account's own pack *name* is written, refused while the install holds that name."""
         assert self.account is not None, "a write names the account it lands in"
-        if (block_packs_root() / name / _PACK_FILE).is_file():
+        if (block_packs_root() / name / PACK_FILE).is_file():
             raise ConflictError(
                 f"the install holds a block pack named {name!r}, so this account cannot write one",
                 code="block_pack_collision",
             )
-        return self.account / name / _PACK_FILE
+        return self.account / name / PACK_FILE
 
     def _pack_entries(self, name: str) -> list[tuple[PoolEntry, frozenset[Presumption]]]:
         """One entry per part a snippet suits, in the snippet's order and then the parts' render order."""

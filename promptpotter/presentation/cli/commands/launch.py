@@ -194,7 +194,7 @@ def cycle_result_command(session: Session, cycle_result: CycleResult) -> Command
             dataset_name=session.dataset_name,
             campaign_dir=session.store.campaigns.campaign_root_dir(session.campaign_id),
         ),
-        outcome=stop_reason_outcome(cycle_result.stop_reason),
+        exit_code=stop_reason_outcome(cycle_result.stop_reason).exit_code,
     )
 
 
