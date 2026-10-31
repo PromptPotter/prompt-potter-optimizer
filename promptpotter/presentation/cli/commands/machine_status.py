@@ -7,7 +7,6 @@ from promptpotter.application import health
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
@@ -65,9 +64,5 @@ async def cmd_health(_args: argparse.Namespace) -> CommandResult:
         data={one.probe.name: one.reading._asdict() for one in checked},
         # The state leads each line: `deploy-linux/update.sh` reads it.
         human="\n".join(f"{one.reading.state} {health.row(one)}" for one in checked),
-        outcome=(
-            StopOutcome.FAILED
-            if any(one.reading.state == "broken" for one in checked)
-            else StopOutcome.SUCCESS
-        ),
+        exit_code=int(any(one.reading.state == "broken" for one in checked)),
     )

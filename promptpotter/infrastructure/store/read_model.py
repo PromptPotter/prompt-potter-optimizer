@@ -18,11 +18,11 @@ from pydantic import ValidationError
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import append_line, open_text_robust
+from promptpotter.infrastructure.store.io import append_line, complete_lines, open_text_robust
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import LedgerUnreadableError, validation_reason
 
 logger = logging.getLogger(__name__)
 
@@ -65,33 +65,18 @@ def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
 def _complete_lines(path: Path, start: int) -> Iterator[bytes]:
     with open(path, "rb") as fh:
         fh.seek(start)
-        for raw in fh:
-            if not raw.endswith(b"\n"):
-                return
-            yield raw
+        yield from complete_lines(fh)
 
 
-def _record_of(raw: bytes) -> dict[str, Any] | None:
-    line = raw.strip()
-    if not line:
-        return None
-    try:
-        rec = json.loads(line)
-    except ValueError:
-        return None
-    return rec if isinstance(rec, dict) else None
-
-
-def fold_jsonl_from(path: Path, key: str, offset: int) -> tuple[dict[str, dict[str, Any]], int]:
-    out: dict[str, dict[str, Any]] = {}
+def read_jsonl_from[R](path: Path, read: Callable[[bytes], R], offset: int) -> tuple[list[R], int]:
+    out: list[R] = []
     try:
         for raw in _complete_lines(path, offset):
             offset += len(raw)
-            row = _record_of(raw)
-            if row is not None and isinstance(k := row.get(key), str):
-                out[k] = row
+            if raw.strip():
+                out.append(read(raw))
     except FileNotFoundError:
-        return {}, offset
+        return [], offset
     return out, offset
 
 
@@ -151,11 +136,7 @@ def line_dict(raw: bytes) -> dict[str, Any]:
 
 
 def _refusal(ledger: Path, offset: int, exc: ValueError) -> LedgerUnreadableError:
-    if isinstance(exc, ValidationError):
-        err = exc.errors()[0]
-        reason = f"{'.'.join(map(str, err['loc'])) or 'the record'}: {err['msg']}"
-    else:
-        reason = str(exc)
+    reason = validation_reason(exc, shown=1) if isinstance(exc, ValidationError) else str(exc)
     cycle_dir = CycleLayout.of_ledger(ledger).cycle_dir
     campaign_dir = cycle_dir.parent.parent
     held = campaign_cycles_dir(campaign_dir) == cycle_dir.parent
@@ -311,7 +292,7 @@ class _Feeder:
         }
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
         # By kind, so the folds that never take a refused line (run state, spend) still read whole:
-        # a reshape of one kind leaves the spend bank readable, so a reset can bank before it wipes.
+        # a reshape of one kind leaves the spend bank readable, so a delete can bank before it wipes.
         self.refused: dict[
             type[StrictModel], LedgerUnreadableError | UnregisteredStatePartError
         ] = {}

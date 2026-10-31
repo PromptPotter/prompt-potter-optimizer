@@ -1,183 +1,159 @@
 from __future__ import annotations
 
+import contextlib
 import logging
-from contextlib import ExitStack
+import os
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import NamedTuple
+from pathlib import Path, PurePosixPath
 
-from promptpotter.config.paths import BLOCK_PACKS_DIR, SHARED_CACHE_DIRS
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.infrastructure import producer_lock
+from promptpotter.infrastructure.store.data_root import PRODUCER_LOCKS, Fate, Kind, classify
 from promptpotter.infrastructure.store.draft_store import DraftStore
-from promptpotter.infrastructure.store.io import (
-    iter_files,
-    rmtree_robust,
-    unlink_robust,
-    write_lock_name,
-)
+from promptpotter.infrastructure.store.io import iter_files, probe_lock, unlink_robust
 from promptpotter.infrastructure.store.layout import (
-    DRAFTS_DIR,
-    SandboxOwner,
+    draft_claim_path,
     draft_dirs,
+    in_inner_sandbox,
     inner_sandboxes_dir,
     read_sandbox_owner,
     tenant_workspace,
 )
-from promptpotter.infrastructure.store.ruler_store import RULER_FILE
-from promptpotter.infrastructure.store.tenant_dataset_store import (
-    BANKS_DIR,
-    MATERIALIZED_DIR,
-    UPLOADS_DIR,
-)
-from promptpotter.infrastructure.store.wallet_store import CHARGES_FILE
+from promptpotter.shared.errors import ConflictError
 
 logger = logging.getLogger(__name__)
 
 
-# A head-to-head manifest, a ruler row and the workspace ledger (the active pointer beside it) name
-# campaigns, so they go with them; a draft is a cycle not yet minted.
-_DROP_NAMES = ("campaigns", "head_to_heads", DRAFTS_DIR, RULER_FILE, ".workspace")
-
-# Exhaustive, so a leftover surfaces as unrecognized; `SHARED_CACHE_DIRS` is spliced so a new cache is never destroyed.
-_PRESERVE_NAMES = (
-    *SHARED_CACHE_DIRS,
-    BLOCK_PACKS_DIR,
-    "diagnostics",
-    "traces",
-    "backends",
-    "datasets",
-    MATERIALIZED_DIR,
-    BANKS_DIR,
-    UPLOADS_DIR,
-    "task-context",
-    ".cache",
-    "user.json",
-    CHARGES_FILE,
-)
-
-
 @dataclass(frozen=True, slots=True)
-class TenantReset:
-    workspace: WorkspaceDir
-    drop: tuple[Path, ...]
-    preserve: tuple[Path, ...]
-    unrecognized: tuple[Path, ...]
-
-
-class SandboxDrop(NamedTuple):
-    sandbox: Path
-    owner: SandboxOwner
+class Drop:
+    path: Path
+    size: int
+    # ``None``: no row names the file.
+    kind: Kind | None
 
 
 @dataclass(frozen=True, slots=True)
 class ResetPlan:
     projects_root: Path
-    tenants: tuple[TenantReset, ...]
-    sandboxes: tuple[SandboxDrop, ...]
-    # Kept: with no owner record they name no tenant (as `jobs/reaper.py::reclaim_orphan_sandboxes`).
-    unattributable_sandboxes: tuple[Path, ...]
-
-    @property
-    def drops(self) -> list[str]:
-        return [
-            *(str(p) for tenant in self.tenants for p in tenant.drop),
-            *(str(target.sandbox) for target in self.sandboxes),
-        ]
+    roots: tuple[Path, ...]
+    # Whose draft claims the reset takes before anything goes.
+    workspaces: tuple[WorkspaceDir, ...]
+    drops: tuple[Drop, ...]
+    kept: int
+    # Why the reset may not go now; asked again under the claims, since a run may start after the plan.
+    refusal: str | None
 
 
-def _plan_tenant(workspace: WorkspaceDir) -> TenantReset:
-    drop: list[Path] = []
-    preserve: list[Path] = []
-    unrecognized: list[Path] = []
-    entries = sorted(workspace.iterdir()) if workspace.is_dir() else []
-    locks = {write_lock_name(entry.name): entry.name for entry in entries}
-    for entry in entries:
-        # A write lock goes with the file it locks, and is never listed apart from it.
-        if (locked := locks.get(entry.name)) is not None:
-            if locked in _DROP_NAMES:
-                drop.append(entry)
-        elif entry.name in _DROP_NAMES:
-            if entry.exists():
-                drop.append(entry)
-        elif entry.name in _PRESERVE_NAMES:
-            preserve.append(entry)
-        else:
-            unrecognized.append(entry)
-    return TenantReset(
-        workspace=workspace,
-        drop=tuple(drop),
-        preserve=tuple(preserve),
-        unrecognized=tuple(unrecognized),
-    )
+def _owned_sandboxes(projects_root: Path, tenant_id: str) -> list[Path]:
+    """A sandbox naming no owner is no tenant's: only a reset of every tenant takes it."""
+    inner = inner_sandboxes_dir(projects_root)
+    return [
+        sandbox
+        for sandbox in (sorted(inner.iterdir()) if inner.is_dir() else ())
+        if sandbox.is_dir()
+        and (owner := read_sandbox_owner(sandbox)) is not None
+        and owner.tenant_id == tenant_id
+    ]
+
+
+def _drop(path: Path, size: int, data_root: Path) -> Drop | None:
+    found = classify(PurePosixPath(path.relative_to(data_root).as_posix()))
+    if found is None:
+        return Drop(path, size, None)
+    return Drop(path, size, found.kind) if found.kind.fate is Fate.RUN else None
+
+
+def _live(projects_root: Path, roots: tuple[Path, ...], drops: tuple[Drop, ...]) -> str | None:
+    """`delete`'s guard over every cycle the reset reaches, and every run a job holds there."""
+    for drop in drops:
+        if drop.kind in PRODUCER_LOCKS and producer_lock.held(drop.path):
+            return f"{drop.path.parent} has a live producer — pause or stop it first"
+    resolved = [root.resolve() for root in roots]
+    for job in JobRegistry.attach(jobs_dir(projects_root)).list_holding_spend():
+        if any(Path(job.workspace).resolve().is_relative_to(root) for root in resolved):
+            return f"{job.what} ({job.job_id}) holds spend — pause or stop it first"
+    return None
+
+
+def _claimed(workspaces: tuple[WorkspaceDir, ...]) -> str | None:
+    for workspace in workspaces:
+        for draft in draft_dirs(workspace):
+            with probe_lock(draft_claim_path(workspace, draft.name)) as held:
+                if held:
+                    return f"draft {draft.name} is held by a Start or a command on it"
+    return None
 
 
 def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
     """A named tenant is the caller's resolved identity, never a literal `default`: the first web sign-in renames it."""
-    if tenant_id is not None:
-        workspaces = [tenant_workspace(projects_root, tenant_id)]
-    elif projects_root.is_dir():
-        workspaces = [WorkspaceDir(p) for p in sorted(projects_root.iterdir()) if p.is_dir()]
+    data_root = projects_root.parent
+    if tenant_id is None:
+        roots: tuple[Path, ...] = (data_root,)
+        workspaces = tuple(
+            WorkspaceDir(p)
+            for p in (sorted(projects_root.iterdir()) if projects_root.is_dir() else ())
+            if p.is_dir()
+        )
     else:
-        workspaces = []
-    tenant_names = {ws.name for ws in workspaces}
-
-    sandboxes: list[SandboxDrop] = []
-    unattributable: list[Path] = []
-    inner_dir = inner_sandboxes_dir(projects_root)
-    for sandbox in sorted(inner_dir.iterdir()) if inner_dir.is_dir() else ():
-        if not sandbox.is_dir():
-            continue
-        owner = read_sandbox_owner(sandbox)
-        if owner is None:
-            unattributable.append(sandbox)
-        elif owner.tenant_id in tenant_names:
-            sandboxes.append(SandboxDrop(sandbox, owner))
+        workspace = tenant_workspace(projects_root, tenant_id)
+        roots = (workspace, *_owned_sandboxes(projects_root, tenant_id))
+        workspaces = (workspace,)
+    drops: list[Drop] = []
+    kept = 0
+    for root in roots:
+        for path, st in iter_files(root):
+            if (drop := _drop(path, st.st_size, data_root)) is None:
+                kept += 1
+            else:
+                drops.append(drop)
+    held = tuple(sorted(drops, key=lambda d: d.path))
     return ResetPlan(
-        projects_root=projects_root,
-        tenants=tuple(_plan_tenant(ws) for ws in workspaces),
-        sandboxes=tuple(sandboxes),
-        unattributable_sandboxes=tuple(unattributable),
+        projects_root,
+        roots,
+        workspaces,
+        held,
+        kept,
+        _claimed(workspaces) or _live(projects_root, roots, held),
     )
 
 
-def size_tag(path: Path) -> str:
-    try:
-        if path.is_file():
-            return f"  ({path.stat().st_size:,} B)"
-        if path.is_dir():
-            sizes = [st.st_size for _p, st in iter_files(path)]
-            return f"  ({len(sizes):,} files / {sum(sizes) / 1_048_576:.1f} MiB)"
-    except OSError:
-        pass
-    return ""
+def _prune_empty(root: Path) -> None:
+    """Bottom-up; a sandbox goes whole, a tenant's own directory stays."""
+    for current, _dirs, _files in os.walk(root, topdown=False):
+        if Path(current) != root or in_inner_sandbox(root):
+            with contextlib.suppress(OSError):
+                os.rmdir(current)
 
 
-def _remove(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        rmtree_robust(path)
-    elif path.exists() or path.is_symlink():
-        unlink_robust(path)
+@contextmanager
+def resetting(plan: ResetPlan) -> Iterator[None]:
+    """The plan's drops go as the block ends, once every draft's claim is held and no run is live in
+    reach; a refusal or a raise inside the block drops nothing."""
+    if plan.refusal is not None:
+        raise ConflictError(f"refusing to reset: {plan.refusal}")
+    with ExitStack() as held:
+        claims: set[Path] = set()
+        for workspace in plan.workspaces:
+            for draft in draft_dirs(workspace):
+                held.enter_context(DraftStore(workspace).hold(draft.name))
+                claims.add(draft_claim_path(workspace, draft.name))
+        if (live := _live(plan.projects_root, plan.roots, plan.drops)) is not None:
+            raise ConflictError(f"refusing to reset: {live}")
+        yield
+        for drop in plan.drops:
+            # A held claim goes as its hold retires: Windows refuses to delete a file held open.
+            if drop.path not in claims:
+                unlink_robust(drop.path)
+    for root in plan.roots:
+        _prune_empty(root)
+    logger.info("reset: removed %d file(s), kept %d", len(plan.drops), plan.kept)
 
 
 def apply_reset(plan: ResetPlan) -> None:
     """Reads no ledger: a reset follows a reshape this build cannot read, and the account's charges hold its spend."""
-    with ExitStack() as held:
-        # Every draft's claim before anything goes: one a Start holds refuses the reset whole.
-        claims = {
-            tenant.workspace: [
-                held.enter_context(DraftStore(tenant.workspace).hold(draft.name))
-                for draft in draft_dirs(tenant.workspace)
-            ]
-            for tenant in plan.tenants
-        }
-        for tenant in plan.tenants:
-            drafts = DraftStore(tenant.workspace)
-            for claim in claims[tenant.workspace]:
-                with claim:
-                    _remove(drafts.draft_dir(claim.draft_id))
-            for path in tenant.drop:
-                _remove(path)
-                logger.info("reset: removed %s", path)
-    for target in plan.sandboxes:
-        _remove(target.sandbox)
-        logger.info("reset: removed inner sandbox %s", target.sandbox.name)
+    with resetting(plan):
+        return

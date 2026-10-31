@@ -4,6 +4,7 @@ from pathlib import Path
 
 from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.layout import DIAGNOSTICS_DIR
 
 
 def _ts_filename_part(ts: str) -> str:
@@ -15,7 +16,7 @@ class DiagnosticRunStore:
         self._base_dir = base_dir
 
     def _root(self) -> Path:
-        return self._base_dir / "diagnostics"
+        return self._base_dir / DIAGNOSTICS_DIR
 
     def _dir(self) -> Path:
         return self._root() / "runs"

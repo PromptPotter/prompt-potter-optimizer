@@ -5,7 +5,7 @@ import os
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, NamedTuple, Self
+from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -626,9 +626,7 @@ class LLMCallRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-AccountEvent = Literal[
-    "account_created", "signed_in", "terms_accepted", "uploaded", "request_refused"
-]
+AccountEvent = Literal["uploaded", "request_refused"]
 
 HealthState = Literal["held", "broken", "unverified"]
 
@@ -670,11 +668,8 @@ class AccountEventRecord(FrozenModel):
     record_type: Literal["account_event"] = "account_event"
     event: AccountEvent
     user_id: str
-    # The provider of a sign-in, the version of a terms acceptance, the file an upload was kept as,
-    # what a refused request asked and was told.
+    # The file an upload was kept as, what a refused request asked and was told.
     subject: str = ""
-    # What a sign-in or an opening came from; unset where no request carried one.
-    device: Device | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1346,6 +1341,10 @@ CycleRecord = Annotated[
 
 RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(
     CycleRecord, config=ConfigDict(defer_build=True)
+)
+
+RECORD_KINDS: frozenset[str] = frozenset(
+    arm.model_fields["record_type"].default for arm in get_args(get_args(CycleRecord)[0])
 )
 
 

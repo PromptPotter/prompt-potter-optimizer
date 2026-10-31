@@ -129,22 +129,8 @@
         "additionalProperties": false,
         "description": "On the WORKSPACE ledger; ``user_id`` is the acting principal, a delegate's own id in its delegator's tenant.",
         "properties": {
-          "device": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Device"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "event": {
             "enum": [
-              "account_created",
-              "signed_in",
-              "terms_accepted",
               "uploaded",
               "request_refused"
             ],
@@ -3270,15 +3256,6 @@
         ],
         "title": "DegradationHealth",
         "type": "object"
-      },
-      "Device": {
-        "enum": [
-          "phone",
-          "tablet",
-          "computer"
-        ],
-        "title": "Device",
-        "type": "string"
       },
       "Election": {
         "additionalProperties": false,

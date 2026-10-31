@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable, Sequence
 from functools import partial
 from pathlib import Path
@@ -10,6 +11,7 @@ from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -18,8 +20,9 @@ from promptpotter.infrastructure.store.dataset_access import (
     render_framing_file,
 )
 from promptpotter.infrastructure.store.io import (
-    read_json_optional,
-    read_yaml_optional,
+    parse_yaml,
+    read_bytes_optional,
+    read_lines,
     validate_path_component,
     write_bytes,
     write_json,
@@ -36,9 +39,19 @@ MATERIALIZED_DIR = "materialized"
 BANKS_DIR = "banks"
 # Every file uploaded, under its own content: an upload definition's `source:` reads it from here.
 UPLOADS_DIR = "uploads"
-_LABELS_FILE = "labels.jsonl"
+LABELS_FILE = "labels.jsonl"
 # Which bank each fetched `source:` recipe cut: a content fact, so an inner sandbox shares it.
-_CUTS_FILE = "cuts.jsonl"
+CUTS_FILE = "cuts.jsonl"
+# Each dataset's decomposed framing, which shadows its definition's committed one.
+TASK_CONTEXT_DIR = "task-context"
+
+
+class BankLabel(FrozenModel):
+    """A line of `labels.jsonl`: from ``labelled_at`` on, *label* names the bank *dataset_hash*."""
+
+    label: str
+    dataset_hash: str
+    labelled_at: str
 
 
 class TenantDatasetStore:
@@ -81,7 +94,7 @@ class TenantDatasetStore:
             n += 1
 
     def _labels_path(self) -> Path:
-        return self._base_dir / BANKS_DIR / _LABELS_FILE
+        return self._base_dir / BANKS_DIR / LABELS_FILE
 
     def _bank_path(self, digest: str) -> Path:
         return self._base_dir / BANKS_DIR / f"{validate_path_component(digest)}.json"
@@ -98,23 +111,22 @@ class TenantDatasetStore:
         """A label moves; no bank and no measurement filed under either hash is rewritten."""
         validate_dataset_name(label)
         if self.hash_of(label) != digest:
-            append_row(
-                self._labels_path(),
-                {"label": label, "dataset_hash": digest, "labelled_at": utcnow_iso()},
-            )
+            moved = BankLabel(label=label, dataset_hash=digest, labelled_at=utcnow_iso())
+            append_row(self._labels_path(), moved.model_dump())
 
     def labels(self) -> dict[str, str]:
+        """The last line naming a label is where it stands."""
         return {
-            label: str(row["dataset_hash"])
-            for label, row in fold_jsonl(self._labels_path(), "label").items()
+            row.label: row.dataset_hash
+            for row in map(BankLabel.model_validate_json, read_lines(self._labels_path()))
         }
 
     def hash_of(self, label: str) -> str | None:
         return self.labels().get(label)
 
     def _banked_rows(self, digest: str) -> list[dict[str, Any]] | None:
-        data = read_json_optional(self._bank_path(digest))
-        return None if data is None else list(data["items"])
+        raw = read_bytes_optional(self._bank_path(digest))
+        return None if raw is None else _bank_items(raw)
 
     def bank(self, digest: str) -> Bank | None:
         rows = self._banked_rows(digest)
@@ -132,7 +144,7 @@ class TenantDatasetStore:
             str(self._base_dir),
             file_sig(banks),
             file_sig(self._labels_path()),
-            file_sig(banks / _CUTS_FILE),
+            file_sig(banks / CUTS_FILE),
             file_sig(self.materialized_panel_dir(name) / MATERIALIZED_PANEL_FILE),
         )
 
@@ -143,12 +155,12 @@ class TenantDatasetStore:
     def record_cut(self, source: str, bank: Bank) -> None:
         self.put_bank(bank)
         append_row(
-            self._base_dir / BANKS_DIR / _CUTS_FILE,
+            self._base_dir / BANKS_DIR / CUTS_FILE,
             {"source": source, "dataset_hash": bank.dataset_hash},
         )
 
     def cut(self, source: str) -> Bank | None:
-        row = fold_jsonl(self._base_dir / BANKS_DIR / _CUTS_FILE, "source").get(source)
+        row = fold_jsonl(self._base_dir / BANKS_DIR / CUTS_FILE, "source").get(source)
         return None if row is None else self.bank(str(row["dataset_hash"]))
 
     def banks_sharing(self, keys: frozenset[str]) -> frozenset[str]:
@@ -176,10 +188,11 @@ class TenantDatasetStore:
         return self._base_dir / UPLOADS_DIR / validate_path_component(name)
 
     def task_context_path(self, name: str) -> Path:
-        return self._base_dir / "task-context" / f"{dataset_id_prefix(name)}.yaml"
+        return self._base_dir / TASK_CONTEXT_DIR / f"{dataset_id_prefix(name)}.yaml"
 
     def load_task_context(self, name: str) -> TaskDecomposition:
-        return TaskDecomposition.from_dict(read_yaml_optional(self.task_context_path(name)))
+        raw = read_bytes_optional(self.task_context_path(name))
+        return TaskDecomposition() if raw is None else read_task_context(raw)
 
     def save_task_context(self, name: str, framing: TaskDecomposition) -> Path | None:
         """`None` on an empty record: this tier shadows the definition's committed framing, and an empty file buries it."""
@@ -217,8 +230,21 @@ class TenantDatasetStore:
         return path
 
 
+def read_task_context(raw: bytes) -> TaskDecomposition:
+    data = parse_yaml(raw)
+    if not isinstance(data, dict | None):
+        raise ValueError("a task context is a mapping of its fields")
+    return TaskDecomposition.from_dict(data)
+
+
+def _bank_items(raw: bytes) -> list[dict[str, Any]]:
+    return list(json.loads(raw)["items"])
+
+
+def read_bank(raw: bytes) -> Bank:
+    return Bank.read(_bank_items(raw))
+
+
 def _keys(path: Path) -> frozenset[str]:
-    rows = read_json_optional(path)
-    return (
-        frozenset() if rows is None else frozenset(s.key for s in Bank.read(rows["items"]).samples)
-    )
+    raw = read_bytes_optional(path)
+    return frozenset() if raw is None else frozenset(s.key for s in read_bank(raw).samples)

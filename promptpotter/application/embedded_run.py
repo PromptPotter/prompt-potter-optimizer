@@ -24,7 +24,7 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import land_job
-from promptpotter.application.jobs.registry import EmbeddedRun, JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -43,6 +43,7 @@ from promptpotter.domain.command_kinds import (
     SubmitArmsPayload,
     SubmittedArm,
 )
+from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.sample import Bank
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset

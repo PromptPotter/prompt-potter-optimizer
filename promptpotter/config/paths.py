@@ -53,18 +53,37 @@ def user_data_root() -> Path:
     return _os_app_data_dir()
 
 
+INSTALL_CACHE_DIR = ".cache"
+
+# From the data root: names the newest terminal launch's `readout.log`.
+READOUT_POINTER = "logs/latest-readout-path.txt"
+
+
 def install_cache_root() -> Path:
     """What derives from the installed code alone, so every home on one install shares it."""
     checkout = source_checkout_root()
-    return (checkout if checkout is not None else _os_app_data_dir()) / ".cache"
+    return (checkout if checkout is not None else _os_app_data_dir()) / INSTALL_CACHE_DIR
+
+
+PROJECTS_DIR = "projects"
+# Under the projects root: held while an account opens.
+ACCOUNTS_LOCK = ".accounts.lock"
+
+JOBS_DIR = "jobs"
+# Under the jobs dir, which is globbed for `*.json` only, so none of these reads as a job.
+ADMISSION_LOCK = ".admission.lock"
+LANDING_FILE = ".landing"
+PRODUCERS_DIR = "producers"
+MACHINE_DIR = "machine"
+JOB_LOGS_DIR = "logs"
 
 
 def default_projects_root() -> Path:
-    return user_data_root() / "projects"
+    return user_data_root() / PROJECTS_DIR
 
 
 def jobs_dir(projects_root: Path) -> Path:
-    return projects_root.parent / "jobs"
+    return projects_root.parent / JOBS_DIR
 
 
 def optimizers_root() -> Path:

@@ -18,14 +18,11 @@ from promptpotter.application.jobs.coupon import (
     holds_own_key,
     read_coupon,
 )
-from promptpotter.application.jobs.registry import (
-    UNRESOLVED_HOP,
-    Job,
-    JobRegistry,
-)
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
     CYCLE_AXES,

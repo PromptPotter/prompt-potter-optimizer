@@ -126,6 +126,12 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **The pre-commit hook runs bare `python`**, so a commit in a worktree builds and syncs a `.venv` there.
   Action: the hook resolves the clone's venv like `_BORROWED` does. **Re-test:** a commit in a fresh
   worktree creates no `.venv`.
+- **The gate measures whatever extras the venv happens to hold**: `gate.py::_PINNED_EXTRAS` syncs
+  `--inexact`, so packages outside the pinned set stay installed and an optional import loads them. A
+  venv built with `uv sync --all-extras` put the suite over `tests_owning.py::WIN32_CEILING_MB`;
+  resynced to the pinned extras, the same tree passed. Action: the gate refuses a venv holding packages
+  outside `_PINNED_EXTRAS`, naming the sync that makes it exact. **Re-test:** `uv sync --all-extras`,
+  then `gate.py --only pytest` refuses before it measures.
 
 ### The webapp's vanilla pass (audit 2026-10-29)
 
@@ -205,15 +211,36 @@ import-graph script before and after; close each wave with `gate.py --only layer
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
-- **`reset` still refuses when the spend bank's OWN record kinds reshape** (`TokenUsageRecord`,
-  `SpendHoldRecord`, `SpendTombstoneRecord`): the bank cannot read the money it would bank, so it
-  drops nothing, and the wipe is by hand. Action: decide whether such a reshape migrates the bank
-  first or banks nothing on purpose. **Re-test:** a reset over a ledger with a reshaped `token_usage` line.
-- **`reset` drops a campaign directory with no manifest unbanked, and guards no live producer**:
-  `maintenance/reset.py::apply_reset` banks through `iter_campaign_dirs`, which skips such a
-  directory, and never takes the guard `delete` takes (`_guard_and_release`). Action: bank by
-  ledger, not manifest, and take the delete's guard. **Re-test:** a reset over a manifest-less
-  campaign whose ledger is billed.
+- **Run files read as dicts have no shape row**: `data_root.py::KINDS` proves `draft.json`,
+  `checkin.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
+  `diagnostics/`, `banks/cuts.jsonl`, `rates.json`, the langfuse mirror and the account's
+  `model_capabilities.yaml` by presence alone, because their readers walk `dict`s
+  (`read_json_optional`, `read_json_tolerant`, `read_yaml_optional`, `fold_jsonl`). A reshape there
+  passes `land-data` and is read around. Action: a model per file, its reader's, then its row's
+  shape. **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
+- **`iter_jsonl` reads past a line it cannot decode** (`store/read_model.py`), and `fold_jsonl`,
+  the bank labels and cuts with it, so a torn or reshaped line is silently absent. Action: the
+  complete-line rule and a refusal, as `ledger_record`. **Re-test:** `git grep -n "except json.JSONDecodeError" -- promptpotter/infrastructure/store/read_model.py`.
+- **`CycleEventLog.__init__` counts an unterminated last line as an offset** (`infrastructure/ledger.py`)
+  where `iter` and every tail skip it, so a torn tail shifts the next append's offset by one against
+  a refold. Action: count through `io.py::complete_lines` and decide what an append does past a torn
+  tail. **Re-test:** `git grep -n "for line in fh" -- promptpotter/infrastructure/ledger.py`.
+- **`_Billed` is `_Cost` with a flag flipped** (`store/account_spend.py::_Cost.counts_mirrored`): a
+  flag keeping a bank's spend and a campaign's cost apart over one fold of the same lines. Action:
+  one fold whose value carries both sums, read by `billed_spend` and `ledger_cost`. **Re-test:** `git grep -n "counts_mirrored" -- promptpotter`.
+- **Two `ValidationError` formatters remain beside `shared/errors.py::validation_reason`**:
+  `application/datasets/draft_patch.py` (prefixes the field) and `PayloadInvalidError.refusing`
+  (carries `ctx`). Action: both read `validation_reason`, the prefix and the context as its data.
+  **Re-test:** `git grep -n "exc.errors()" -- promptpotter`.
+- **A ledger subscriber that raises after `Admission._write` lands a charge leaves it in `_unlanded`**
+  (`llm/spend_book.py`), so the book counts that part twice until the run ends — conservative, never
+  under. Action: the record lands before any subscriber runs. **Re-test:** the outlives journey in
+  `tests/test_spend.py` with a raising projection.
+- **`CampaignOwner` reads `campaign.json` beside `Campaign`** (`campaign_store/store.py::campaign_owner`),
+  a second, tolerant model of one file. Action: one model. **Re-test:** `git grep -n "CampaignOwner" -- promptpotter`.
+- **Writers with no reader**: `dashboard.json` and `index.json` (checkouts nothing reads back), and
+  `identity/blocklist_audit.jsonl` and `grants_audit.jsonl`. Action: decide whether each earns a
+  reader or goes. **Re-test:** `git grep -n "blocklist_audit" -- promptpotter`.
 - **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append
   an `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both
   reads derive from. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
@@ -338,19 +365,12 @@ import-graph script before and after; close each wave with `gate.py --only layer
   thing that moves. Action: a no-op batch is retried once with the no-op named in the prompt, or the round escalates at
   once instead of closing empty. **Rides with:** any change to `potter/l1/candidate_source.py`. **Re-test:** resume that
   campaign; round 2 measures at least one candidate or names why it escalated.
-- **A campaign's crash is caused by another campaign's ledger**: `crm-extract-names__29f63f` crashed entering round 1 on
-  `LedgerUnreadableError` for `inbox-requires-action-v6__e1bda1`'s ledger (written before `field_accuracy` joined
-  `round_complete.fold`). A new run reads every campaign's ledger, so one stale campaign halts all of them, and only
-  after origin scoring is paid. Action: the reader that spans campaigns refuses at mint (before origin), or skips a
-  ledger it cannot read with one named warning. **Re-test:** with one pre-shape-change campaign on disk, `new` refuses
-  before spending or runs to round 1.
-- **A strict reader blocks `new` on leftovers the wipe skips**: on 2026-10-31 `new` refused twice
-  before minting: `user.json` still held `spend_budget_usd_total` / `token_budget_total` (`null`; the
-  `User` model forbids extras), then `drafts/d_*/.runtime/ledger.jsonl` lacked `key_source`. Neither is
-  in `.scratch/wipe_run_data.py`'s list, and the error names no verb ("no verb repairs it"). Action: a
-  shape change lists every store it invalidates, the wipe covers drafts and the account file's dropped
-  keys, and the refusal names the wipe. **Re-test:** after a shape change, `new <dataset>` on an old
-  tree either runs or names the one command that clears it.
+- **A run reads every campaign's ledger, so one stale campaign crashes another**: `crm-extract-names__29f63f`
+  crashed entering round 1 on `LedgerUnreadableError` for `inbox-requires-action-v6__e1bda1`'s ledger. The bill
+  no longer reads a ledger and `land-data` refuses a tree holding one that does not load, but a desk tree is
+  never landed, and `intelligence/earned_blocks.py` and `initialization/loop_start.py::_banked_instruments`
+  still read every campaign's ledger after origin scoring is paid. Action: those readers refuse at mint,
+  before origin. **Re-test:** with one pre-shape-change campaign on a desk tree, `new` refuses before spending.
 - **A resumed walk re-walks a later proposer's arms**: `runner/round.py::bank_walk` banks the walk
   whole, and the opener's replay (`potter/l1/candidate_source.py::_generate_or_load`) returns it whole,
   so `mating` adds its children again and `locus_crossover` re-crosses the banked ones on a shifted rng;
@@ -782,8 +802,6 @@ word's `git grep -c` for that sense is 0.
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
 - **Seen removing the migrations** (2026-10-30):
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
-  - `identity/default_claim.py::_rewrite_campaign_ownership` writes `campaign.json` beside
-    `CampaignStore.update_campaign`, and logs an unreadable manifest instead of refusing.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
   - `family_ray_queries.py::_RayTail` gets a line no activity arm accepts as a `feed_fold` log, not a
     `LedgerUnreadableError`: `LineIndex` validates JSON only. Both tails skip an unknown

@@ -47,8 +47,8 @@ an oversight. Who may press it: [`access-model.md`](../../docs/operations/access
 
 **Emit nothing to stdout that is not also findable as a file.** `ReadoutProjection._write`
 (`application/views/readout.py`) writes every line to its cycle's `readout.log` at every entry point; stdout is
-one optional sink of it. **`logs/latest-readout-path.txt` only NAMES the newest terminal launch's file**,
-written by `HeldRun.run_inline` alone. <!-- probe: git grep -cE "latest-readout-path" -- promptpotter/*.py <= 1 -->
+one optional sink of it. **The data root's `logs/latest-readout-path.txt` only NAMES the newest terminal
+launch's file**, written by `HeldRun.run_inline` alone. <!-- probe: git grep -cE "latest-readout-path" -- promptpotter/*.py <= 1 -->
 
 **A value already on disk is ADDRESSED in the readout, never reprinted** — name its home and size; a value with
 no on-disk home is the bug.

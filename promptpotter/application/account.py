@@ -1,8 +1,8 @@
 """An account's life, written and read back.
 
-Each fact is stamped ONCE and written to the workspace ledger before ``user.json``, so no account
-and no consent exists without its record; a write that fails between the two repeats the record on
-the retry, which reads as the same fact twice and never as one missing.
+Each fact is stamped ONCE and written to the account's consent trail before ``user.json``, so no
+account and no consent exists without its record; a write that fails between the two repeats the
+record on the retry, which reads as the same fact twice and never as one missing.
 """
 
 from __future__ import annotations
@@ -11,11 +11,12 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.config.paths import default_projects_root
+from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.infrastructure.identity import blocklist, default_claim
 from promptpotter.infrastructure.identity.grants import (
+    PrincipalGrant,
     grant_principal,
     list_grants,
     revoke_principal,
@@ -32,6 +33,8 @@ from promptpotter.infrastructure.store.io import held_lock
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import (
     AccountDir,
+    ConsentEvent,
+    ConsentLine,
     ConsentRecord,
     Torn,
     User,
@@ -43,21 +46,29 @@ from promptpotter.shared.errors import LedgerUnreadableError, PotterError
 from promptpotter.shared.identity import IdentityContext, acting_principal, default_identity
 
 
-def _record(
+def _consent(
     stores: Stores,
-    event: AccountEvent,
+    event: ConsentEvent,
     *,
     at: str,
     subject: str = "",
     device: Device | None = None,
 ) -> None:
-    CycleEventLog.open_workspace(stores.base_dir).append(
-        AccountEventRecord(
+    stores.users.record(
+        ConsentLine(
             event=event,
             user_id=acting_principal(stores.identity).id,
             subject=subject,
             device=device,
-            timestamp=at,
+            at=at,
+        )
+    )
+
+
+def _record(stores: Stores, event: AccountEvent, *, subject: str) -> None:
+    CycleEventLog.open_workspace(stores.base_dir).append(
+        AccountEventRecord(
+            event=event, user_id=acting_principal(stores.identity).id, subject=subject
         )
     )
 
@@ -75,16 +86,13 @@ class AccountCeilingError(PotterError):
     code = "accounts_full"
 
 
-# Held from the count to the write, or two first sign-ins at the ceiling both read room for one.
-_OPENING_LOCK = ".accounts.lock"
-
-
 def arrive(stores: Stores, *, device: Device | None) -> Arrival:
     """The ONE place an account comes into being, whichever request reaches it first."""
     existing = stores.users.load()
     if existing is not None:
         return Arrival(existing, opened=False)
-    with held_lock(stores.projects_root / _OPENING_LOCK, wait_s=LOCK_TIMEOUT):
+    # Held from the count to the write, or two first sign-ins at the ceiling both read room for one.
+    with held_lock(stores.projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT):
         # A concurrent first request of this same person may have opened it while this one waited.
         existing = stores.users.load()
         if existing is not None:
@@ -103,7 +111,7 @@ def arrive(stores: Stores, *, device: Device | None) -> Arrival:
             email=identity.email,
             created_at=utcnow_iso(),
         )
-        _record(stores, "account_created", at=user.created_at, device=device)
+        _consent(stores, "account_created", at=user.created_at, device=device)
         stores.users.save(user)
     return Arrival(user, opened=True)
 
@@ -114,7 +122,7 @@ def account_of(stores: Stores) -> User:
 
 def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
     arrival = arrive(stores, device=device)
-    _record(
+    _consent(
         stores,
         "signed_in",
         at=utcnow_iso(),
@@ -128,19 +136,19 @@ def accept_terms(stores: Stores, version: str) -> User:
     """``accepted_at`` is this server's clock, never the client's: its legal weight rests on that."""
     consent = ConsentRecord(version=version, accepted_at=utcnow_iso())
     user = account_of(stores).model_copy(update={"terms_accepted": consent})
-    _record(stores, "terms_accepted", at=consent.accepted_at, subject=version)
+    _consent(stores, "terms_accepted", at=consent.accepted_at, subject=version)
     stores.users.save(user)
     return user
 
 
 def record_refusal(stores: Stores, *, subject: str) -> None:
     """A person's attempt the server turned down: without it, a failed first try leaves no trace."""
-    _record(stores, "request_refused", at=utcnow_iso(), subject=subject)
+    _record(stores, "request_refused", subject=subject)
 
 
 def record_upload(stores: Stores, *, filename: str, kept: Path) -> None:
     """Names the kept bytes beside the refusal that may follow, so the trail leads to the file."""
-    _record(stores, "uploaded", at=utcnow_iso(), subject=f"{filename} -> uploads/{kept.name}")
+    _record(stores, "uploaded", subject=f"{filename} -> uploads/{kept.name}")
 
 
 class Trail(NamedTuple):
@@ -280,7 +288,7 @@ def unblock_email(email: str, *, actor: str) -> list[str]:
     )
 
 
-def grants() -> dict[str, dict[str, object]]:
+def grants() -> dict[str, PrincipalGrant]:
     return list_grants(default_identity_paths().grants)
 
 

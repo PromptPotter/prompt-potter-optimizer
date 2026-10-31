@@ -9,32 +9,16 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
+from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, FreeTier
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.shared.errors import PayloadInvalidError
-
-# Per model, each gated parameter's admitted values, lowest first.
-type Bounds = dict[str, tuple[str, ...]]
-
-
-class Ask(FrozenModel):
-    linkedin: str
-
-
-class FreeTier(FrozenModel):
-    task_nodes: tuple[str, ...]
-    task_models: dict[str, Bounds]
-    optimizer_models: dict[str, Bounds]
-    # The check-in's last config layer, in a dataset file's `campaign:` shape.
-    campaign: dict[str, Any]
-    ask: Ask
 
 
 def free_tier() -> FreeTier:
     """Read each time, so an operator's edit holds from the next check."""
-    return FreeTier.model_validate(read_yaml(free_tier_path()))
+    return FREE_TIER_ADAPTER.validate_python(read_yaml(free_tier_path()))
 
 
 def with_free_tier_layer(

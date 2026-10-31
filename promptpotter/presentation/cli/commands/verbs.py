@@ -15,7 +15,6 @@ from typing import Any, Literal, get_args, get_origin
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
@@ -272,19 +271,18 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "reset",
         "reset:cmd_reset",
-        help="Drop campaigns/ + active_session.json for the "
-        "selected tenant; preserve its archive home's paid caches ("
-        + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
-        + "). The escape hatch for cycles "
-        "obsoleted by code changes — per-sample measurements survive so the "
-        "next `new` hits cache immediately.",
+        help="Drop the selected tenant's run data and every file no row of "
+        "`infrastructure/store/data_root.py` names; keep survivors (who an account is, what it "
+        "holds and was charged) and the caches, so the next `new` hits cache. Refused, exit 3, "
+        "while a run in reach is live or a draft is held. The escape hatch after a reshape of "
+        "run data.",
         args=(
             Arg(
                 "--all-tenants",
                 dest="all_tenants",
                 action="store_true",
-                help="Reset every tenant under .promptpotter/projects/ "
-                "(default: only the tenant named by --tenant).",
+                help="Reset the whole data root: every tenant, every sandbox and the install's "
+                "own run data (default: only the tenant named by --tenant and its sandboxes).",
             ),
             Arg(
                 "--yes",
@@ -675,6 +673,31 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "process not running TARGET, until the restarted server runs it. Prints `closed …`, or one "
         "`held …` line per live run on other code and closes nothing. Zero spend.",
         args=(Arg("target", help="The full commit the landing checks out."),),
+        needs_registries=False,
+    ),
+    Verb(
+        "land-data",
+        "reset:cmd_land_data",
+        help="A landing's one write to the data root, under THIS code: stage each survivor "
+        "migration (`application/maintenance/migrate.py::MIGRATIONS`), load every file under the "
+        "data root as its row of `infrastructure/store/data_root.py` shapes it would then stand, and "
+        "write the migrations and drop each cache file that no longer loads only if nothing refuses. "
+        "A file no row names, or a survivor or run file that does not load, refuses: exit 3, "
+        "nothing written. Zero spend.",
+        args=(
+            Arg(
+                "--reset",
+                action="store_true",
+                help="Also drop every account's run data and every file no row names, as "
+                "`reset --all-tenants` does; refused while a run is live.",
+            ),
+            Arg(
+                "--dry-run",
+                dest="dry_run",
+                action="store_true",
+                help="Print what the landing would write, drop and refuse; write nothing.",
+            ),
+        ),
         needs_registries=False,
     ),
     Verb(

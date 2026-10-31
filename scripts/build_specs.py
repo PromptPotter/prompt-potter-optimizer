@@ -13,11 +13,13 @@ sys.path.insert(0, str(_REPO))
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.run_records import CycleRecord
+from promptpotter.infrastructure.store.data_root import pinned_schemas
 from promptpotter.main import app
 
 _SPECS = _REPO / "docs" / "specs"
 _OPENAPI_PATH = _SPECS / "openapi.generated.json"
 _ASYNCAPI_PATH = _SPECS / "events-asyncapi.generated.json"
+_DATA_ROOT_PATH = _SPECS / "data-root.generated.json"
 
 _REGENERATE = "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`."
 
@@ -37,6 +39,20 @@ record-derived frame's `payload` is the `CycleRecord` its `kind` names. The
 subscription contract (snapshot first, then the live tail; gap recovery; no replay)
 is `docs/developer/event-stream.md`.
 """
+
+
+_DATA_ROOT_DESCRIPTION = f"""\
+{_REGENERATE}
+
+Every SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns
+under the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before
+`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by
+`update.sh <ref> --reset`.
+"""
+
+
+def data_root() -> dict[str, Any]:
+    return {"description": _DATA_ROOT_DESCRIPTION, "kinds": pinned_schemas()}
 
 
 def openapi() -> dict[str, Any]:
@@ -93,6 +109,7 @@ def main() -> int:
     for path, document in (
         (_OPENAPI_PATH, contract),
         (_ASYNCAPI_PATH, asyncapi(contract["paths"])),
+        (_DATA_ROOT_PATH, data_root()),
     ):
         # `sort_keys` so a registration reorder is not a diff.
         content = json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True) + "\n"

@@ -37,6 +37,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared.answer_text import truncate
+from promptpotter.shared.errors import validation_reason
 
 if TYPE_CHECKING:
     import httpx
@@ -218,7 +219,7 @@ def cell_gateway_body(
 
 
 def _validation_summary(err: ValidationError, content: str, finish_reason: str | None) -> str:
-    broke = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in err.errors()[:5])
+    broke = validation_reason(err, shown=5)
     return f"finish={finish_reason} || {broke} || emitted: {truncate(content, 1500)}"
 
 

@@ -5,19 +5,19 @@ from __future__ import annotations
 import logging
 import secrets
 import time
-from dataclasses import dataclass
-from json import JSONDecodeError
 from pathlib import Path
 
-from promptpotter.infrastructure.store.io import read_json, write_json
+from pydantic import ValidationError
+
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure.store.io import read_bytes_optional, write_json
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SESSION_TTL_S = 60 * 60 * 24 * 7
 
 
-@dataclass(frozen=True)
-class SessionData:
+class SessionData(FrozenModel):
     user_id: str
     tenant_id: str
     issuer: str
@@ -58,44 +58,23 @@ class OIDCSessionStore:
             created_at=now,
             expires_at=now + self._ttl_s,
         )
-        write_json(
-            self._path(session_id),
-            {
-                "user_id": data.user_id,
-                "tenant_id": data.tenant_id,
-                "issuer": data.issuer,
-                "subject": data.subject,
-                "email": data.email,
-                "provider": data.provider,
-                "created_at": data.created_at,
-                "expires_at": data.expires_at,
-            },
-        )
+        write_json(self._path(session_id), data.model_dump(mode="json"))
         return session_id, data
 
     def read(self, session_id: str) -> SessionData | None:
         if not session_id or "/" in session_id or "\\" in session_id:
             return None
         path = self._path(session_id)
-        if not path.is_file():
+        raw = read_bytes_optional(path)
+        if raw is None:
             return None
         try:
-            raw = read_json(path)
-        except (OSError, JSONDecodeError):
+            data = SessionData.model_validate_json(raw)
+        except ValidationError:
             # Don't log the session id — it's the sole bearer credential.
             logger.warning("unreadable session file, deleting")
             path.unlink(missing_ok=True)
             return None
-        data = SessionData(
-            user_id=str(raw.get("user_id", "")),
-            tenant_id=str(raw.get("tenant_id", "")),
-            issuer=str(raw.get("issuer", "")),
-            subject=str(raw.get("subject", "")),
-            email=raw.get("email"),
-            provider=str(raw.get("provider", "")),
-            created_at=int(raw.get("created_at", 0)),
-            expires_at=int(raw.get("expires_at", 0)),
-        )
         if data.is_expired():
             path.unlink(missing_ok=True)
             return None

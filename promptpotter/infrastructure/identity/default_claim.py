@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.infrastructure.store.io import read_json, write_json
-from promptpotter.infrastructure.store.layout import CampaignLayout
+from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.infrastructure.identity.paths import DefaultClaim, default_identity_paths
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import TERMINAL_IDENTITY_ID
 
@@ -35,23 +35,20 @@ def maybe_claim_default(
                 logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
             except OSError as exc:
                 logger.warning("Failed to claim default tenant for %s: %s", user_id, exc)
-        write_json(
-            marker_path,
-            {"user_id": user_id, "claimed_at": utcnow_iso(), "renamed": renamed},
-        )
+        claim = DefaultClaim(user_id=user_id, claimed_at=utcnow_iso(), renamed=renamed)
+        write_json(marker_path, claim.model_dump())
         if user_dir.is_dir():
-            _rewrite_campaign_ownership(user_dir / "campaigns", user_id)
+            _rebind_campaigns(CampaignStore(WorkspaceDir(user_dir)), user_id)
     return renamed
 
 
 def registered_user_id(marker_path: Path) -> str | None:
-    if not marker_path.is_file():
+    """Optional, not tolerant: a corrupt marker read as unclaimed would silently demote the host."""
+    raw = read_json_optional(marker_path)
+    if raw is None:
         return None
-    try:
-        uid = read_json(marker_path).get("user_id")
-    except (OSError, JSONDecodeError):
-        return None
-    return uid if isinstance(uid, str) and uid and uid != "default" else None
+    uid = DefaultClaim.model_validate(raw).user_id
+    return uid if uid != "default" else None
 
 
 def _is_host(*, terminal: bool, user_id: str) -> bool:
@@ -69,24 +66,10 @@ def is_host_tenant_dir(user_id: str) -> bool:
     return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
 
 
-def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
+def _rebind_campaigns(campaigns: CampaignStore, user_id: str) -> None:
     """Any OTHER owner is left alone: a multi-user install holds campaigns that are someone else's."""
-    if not campaigns_root.is_dir():
-        return
-    rewritten = 0
-    for campaign_dir in campaigns_root.iterdir():
-        manifest = CampaignLayout(campaign_dir).manifest
-        if not manifest.is_file():
-            continue
-        try:
-            data = read_json(manifest)
-        except (OSError, JSONDecodeError) as exc:
-            logger.warning("Skipping unreadable campaign.json at %s: %s", manifest, exc)
-            continue
-        if data["owner_user_id"] != "default":
-            continue
-        data["owner_user_id"] = user_id
-        write_json(manifest, data)
-        rewritten += 1
-    if rewritten:
-        logger.info("Rebound %d campaigns to user %s", rewritten, user_id)
+    for campaign_id in campaigns.list_campaign_ids():
+        owner = campaigns.campaign_owner(campaign_id)
+        if owner is not None and owner.owner_user_id == "default":
+            campaigns.update_campaign(campaign_id, owner_user_id=user_id)
+            logger.info("Rebound campaign %s to user %s", campaign_id, user_id)

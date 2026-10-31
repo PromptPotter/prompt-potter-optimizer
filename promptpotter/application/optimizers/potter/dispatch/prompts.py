@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizer_manifest import (
-    PipelineManifest,
     SelectedOptimizer,
     checkin_manifest,
     llm_node_manifest,
@@ -18,6 +17,7 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
 from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
 from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_manifest import PipelineManifest
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 

@@ -2,10 +2,17 @@
 
 ## Stores
 
-**A new content-addressed cache joins `config/paths.py::SHARED_CACHE_DIRS`** — `build_stores` roots,
-`application/maintenance/reset.py` preserves and the storage report counts only what it lists, so a
-cache missing from it is destroyed or double-counted. `shared_root` equals `projects_root` except in an
-L4 inner sandbox, which isolates campaign state but never a content-keyed cache.
+**A new content-addressed cache joins `config/paths.py::SHARED_CACHE_DIRS`** — `build_stores` roots
+and the storage report counts only what it lists, so a cache missing from it is double-counted.
+`shared_root` equals `projects_root` except in an L4 inner sandbox, which isolates campaign state but
+never a content-keyed cache.
+
+**A new file joins `store/data_root.py::KINDS` as one row, its shape its reader's own model**
+— owned by [`decisions.md`](../../../docs/decisions.md) § 0011; a file no row names is dropped by
+`reset` and refuses a landing. **What an account authored or agreed to is migrated, never wiped** — a
+reshape of a SURVIVOR row ships a migration (`application/maintenance/migrate.py::MIGRATIONS`); a
+consent fact is a `user_store.py::ConsentLine` in `consent.jsonl`, never a workspace-ledger record,
+which is run data.
 
 **`optimizer_reuse` and `judge_reuse` are separate `LLMReuseCache` instances** (`store/llm_reuse_cache.py`) —
 a grader reading the loop's cached answers would be a ruler fed by what it measures.
@@ -22,10 +29,11 @@ home's cells asks its owner. A store keyed by what one account holds (`tenant_da
 roots at the tenant, never the home. A MEMORY read past `store/archive_queries.py`'s scope
 (`bind_memory_scope`) is the bug.
 
-**`store/account_spend.py` banks what a subject still holds before a delete** — every destroyer calls
-it itself, so none can skip the bank; `mirrored` L4 inner copies are skipped, or that money bills twice.
-**A subject's COST and the account's BILL are two folds** (`_Cost`, `_Billed`): a campaign row reads
-`campaign_spend` (cost, an inner run's included); only a bill or a bank skips `mirrored`.
+**The account's bill is its charges, never its ledgers** (`store/wallet_store.py::ChargeBook`, written by
+`llm/spend_book.py::Admission` at every hold and every billed part), so no delete and no reshape reaches it.
+**`store/account_spend.py` banks a cycle's spend before a delete**, for its campaign's cost and ceilings —
+every destroyer calls it itself; `mirrored` L4 inner copies are skipped, or that money banks twice.
+A campaign row reads `campaign_spend` (`_Cost`, an inner run's included); a bank reads `_Billed`.
 
 **A cycle's own facts are ledger records, and `index.json` is their fold** — written by
 `projections/cycle_index.py::write_cycle_index`, read through `read_cycle_index` off the ledger, never

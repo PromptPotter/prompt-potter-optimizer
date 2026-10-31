@@ -73,7 +73,7 @@ def _protected_pipeline_fields(pipeline: PipelineData) -> frozenset[str]:
     return _READ_ON_L4_ROWS if pipeline.inner is not None else frozenset()
 
 
-def _parsed(lines: Iterable[str]) -> list[tuple[str, FiledAnswer | None]]:
+def _parsed(lines: Iterable[str]) -> list[tuple[str, FiledAnswer]]:
     return [(line, answer_of(line)) for line in lines]
 
 
@@ -266,7 +266,7 @@ def inventory_measurement_archive(
     held: set[tuple[str, str]] = set()
 
     for file_key in archive.keys(ArchiveFile.CELLS):
-        answers = [(line, a) for line, a in _parsed(archive.detail_lines(file_key)) if a]
+        answers = _parsed(archive.detail_lines(file_key))
         moved = sum(1 for _, answer in answers if _moved(answer))
         cold_each = archive.cold_bytes_on_disk(file_key) / moved if moved else 0.0
         for line, answer in answers:
@@ -389,7 +389,7 @@ def _compacted(
     skipped: dict[str, int] = {}
 
     for line, answer in _parsed(lines):
-        if answer is None or not _in_scope(answer, dataset_hash) or answer.compaction is not None:
+        if not _in_scope(answer, dataset_hash) or answer.compaction is not None:
             out.append(line)
             continue
         if answer.role != _ELIGIBLE_ROLE:
@@ -447,9 +447,9 @@ _Split = tuple[dict[str, MovedFields], list[MovedFields]]
 
 
 def _split_cold(
-    answers: list[tuple[str, FiledAnswer | None]], cold: list[MovedFields], dataset_hash: str | None
+    answers: list[tuple[str, FiledAnswer]], cold: list[MovedFields], dataset_hash: str | None
 ) -> _Split | None:
-    scoped = {a.answer: _in_scope(a, dataset_hash) for _, a in answers if a is not None}
+    scoped = {a.answer: _in_scope(a, dataset_hash) for _, a in answers}
     mine: dict[str, MovedFields] = {}
     rest: list[MovedFields] = []
     for moved in cold:
@@ -466,9 +466,7 @@ def _restored(
     lines: list[str], cold: list[MovedFields], *, dataset_hash: str | None
 ) -> tuple[CellRewrite | None, _FileOutcome]:
     answers = _parsed(lines)
-    unrestorable = sum(
-        1 for _, a in answers if a and a.purged is not None and _in_scope(a, dataset_hash)
-    )
+    unrestorable = sum(1 for _, a in answers if a.purged is not None and _in_scope(a, dataset_hash))
     split = _split_cold(answers, cold, dataset_hash)
     if split is None:
         return None, _FileOutcome(_Conflict(), unrestorable=unrestorable)
@@ -477,7 +475,7 @@ def _restored(
         return None, _FileOutcome(None, unrestorable=unrestorable)
     new_lines = [
         answer_line(replace(rejoined(a, mine[a.answer].pipeline), compaction=None))
-        if a is not None and a.answer in mine
+        if a.answer in mine
         else line
         for line, a in answers
     ]
@@ -511,7 +509,7 @@ def _purged(
     if not mine:
         return None, _FileOutcome(None)
     stamped = [
-        answer_line(replace(a, purged=stamped_at)) if a is not None and a.answer in mine else line
+        answer_line(replace(a, purged=stamped_at)) if a.answer in mine else line
         for line, a in answers
     ]
     gone = _Purged(len(mine), cold_size(cold) - cold_size(rest))

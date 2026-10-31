@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Unpack, get_args
 
 from pydantic import ValidationError
@@ -86,6 +86,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_resolved_run,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
     read_json_optional,
@@ -101,7 +102,6 @@ from promptpotter.infrastructure.store.layout import (
     campaign_cycles_dir,
     campaign_root_dir_for,
     campaigns_root_dir_for,
-    classify,
     cycle_dir_for,
     head_to_head_path,
     inner_sandbox_key,
@@ -119,6 +119,7 @@ from promptpotter.shared.errors import (
     ManifestUnreadableError,
     NotFoundError,
     graceful,
+    validation_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,17 +133,18 @@ def _prune_empty_dirs(root: Path) -> None:
             d.rmdir()
 
 
+def _keepsake(path: Path, campaign_dir: Path) -> bool:
+    row = campaign_row(PurePosixPath(path.relative_to(campaign_dir).as_posix()))
+    return row is not None and row.keepsake
+
+
 def _strip_to_keepsake(campaign_dir: Path) -> None:
     cycles_dir = campaign_cycles_dir(campaign_dir)
     if cycles_dir.is_dir():
         for cdir in cycles_dir.iterdir():
             if not cdir.is_dir():
                 continue
-            for p in [
-                f
-                for f, _st in iter_files(cdir)
-                if not classify(f.relative_to(campaign_dir).parts).keepsake
-            ]:
+            for p in [f for f, _st in iter_files(cdir) if not _keepsake(f, campaign_dir)]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)
 
@@ -199,7 +201,7 @@ class CampaignStore:
         except ValidationError as exc:
             raise ManifestUnreadableError(
                 path=str(path.relative_to(self._base_dir)),
-                reason=f"{exc.error_count()} field(s) — {exc.errors()[0]['msg']}",
+                reason=validation_reason(exc, shown=1),
             ) from exc
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:

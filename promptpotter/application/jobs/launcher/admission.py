@@ -21,22 +21,22 @@ from promptpotter.application.jobs.quota import (
     refuse_verb_rate,
     share_campaign_ceiling,
 )
-from promptpotter.application.jobs.registry import (
-    UNRESOLVED_HOP,
-    CampaignLaunch,
-    EmbeddedRun,
-    InnerRun,
-    Job,
-    JobRegistry,
-    ScoringPass,
-    ScoringVerb,
-    SlotHolder,
-)
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import (
+    UNRESOLVED_HOP,
+    CampaignLaunch,
+    EmbeddedRun,
+    InnerRun,
+    Job,
+    ScoringPass,
+    ScoringVerb,
+    SlotHolder,
+)
 from promptpotter.domain.phases import (
     ErrorRecord,
     PauseCause,

@@ -50,7 +50,7 @@ declared, visible and hashed into identity; the campaign's own config holds only
 owns. Node types and their I/O are [`developer/node-standard.md`](developer/node-standard.md)
 § Optimizer node types'. Implementations register under their node name through the one
 entry-point registry connectors and judges use, so a third party ships an optimizer with no edit
-in this tree, and a manifest is typed on read (`application/optimizer_manifest.py::PipelineManifest`)
+in this tree, and a manifest is typed on read (`domain/pipeline_manifest.py::PipelineManifest`)
 so a roster the bench cannot run is refused before a mint. **The bench walks `default` once per
 round, and `initial_population` in a round entered with no population; every other pipeline is
 the optimizer's own, and the bench never chooses.** The individuals a run carries are one
