@@ -6,11 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.18] — 2026-10-31
+
+> One shape end to end: an individual is its prompts, a dataset is its content, one `Budget` bounds a run, every run input is a record, and a head-to-head is minted in one act. The optimizer climbs: L1 holds `answer_format`, PoBB stops a clear leader at the election's bar, and the climb is served per minute, candidate and $. Breaking on disk: run data is wiped. 134 commits since `v0.8.17`.
+
 ### Added
 
 - **Pools.** One `Pool` slice (`BlockPool`, `DemoPool`) any manifest seeds and reads under `off | open | closed`, banked whole; `EarnedLibrary` / `EarnedBlocks` go. (83d049d60, c4a803b3a)
 - `discard-draft` verb. (8f1a0e13e)
 - `export --tier chat|report|notebook|deploy|package`: five served readings of a cycle, the same at `GET …/cycles/{id}/export` and on the candidates card; `export.json` carries a PROV-O `lineage`.
+- **The climb is served**: Δ per minute, per candidate and per $ on the activity channel and in `readout.log` (`climb_line`). (26d36ebec)
+- **A landing waits on live producers of older code**: `update.sh` asks `close-admission <target>` from the current checkout before it moves anything and holds admission closed until the new API starts; a run records its code revision. (9b664d2f1)
 
 ### Changed
 
@@ -38,6 +44,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING — block libraries are packs the operator installs** under `block_packs/`; core ships none and `config/prompt_variants.json` is deleted.
 - **BREAKING — a ledger line no model accepts refuses its cycle** to every reader of its kind.
 - **BREAKING — no migration: a shape change wipes run data.** The `restamp` verb is deleted and `update.sh` no longer runs it or fails a deploy on an unreadable campaign; a released job's file is deleted by the job registry once its day ends; hard samples, prompt exports and ledger `llm_call` usage read strictly.
+- **BREAKING — every run input is a record**: every act on a head-to-head arm is admitted and leaves the comparison (a fork off an arm leaves it for the campaign); the campaign ceiling is a record on its root ledger; record fields no longer default; `reset` banks across a reshape and takes every draft claim first; a Harbor trial whose logs moved is refused. (9b664d2f1)
+- **BREAKING — a round banks the reference it read against** (`RoundOutcome.reference`), so CAPO's and GEPA's elections crown against the line's parent; `RoundPlan`'s fields are the round roles; one restatement seam; a line stands on its origin until an election crowns another; a cladogram extent is the served `main_line`, forks and inner runs included. (52b76f719)
+- **L1 never writes `answer_format`**, and a held leader ahead of its parent re-reads the next panel. (1c9288f9b)
+- **PoBB stops a clear leader at the election's own admission bar** (`Selector.admission`); `lock_in`, `lock_in_n_min`, `epsilon_elimination` and `leader_lock_in` fold into `early_stop`; `decision_grade` is gone. (24a05c2bf)
+- The pre-push hook proves only a push to main. (37d229a12)
 - **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), the `round_standing` record (carried by `round_closed`), and the `optimizer_state` record (a `round_restated` statement, which a repair's re-bank writes too).
 
 ## [0.8.17] — 2026-10-15

@@ -7,8 +7,8 @@ title: "PromptPotter: LLM-Driven Evolution of Prompts and Pipelines"
 authors:
   - family-names: Streuli
     given-names: David
-version: 0.8.17
-date-released: 2026-10-15
+version: 0.8.18
+date-released: 2026-10-31
 repository-code: https://github.com/PromptPotter/prompt-potter-optimizer
 url: https://promptpotter.com
 license-url: https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE
