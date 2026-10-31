@@ -76,6 +76,7 @@ from promptpotter.application.head_to_head_price import (
     priced_head_to_head,
 )
 from promptpotter.application.jobs import mint
+from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.coupon import (
     bind_account,
     coupon_status,
@@ -244,7 +245,6 @@ from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     bank_spend,
     billed_spend,
-    iter_user_token_usage,
     ledger_cost,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -1298,19 +1298,17 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         overlay = {"llm_only": {"model": model}}
         index.append(CycleSeedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
 
-    def tailed() -> tuple[float, int, CycleSeed | None, float]:
+    def tailed() -> tuple[float, int, CycleSeed | None]:
         spend, calls, _worked_s = scan_ledger_spend([LedgerSpan(index.path)])
-        wallet = iter_user_token_usage(ledgers=[index.path], since=0.0, until=float("inf"))
-        charted = sum(row.billed_usd or 0.0 for row in wallet)
         seeded = scan_last([LedgerSpan(index.path)], CycleSeedRecord)
-        return spend.total_used_usd, calls, None if seeded is None else seeded.seed, charted
+        return spend.total_used_usd, calls, None if seeded is None else seeded.seed
 
-    def cold() -> tuple[float, int, CycleSeed | None, float]:
+    def cold() -> tuple[float, int, CycleSeed | None]:
         rows = iter_jsonl(index.path)
         bills = [row["cost_usd"] for row in rows if row["record_type"] == "token_usage"]
         seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_seed"]
         seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
-        return sum(bills), len(bills), seeded, sum(bills)
+        return sum(bills), len(bills), seeded
 
     bill(3)
     seed("first")
@@ -1323,7 +1321,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "the per-round split is the same bill: a call that carries no round banks at the origin's"
     )
     write_jsonl(index.path, iter_jsonl(index.path)[:2])
-    assert tailed() == cold() == (2.0, 2, None, 2.0), (
+    assert tailed() == cold() == (2.0, 2, None), (
         "a compaction swaps the file for a shorter one; the index kept its old rows"
     )
     seen: list[tuple[float, int]] = []
@@ -2188,7 +2186,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             inner,
             CallLabel("cut", "optimizer"),
             cut,
-            cut,
+            reservation=None,
             model="gpt-x",
             provider="openai",
             paid_by="host",
@@ -2236,7 +2234,13 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     before, held_usd, spent_usd = unreported_on(held_ledger), book.usd_unreported, book.usd_metered
     with _billing_on(held_ledger, book):
         Admission(
-            book, nitro, cut, cut, model="m:nitro", provider="openrouter", paid_by="host"
+            book,
+            nitro,
+            cut,
+            reservation=None,
+            model="m:nitro",
+            provider="openrouter",
+            paid_by="host",
         ).settle(Billed(TokenAccount(input=600, output=100), None))
     assert book.usd_metered == spent_usd, "a bill naming tokens and no price read as free"
     assert book.usd_unreported == pytest.approx(held_usd + hold_usd), "it was not held at its bound"
@@ -2612,6 +2616,9 @@ def _account_stores(
             BilledCharge(
                 hold_id="spent",
                 key_source="host",
+                kind="optimizer",
+                model="gpt-x",
+                provider="openai",
                 cost_usd=spent.get("cost_usd"),
                 rate_priced_usd=None,
                 tokens=spent["input_tokens"] + spent["output_tokens"],
@@ -2875,7 +2882,14 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         resolve_api_key(spent_out.identity, "openai", spent_out)
     spent_out.charges.append(
         BilledCharge(
-            hold_id="own", key_source="user", cost_usd=5.0, rate_priced_usd=None, tokens=9_000_000
+            hold_id="own",
+            key_source="user",
+            kind="optimizer",
+            model="gpt-x",
+            provider="openrouter",
+            cost_usd=5.0,
+            rate_priced_usd=None,
+            tokens=9_000_000,
         )
     )
     status = coupon_status(spent_out)
@@ -3371,6 +3385,34 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert before == pytest.approx(0.07 + 0.11 + 0.05), (
         "the account read another sum than its cycles billed"
     )
+
+    # An admission that fails past its hold frees the book's room and charges the account nothing.
+    def unwritable(**_: object) -> None:
+        raise OSError("the ledger's disk is full")
+
+    root_hop = CycleHop(campaign_id="camp-2", cycle_id=root)
+    ledger = telemetry.set_cycle_ledger(
+        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(root_hop)))
+    )
+    bill, book = account_bill(stores.charges), spend_book(1.0)
+    room = book.money_left()
+    try:
+        with monkeypatch.context() as patched, spending_under(book), pytest.raises(OSError):
+            patched.setattr(
+                "promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable
+            )
+            with admitted(
+                CallLabel("backend", "backend"),
+                SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
+                model="openai/gpt-4o",
+                provider="openrouter",
+                paid_by="host",
+            ):
+                pass
+    finally:
+        telemetry.reset_cycle_ledger(ledger)
+    assert account_bill(stores.charges) == bill, "a send never made left its hold on the bill"
+    assert book.money_left() == room, "a send never made kept its room held"
     assert not cleanup(root) and account_usd() == pytest.approx(before), (
         "a cycle the delete REFUSES must not be banked: it keeps its rows, the same money twice"
     )
@@ -3553,4 +3595,11 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert not stores.campaigns.iter_campaign_dirs(), "a reset kept a campaign it cannot read"
     assert account_usd() == pytest.approx(framed_total + 0.13), (
         "a reset over a reshaped ledger dropped the account's spend with it"
+    )
+    activity = account_activity(stores, window="1d", group_by="model")
+    assert activity.total_spend_usd == pytest.approx(account_usd()), (
+        "the Activity pane read another bill than the account's charges"
+    )
+    assert activity.total_tokens == 4 * 2_800 + 400 + 700, (
+        "the Activity pane lost the sends of what was deleted, reset or never minted"
     )

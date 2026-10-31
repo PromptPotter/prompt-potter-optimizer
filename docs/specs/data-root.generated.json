@@ -218,6 +218,39 @@
                 "title": "Key Source",
                 "type": "string"
               },
+              "kind": {
+                "enum": [
+                  "optimizer",
+                  "backend",
+                  "judge",
+                  "diagnostic",
+                  "bench"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Model"
+              },
+              "provider": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Provider"
+              },
               "rate_priced_usd": {
                 "anyOf": [
                   {
@@ -247,6 +280,9 @@
             "required": [
               "hold_id",
               "key_source",
+              "kind",
+              "model",
+              "provider",
               "cost_usd",
               "rate_priced_usd",
               "tokens"

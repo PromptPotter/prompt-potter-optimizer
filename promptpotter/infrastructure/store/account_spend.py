@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
@@ -24,12 +25,13 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     KeySource,
     PaidSpend,
+    TokenUsageKind,
     UserSpend,
     bill_or_rate_usd,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.layout import CycleLayout, draft_dirs
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
     HeldSends,
@@ -39,49 +41,9 @@ from promptpotter.infrastructure.store.read_model import (
     held_tokens,
 )
 from promptpotter.infrastructure.store.wallet_store import BilledCharge, ChargeBook, HeldCharge
-from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-
-
-def account_ledgers(campaigns: CampaignStore) -> list[Path]:
-    """Resolved, never opened, so a read mints no dir; a draft's calls are the account's."""
-    return [
-        *campaigns.iter_cycle_ledgers(),
-        *(
-            ledger
-            for draft_dir in draft_dirs(campaigns.workspace)
-            if (ledger := CycleLayout(draft_dir).ledger).is_file()
-        ),
-        CycleEventLog.workspace_path(campaigns.workspace),
-    ]
-
-
-class UsageRow(NamedTuple):
-    ts: float
-    billed_usd: float | None
-    rate_priced_usd: float | None
-    """:func:`row_figures`' pair: both ``None`` is unpriced, and a replay is a bill of ``0.0``."""
-    tokens: int
-    model: str | None
-    provider: str | None
-    kind: str
-    # ``None`` on a replay, which no key paid.
-    key_source: KeySource | None
-
-
-def iter_user_token_usage(*, ledgers: Iterable[Path], since: float, until: float) -> list[UsageRow]:
-    return [
-        row
-        for ledger in ledgers
-        for row in LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Usage)
-        if since <= row.ts < until
-    ]
-
-
-def row_figures(usage: TokenUsageRecord) -> tuple[float | None, float | None]:
-    return (0.0, None) if usage.cached else (usage.cost_usd, usage.rate_priced_usd)
 
 
 def _billed(cost_usd: float | None, rate_priced_usd: float | None, tokens: int) -> UserSpend:
@@ -91,7 +53,10 @@ def _billed(cost_usd: float | None, rate_priced_usd: float | None, tokens: int) 
 
 
 def _billed_of(usage: TokenUsageRecord) -> UserSpend:
-    return _billed(*row_figures(usage), usage.input_tokens + usage.output_tokens)
+    tokens = usage.input_tokens + usage.output_tokens
+    if usage.cached:
+        return _billed(0.0, None, tokens)
+    return _billed(usage.cost_usd, usage.rate_priced_usd, tokens)
 
 
 type _Hold = SpendHoldRecord | HeldCharge
@@ -177,43 +142,7 @@ class _Banked(NamedTuple):
     subjects: frozenset[BankedSubject]
 
 
-def _interned(value: object) -> str | None:
-    return sys.intern(value) if isinstance(value, str) else None
-
-
-class _Usage:
-    records: ClassVar[RecordClasses] = (TokenUsageRecord,)
-
-    def __init__(self) -> None:
-        self._rows: list[UsageRow] = []
-        self._held: tuple[UsageRow, ...] | None = None
-
-    def feed(self, usage: TokenUsageRecord) -> None:
-        ts = epoch_seconds(usage.timestamp)
-        if ts is None:
-            return
-        billed, rate_priced = row_figures(usage)
-        self._rows.append(
-            UsageRow(
-                ts=ts,
-                billed_usd=billed,
-                rate_priced_usd=rate_priced,
-                tokens=usage.input_tokens + usage.output_tokens,
-                model=_interned(usage.model),
-                provider=_interned(usage.provider),
-                kind=sys.intern(usage.kind),
-                key_source=usage.key_source,
-            )
-        )
-        self._held = None
-
-    def value(self) -> tuple[UsageRow, ...]:
-        if self._held is None:
-            self._held = tuple(self._rows)
-        return self._held
-
-
-_SPEND_FOLDS = (_Cost, _Billed, _Tombstones, _Usage)
+_SPEND_FOLDS = (_Cost, _Billed, _Tombstones)
 
 
 def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
@@ -284,9 +213,60 @@ class _Charges:
         return self._billed, tuple(self._held.open.values()), tuple(self._held.unpriced.values())
 
 
+class UsageRow(NamedTuple):
+    ts: float
+    billed_usd: float | None
+    rate_priced_usd: float | None
+    tokens: int
+    model: str | None
+    provider: str | None
+    kind: TokenUsageKind
+    key_source: KeySource
+
+
+def _interned(value: str | None) -> str | None:
+    return None if value is None else sys.intern(value)
+
+
+class _Usage:
+    records: ClassVar[RecordClasses] = (BilledCharge,)
+
+    def __init__(self) -> None:
+        self._rows: list[UsageRow] = []
+        self._held: tuple[UsageRow, ...] | None = None
+
+    def feed(self, charge: BilledCharge) -> None:
+        self._rows.append(
+            UsageRow(
+                ts=datetime.fromisoformat(charge.timestamp).timestamp(),
+                billed_usd=charge.cost_usd,
+                rate_priced_usd=charge.rate_priced_usd,
+                tokens=charge.tokens,
+                model=_interned(charge.model),
+                provider=_interned(charge.provider),
+                kind=charge.kind,
+                key_source=charge.key_source,
+            )
+        )
+        self._held = None
+
+    def value(self) -> tuple[UsageRow, ...]:
+        if self._held is None:
+            self._held = tuple(self._rows)
+        return self._held
+
+
+_CHARGE_FOLDS = (_Charges, _Usage)
+
+
+def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[UsageRow]:
+    rows = LedgerIndex.of(charges.path, _CHARGE_FOLDS).view(_Usage)
+    return [row for row in rows if since <= row.ts < until]
+
+
 def account_bill(charges: ChargeBook) -> PaidSpend:
     """Every send the account made, a deleted campaign's and an L4 sandbox's included: no delete reaches a charge."""
-    billed, open_holds, unpriced = LedgerIndex.of(charges.path, (_Charges,)).view(_Charges)
+    billed, open_holds, unpriced = LedgerIndex.of(charges.path, _CHARGE_FOLDS).view(_Charges)
     attached: dict[str, bool] = {}
 
     def stopped(hold: HeldCharge) -> bool:

@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import Field, SecretStr, TypeAdapter
 
-from promptpotter.domain.spend import Budget, KeySource
+from promptpotter.domain.spend import Budget, KeySource, TokenUsageKind
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     append_line,
@@ -136,6 +136,10 @@ class BilledCharge(FrozenModel):
     record_type: Literal["billed"] = "billed"
     hold_id: str
     key_source: KeySource
+    kind: TokenUsageKind
+    # ``None`` where neither the send nor its reply named one, as on a backend cell.
+    model: str | None
+    provider: str | None
     cost_usd: float | None
     rate_priced_usd: float | None
     tokens: int

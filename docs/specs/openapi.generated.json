@@ -397,7 +397,7 @@
             "type": "boolean"
           },
           "group_by": {
-            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`TokenUsageRecord.key_source`).",
+            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`BilledCharge.key_source`).",
             "enum": [
               "model",
               "api_key"

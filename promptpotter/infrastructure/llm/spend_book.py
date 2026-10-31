@@ -769,8 +769,8 @@ class Admission:
         book: SpendBook,
         label: CallLabel,
         bound: SendBound,
-        held: SendBound,
         *,
+        reservation: _Reservation | None,
         model: str | None,
         provider: str | None,
         paid_by: KeySource,
@@ -779,7 +779,6 @@ class Admission:
         self._label = label
         self._paid_by = paid_by
         self._bound = bound
-        self._held = held
         self._billed_usd = 0.0
         self._billed_tokens = 0
         self._priced = True
@@ -796,8 +795,20 @@ class Admission:
         self.closed = False
         # What the send closed at, once every part of it was priced; ``None`` until then.
         self.bill: Budget | None = None
+        self._held = book.held_at(label, bound)
+        what = f"{label.node} on {model}" if model else label.node
+        self.drew = book.hold(
+            self._held, bound, label.kind, what=what, reservation=reservation, paid_by=paid_by
+        )
         _OUT.add(self._hold_id)
-        self._hold(self._hold_id, bound)
+        try:
+            self._hold(self._hold_id, bound)
+        except BaseException:
+            self._finish()
+            book.release(self._held, bound, label.kind, paid_by)
+            # Nothing was sent: closed at zero, or the account's bill keeps the bound forever.
+            self._charge(0.0, None, 0, model=model, provider=provider)
+            raise
 
     def _hold(self, hold_id: str, bound: SendBound) -> None:
         self._charges.append(
@@ -834,15 +845,7 @@ class Admission:
             recorded=part.rate_priced_usd,
         )
         tokens = part.usage.input + part.usage.output
-        self._charges.append(
-            BilledCharge(
-                hold_id=self._hold_id,
-                key_source=self._paid_by,
-                cost_usd=part.cost_usd,
-                rate_priced_usd=rate,
-                tokens=tokens,
-            )
-        )
+        self._charge(part.cost_usd, rate, tokens, model=model, provider=provider)
         record = emit_token_usage(
             node=part.node or self._label.node,
             kind=self._label.kind,
@@ -874,6 +877,28 @@ class Admission:
             self._root.mirror(record, hold_id=self._hold_id)
         if not self._book.saw(record):
             self._unseen.append(record)
+
+    def _charge(
+        self,
+        cost_usd: float | None,
+        rate: float | None,
+        tokens: int,
+        *,
+        model: str | None,
+        provider: str | None,
+    ) -> None:
+        self._charges.append(
+            BilledCharge(
+                hold_id=self._hold_id,
+                key_source=self._paid_by,
+                kind=self._label.kind,
+                model=model,
+                provider=provider,
+                cost_usd=cost_usd,
+                rate_priced_usd=rate,
+                tokens=tokens,
+            )
+        )
 
     def _bill(self, usd: float | None, tokens: int) -> None:
         if usd is None:
@@ -939,16 +964,21 @@ def admitted(
     label = filed(label)
     book = _bound_book(label.node)
     reservation = _RESERVATION.get()
-    what = f"{label.node} on {model}" if model else label.node
-    held = book.held_at(label, bound)
-    drew = book.hold(held, bound, label.kind, what=what, reservation=reservation, paid_by=paid_by)
-    admission = Admission(book, label, bound, held, model=model, provider=provider, paid_by=paid_by)
+    admission = Admission(
+        book,
+        label,
+        bound,
+        reservation=reservation,
+        model=model,
+        provider=provider,
+        paid_by=paid_by,
+    )
     try:
         yield admission
     finally:
         if not admission.closed:
             admission.unreported()
-        if drew and reservation is not None:
+        if admission.drew and reservation is not None:
             reservation.closed(admission.bill)
 
 
