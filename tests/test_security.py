@@ -26,7 +26,6 @@ import pytest
 from factories import (
     SANDBOX_CAMPAIGN,
     arm_state,
-    billed_call,
     inner_sandbox,
     minted_campaign,
     round_result,
@@ -124,6 +123,7 @@ from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     campaign_root_dir_for,
     cycle_dir_for,
+    draft_dirs,
     inner_sandbox_dir,
     inner_sandboxes_dir,
 )
@@ -1056,19 +1056,11 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "one campaign's delete took another's sandbox"
     )
 
-    # A reset takes every draft's claim before it banks: one a Start holds refuses it whole, so
-    # the retry that follows banks each campaign once.
+    # A reset takes every draft's claim before anything goes: one a Start holds refuses it whole.
     campaigns.create_campaign(minted_campaign(hop))
-    CycleEventLog.open(CycleDir(cycle_dir)).append(billed_call(0.5))
     built_stores.drafts.write_draft("held-draft", {})
-    bank = CycleEventLog.workspace_path(campaigns.workspace)
-
-    def banked() -> bytes:
-        return bank.read_bytes() if bank.exists() else b""
-
-    before = banked()
     with built_stores.drafts.hold("held-draft"), pytest.raises(ConflictError):
         apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
-    assert banked() == before, "a refused reset banked a campaign it left in place"
+    assert campaigns.iter_campaign_dirs(), "a refused reset dropped a campaign"
     apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
-    assert banked() != before, "a reset dropped a campaign's spend unbanked"
+    assert not campaigns.iter_campaign_dirs() and not draft_dirs(campaigns.workspace)

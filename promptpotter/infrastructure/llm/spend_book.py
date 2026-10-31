@@ -49,6 +49,7 @@ from promptpotter.infrastructure.store.read_model import (
     RecordClasses,
     held_tokens,
 )
+from promptpotter.infrastructure.store.wallet_store import BilledCharge, ChargeBook, HeldCharge
 from promptpotter.shared.errors import (
     ErrorCategory,
     HostAllowanceExhaustedError,
@@ -339,10 +340,7 @@ class SpendBook(Projection):
                 "mirrored": False,
             }
         )
-        try:
-            self.ledger.append(copy)
-        except Exception:
-            logger.exception("could not carry a nested run's call onto the root ledger")
+        self.ledger.append(copy)
 
     def exhausted(self) -> ErrorCategory | None:
         allotment = self.allotment
@@ -623,6 +621,27 @@ def spending_under(book: SpendBook) -> Iterator[SpendBook]:
         _BOOK.reset(token)
 
 
+_CHARGES: ContextVar[ChargeBook] = ContextVar("charges")
+
+
+def bind_charges(charges: ChargeBook) -> Token[ChargeBook]:
+    return _CHARGES.set(charges)
+
+
+def reset_charges(token: Token[ChargeBook]) -> None:
+    _CHARGES.reset(token)
+
+
+def _bound_charges(what: str) -> ChargeBook:
+    try:
+        return _CHARGES.get()
+    except LookupError:
+        raise RuntimeError(
+            f"{what}: no account is bound, so no wallet would be charged for this send. Every "
+            "entry that sends calls `bind_account` where it binds its spend book."
+        ) from None
+
+
 def filed(label: CallLabel) -> CallLabel:
     """Admits a send in the bucket its bill lands in, so a bench pass is never held as search."""
     return CallLabel(label.node, filed_kind(label.kind))
@@ -737,6 +756,15 @@ class Billed(NamedTuple):
     rate_priced_usd: float | None = None
 
 
+class _Part(NamedTuple):
+    part: Billed
+    model: str | None
+    provider: str | None
+    rate: float | None
+    usd: float | None
+    tokens: int
+
+
 # Holds THIS process has out, so a ledger scan never reads one awaiting its bill as unreported.
 _OUT: set[str] = set()
 
@@ -747,8 +775,8 @@ class Admission:
         book: SpendBook,
         label: CallLabel,
         bound: SendBound,
-        held: SendBound,
         *,
+        reservation: _Reservation | None,
         model: str | None,
         provider: str | None,
         paid_by: KeySource,
@@ -757,7 +785,6 @@ class Admission:
         self._label = label
         self._paid_by = paid_by
         self._bound = bound
-        self._held = held
         self._billed_usd = 0.0
         self._billed_tokens = 0
         self._priced = True
@@ -765,30 +792,80 @@ class Admission:
         self._provider = provider
         self._started = time.monotonic()
         self._hold_id = uuid.uuid4().hex
-        # A nested run's holds and bills land on its ROOT's ledger, which the account banks.
+        # A nested run's holds and bills land on its ROOT's ledger; the account's charges take each once.
         self._root = book.root()
+        self._held_on = self._root.ledger or billing_ledger(label.node)
+        self._charges = _bound_charges(label.node)
         self._unseen: list[TokenUsageRecord] = []
-        self._unlanded: list[tuple[float | None, int]] = []
+        # Priced parts no ledger record carries yet, metered straight into the book at its close.
+        self._unlanded: list[_Part] = []
         self.closed = False
         # What the send closed at, once every part of it was priced; ``None`` until then.
         self.bill: Budget | None = None
+        self._held = book.held_at(label, bound)
+        what = f"{label.node} on {model}" if model else label.node
+        self.drew = book.hold(
+            self._held, bound, label.kind, what=what, reservation=reservation, paid_by=paid_by
+        )
         _OUT.add(self._hold_id)
+        try:
+            self._hold(self._hold_id, bound)
+        except BaseException:
+            self._finish()
+            book.release(self._held, bound, label.kind, paid_by)
+            # Nothing was sent: closed at zero, or the account's bill keeps the bound forever.
+            self._charge(0.0, None, 0, model=model, provider=provider)
+            raise
+
+    def _hold(self, hold_id: str, bound: SendBound) -> None:
+        self._charges.append(
+            HeldCharge(
+                hold_id=hold_id,
+                key_source=self._paid_by,
+                input_tokens=bound.input_tokens,
+                output_tokens=bound.output_tokens,
+                cost_usd=bound.usd,
+                ledger=self._charges.held_on(self._held_on.path),
+            )
+        )
         emit_spend_hold(
-            hold_id=self._hold_id,
-            node=label.node,
-            kind=label.kind,
+            hold_id=hold_id,
+            node=self._label.node,
+            kind=self._label.kind,
             input_tokens=bound.input_tokens,
             output_tokens=bound.output_tokens,
             cost_usd=bound.usd,
-            model=model,
-            provider=provider,
-            key_source=paid_by,
-            ledger=self._root.ledger,
+            model=self._model,
+            provider=self._provider,
+            key_source=self._paid_by,
+            ledger=self._held_on,
         )
 
-    def _emit(self, part: Billed) -> None:
+    def _price(self, part: Billed) -> _Part:
         model = part.model or self._model
         provider = part.provider or self._provider
+        rate = rate_priced_usd(
+            part.usage,
+            model=model,
+            provider=provider,
+            cost_usd=part.cost_usd,
+            recorded=part.rate_priced_usd,
+        )
+        one = _Part(
+            part,
+            model,
+            provider,
+            rate,
+            bill_or_rate_usd(part.cost_usd, rate),
+            part.usage.input + part.usage.output,
+        )
+        self._bill(one.usd, one.tokens)
+        self._unlanded.append(one)
+        return one
+
+    def _write(self, one: _Part) -> None:
+        part = one.part
+        self._charge(part.cost_usd, one.rate, one.tokens, model=one.model, provider=one.provider)
         record = emit_token_usage(
             node=part.node or self._label.node,
             kind=self._label.kind,
@@ -796,39 +873,49 @@ class Admission:
             duration_s=(
                 time.monotonic() - self._started if part.duration_s is None else part.duration_s
             ),
-            model=model,
-            provider=provider,
+            model=one.model,
+            provider=one.provider,
             served_by=part.served_by,
             cost_usd=part.cost_usd,
-            recorded_rate_usd=part.rate_priced_usd,
+            recorded_rate_usd=one.rate,
             key_source=self._paid_by,
             hold_id=self._hold_id,
             mirrored=self._root is not self._book,
         )
         if record is None:
-            usd = bill_or_rate_usd(
-                part.cost_usd,
-                rate_priced_usd(
-                    part.usage,
-                    model=model,
-                    provider=provider,
-                    cost_usd=part.cost_usd,
-                    recorded=part.rate_priced_usd,
-                ),
-            )
-            self._unlanded.append((usd, part.usage.input + part.usage.output))
-            self._bill(usd, part.usage.input + part.usage.output)
             logger.warning(
-                "%s: a call counted at $%s reached no ledger; only this run's book counts it",
+                "%s: a call counted at $%s reached a muted ledger; only this run's book counts it",
                 part.node or self._label.node,
-                "?" if usd is None else f"{usd:.6f}",
+                "?" if one.usd is None else f"{one.usd:.6f}",
             )
             return
-        self._bill(record.bill_or_rate_usd, record.input_tokens + record.output_tokens)
-        if self._root is not self._book:
-            self._root.mirror(record, hold_id=self._hold_id)
+        self._unlanded.remove(one)
         if not self._book.saw(record):
             self._unseen.append(record)
+        if self._root is not self._book:
+            self._root.mirror(record, hold_id=self._hold_id)
+
+    def _charge(
+        self,
+        cost_usd: float | None,
+        rate: float | None,
+        tokens: int,
+        *,
+        model: str | None,
+        provider: str | None,
+    ) -> None:
+        self._charges.append(
+            BilledCharge(
+                hold_id=self._hold_id,
+                key_source=self._paid_by,
+                kind=self._label.kind,
+                model=model,
+                provider=provider,
+                cost_usd=cost_usd,
+                rate_priced_usd=rate,
+                tokens=tokens,
+            )
+        )
 
     def _bill(self, usd: float | None, tokens: int) -> None:
         if usd is None:
@@ -846,23 +933,21 @@ class Admission:
             self.release()
 
     def settle(self, *parts: Billed, unknown: SendBound | None = None) -> None:
-        for part in parts or (Billed(TokenAccount(), 0.0),):
-            self._emit(part)
-        if unknown is not None:
-            emit_spend_hold(
-                hold_id=uuid.uuid4().hex,
-                node=self._label.node,
-                kind=self._label.kind,
-                input_tokens=unknown.input_tokens,
-                output_tokens=unknown.output_tokens,
-                cost_usd=unknown.usd,
-                model=self._model,
-                provider=self._provider,
-                key_source=self._paid_by,
-                ledger=self._root.ledger,
-            )
-            self._book.keep_held(unknown, self._label.kind, self._paid_by)
+        """The book closes on every part and the unknown remainder whatever its writes do: a write
+        that raises still leaves it settled whole, and the raise reaches the caller."""
         self._finish()
+        priced = [self._price(part) for part in parts or (Billed(TokenAccount(), 0.0),)]
+        try:
+            for one in priced:
+                self._write(one)
+            if unknown is not None:
+                self._hold(uuid.uuid4().hex, unknown)
+        finally:
+            self._close_book(unknown)
+
+    def _close_book(self, unknown: SendBound | None) -> None:
+        if unknown is not None:
+            self._book.keep_held(unknown, self._label.kind, self._paid_by)
         if self._priced:
             self._book.release(self._held, self._bound, self._label.kind, self._paid_by)
             bill = Budget.amount(self._billed_usd, self._billed_tokens)
@@ -873,8 +958,8 @@ class Admission:
             self._book.unpriced(self._held, self._bound, self._label.kind, self._paid_by)
         for record in self._unseen:
             self._book.count(record)
-        for usd, tokens in self._unlanded:
-            self._book._spend(self._label.kind, usd, tokens, self._paid_by)
+        for one in self._unlanded:
+            self._book._spend(self._label.kind, one.usd, one.tokens, self._paid_by)
 
     def release(self) -> None:
         # A bill of nothing, so no later scan reads the hold as a send that ended unreported.
@@ -905,16 +990,21 @@ def admitted(
     label = filed(label)
     book = _bound_book(label.node)
     reservation = _RESERVATION.get()
-    what = f"{label.node} on {model}" if model else label.node
-    held = book.held_at(label, bound)
-    drew = book.hold(held, bound, label.kind, what=what, reservation=reservation, paid_by=paid_by)
-    admission = Admission(book, label, bound, held, model=model, provider=provider, paid_by=paid_by)
+    admission = Admission(
+        book,
+        label,
+        bound,
+        reservation=reservation,
+        model=model,
+        provider=provider,
+        paid_by=paid_by,
+    )
     try:
         yield admission
     finally:
         if not admission.closed:
             admission.unreported()
-        if drew and reservation is not None:
+        if admission.drew and reservation is not None:
             reservation.closed(admission.bill)
 
 
@@ -938,7 +1028,7 @@ class _HoldTrail:
     records: ClassVar[RecordClasses] = HOLD_TRAIL
 
     def __init__(self) -> None:
-        self._held = HeldSends()
+        self._held: HeldSends[SpendHoldRecord] = HeldSends()
         self._labels: dict[str, CallLabel] = {}
         self._bills: dict[str, tuple[float, int]] = {}
 

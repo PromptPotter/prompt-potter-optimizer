@@ -37,18 +37,16 @@ def _render_summary(plan: ResetPlan) -> str:
             lines.extend(f"    ? {p.name}" for p in tenant.unrecognized)
         lines.append("")
     summary = "\n".join(lines).rstrip()
-    if pointers := [t.pointer_label for t in plan.tenants if t.holds_pointer]:
-        summary += "\n\npointers:" + "".join(f"\n    - {label}" for label in pointers)
     sandbox_lines: list[str] = []
     if plan.sandboxes:
-        sandbox_lines.append("inner sandboxes (off-tree, dropped with their spend banked):")
+        sandbox_lines.append("inner sandboxes (off-tree, dropped with their owner's campaigns):")
         sandbox_lines.extend(
             f"    - {target.sandbox.name}  [{target.owner.campaign_id}]{size_tag(target.sandbox)}"
             for target in plan.sandboxes
         )
     if plan.unattributable_sandboxes:
         sandbox_lines.append(
-            "inner sandboxes KEPT (no usable owner record — cannot name a ledger to bank into):"
+            "inner sandboxes KEPT (no usable owner record — cannot name the tenant they belong to):"
         )
         sandbox_lines.extend(f"    ? {sandbox.name}" for sandbox in plan.unattributable_sandboxes)
     if sandbox_lines:
@@ -112,8 +110,8 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             f"{kept_note}"
             f"preserved: the archive home's paid caches "
             f"({', '.join(d + '/' for d in SHARED_CACHE_DIRS)}).\n"
-            "banked: each campaign's spend plus every sandbox's unforwarded residue, onto the "
-            "workspace ledger — a reset drops the data, never the money.\n"
+            "kept: each account's charges, written at every send — a reset drops the data, never "
+            "the money.\n"
             "next: `python -m promptpotter new <name>` (from datasets/<name>/)."
         ),
     )

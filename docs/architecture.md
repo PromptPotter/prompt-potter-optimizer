@@ -308,5 +308,5 @@ admission and the spend book are [`decisions.md`](decisions.md) § 0003's.
 
 - **Only the run's spend book halts a run**; an unreported call binds at the most it may cost,
   never counted spent.
-- **An L4 inner cycle spends under its root's book**, mirrored onto the outer ledger, so the
-  account walk never reaches `.inner/` (`infrastructure/store/account_spend.py::account_ledgers`).
+- **An L4 inner cycle spends under its root's book**, mirrored onto the outer ledger, and charges
+  its owner's account (`infrastructure/store/stores.py::build_stores`, `charges`).

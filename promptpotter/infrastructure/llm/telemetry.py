@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -37,9 +36,6 @@ from promptpotter.shared.measurement_context import MeasurementRole, measured_pa
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
-
-logger = logging.getLogger(__name__)
-
 
 # No default: unbound is "never bound", and a bound ``None`` is the declared mute of a probe render.
 _CYCLE_LEDGER: ContextVar[CycleEventLog | None] = ContextVar("cycle_ledger")
@@ -121,16 +117,10 @@ def bound_round() -> int:
 
 
 def _append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
+    """``None``: the bound ledger is muted. A failed append raises to the call site."""
     if ledger is None:
         ledger = bound_ledger(type(record).__name__)
-    if ledger is None:
-        return None
-    try:
-        return ledger.append(record)
-    except Exception:
-        # Telemetry must not break its call site.
-        logger.exception("ledger append failed for %s", type(record).__name__)
-        return None
+    return None if ledger is None else ledger.append(record)
 
 
 def rate_priced_usd(

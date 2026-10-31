@@ -7,11 +7,7 @@ from pydantic import Field
 
 from promptpotter.domain.spend import KeySource, bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.account_spend import (
-    UsageRow,
-    account_ledgers,
-    iter_user_token_usage,
-)
+from promptpotter.infrastructure.store.account_spend import UsageRow, account_usage
 from promptpotter.infrastructure.store.stores import Stores
 
 ActivityWindow = Literal["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]
@@ -50,7 +46,7 @@ class ActivityResponse(StrictModel):
     group_by: ActivityGroupBy = Field(
         description="The colour axis: `model` is the exact model id, `api_key` the key that "
         "paid: the provider that billed the call, and whether the host's key under the coupon "
-        "or the account's own sent it (`TokenUsageRecord.key_source`)."
+        "or the account's own sent it (`BilledCharge.key_source`)."
     )
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
@@ -82,7 +78,7 @@ class ActivityResponse(StrictModel):
     )
 
 
-_KEY_LABELS: dict[KeySource | None, str] = {"host": "host key", "user": "own key", None: "replay"}
+_KEY_LABELS: dict[KeySource, str] = {"host": "host key", "user": "own key"}
 
 
 def _series_label(row: UsageRow, group_by: ActivityGroupBy) -> str:
@@ -112,9 +108,7 @@ def account_activity(
     rate_priced = [0.0] * _N_BUCKETS
     unpriced = [0] * _N_BUCKETS
     labels: dict[str, None] = {}
-    for row in iter_user_token_usage(
-        ledgers=account_ledgers(stores.campaigns), since=since, until=until
-    ):
+    for row in account_usage(stores.charges, since=since, until=until):
         i = min(_N_BUCKETS - 1, int((row.ts - since) / width))
         label = _series_label(row, group_by)
         labels[label] = None

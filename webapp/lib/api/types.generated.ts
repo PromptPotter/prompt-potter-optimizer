@@ -3987,7 +3987,7 @@ export interface ActivityResponse {
   window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
   /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
    * the provider that billed the call, and whether the host's key under the
-   * coupon or the account's own sent it (`TokenUsageRecord.key_source`). */
+   * coupon or the account's own sent it (`BilledCharge.key_source`). */
   group_by: 'model' | 'api_key';
   buckets: ActivityBucket[];
   /** Every series in the window, in first-seen order — one colour per label, stable

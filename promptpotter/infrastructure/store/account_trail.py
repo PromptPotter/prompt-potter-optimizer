@@ -158,8 +158,13 @@ def bank_before_removal(
     subject: BankedSubject,
     metered: dict[CeilingMeter, Budget],
 ) -> None:
-    """Every destroyer's one bank; a tombstone already standing is a crashed delete's, kept for the retry."""
+    """A campaign destroyer's one bank; a tombstone already standing is a crashed delete's, kept for the retry."""
     bank_spend(workspace=workspace, cycle_dirs=cycle_dirs, subject=subject, metered=metered)
+    bank_trail(workspace=workspace, cycle_dirs=cycle_dirs, subject=subject)
+
+
+def bank_trail(*, workspace: WorkspaceDir, cycle_dirs: list[Path], subject: BankedSubject) -> None:
+    """A draft's whole bank: no campaign ceiling counted its calls, and the account's charges hold them."""
     commands = [
         BankedCommand(at=line.at, kind=line.what, subject=line.subject, user_id=line.actor)
         for cycle_dir in cycle_dirs

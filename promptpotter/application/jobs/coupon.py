@@ -2,7 +2,7 @@
 
 The host runs an account on the box's keys up to its coupon; past it the account sends on a key of
 its own. What the coupon has left is DERIVED, from the face (`grant.json`, else the box's default)
-less what the account's ledgers say the box's keys paid; nothing counts it down.
+less what the account's charges say the box's keys paid; nothing counts it down.
 """
 
 from __future__ import annotations
@@ -25,9 +25,8 @@ from promptpotter.infrastructure.llm.registry import (
     providers,
 )
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
-from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.layout import tenant_workspace
+from promptpotter.infrastructure.llm.spend_book import bind_charges, reset_charges
+from promptpotter.infrastructure.store.account_spend import account_bill
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.wallet_store import CouponGrant
 from promptpotter.shared.errors import (
@@ -52,9 +51,7 @@ def coupon_face(stores: Stores) -> Budget:
 
 
 def account_spend(stores: Stores) -> PaidSpend:
-    """The ACCOUNT's ledgers, never a sandbox's: an L4 inner run's bills are carried onto its root."""
-    account = CampaignStore(tenant_workspace(stores.shared_root, stores.tenant_id))
-    return sum_user_spend(ledgers=account_ledgers(account))
+    return account_bill(stores.charges)
 
 
 def holds_own_key(stores: Stores) -> bool:
@@ -147,8 +144,10 @@ def bind_account(stores: Stores) -> Callable[[], None]:
     and an inner cell rebinds the same account."""
     account = _ACCOUNT.set(stores)
     tenant = set_rate_tenant(str(stores.tenant_id))
+    charges = bind_charges(stores.charges)
 
     def unbind() -> None:
+        reset_charges(charges)
         tenant.var.reset(tenant)
         _ACCOUNT.reset(account)
 

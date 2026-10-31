@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import BankedSubject
-from promptpotter.domain.spend import NOTHING_METERED, CeilingMeter
-from promptpotter.infrastructure.store.account_trail import bank_before_removal
+from promptpotter.infrastructure.store.account_trail import bank_trail
 from promptpotter.infrastructure.store.io import (
     HeldLock,
     read_json_optional,
@@ -119,14 +118,12 @@ class DraftStore:
         rmtree_robust(self.draft_dir(draft_id))
 
     def discard(self, claim: DraftClaim) -> None:
-        """A destroyer, under the claim it releases: what its check-in cost and what was commanded on
-        it outlive it, under its id."""
+        """A destroyer, under the claim it releases: what was commanded on it outlives it, under its id."""
         with claim:
             draft_dir = self.draft_dir(claim.draft_id)
-            bank_before_removal(
+            bank_trail(
                 workspace=self._base_dir,
                 cycle_dirs=[draft_dir],
                 subject=BankedSubject(draft_id=claim.draft_id),
-                metered=dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED),
             )
             rmtree_robust(draft_dir)
