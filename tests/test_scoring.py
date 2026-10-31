@@ -20,6 +20,7 @@ from pathlib import Path
 from statistics import fmean, mean, stdev
 from typing import Any, cast
 
+import httpx
 import pytest
 import yaml
 from factories import (
@@ -38,6 +39,7 @@ from factories import (
     filed_under,
     jumping_clock,
     level_series,
+    loop_session,
     measurement,
     measurements,
     member_rows,
@@ -57,8 +59,8 @@ from factories import (
     walking_cycle,
     workspace,
 )
-from offline_world import Router
-from pydantic import ValidationError
+from offline_world import FakeHarness, Router
+from pydantic import SecretStr, ValidationError
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
@@ -158,6 +160,7 @@ from promptpotter.application.scoring.paired import (
     grade_measurands,
     read_pair,
 )
+from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
     PairedGrade,
@@ -171,6 +174,9 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
+from promptpotter.config.settings import settings
+from promptpotter.connectors import n8n
+from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, arm_end, is_leader_eligible
 from promptpotter.domain.bench import (
@@ -227,6 +233,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, RoundResult
@@ -266,6 +273,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, TokenUsageKind
 from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
 from promptpotter.domain.wounds import fatal_validation_failures
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
 from promptpotter.infrastructure.llm.telemetry import (
@@ -281,7 +289,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.answer_text import extract_gsm8k_number
-from promptpotter.shared.errors import ConflictError, ErrorCategory
+from promptpotter.shared.errors import ConflictError, ErrorCategory, SendRefusedError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
@@ -4004,3 +4012,85 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     quoted = elections["potter_s1"]
     assert quoted is not None and quoted.ability is not None and quoted.ability.theta == 0.42
     assert any(note.startswith("potter_s1, gepa_s1 elected") for note in matrix.notes)
+
+
+# 8. A bare-answer backend — the n8n eval harness
+
+
+def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    monkeypatch.setattr(settings, "N8N_HARNESS_URL", FakeHarness.URL)
+    monkeypatch.setattr(settings, "N8N_HARNESS_TOKEN", SecretStr("harness-secret"))
+    stores = workspace(tmp_path)
+    harness = n8n.CONNECTOR
+    assert harness.pipeline_declaration is not None
+    graph = harness.pipeline_declaration(stores, cast("Any", None), None)
+    session = loop_session(
+        stores,
+        parse_pipeline_response(graph),
+        [],
+        client=BackendClient(harness, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir),
+    )
+    gold = '{"requires_action": ["true"]}'
+    row = Sample(id=0, query='{"subject": "Invoice 1023"}', ground_truth=gold)
+    contract = {
+        "output_schema": {"type": "object", "properties": {"requires_action": {"type": "string"}}},
+        "answer_fields": ["requires_action"],
+    }
+    candidate = {"prompt": "## requires_action\nTrue when the sender asks for a reply.", **contract}
+
+    def cell(params: dict[str, Any], book_usd: float | None = None) -> MeasuredCell:
+        async def measured() -> MeasuredCell:
+            # Bound in this run's own context, so nothing outlives it.
+            set_cycle_ledger(CycleEventLog(tmp_path / "harness.jsonl"))
+            with at_round(1), spending_under(spend_book(book_usd, usd_reserve=None)):
+                return await measure_sample(row, session, params)
+
+        return asyncio.run(measured())
+
+    read = cell({"harness": {**candidate, "model": "another/model"}})
+    headers, sent = offline.harness.asked[-1]
+    rode = (headers.get("x-eval-secret"), headers.get("authorization"))
+    assert rode == ("harness-secret", None), (
+        "the secret rode another header than the operator named"
+    )
+    assert sent == {
+        "case_id": row.key,
+        "input": json.loads(row.query),
+        "expected": json.loads(gold),
+        "prompt": candidate["prompt"],
+        "params": contract,
+    }, "the harness was sent another candidate, or a model a dataset aimed it at"
+    assert (read.predicted, read.error_category) == ("true", None), (
+        "the harness's answer was not what the cell read"
+    )
+    assert read.cost_s is not None, "a harness cell's round trip went unclocked"
+
+    offline.harness.says = lambda body: {"case_id": body["case_id"], "answer": {"a": "x"}}
+    assert json.loads(cell({"harness": candidate}).predicted) == {"a": "x"}, (
+        "an object answer was graded as anything but its fields"
+    )
+
+    cell({"harness": {}})
+    assert offline.harness.asked[-1][1]["prompt"] == "", (
+        "an unprompted cell asked the harness for anything but its production text"
+    )
+
+    replies: tuple[Callable[[dict[str, Any]], dict[str, Any] | httpx.Response], ...] = (
+        lambda body: {"case_id": body["case_id"], "answer": "  ", "raw": {}},
+        lambda _body: httpx.Response(403, json={"message": "Authorization data is wrong!"}),
+    )
+    for reply in replies:
+        offline.harness.says = reply
+        hole = cell({"harness": candidate})
+        assert hole.errored and hole.predicted != NO_RESULT, (
+            "a harness that answered nothing was graded as a wrong answer"
+        )
+
+    asked = len(offline.harness.asked)
+    with pytest.raises(SendRefusedError):
+        cell({"harness": candidate}, book_usd=0.5)
+    assert len(offline.harness.asked) == asked, (
+        "a cell no rate prices was sent under a dollar ceiling it cannot be held to"
+    )

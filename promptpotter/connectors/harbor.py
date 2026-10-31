@@ -377,45 +377,49 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
 _REASONING_CHANNEL = "extra_body.reasoning"
 
 
+def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {SKILL_DELIVERY_KEY: _skill_delivery(cfg)}
+    if prompt := cfg.get("prompt"):
+        fields["prompt"] = prompt
+    if model := cfg.get("model"):
+        fields["model"] = model
+    via = str(cfg.get("provider") or "")
+    if via:
+        fields["provider"] = via
+    kwargs = {k: v for k, v in cfg.items() if k in AGENT_KWARG_KEYS}
+    effort = sent_effort(kwargs.pop("reasoning_effort", None))
+    body = cell_gateway_body(
+        openai_compat_spec(via),
+        via,
+        route_order=cfg.get("route_order"),
+        reasoning_effort=effort,
+    )
+    call_kwargs: dict[str, Any] = {}
+    if body is not None:
+        # litellm's `drop_params` drops `reasoning_effort` on a model it does not list.
+        call_kwargs["extra_body"] = body
+    elif effort is not None:
+        kwargs["reasoning_effort"] = effort
+    if (reply := cfg.get("max_tokens")) is not None:
+        call_kwargs["max_tokens"] = int(reply)
+    if call_kwargs:
+        kwargs["llm_call_kwargs"] = call_kwargs
+    if (context := cfg.get("max_input_tokens")) is not None:
+        # Unsent, terminus-2 assumes the whole window: 1M tokens for a model litellm lacks.
+        kwargs["model_info"] = {"max_input_tokens": int(context)}
+    if kwargs:
+        fields["agent_kwargs"] = kwargs
+    return fields
+
+
 def harbor_wire_adapter(
-    query: str,
+    sample: Sample,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"query": query}
+    payload: dict[str, Any] = {"query": sample.query}
     for node, cfg in node_config_items(pipeline_params):
-        if node != AGENT_NODE:
-            continue
-        payload[SKILL_DELIVERY_KEY] = _skill_delivery(cfg)
-        if prompt := cfg.get("prompt"):
-            payload["prompt"] = prompt
-        if model := cfg.get("model"):
-            payload["model"] = model
-        via = str(cfg.get("provider") or "")
-        if via:
-            payload["provider"] = via
-        kwargs = {k: v for k, v in cfg.items() if k in AGENT_KWARG_KEYS}
-        effort = sent_effort(kwargs.pop("reasoning_effort", None))
-        body = cell_gateway_body(
-            openai_compat_spec(via),
-            via,
-            route_order=cfg.get("route_order"),
-            reasoning_effort=effort,
-        )
-        call_kwargs: dict[str, Any] = {}
-        if body is not None:
-            # litellm's `drop_params` drops `reasoning_effort` on a model it does not list.
-            call_kwargs["extra_body"] = body
-        elif effort is not None:
-            kwargs["reasoning_effort"] = effort
-        if (reply := cfg.get("max_tokens")) is not None:
-            call_kwargs["max_tokens"] = int(reply)
-        if call_kwargs:
-            kwargs["llm_call_kwargs"] = call_kwargs
-        if (context := cfg.get("max_input_tokens")) is not None:
-            # Unsent, terminus-2 assumes the whole window: 1M tokens for a model litellm lacks.
-            kwargs["model_info"] = {"max_input_tokens": int(context)}
-        if kwargs:
-            payload["agent_kwargs"] = kwargs
+        if node == AGENT_NODE:
+            payload.update(_agent_fields(cfg))
     return payload
 
 
@@ -423,7 +427,7 @@ def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
-    sent = harbor_wire_adapter("", {node: dict(cfg)}).get("agent_kwargs") or {}
+    sent = _agent_fields(dict(cfg)).get("agent_kwargs") or {}
     call = sent.get("llm_call_kwargs") or {}
     turns = sent.get("max_turns")
     reply = call.get("max_tokens")

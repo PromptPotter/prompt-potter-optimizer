@@ -51,9 +51,8 @@ def _validate(c: object, origin: str) -> Connector:
         raise RuntimeError(f"{where}: cells_hold_the_machine needs execution='in_process'.")
     if c.compose_overlay is not None and not c.cells_hold_the_machine:
         raise RuntimeError(f"{where}: compose_overlay needs cells_hold_the_machine.")
-    # A remote backend answers `GET /pipeline` itself, so a second declaration would never be read.
-    if c.pipeline_declaration is not None and c.execution != "in_process":
-        raise RuntimeError(f"{where}: pipeline_declaration needs execution='in_process'.")
+    if c.round_trip_is_latency and c.execution != "remote_http":
+        raise RuntimeError(f"{where}: core clocks an in-process cell — drop round_trip_is_latency.")
     return c
 
 

@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **The `n8n` connector.** Each cell posts the candidate prompt to an n8n eval-harness webhook (`N8N_HARNESS_URL`, secret `N8N_HARNESS_TOKEN` in `N8N_HARNESS_AUTH_HEADER`) and grades the `answer` it returns; the model is the n8n node's, and no usage is reported, so a ceiling refuses its cells. A remote connector now declares its wire: `cell_path`, `read_reply`, `round_trip_is_latency`, `auth_scheme`, and a `pipeline_declaration` in place of `GET /pipeline`.
 - **Several graded fields, one item per call.** `fields_match(predicted, ground_truth)` grades a node's JSON reply field by field against an object gold (`{field: [accepted, …]}`, `null` ungraded); a cell's fitness is the share right, and `field_accuracy` reaches the readout per arm and per round.
 
 ### Changed

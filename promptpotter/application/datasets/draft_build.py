@@ -160,11 +160,7 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
 def _draft_schema_source(draft: DraftCampaign) -> SchemaSource:
     if draft.backend_nodes:
         return "backend"
-    return (
-        "local"
-        if connectors.CONNECTORS.get(draft.connector).execution == "in_process"
-        else "unreachable"
-    )
+    return "unreachable" if connectors.CONNECTORS.get(draft.connector).serves_pipeline else "local"
 
 
 def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:

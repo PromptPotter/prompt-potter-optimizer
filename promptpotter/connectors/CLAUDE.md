@@ -12,6 +12,7 @@
 ## Execution mode — declared, never name-branched
 
 **`BackendClient.run_query` dispatches on `Connector.execution` (`remote_http` | `in_process`)**, and `_validate` refuses a mismatched pairing. **`in_process_run` is handed the `Sample`, and core clocks it** (`BackendClient._in_process_cell`): the row is `sample.source_pin`, and no connector stamps `total_time` / `step_timings`. <!-- probe: git grep -cE "total_time|step_timings" -- promptpotter/connectors/*.py == 0 -->
+**A remote backend off the `/matches` wire declares how it differs** — `cell_path`, `read_reply`, `round_trip_is_latency` (core clocks the POST), a `pipeline_declaration` for `GET /pipeline` — never a branch in `BackendClient` (`n8n.py`).
 **Per-run state is the `workload` argument (`InProcessWorkload`), never a ContextVar or a module cache** — harbor's one ContextVar scopes a single send's billing. <!-- probe: git grep -cE "ContextVar\(" -- promptpotter/connectors/*.py <= 1 -->
 
 ## The answer shape — declared in `extract_experiment`, never inferred
@@ -42,13 +43,13 @@ A **ranked-label** connector yields `ground_truth: "<label>"`, read by `label_ma
 
 ## The credential rides the connector
 
-**`Connector.auth_token()` and `Connector.endpoint()` are operator config**, so nothing a request, flag or campaign sets can aim the bearer token elsewhere; no connector writes an `Authorization` header. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 -->
+**`Connector.auth_token()`, `auth_scheme()` and `endpoint()` are operator config**, so nothing a request, flag or campaign sets can aim the token elsewhere; core writes the header, never a connector. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 -->
 **A check-in names only a connector with `serves_uploads`** (`draft_patch.py`) — one whose cells read operator files or start containers is never a tenant's choice.
 
 ## Conventions
 
 - **An optional import is declared on `Connector.extra`** — launch and the dataset listing refuse on it; no connector checks `installed()`. <!-- probe: git grep -cE "installed\(" -- promptpotter/connectors/*.py == 0 -->
-- **Wire adapters are pure functions** `(query, pipeline_params) -> dict` — no I/O; `identity_config` never reaches one.
+- **Wire adapters are pure functions** `(sample, pipeline_params) -> dict` — no I/O; `identity_config` never reaches one.
 - **An `owns_panel` connector's panel is read by `infrastructure/store/dataset_access.py::dataset_experiment`**, ordered before the row ladder, never as a fallback; L4's `runner/inner/` reads it off the workload. Panel ORDER is the slot; the archive and δ key a cell by `Sample.key`, so a reorder moves nothing.
 - **On an episodic backend `query` is an ID** — a real question rides `Sample.question`, which is what a judge sees.
 - **Declare every always-present payload key in `Connector.required_observation_keys`** — an undeclared one is dropped silently.

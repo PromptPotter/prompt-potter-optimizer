@@ -232,10 +232,7 @@ async def establish_campaign_origin(
 
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
 
-    if session.index_terms:
-        await session.backend_client.init_session(session.index_terms)
-    elif session.backend_client.execution == "remote_http":
-        logger.warning("No session terms available — /matches calls will fail.")
+    await session.backend_client.init_session(session.index_terms)
 
     listener.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
 

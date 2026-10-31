@@ -181,6 +181,30 @@ LLM_ONLY_NODE: dict[str, Any] = {
 }
 
 
+class FakeHarness:
+    """The n8n eval-harness edge: one webhook at `URL`, each POST kept in `asked` as its headers
+    and body. *says* is the policy: a reply body, or a response carrying a status."""
+
+    AT = "127.0.0.1:5678"
+    URL = f"http://{AT}/webhook/eval-harness"
+
+    def __init__(self) -> None:
+        self.says: Callable[[dict[str, Any]], dict[str, Any] | httpx.Response] = lambda body: {
+            "case_id": body["case_id"],
+            "answer": "true",
+            "raw": {},
+        }
+        self.asked: list[tuple[httpx.Headers, dict[str, Any]]] = []
+
+    def respond(self, request: httpx.Request, body: bytes) -> httpx.Response | None:
+        if request.method != "POST" or str(request.url) != self.URL:
+            return None
+        sent = json.loads(body)
+        self.asked.append((request.headers, sent))
+        said = self.says(sent)
+        return said if isinstance(said, httpx.Response) else _json(200, said, request)
+
+
 class Hang:
     """A request the backend never answers: only the client's own clock ends it."""
 
@@ -326,14 +350,15 @@ def _key_checks() -> set[str]:
 
 
 class Router:
-    """The world: the backend at its address, an LLM on any of its wires and its key check, an
-    empty model catalogue, Harbor's registry once one is published, the upstream price list once
-    a journey says what it lists, a sign-in provider's token endpoint once a journey says what it
-    answers; anything else is named in `unrouted` and refused."""
+    """The world: the backend and the n8n harness at their addresses, an LLM on any of its wires
+    and its key check, an empty model catalogue, Harbor's registry once one is published, the
+    upstream price list once a journey says what it lists, a sign-in provider's token endpoint
+    once a journey says what it answers; anything else is named in `unrouted` and refused."""
 
     def __init__(self, llm: FakeLLM, backend: FakeBackend) -> None:
         self.llm = llm
         self.backend = backend
+        self.harness = FakeHarness()
         self.registry: list[dict[str, Any]] | None = None
         # Upstream's rows, `provider/model` -> its per-token costs, as `refresh_rates` fetches them.
         self.rates: dict[str, dict[str, Any]] | None = None
@@ -348,6 +373,8 @@ class Router:
         answered = None
         if u.netloc == FakeBackend.AT:
             answered = self.backend.respond(request, body)
+        elif u.netloc == FakeHarness.AT:
+            answered = self.harness.respond(request, body)
         elif u.path.endswith(tuple(LLM_WIRES)):
             answered = self.llm.reply(request, json.loads(body))
         elif f"{u.netloc}{u.path}" == "openrouter.ai/api/v1/models":

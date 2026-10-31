@@ -151,13 +151,14 @@ async def _resolve_pipeline_schema(
     experiment: dict[str, Any] | None,
 ) -> tuple[PipelineSchema, dict[str, Any]]:
     """RAISES, never ``None``: a schema optional at its readers is a run that completes with wrong numbers.
-    A remote backend's schema is its own answer with the dataset's file laid on, so one that cannot
+    A served schema is the backend's answer with the dataset's file laid on, so one that cannot
     answer raises: the file alone declares another pipeline."""
     local_raw = dataset_pipeline_declaration(stores, dataset, experiment)
-    if connector.execution == "in_process":
-        declaration = local_raw
-    else:
+    declaration: dict[str, Any] | None
+    if connector.serves_pipeline:
         declaration = overlay_dataset_pipeline(await client.fetch_pipeline(), local_raw or {})
+    else:
+        declaration = local_raw
     if declaration is None:
         raise PayloadInvalidError(
             f"{dataset.name} declares no pipeline. Every measurement is keyed on its "

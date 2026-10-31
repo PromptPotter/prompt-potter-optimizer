@@ -62,8 +62,8 @@ class DspyProgram:
     """In the order its samples were numbered: a sample's ``id`` is its example's position."""
 
 
-def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"query": query}
+def dspy_wire_adapter(sample: Sample, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"query": sample.query}
     for node, cfg in node_config_items(pipeline_params):
         if node != PROGRAM_NODE:
             continue
