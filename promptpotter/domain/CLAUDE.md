@@ -24,7 +24,7 @@ The pure layer: no I/O, no async; `scripts/gate.py::_LAYERING` refuses an import
   `CycleDir` / `WorkspaceDir` are passed through, never rebuilt from `str`.
 - **`model_capabilities` rides `PipelineSchema`, never the identity**, so a refreshed snapshot re-keys nothing.
 - **A resume re-derives a `CheckpointKind` iff a replayer is registered for it**
-  (`application/bench/resume_and_fork/replayers.py::replayers`).
+  (`promptpotter/application/bench/resume_and_fork/replayers.py::replayers`).
 - **`pipeline_overlay.py` is the one walk and merge of `pipeline_params`** — a re-derived `k == "steps"`
   is a second definition. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
 - **The estimator digest hashes `l4/proxies`**, so only what decides a cell's number lives there.
