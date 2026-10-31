@@ -4,7 +4,7 @@ import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";
 import { setCandidatesState, useCandidatesState } from "@/lib/state/candidates";
 import { useCandidateBars } from "./useCandidateBars";
-import { measuringArm, useCycleStream } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
@@ -148,7 +148,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     return idx >= 0 ? idx : null;
   }, [divergentRound, views]);
 
-  const measuring = measuringArm(dash);
+  const measuring = dash.measuring_arm;
   const inFlightIndex = useMemo(() => {
     if (!isLive || measuring === null) return null;
     // `findLastIndex`: a fork's timeline also holds the parent's arm of that key, earlier on it.

@@ -17,7 +17,7 @@ API_BASE = "https://api.groq.com/openai/v1"
 
 # ── Dataset ────────────────────────────────────────────────────────
 HF_DATASET = "BBEH/bbeh"
-# `loaders.py::HF_PINS`'s commit for this repo, copied: Colab cannot import it.
+# Pinned: a moving ref re-cuts the rows every method is scored on, under the same name.
 HF_REVISION = "08e07a803851822c04399782ece3c4a07ce419f9"
 SPLIT_SEED = 42
 # BBEH mini ships 20 examples per task. Every method — PromptPotter and every peer optimizer —

@@ -204,9 +204,9 @@ class OptimizationConfig(StrictModel):
         description=(
             "Consecutive closed rounds without an advance of the best-so-far line on the origin "
             "panel (``RunStanding.rounds_without_advance``) after which the run stops "
-            "``converged``, under any optimizer. A promotion that has not separated from the "
-            "origin counts toward it; a round whose origin-panel reading was not taken counts "
-            "neither way. ``None`` → no such stop."
+            "``converged``, under any optimizer. A promotion resets it, separated from the "
+            "origin or not; a round whose origin-panel reading was not taken counts neither "
+            "way. ``None`` → no such stop."
         ),
     )
     degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)

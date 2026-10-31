@@ -22,7 +22,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 
 ## Code shape
 
-- **No fallbacks in service code.** Three sanctioned: the synthetic-0 on `validation_failures`; the load-boundary deprecated-sample gate (`classify_result()` fatal codes); an owed adapter output re-run before the next walk, halting `PAUSED` past `OWED_WRITE_ATTEMPTS` (`runner/round.py::settle_owed_outputs`). A new one is listed here.
+- **No fallbacks in service code.** Three sanctioned: the synthetic-0 on `validation_failures`; the load-boundary deprecated-sample gate (`classify_result()` fatal codes); an owed adapter output re-run before the next walk, halting `ADAPTER_OWED` past `OWED_WRITE_ATTEMPTS` (`runner/round.py::settle_owed_outputs`). A new one is listed here.
 - **Where a return-value contract must let an exception escape, use `graceful()`** (`shared/errors.py`).
 - **Absent is not zero.** A failed or missing measurement is ABSENT (`None`, an absent channel), never `0.0`; a real 0.0 is a measurement. Counts, rates and money are honest zeros. Render the state, never the number's truthiness. Every layer that emits or reads a measurement obeys this one rule.
 - **Ask the typed predicate, never a hand-authored set of names.** A literal set of dataset / node / stop-reason names silently skips what it failed to list. Ask `stop_reason_outcome` (`domain/phases.py`), `backend_type_of_dataset`, or the registry; a needed set is derived from the typed table, and a curated subset is pinned by an `assert subset <= derived` (`infrastructure/store/family_ray_queries.py`). Enforcement is per-site, never a repo-wide scan.

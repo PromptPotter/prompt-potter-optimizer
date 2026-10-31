@@ -16,7 +16,7 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.infrastructure.llm.telemetry import emit_error_record, emit_round_warning
+from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.shared.errors import (
     ErrorCategory,
     OptimizerTimeoutError,
@@ -71,7 +71,6 @@ def end_run_on(
     info = STOP_REASON_INFO[reason]
     if isinstance(exc, SendRefusedError):
         logger.warning("Run halted: %s", exc)
-        emit_round_warning(kind="send_refused", severity="error", message=str(exc))
     elif isinstance(exc, asyncio.CancelledError):
         logger.warning(
             "Optimization cancelled %s (%s); finalizing as paused (resumable).",

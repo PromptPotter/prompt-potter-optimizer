@@ -192,6 +192,7 @@ def discordant_counts(candidate: Sequence[float], prior: Sequence[float]) -> tup
     return wins, losses
 
 
+@shapes_optimizer_prompt
 def sign_posterior(wins: int, losses: int) -> float:
     if wins + losses == 0:
         return 0.5
@@ -199,7 +200,8 @@ def sign_posterior(wins: int, losses: int) -> float:
 
 
 def holm_adjusted(p_values: list[float]) -> list[float]:
-    """In INPUT order. Holm, not Benjamini-Hochberg: pairs that SHARE arms are dependent."""
+    """In INPUT order. What a claim gates on: it holds under any dependence, and pairs that SHARE
+    arms are dependent."""
     m = len(p_values)
     if m == 0:
         return []
@@ -209,6 +211,18 @@ def holm_adjusted(p_values: list[float]) -> list[float]:
     for rank, idx in enumerate(sorted(range(m), key=lambda i: p_values[i])):
         running = max(running, (m - rank) * p_values[idx])
         out[idx] = min(1.0, running)
+    return out
+
+
+def bh_adjusted(p_values: list[float]) -> list[float]:
+    """In INPUT order: Benjamini-Hochberg q, the false-discovery reading beside Holm, never in its
+    place — it assumes positive dependence, which pairs sharing an arm need not hold."""
+    m = len(p_values)
+    out = [0.0] * m
+    running = 1.0
+    for rank, idx in reversed(list(enumerate(sorted(range(m), key=lambda i: p_values[i]), 1))):
+        running = min(running, m * p_values[idx] / rank)
+        out[idx] = running
     return out
 
 

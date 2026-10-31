@@ -24,6 +24,8 @@ roots at the tenant, never the home. A MEMORY read past `store/archive_queries.p
 
 **`store/account_spend.py` banks what a subject still holds before a delete** — every destroyer calls
 it itself, so none can skip the bank; `mirrored` L4 inner copies are skipped, or that money bills twice.
+**A subject's COST and the account's BILL are two folds** (`_Cost`, `_Billed`): a campaign row reads
+`campaign_spend` (cost, an inner run's included); only a bill or a bank skips `mirrored`.
 
 **A cycle's own facts are ledger records, and `index.json` is their fold** — written by
 `projections/cycle_index.py::write_cycle_index`, read through `read_cycle_index` off the ledger, never
@@ -53,8 +55,7 @@ election stamps them.
 `compact` is reversible; only `purge-cold` needs attribution, and only it is irreversible.
 
 **Every archive path is built from `measurement_archive.py::ArchiveFile`, keyed by a content address, never a
-name** — a new kind is a member, and `application/maintenance/restamp.py::_ARCHIVE_WALKS` refuses to import
-without its walker; a file no kind names is removed by the re-stamp. <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 --> A dataset name in any other tenant path
+name**. <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 --> A dataset name in any other tenant path
 is one segment, `layout.py::dataset_id_prefix`.
 
 ## Dataset content has two tiers, and only one is writable

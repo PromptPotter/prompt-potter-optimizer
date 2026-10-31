@@ -1,4 +1,7 @@
 import type {
+  AccountKey,
+  CouponStatus,
+  LifetimeSpend,
   CourseKind,
   ArmElection,
   ArmName,
@@ -14,11 +17,10 @@ import type {
   HierarchyRound,
   HierarchyState,
   HierarchyStep,
-  HierarchyStat,
-  BenchStat,
   HierarchyTag,
   LiveCandidate,
   Measured,
+  MeteredSpend,
   NodePrompt,
   OverlapReading,
   PairedReading,
@@ -32,14 +34,61 @@ import type {
 } from "@/lib/api/types";
 
 // The envelope every rendered level wears, empty; each builder lays its level's own fields over it.
-function envelope(): {
-  lede: null;
-  caveat: null;
-  tags: HierarchyTag[];
-  stats: (HierarchyStat | BenchStat)[];
-  children: never[];
-} {
-  return { lede: null, caveat: null, tags: [], stats: [], children: [] };
+function envelope(): { caveat: null; tags: HierarchyTag[]; children: never[] } {
+  return { caveat: null, tags: [], children: [] };
+}
+
+const NO_METER: MeteredSpend = {
+  meter: "bill",
+  metered_usd: 0,
+  metered_tokens: 0,
+  billed_usd: 0,
+  rate_priced_usd: 0,
+  calls_rate_priced: false,
+  rate_known: true,
+  bill_is_floor: false,
+  metered_is_bill: true,
+  incurred_usd: 0,
+  billed_tokens: 0,
+  unpriced_tokens: 0,
+  kinds: {},
+  replay_share: null,
+};
+
+export function lifetimeSpend(over: Partial<LifetimeSpend> = {}): LifetimeSpend {
+  return {
+    billed_usd: 0,
+    rate_priced_usd: 0,
+    calls_rate_priced: false,
+    bill_is_floor: false,
+    unpriced_tokens: 0,
+    sends_unreported: false,
+    unreported_usd: 0,
+    ...over,
+  };
+}
+
+export function accountKey(provider: string, last4: string): AccountKey {
+  return { provider, last4, added_at: "2026-01-01T00:00:00Z" };
+}
+
+// A fresh non-host account on a $5 face, nothing spent, no key held.
+export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
+  return {
+    host: false,
+    face_usd: 5,
+    face_tokens: null,
+    left_usd: 5,
+    left_tokens: null,
+    used_share: 0,
+    exhausted: false,
+    void: false,
+    host_key_spend: lifetimeSpend(),
+    own_key_spend: lifetimeSpend(),
+    keys: [],
+    providers: ["anthropic", "openai"],
+    ...over,
+  };
 }
 
 // A step as served: its address is the server's, minted from its course and offset.
@@ -148,11 +197,6 @@ export function runStanding(
 export function producerReading(over: Partial<ProducerReading> = {}): ProducerReading {
   return {
     state: "absent",
-    label: "",
-    label_on_child: "",
-    stepping: false,
-    stalled: "",
-    alert: null,
     attached: false,
     appending: false,
     silent_for_s: null,
@@ -244,6 +288,7 @@ export function hierarchyCandidate(
       sample_set_n: null,
       divergence: null,
       divergent: false,
+      standing: "proposed",
       ...facts,
       reading,
     },
@@ -278,12 +323,10 @@ export function supersededTag(branch: string): HierarchyTag {
 
 export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchyState {
   return {
-    run_phase: "terminal",
-    status: { label: "—", mark: "unknown" },
+    status: { run_phase: "terminal", stop_reason: null, mark: "unknown" },
     attached: false,
     pause: null,
     admission: { offers: null, refusal: "", skip_refusal: "", lookahead_refusal: "" },
-    next_step: "",
     intervened: false,
     ...over,
   };
@@ -315,6 +358,9 @@ export function subtreeCourse(
       task: null,
       standing: null,
       rounds_closed: 0,
+      rounds_cap: null,
+      spend: NO_METER,
+      bench: null,
       elects_on: "ability",
       lens_criterion: null,
       lens_shift: null,
@@ -343,15 +389,8 @@ export function subtreeCampaign(
       root,
       line: root,
       lifecycle: "active",
-      spend_lifetime: {
-        billed_usd: 0,
-        rate_priced_usd: 0,
-        calls_rate_priced: false,
-        bill_is_floor: false,
-        unpriced_tokens: 0,
-        sends_unreported: false,
-        unreported_usd: 0,
-      },
+      spend_lifetime: lifetimeSpend(),
+      line_course: null,
       runs_with: null,
       deletable_stubs: 0,
     },
@@ -365,7 +404,9 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
     active_node: null,
-    measurement_node: null,
+    measurement_node: "l1_score",
+    measuring: false,
+    inner: null,
     candidates: [],
     fitness_bands: NO_FITNESS_BANDS,
     nodes: {},
@@ -477,7 +518,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       most: 0,
       scoring_now: false,
       pick_max: 1,
-      money_hold: null,
+      affordable: null,
       cell_reserve_usd: null,
       unavailable: "",
       explained: "",
@@ -499,6 +540,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     round_cells_ceiling: 0,
     run_limits: { budget: {}, optimizer: [] },
     defaults_drift: null,
+    backend_revision: null,
     spend_metered: null,
     fork_remainder: null,
     spend_metered_by_round: null,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
@@ -87,11 +87,36 @@ type StatusMark = Literal[
     "unknown",
 ]
 
+type StatusTone = Literal["live", "attention", "quiet", "success", "warn", "danger"]
+
+
+class StatusMarkInfo(NamedTuple):
+    glyph: str
+    tone: StatusTone
+
+
+STATUS_MARK_INFO: dict[StatusMark, StatusMarkInfo] = {
+    "running": StatusMarkInfo("●", "live"),
+    "scoring": StatusMarkInfo("◐", "live"),
+    "starting": StatusMarkInfo("◌", "live"),
+    "queued": StatusMarkInfo("…", "quiet"),
+    "gate": StatusMarkInfo("◆", "attention"),
+    "paused": StatusMarkInfo("‖", "quiet"),
+    "detached": StatusMarkInfo("⊘", "warn"),
+    "success": StatusMarkInfo("✓", "success"),
+    "halted": StatusMarkInfo("■", "warn"),
+    "failed": StatusMarkInfo("✕", "danger"),
+    "archived": StatusMarkInfo("▫", "quiet"),
+    "unknown": StatusMarkInfo("?", "quiet"),
+}
+
 
 class RunStatus(FrozenModel):
-    """How a run reads on a row: one word and the mark drawn beside it."""
+    """How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. Its word
+    is `label`, a lookup every surface makes the same way (`lib/derivations/run-phase.ts::runWord`)."""
 
-    label: str
+    run_phase: RunPhase
+    stop_reason: StopReason | None = Field(description="Null while the run has not stopped.")
     mark: StatusMark
 
     @classmethod
@@ -102,11 +127,19 @@ class RunStatus(FrozenModel):
         *,
         lifecycle: LifecycleStatus,
     ) -> RunStatus:
-        if lifecycle == "archived":
-            return cls(label=LIFECYCLE_STATUS_LABELS[lifecycle], mark="archived")
         mark: str = "unknown"
-        if run_phase is not RunPhase.TERMINAL:
+        if lifecycle == "archived":
+            mark = "archived"
+        elif run_phase is not RunPhase.TERMINAL:
             mark = run_phase.value
         elif stop_reason is not None:
             mark = STOP_REASON_INFO[stop_reason].outcome.value
-        return cls.model_validate({"label": run_phase_label(run_phase, stop_reason), "mark": mark})
+        return cls.model_validate(
+            {"run_phase": run_phase, "stop_reason": stop_reason, "mark": mark}
+        )
+
+    @property
+    def label(self) -> str:
+        if self.mark == "archived":
+            return LIFECYCLE_STATUS_LABELS["archived"]
+        return run_phase_label(self.run_phase, self.stop_reason)

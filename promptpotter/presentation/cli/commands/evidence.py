@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
 from promptpotter.application.evidence.head_to_head import (
+    ArmContrast,
+    ContrastArm,
     GuardDifference,
     GuardState,
     HeadToHeadRow,
@@ -16,7 +18,13 @@ from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.bench import BandedValue, BenchColumn, BenchScore, DatasetSplit
+from promptpotter.domain.bench import (
+    BENCH_STATE_INFO,
+    BandedValue,
+    BenchColumn,
+    BenchScore,
+    DatasetSplit,
+)
 from promptpotter.domain.campaign import BenchSet
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
@@ -236,7 +244,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 f"{_banded(_lift(b, h2h.headline), '{:+.3f}', 7, 18)}  "
                 f"{_value(_lift(b, beside), '{:+.3f}'):>9}  "
                 if graded is not None
-                else f"{b.status.sentence:<106.106}  "
+                else f"{BENCH_STATE_INFO[b.status.state].sentence:<106.106}  "
             )
             + (
                 f"{spend.total_used_usd:>8.4f}  {spend.total_rate_priced_usd:>10.4f}  "
@@ -275,24 +283,73 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                     for k in SPEND_KIND_LABELS
                 )
             )
-    if h2h.pairs:
+    lines += _election_lines(h2h.rows)
+    if h2h.contrasts:
         lines += [
             "",
-            f"  selection b - selection a on the bench rows both scored, in {h2h.headline} — "
-            "the lift column's arithmetic with the origin replaced by a. `x` marks a pair whose "
-            "guard differs: read, labelled, and outside the Holm correction:",
-            f"  {'pair (b - a)':<50}  {'shift':>7}  {'95% CI':>18}  {'n':>4}  {'p':>12}  "
-            f"{'p (Holm)':>12}",
+            f"  The arm-by-arm matrix in {h2h.headline}: an arm is a treatment and its replicates; "
+            "shift is the mean over bench rows of b's replicate mean less a's, every replicate of "
+            "both having scored the row, its 95% CI and p over rows — an SE clustered by row. "
+            "se iid is the same mean's SE were every replicate pairing independent, deff the "
+            "squared ratio. Holm gates a claim; BH q is the false-discovery reading. `x` marks a "
+            "contrast whose guard differs: read, labelled, and outside the correction:",
+            f"  {'contrast (b - a)':<50}  {'shift':>7}  {'95% CI':>18}  {'rows':>4}  "
+            f"{'se row':>7}  {'se iid':>7}  {'deff':>5}  {'p':>12}  {'p (Holm)':>12}  "
+            f"{'q (BH)':>12}",
         ]
-        for p in h2h.pairs:
-            pair = p.reading
-            if pair.a is None or pair.b is None:
-                continue
-            first, second = (m.address.path[-1].campaign_id for m in (pair.a, pair.b))
-            mark = "x" if p.guard.state is GuardState.DIFFERS else " "
-            label = f"{first[:23]} -> {second[:23]}"
-            lines.append(f" {mark}{label:<50}  {_pair_text(pair, '{:+.3f}', 7, 18, 4, 12)}")
+        for c in h2h.contrasts:
+            mark = "x" if c.guard.state is GuardState.DIFFERS else " "
+            label = f"{_arm_text(c.a)} -> {_arm_text(c.b)}"
+            lines.append(f" {mark}{label:<50}  {_contrast_text(c)}")
     lines.append("")
+    return lines
+
+
+def _arm_text(arm: ContrastArm) -> str:
+    return f"{arm.optimizer[:9]}:{arm.treatment_digest[:6]}({len(arm.replicates)})"
+
+
+def _contrast_text(c: ArmContrast) -> str:
+    lift = c.lift
+    if lift is None:
+        return f"under two rows every replicate scored ({len(c.differences)})"
+    est, family = lift.estimate, lift.family
+    floored = "*" if est.p_value <= est.p_floor else " "
+
+    def se(value: float | None) -> str:
+        return "—" if value is None else f"{value:.4f}"
+
+    return (
+        f"{est.value:>+7.3f}  {fmt_ci(est.ci_lo, est.ci_hi, spec='{:+.3f}'):>18}  "
+        f"{len(c.differences):>4}  {se(c.se_clustered):>7}  {se(c.se_naive):>7}  "
+        f"{'—' if c.design_effect is None else f'{c.design_effect:.2f}':>5}  "
+        f"{fmt_pvalue(est.p_value):>12}{floored} "
+        f"{fmt_pvalue(None if family is None else family.p_adjusted):>12}  "
+        f"{fmt_pvalue(c.q_value):>12}"
+    )
+
+
+def _election_lines(rows: list[HeadToHeadRow]) -> list[str]:
+    elected = [r for r in rows if r.election is not None]
+    if not elected:
+        return []
+    lines = [
+        "",
+        "  Each selection's election, and the column to quote it on: an `ability` election is "
+        "won on θ unless its θ carries a caveat, where θ is not ability and it reads on accuracy:",
+        f"  {'campaign':<24}  {'elects on':<9}  {'θ':>7}  {'95% CI':>18}  {'caveat':<18}  quote on",
+    ]
+    for r in elected:
+        election = r.election
+        assert election is not None
+        ability = election.ability
+        theta = "—" if ability is None or ability.theta is None else f"{ability.theta:+.3f}"
+        band = "—" if ability is None else fmt_ci(ability.ci_lo, ability.ci_hi, spec="{:+.3f}")
+        caveat = "—" if ability is None or ability.caveat is None else ability.caveat.value
+        lines.append(
+            f"  {r.campaign_id[:24]:<24}  {election.elects_on:<9}  {theta:>7}  {band:>18}  "
+            f"{caveat[:18]:<18}  {election.reads_on}"
+        )
     return lines
 
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
-from promptpotter.domain.cell_fold import CellFold
+from promptpotter.domain.arms import is_leader_eligible
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
         SampleIndex,
         SampleRecord,
     )
+    from promptpotter.domain.pipeline_schema import LocusKind, PipelineSchema
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.sample import ArchiveEntry
 
 
 NOISE_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 0.02
@@ -94,6 +94,7 @@ class ValueRecord:
 @dataclass
 class AxisImpact:
     axis: str
+    kind: LocusKind
     effect_size: float
     consistency: float
     classification: str
@@ -132,16 +133,18 @@ def _flips(rounds: Sequence[RoundResult]) -> list[dict[str, Any]]:
 
 
 class AxisIndex:
-    """Reads its sample index alone, so it remembers as that index does per purpose."""
+    """Ranks the loci of the cycle's own measured arms; its failure readings remember as its
+    sample index does."""
 
-    def __init__(self, sample_index: SampleIndex) -> None:
+    def __init__(self, sample_index: SampleIndex, schema: PipelineSchema) -> None:
         self.sample_index = sample_index
+        self._schema = schema
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
+        self._axis_kinds: dict[str, LocusKind] = {}
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._flips: list[dict[str, Any]] = []
-        self._folded: int | None = None
 
     @shapes_optimizer_prompt
     def peaked_axes(self) -> frozenset[str]:
@@ -150,21 +153,31 @@ class AxisIndex:
         )
 
     @shapes_optimizer_prompt
-    def axis_rankings(self) -> list[AxisImpact]:
+    def _ranked_axes(self, only: LocusKind | None) -> list[tuple[str, dict[str, list[float]]]]:
+        """``None`` ranks every kind."""
+        return [
+            (axis, vals)
+            for axis, vals in self._axis_values.items()
+            if not _is_forbidden_axis(axis) and only in (None, self._axis_kinds[axis])
+        ]
+
+    @shapes_optimizer_prompt
+    def axis_rankings(self, only: LocusKind | None) -> list[AxisImpact]:
         impacts = [
             i
-            for axis, vals in self._axis_values.items()
-            if not _is_forbidden_axis(axis) and (i := self._compute_axis_impact(axis, vals))
+            for axis, vals in self._ranked_axes(only)
+            if (i := self._compute_axis_impact(axis, vals))
         ]
         return sorted(impacts, key=lambda a: -a.effect_size)
 
     @shapes_optimizer_prompt
-    def _exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
+    def _exhausted_axes(
+        self, only: LocusKind | None, min_values: int = 4, max_effect: float = 0.02
+    ) -> list[AxisImpact]:
         out = [
             i
-            for axis, vals in self._axis_values.items()
-            if not _is_forbidden_axis(axis)
-            and len(vals) >= min_values
+            for axis, vals in self._ranked_axes(only)
+            if len(vals) >= min_values
             and (i := self._compute_axis_impact(axis, vals))
             and i.effect_size <= max_effect
         ]
@@ -197,8 +210,8 @@ class AxisIndex:
         return "flat"
 
     @shapes_optimizer_prompt
-    def digest(self) -> dict[str, str] | None:
-        rankings5 = self.axis_rankings()[:5]
+    def digest(self, *, only: LocusKind | None) -> dict[str, str] | None:
+        rankings5 = self.axis_rankings(only)[:5]
         top_vals_str: str | None = None
         if rankings5:
             impact = self._compute_axis_impact(
@@ -214,7 +227,7 @@ class AxisIndex:
         disc = self.sample_index.discriminating()
         persistent = self.sample_index.persistent_failures(min_streak=3)
         bottleneck = self.sample_index.bottleneck_distribution()
-        exhausted = self._exhausted_axes()
+        exhausted = self._exhausted_axes(only)
         exhausted_str = (
             "; ".join(
                 f"{a.axis} ({len(self._axis_values.get(a.axis, {}))} values tested, "
@@ -325,34 +338,20 @@ class AxisIndex:
         self._axis_failure_group_deltas = new_deltas
 
     def refresh(self, rounds: Sequence[RoundResult]) -> None:
+        """An arm with no accuracy is skipped: folded as 0.0 it manufactures ``effect_size``."""
         self._flips = _flips(rounds)
-        if self._folded == self.sample_index.generation:
-            return
-        # Folded WHOLE each time: a configuration's reading moves as its population grows.
         self._axis_values = defaultdict(lambda: defaultdict(list))
-        for entry, reading in self.sample_index.runs:
-            self._fold_entry(self._axis_values, entry, reading)
+        self._axis_kinds = {}
+        for rr in rounds:
+            for key, arm in rr.arms.items():
+                fold = rr.folds.get(key)
+                if not is_leader_eligible(arm) or fold is None or fold.accuracy is None:
+                    continue
+                for locus, value in arm.individual.loci().items():
+                    self._axis_kinds[locus.name] = self._schema.locus_kind(*locus)
+                    # Keyed whole: two prompts sharing a preview are two values.
+                    self._axis_values[locus.name][str(value)].append(fold.accuracy)
         self._recompute_failure_group_correlations()
-        self._folded = self.sample_index.generation
-
-    @staticmethod
-    def _fold_entry(
-        axis_values: dict[str, dict[str, list[float]]],
-        entry: ArchiveEntry,
-        scores: CellFold,
-    ) -> None:
-        """An entry with no accuracy is skipped: folded as 0.0 it manufactures ``effect_size``."""
-        recorded = scores.accuracy
-        if recorded is None:
-            return
-        accuracy = float(recorded)
-        for node_name, node_config in entry.pipeline_params.items():
-            if isinstance(node_config, dict):
-                for param, value in node_config.items():
-                    axis = f"{node_name}.{param}" if node_name else param
-                    axis_values[axis][_value_preview(value)].append(accuracy)
-            else:
-                axis_values[node_name][_value_preview(node_config)].append(accuracy)
 
     @shapes_optimizer_prompt
     def _compute_axis_impact(
@@ -360,13 +359,16 @@ class AxisIndex:
         axis: str,
         values: dict[str, list[float]],
     ) -> AxisImpact | None:
-        records = [ValueRecord(v, sum(a) / len(a), len(a)) for v, a in values.items() if a]
+        records = [
+            ValueRecord(_value_preview(v), sum(a) / len(a), len(a)) for v, a in values.items() if a
+        ]
         records.sort(key=lambda r: -r.mean_accuracy)
         means = [r.mean_accuracy for r in records]
         total = sum(r.sample_count for r in records)
+        kind = self._axis_kinds[axis]
 
         if len(means) < 2:
-            return AxisImpact(axis, 0.0, 0.0, "dead", sample_count=total)
+            return AxisImpact(axis, kind, 0.0, 0.0, "dead", sample_count=total)
 
         deltas = [abs(a - b) for a, b in combinations(means, 2)]
         effect = sum(deltas) / len(deltas)
@@ -380,6 +382,7 @@ class AxisIndex:
         )
         return AxisImpact(
             axis=axis,
+            kind=kind,
             effect_size=round(effect, 4),
             consistency=round(consistency, 4),
             classification=cls,

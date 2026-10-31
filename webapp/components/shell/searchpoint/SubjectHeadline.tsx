@@ -13,7 +13,7 @@ export function SubjectHeadline({
 }: {
   spend: SpendView;
   reading: ArmReading | null;
-  // served: the course's `BenchStat.vs_origin`, set only where the shown searchpoint is the graded pick.
+  // served: the course's `facts.bench.vs_origin`, set only where the shown searchpoint is the graded pick.
   bench: PairedReading | null;
 }) {
   const { metered } = spend;

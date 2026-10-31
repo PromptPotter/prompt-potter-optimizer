@@ -65,17 +65,10 @@ interface, only when it beats 1PL out-of-sample (with hysteresis), so a thin dat
 
 ## Reading a round — which column is the verdict
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-light.png">
-    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/warnings-dark.png" alt="Optimizer warnings: rounds 3 to 6 each resolved nothing, because every arm's lift interval spans zero" width="100%">
-  </picture>
-</p>
-
 **It does not grade its own homework.** With three arms and no real difference, *some* arm beats its
-parent most of the time. PromptPotter promotes the best it saw and says, per round, on screen and on
-disk, that the lift interval spans zero (`(ns)` beside its `p`). Degenerate candidates (a constant
+parent most of the time. PromptPotter promotes the best it saw and marks the round's
+`RoundAdvance` (`not separated` where the lift interval spans zero) on its round, on screen and on
+disk (`(ns)` beside its `p`). Degenerate candidates (a constant
 answer, a scorer-gaming shape) are caught before they count, and the layer that validates a fix is
 never the one that proposed it.
 
@@ -103,7 +96,7 @@ Checked in severity order (`ruler.py::theta_caveat`):
 - **Disjoint datasets** (`disjoint_scopes`). Each `RulerScope` is its own scale; a lift paired on
   shared cells still holds.
 - **The 0% floor** (`floor_pinned`, per arm). An all-miss arm pins θ to a constant whatever it saw,
-  so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which PoBB cuts): an
+  so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which the election refuses): an
   arm can answer differently every time and be wrong every time.
 - **A flat ruler** (`flat_ruler`). The ruler's own δ span is below `BAND_COLLAPSE_LOGITS`, so θ is
   accuracy plus a constant. What an all-zeros fit looks like; checked before `collapsed_band`,
@@ -129,7 +122,8 @@ Checked in severity order (`ruler.py::theta_caveat`):
   (`origin_panel.py::origin_panel` — per dataset, the cells the origin answered, every member topped up onto them once). Fixed, because a
   set re-chosen from what the line shared contracted as it grew. It is a rate, needing no ruler —
   readable when θ's scale has collapsed. The panel's rows also feed the election (draw and panel
-  pooled, less the parent's crowning cells: `::election_rows`; mid-round cuts stay on the draw), so
+  pooled, less the parent's crowning cells: `::election_rows`; an arm the eliminator stopped stays
+  on its draw), so
   it is a REUSED set and the overlap reading is optimistic for every pick: **the unbiased headline
   is the bench.** Round files, `log.md`, `review.md`, the round-close line and the candidates
   chart's `overlap` series all render this one reading.

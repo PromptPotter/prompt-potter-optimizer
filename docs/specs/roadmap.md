@@ -21,10 +21,10 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
    never edited, a held leader is never re-scored); early stop when C1.1 clearly beats C0; Δ per time,
    per candidate and per $ served in chat. Paid: the board's path, steps (1)–(4).
 4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
-   partition; third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
+   partition. Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
-5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A2 host
-   coupon + BYO keys; A3 anonymous preview.
+5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A3
+   anonymous preview.
 6. **Capability (Lane C), by dependency:** C2 composite fitness → C4 cross-user panel; C2b judged
    scoring; C3 L4 closure; SIFT S1; the PUCT selector (§ Selector members — parent choice as one acquisition); C5, C6, C8, C10; C7 after v1.
 
@@ -34,10 +34,9 @@ session's files land; the operator's picked renames.
 Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
 the rest of Lane C.
 
-### Lane A — the hosted beta, usable by a free-tier account end to end
+### Lane A — the hosted beta, usable by a coupon account end to end
 
 - **A1** First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit).
-- **A2** Host coupon + BYO per-user API keys (§ Host coupon + BYO keys).
 - **A3** Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier).
 
 ### Lane C — differentiator and capability
@@ -48,13 +47,13 @@ the rest of Lane C.
 - **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
 - **C4** Cross-user measurement panel, after P3.
 - **C5** MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
-- **C6** Public-service hardening: Docker, metrics, a rate on unpaid writes (reads are metered), billing; a bound on the NUMBER of accounts.
+- **C6** Public-service hardening: Docker, metrics, billing.
 - **C7** Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal; all but harnesses after v1.
 - **C8** Mask abstraction — the sample-set half (§ Lineage mask).
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
-**M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
+**M14 (publication)** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
 zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
 ## The bench (M13)
@@ -79,14 +78,10 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    `optimizer ∈ {potter, capo, levi, gepa}`, calls held equal, 3 seeds; paired per-cell differences,
    clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
    the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
-   re-ingested with a bench partition wider than 100 rows; an N-arm mint verb over
-   `application/jobs/mint.py::_join_head_to_head`.
-   Price it in dollars and wall clock before asking.
+   re-ingested with a bench partition wider than 100 rows. Declared as
+   `paper/plans/comparability.yaml`; price it with `price-head-to-head` before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
-   budget-matched Pareto comparison reviewers ask for first.
-7. **Third-party reachability**: a scratch-venv example package with one entry point and one
-   proposing node. *Closes when* `optimizer: example` runs a round whose arms carry
-   `source="example:propose"` with zero edits inside this tree.
+   budget-matched Pareto comparison reviewers ask for first (`paper/plans/budget-dimension.yaml`).
 
 ### Members the presets need
 
@@ -101,7 +96,7 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
 ### Selector members — parent choice as one acquisition
 
 Potter's selector (`application/scoring/selection.py::elect_round_winner`, greedy) is UCB1 rebase
-(`application/mask/backprop.py::select_rewind_round`) with the exploration term at zero. Direction:
+(`application/mask/backprop.py::select_branch_round`) with the exploration term at zero. Direction:
 **one PUCT acquisition `Q + c·P·√ΣN/(1+N)`**, P a predicted lift in θ units on `L1Variant`
 (never a normalized preference). `fork_proposal`'s contract does not change. No learned value model
 until a surrogate's held-out error is measured below the lifts the loop chases; Q stays measured θ.
@@ -140,7 +135,11 @@ less wall clock, on an official dataset with a natural origin below 0.4. A one-k
 
 **The path:** (1) replicate the nearest climbing setting and read what the proposer saw of the
 misses; (2) screen library blocks without the optimizer — authored arms, origin plus ONE block;
-(3) the optimizer-model screen — re-run the halted `qwen3.7-flash @ none` arm; (4) combine the winners.
+(3) the optimizer-model screen, per method and per step — potter's L1 moved to MiniMax (jl-optmodel-1);
+(4) combine the winners.
+
+**Hypothesis under test:** each method, and each step within one, has its own most efficient model
+([`../../paper/notes/model-per-method.md`](../../paper/notes/model-per-method.md)).
 
 **Wall clock:**
 - The `n_min` origin-panel top-ups block the round close; root: one scoring pass over every member.
@@ -263,9 +262,8 @@ maintained and measured separately; measured lift is the only admission ticket.
 - **Exit gate** — `rounds_to_separable ≤ 5` on `llm_only` AND TermNorm under one `l1_generate_hash`;
   `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches. The clock is
   separability, never an absolute accuracy.
-- **Run admission** — full speed for two busy users needs more provider quota (A2; an `api_key`
-  dimension on `get_llm_client`'s cache key); look-ahead's ceiling is a hand-set constant per
-  connector, not measured RSS headroom; a horizon priced in expected waste would launch deeper.
+- **Run admission** — look-ahead's ceiling is a hand-set constant per connector, not measured RSS
+  headroom; a horizon priced in expected waste would launch deeper.
 - **Cheap top-up** — a second `PanelTrigger`, blocked on the rule that prices a missing row against
   the round's marginal draw cell.
 - **CPU-hours** metered per phase beside `SpendRollup`, for every connector.
@@ -291,23 +289,6 @@ the prompt. Bars: most people do it; platform-independent; no private data; a ri
 first cut's origin read below it. **MovieLens cannot ship** (no commercial use or redistribution):
 collect our own rows, cut under a name nothing has run before. Served from an install-tier campaign
 root behind a `demo_mode_enabled` reader.
-
-## Host coupon + BYO keys
-
-The host runs a user on its own keys up to a per-user coupon; past it the user uploads their own key
-and continues on their own money. The coupon protects the host wallet, `jobs/quota.py` the machine.
-- **The coupon remainder is derived from the host-key ledger, never a counter** (`grant.json`); keys
-  sit in `TenantApiKeyStore` (`api_keys.json`), both on `read_json_optional` / `write_json`.
-- **`resolve_api_key(identity, provider, stores)` wraps `get_llm_client` as the one choke point**:
-  the user's own key for the provider wins with no coupon check; else a live coupon uses the host
-  key; else 422 `host_allowance_exhausted`, distinct from 422 `no_api_key`. Per provider, unless
-  `settings.coupon_void_on_byo` retires the coupon.
-- **The coupon replaces the free-tier path** (`application/jobs/quota.py::admit_launch` + the `User`
-  lifetime ceilings) in the same change, keeping both units (USD and tokens) and the per-run
-  reservation; the `SpendBook` caps live at the remainder, stopping on a new `StopReason.HOST_ALLOWANCE`.
-- **`TokenUsageRecord.key_source: host|user`** — the one exception to identity-from-path, since it
-  records which wallet paid; `/auth/activity` `group_by=api_key` then groups by whose key.
-- `/auth/api-keys` and `/auth/coupon` ride the auth router, not `/commands/*`.
 
 ## Anonymous preview tier
 

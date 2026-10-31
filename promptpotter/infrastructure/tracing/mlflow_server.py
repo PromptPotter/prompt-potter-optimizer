@@ -104,7 +104,10 @@ def _register_node_prompt(
         _ROUND: str(export.measurement.round),
         # The model the winner was won on rides here, and binds: a swap is a new run.
         "promptpotter.tuned_params": json.dumps(export.tuned_params, sort_keys=True),
-        "promptpotter.bench": export.bench.line,
+        "promptpotter.bench_state": export.bench.status.state.value,
+        "promptpotter.bench_level": ""
+        if (graded := export.bench.graded) is None or graded.selected.level is None
+        else f"{graded.selected.level.value:.3f}",
     }
     standing = next(
         (

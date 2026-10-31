@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ServedDashboard } from "@/lib/api";
 import { criticalAlert } from "../critical-alert";
 import type { RoundHealth } from "@/lib/api/types";
+import { PRODUCER_STATE_INFO, STOP_REASON_INFO } from "@/lib/api/types.generated";
 import { dash as dashboard, health, producerReading, summaryRound } from "@/lib/test-fixtures";
 
 const base = {
@@ -23,14 +24,12 @@ describe("criticalAlert", () => {
         kind: "CRASHED",
         message: "boom\nretry",
         stop_reason: "crashed",
-        label: "Crashed",
-        next_step: "Read the traceback, then resume.",
       },
     });
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: "Crashed — CRASHED",
-      detail: "Read the traceback, then resume.",
+      title: `${STOP_REASON_INFO.crashed.label} — CRASHED`,
+      detail: STOP_REASON_INFO.crashed.next_step,
     });
   });
 
@@ -41,14 +40,12 @@ describe("criticalAlert", () => {
         kind: "ResumeDivergenceError",
         message: "optimizer_identity:l1_generate",
         stop_reason: "diverged",
-        label: "Diverged",
-        next_step: "Fork on the divergence.",
       },
     });
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: "Diverged — ResumeDivergenceError",
-      detail: "Fork on the divergence.",
+      title: `${STOP_REASON_INFO.diverged.label} — ResumeDivergenceError`,
+      detail: STOP_REASON_INFO.diverged.next_step,
     });
   });
 
@@ -72,10 +69,14 @@ describe("criticalAlert", () => {
     expect(criticalAlert({ ...base, bannerStatus: "loading" })).toBeNull();
   });
 
-  it("raises the served producer alert verbatim", () => {
-    const alert = { title: "Run wedged", detail: "heartbeats only for 10m" };
-    const dash = dashboard({ producer: producerReading({ state: "wedged", alert }) });
-    expect(criticalAlert({ ...base, dash })).toEqual({ severity: "warn", ...alert });
+  it("raises the producer state's own alert, clocked by its served silence", () => {
+    const producer = producerReading({ state: "wedged", silent_for_s: 600 });
+    const dash = dashboard({ producer });
+    expect(criticalAlert({ ...base, dash })).toEqual({
+      severity: "warn",
+      title: PRODUCER_STATE_INFO.wedged.alert,
+      detail: `${PRODUCER_STATE_INFO.wedged.alert_detail} for 10m`,
+    });
   });
 
   it("does not flag a clean terminal (no error record)", () => {
@@ -94,12 +95,10 @@ describe("criticalAlert", () => {
         kind: "DIVERGED",
         message: "x",
         stop_reason: "diverged",
-        label: "Diverged",
-        next_step: "",
       },
     });
     const out = criticalAlert({ ...base, bannerStatus: "offline", dash });
-    expect(out?.title).toBe("Diverged — DIVERGED");
+    expect(out?.title).toBe(`${STOP_REASON_INFO.diverged.label} — DIVERGED`);
   });
 
   it("flags an unreachable backend as critical (the LED's twin)", () => {

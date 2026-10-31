@@ -4,7 +4,7 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
-from promptpotter.application.runner.bench import bench_series, own_level
+from promptpotter.application.runner.bench import line_bench_series, line_spans, own_level
 from promptpotter.application.runner.campaign_result import (
     bank_campaign_result,
     declare_line_bench,
@@ -21,6 +21,7 @@ from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import (
+    SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
     ErrorRecord,
     PauseCause,
@@ -52,16 +53,21 @@ def build_cycle_result(
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
     bench_origin: float | None = None
     bench_levels: list[float | None] = []
+    spent = 0
+    round_budget: int | None = None
     if cycle is not None:
-        bench_origin, bench_levels = bench_series(
-            session.store,
-            cycle.bench_passes,
-            session.state.scoring.require_scorer(),
-            rounds=cycle_rounds,
+        scorer = session.state.scoring.require_scorer()
+        spans = line_spans(session.store, scorer, session.hop)
+        spent = sum(len(span.own) for span in spans)
+        bench_origin, bench_levels = line_bench_series(
+            session.store, cycle.bench_passes, scorer, spans
         )
+        cap = cycle.config.optimization.budget.rounds
+        # The cycle's cap holds what its line had left: the line's adds every round a rebase left.
+        round_budget = None if cap is None else cap + spent - len(cycle_rounds)
     return CycleResult(
         rounds=cycle_rounds,
-        n_rounds_after_origin=len(cycle_rounds),
+        n_rounds_after_origin=spent,
         result_accuracy=None if picked is None or picked.fold is None else picked.fold.accuracy,
         result_round=picked.round if picked is not None else 0,
         origin=own_level(cycle.origin_round.results) if cycle is not None else None,
@@ -72,7 +78,7 @@ def build_cycle_result(
         ),
         bench_origin_level=bench_origin,
         bench_round_levels=bench_levels,
-        round_budget=cycle.config.optimization.budget.rounds if cycle is not None else None,
+        round_budget=round_budget,
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
@@ -203,9 +209,7 @@ def _finalize_run(
             session,
             observers,
             stop_reason,
-            interrupted_by=(
-                PauseCause.BOUND if stop_reason is StopReason.PANEL_CUT else pause_cause
-            ),
+            interrupted_by=SELF_PAUSE_CAUSE.get(stop_reason, pause_cause),
         )
     else:
         # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.

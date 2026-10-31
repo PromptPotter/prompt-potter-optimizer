@@ -50,22 +50,28 @@
 .run-error-banner.is-warn{background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 .run-error-banner.is-warn .run-error-banner-head{color:var(--color-warn)}
 
-.dash-lane{min-width:0}
-.dash-lane-head{display:flex;align-items:baseline;gap:var(--space-10);width:100%;padding:var(--space-6) var(--space-12);background:transparent;border:0;border-bottom:0.5px solid var(--color-border);cursor:pointer;color:inherit;text-align:left;font:inherit}
-.dash-lane-head:hover{background:var(--color-background-secondary)}
-.dash-lane-caret{color:var(--color-text-secondary);font-size:var(--text-sm);width:14px;flex:none}
-.dash-lane-title{margin:0;font-size:var(--text-base);font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em;text-transform:uppercase}
-.dash-lane-subtitle{color:var(--color-text-secondary);font-size:var(--text-sm);font-weight:400}
-.dash-lane-body{display:flex;flex-direction:column;gap:var(--space-12);padding-top:14px}
-.dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
-
 .inspector-card{max-height:var(--box-scroll-max);overflow:auto}
 .inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 .inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);padding-top:var(--space-8)}
 
-.lsc-charts{display:flex;flex-direction:column;gap:var(--space-14);margin-top:14px}
-.lsc-charts > *{margin-bottom:0;min-width:0}
-.lsc-charts > .card{background:none;border:0;border-top:0.5px solid var(--color-border);border-radius:0;padding:var(--space-12) 0 0}
+/* A card hosted inside another reads as a section of it: a rule above, no second frame. */
+.card-inset{margin-top:var(--space-14);min-width:0}
+.card-inset > .card{margin:0;background:none;border:0;border-top:0.5px solid var(--color-border);border-radius:0;padding:var(--space-12) 0 0}
+
+/* A run log under the region it belongs to, shown only while it holds entries. */
+.dash-log{margin-top:var(--space-12);padding:0 var(--space-12) var(--space-12)}
+.dash-log-title{margin:0 0 var(--space-6);font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:600}
+.dash-log-body{padding:var(--space-8) var(--space-12);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);font-family:var(--font-mono);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary);max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.dash-log-row{margin-bottom:2px}
+.dash-log-mark{color:var(--color-accent)}
+.dash-log-warn{color:var(--color-warn)}
+
+.knob-clashes{margin:0 0 var(--space-14);padding:var(--space-10) var(--space-12);border:0.5px solid var(--color-warn-border);border-radius:var(--border-radius-md);background:var(--color-warn-bg)}
+.knob-clash-list{list-style:none;margin:var(--space-6) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--space-10)}
+.knob-clash-head{display:flex;align-items:baseline;gap:var(--space-8);flex-wrap:wrap}
+.knob-clash-knobs{font-size:var(--text-sm);font-weight:600;font-family:var(--font-mono);color:var(--color-text-primary)}
+.knob-clash-consequence{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-primary)}
+.knob-clash-relation{margin:var(--space-4) 0 0;font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 
 .trend-degraded{list-style:none;margin:var(--space-8) 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
 .trend-degraded-row{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--text-xs);line-height:1.4;min-width:0}
@@ -178,27 +184,6 @@
   .mech-group > .mech-list > .mech-row{border-top:0.5px solid var(--color-border);padding-top:var(--space-10)}
 }
 
-.cmap{display:flex;flex-direction:column;gap:var(--space-12)}
-.cmap-summary{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.6;color:var(--color-text-secondary)}
-.cmap-summary[data-collision="true"]{color:var(--color-text-primary)}
-.cmap-clear{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
-.cmap-couplings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-10)}
-.cmap-coupling{border-top:0.5px solid var(--color-border);padding-top:10px}
-.cmap-coupling:first-child{border-top:0;padding-top:0}
-.cmap-coupling[data-active="true"]{padding-left:8px;border-left:2px solid var(--color-border)}
-.cmap-coupling-head{display:flex;align-items:baseline;gap:var(--space-8);flex-wrap:wrap}
-.cmap-coupling-knobs{font-size:var(--text-sm);font-weight:600;font-family:var(--font-mono);color:var(--color-text-primary)}
-.cmap-coupling-relation{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-secondary)}
-.cmap-coupling-consequence{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-primary)}
-.cmap-estimands{display:flex;flex-direction:column;gap:var(--space-14)}
-.cmap-estimand-head{display:flex;align-items:baseline;gap:var(--space-8);flex-wrap:wrap;margin-bottom:6px}
-.cmap-estimand-name{font-size:var(--text-sm);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
-.cmap-estimand-doc{font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
-.cmap-knobs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-4)}
-.cmap-knob{display:flex;align-items:baseline;gap:var(--space-10);font-size:var(--text-sm)}
-.cmap-knob-label{flex:1 1 auto;font-family:var(--font-mono);color:var(--color-text-secondary);overflow-wrap:anywhere}
-.cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
-.cmap-knob-source-default{font-size:var(--text-xs);color:var(--color-text-secondary)}
 
 .dash-time-ray{display:flex;align-items:stretch;gap:0;
   border:0.5px solid var(--color-border);border-radius:10px;
@@ -240,7 +225,7 @@
 button.dash-time-ray-head{cursor:pointer}
 .dash-time-ray-head-label{font-weight:700;letter-spacing:0.03em;text-transform:uppercase}
 .dash-time-ray-head-detail{color:var(--color-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Tone of the served status mark: `run-phase.ts::STATUS_MARK`. */
+/* Tone of the served status mark: `domain/cycle_index.py::STATUS_MARK_INFO`. */
 .dash-time-ray-head.tone-live,
 .dash-time-ray-head.tone-success{box-shadow:inset 3px 0 0 var(--color-success)}
 .dash-time-ray-head.tone-attention{box-shadow:inset 3px 0 0 var(--color-accent)}

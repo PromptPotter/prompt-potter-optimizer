@@ -16,7 +16,6 @@ from promptpotter.application.scoring.selection import (
     paired_grades,
     paired_p_best,
 )
-from promptpotter.domain.scoring import graded_answer, is_answer_collapsed
 from promptpotter.domain.validators import StopSignal
 
 if TYPE_CHECKING:
@@ -28,17 +27,15 @@ if TYPE_CHECKING:
 
 
 class EliminationGate(StrEnum):
-    """Named by the producer: re-derived downstream from whichever keys survived, a collapse cut reads as an ε cut."""
+    """Named by the producer, never re-derived from which keys a context carries."""
 
     EPSILON = "epsilon"  # measurement stopped, NOT a verdict
     LOCK_IN = "lock_in"
-    COLLAPSED = "collapsed"  # the ABSENCE of a measurement
 
 
 ABORT_LENS_LABELS: dict[str, str] = {
     f"{EliminationGate.EPSILON.value}_off": "No ε-elimination",
     f"{EliminationGate.LOCK_IN.value}_off": "No lock-in",
-    f"{EliminationGate.COLLAPSED.value}_off": "No collapse cut",
     "all_off": "No early abort",
 }
 
@@ -56,7 +53,7 @@ assert set(ABORT_LENS_LABELS) == set(ABORT_LENS_SUPPRESS), (
 
 
 class EliminationContext(TypedDict, total=False):
-    """``gate`` says which keys EXIST: a collapse carries the two depths alone, lock-in adds posterior and bounding prior, ε its bar."""
+    """``gate`` says which keys EXIST: ε adds its bar to lock-in's."""
 
     gate: EliminationGate
     p_best: float
@@ -69,10 +66,10 @@ class EliminationContext(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class PoBBStop(StopSignal):
-    """``fit`` is the pairing a replay re-fits, and ``None`` on a collapse, which read none."""
+    """``fit`` is the pairing a replay re-fits."""
 
     check_result: EliminationContext
-    fit: PairedPosterior | None
+    fit: PairedPosterior
     paired_breakdown: dict[ArmKey, dict[str, float]]
 
 
@@ -134,19 +131,6 @@ class PoBBCheck:
         n = len(results)
         if n < self.n_min:
             return None
-        # Cut HERE, not by the posterior: one label for everything can score above the ε floor.
-        if is_answer_collapsed(results):
-            return PoBBStop(
-                self.name,
-                "eliminated",
-                {
-                    "gate": EliminationGate.COLLAPSED,
-                    "queries_scored": n,
-                    "total_queries": self.n_samples,
-                },
-                fit=None,
-                paired_breakdown={},
-            )
         # Every posterior gate and the ε ramp read the depth the election's coverage floor counts.
         read = cells_read(
             "ability", results, self.priors_by_sample.get(self.parent, {}), self.ruler
@@ -222,7 +206,6 @@ class PoBBCheck:
         measured = [cell for cell in results if cell.scored]
         grades = paired_grades(measured)
         cells = list(grades)
-        said = {graded_answer(cell.facts, cell.grade) for cell in measured}
         # A prior's absent cells are read worst-case by the bounds, as `check` reads it on shared ones.
         priors = dict(self.priors_by_sample)
         pending = {
@@ -236,12 +219,8 @@ class PoBBCheck:
                 cells.append(sample.key)
             if row is not None and row.scored:
                 grades.update(paired_grades([row]))
-                said.add(graded_answer(row.facts, row.grade))
             if m < self.n_min:
                 continue
-            # Collapse needs one answer everywhere; a second, or no answer, rules it out for good.
-            if len(said) <= 1 and None not in said:
-                return m
             # Cold, a catch-up may yet give the parent any cell, and a depth below what `check` will
             # read lands the horizon past its stop: so it counts the most it could read.
             read = len(theta_cells(dict.fromkeys(cells), cells, self.ruler))

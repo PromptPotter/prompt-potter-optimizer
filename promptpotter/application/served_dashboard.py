@@ -22,12 +22,11 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import ForkRemainder, RunWiringRecord
+from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardFacts,
@@ -42,7 +41,6 @@ from promptpotter.infrastructure.runtime_flags import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
-    scan_last,
     scan_ledger_verify,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
@@ -119,9 +117,9 @@ class SampleLookahead(StrictModel):
         "next round alone."
     )
     pick_max: int = Field(description="The deepest press the next walk can take.")
-    money_hold: str | None = Field(
-        description="How many more cells the spend limits admit, in words, where money and not "
-        "the armed depth holds the walk; null where it does not."
+    affordable: int | None = Field(
+        description="How many more cells the spend limits admit, where money and not the armed "
+        "depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not."
     )
     cell_reserve_usd: float | None = Field(
         description="What each call out holds of the ceiling; null where no book binds."
@@ -174,10 +172,7 @@ def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
 def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
     current = state.current_round
     if live and (rows := current.candidates):
-        measuring = current.measurement_node is not None and (
-            current.active_node == current.measurement_node
-        )
-        named = [c for c in rows if measuring and c.reading.arm == state.measuring_arm]
+        named = [c for c in rows if c.reading.arm == state.measuring_arm]
         return (named or rows)[-1].reading.arm
     closed = [r for r in state.rounds if r.candidates]
     return closed[-1].candidates[-1].reading.arm if closed else None
@@ -307,9 +302,7 @@ def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    wiring = scan_last(
-        ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None), RunWiringRecord
-    )
+    wiring = stores.campaigns.read_run_wiring(hop)
     return None if wiring is None else _binding(stores, hop, config, run, wiring.run_limits)
 
 
@@ -350,8 +343,12 @@ def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
 _ONE_AT_A_TIME = "This backend runs one sample at a time — a single call has no latency to overlap."
 
 
-def _money_hold(affordable: int) -> str:
-    return "holds no further cell" if affordable <= 0 else f"{affordable} more affordable"
+# `SampleLookahead.affordable` worded: none left, or how many more.
+type LookaheadWord = Literal["no_further_cell", "more_affordable"]
+LOOKAHEAD_WORDS: dict[LookaheadWord, str] = {
+    "no_further_cell": "holds no further cell",
+    "more_affordable": "more affordable",
+}
 
 
 def _lookahead_explained(*, auto: bool, ceiling: int, pick_max: int, discards: int) -> str:
@@ -380,8 +377,8 @@ def _lookahead(
     depth = 1 if standing is None else effective_lookahead(standing.lookahead, ceiling)
     affordable, most = state.lookahead_affordable, state.lookahead_most
     # Both verdicts read the depth and the gauge as just corrected.
-    money_hold = (
-        _money_hold(affordable)
+    held_by_money = (
+        affordable
         if standing is not None
         and affordable is not None
         and in_flight + affordable < min(depth, allowed)
@@ -400,7 +397,7 @@ def _lookahead(
         most=most,
         scoring_now=in_flight > 0 or allowed > 0,
         pick_max=pick_max,
-        money_hold=money_hold,
+        affordable=held_by_money,
         cell_reserve_usd=state.cell_reserve_usd,
         unavailable=unavailable,
         explained=unavailable

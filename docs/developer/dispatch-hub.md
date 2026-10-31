@@ -18,7 +18,7 @@ The hub is stateless. `injection_table()` (`dispatch/injections/registry.py`) is
 
 | where it is produced | the bound that judges it |
 |---|---|
-| an LLM optimizer output (`plan`, `critique`, an L2/L3 field) | `max_length` + a `_truncate*` validator on the response model (`dispatch/schemas.py`) — the parse boundary |
+| an LLM optimizer output (`plan`, `critique`, an L2/L3 field) | a `_truncate*` validator on the response model (`dispatch/schemas.py`) — the parse boundary, never a wire `maxLength` ([`structured-output.md`](../concepts/structured-output.md) § Enforcement is provider-dependent) |
 | operator-authored framing (`task_context`) | `TaskDecomposition.check_budget` at mint — per field **and** in total, so five legal fields cannot compose an illegal framing |
 | a derived/measurement view | its own `*_RENDER_CAP` top-K, which bounds rows rather than characters |
 
@@ -40,7 +40,7 @@ Two corollaries are easy to miss: input length is a quality tax and not only a b
 - **`diagnostics`** ← a plain STATUS prefix (layer fires), the fenced `RoundDiagnostics` body (`compute_round_diagnostics`, least-actionable last so the ceiling refuses those first), and EVOLUTION — the ONE progress view on the one comparable column: the L1 stall (`domain/run_standing.py::rounds_without_advance`), each round's `overlap.advance` label, the origin panel's line. **No accuracy column**: a round's own accuracy sits on cells the next round re-picks, so it is no series.
 - **`l1_wounds`** [fenced] ← the last measured round's arms + `Cycle.runtime_failures` — L1-owned wounds, one block ([`self-healing-internals.md`](self-healing-internals.md)). Its runtime config shows only the keys L1 may set whose values are a closed vocabulary or a number, so a route or provider it cannot touch never reads as a lever.
 - **`guard_breaches`** ← `L2Memory.guard_breaches`, `L3Memory.guard_breaches` · post-parse breaches. Plain: evidence values render only where they name a closed vocabulary; an LLM-authored placeholder or plan reports its size, so no untrusted content reaches the unfenced block.
-- **`critique`** ← `bundle.digest.critique` (`format_l1_critique_for_prompt`). **A cluster spans ≥2 rows the panels marked or it is not one**: `minItems` is advisory on a `strict: False` wire, so `l1/critique.py::spanning_clusters` decides against `panels.py::clustered_sample_ids` and drops what spans fewer (`critique_cluster_dropped`). **Rows are the key, never a label**: the generator answers `targets_rows` as `[#id]` marks, and `validators/l1_behavior.py` scores a variant whose rows are unmarked, fewer than two, or spread over two clusters — a label is coined freely on that wire, an id is checkable against the prompt. `[#id]` is the one mark for a row a cluster may span.
+- **`critique`** ← `bundle.digest.critique` (`format_l1_critique_for_prompt`). **A cluster spans ≥2 rows the panels marked or it is not one**: `minItems` is advisory on a `strict: False` wire, so `l1/critique.py::spanning_clusters` decides against `panels.py::clustered_sample_ids` and drops what spans fewer. **Rows are the key, never a label**: the generator answers `targets_rows` as `[#id]` marks, and `validators/l1_behavior.py` scores a variant whose rows are unmarked, fewer than two, or spread over two clusters — a label is coined freely on that wire, an id is checkable against the prompt. `[#id]` is the one mark for a row a cluster may span.
 
 ### Strategic injects — L3_PLAN writes the plan, the operator authors the framing, persistent
 
@@ -50,11 +50,11 @@ Two corollaries are easy to miss: input length is a quality tax and not only a b
 
 ### Cross-round derived
 
-- **`axis_memory`** (DERIVED) ← `Cycle.axes().digest()` — AxisIndex per-axis effect size + sample coverage, for L1_GENERATE, L2_CONTEXT, L3_PLAN; empty until AxisIndex is initialised.
+- **`axis_memory`** (DERIVED) ← `Cycle.axes().digest()` — per-locus effect size over the closed rounds' measured arms (each arm's `OptSearchPoint.loci()` against its round fold's accuracy), and the sample index's failure readings, for L1_GENERATE, L2_CONTEXT, L3_PLAN; a semantic critique ranks prompt-field loci alone (`AxisImpact.kind`).
 - **Panels family** (`injections/panels.py`) — each one's ordering and caps live at its `@signal`; here only what each is FOR:
   - `escalation_panel` — L1 stall depth + `exploration_budget`; gates the `stall_exploration` citation.
   - `evidence_health` — per-node failure rates: an evidence-starved enricher is an upstream fault no param mutation fixes.
-  - `answer_distribution` — the collapse detector (accuracy cannot tell reasoning from one repeated label); it renders the rule, `domain/scoring.py::enumerable_truth_labels` owns it, shared with the θ gate and PoBB.
+  - `answer_distribution` — the collapse detector (accuracy cannot tell reasoning from one repeated label); it renders the rule, `domain/scoring.py::enumerable_truth_labels` owns it, shared with the election's collapse refusal.
   - `failing_samples` — a current miss as ONE row, easiest-first on the locked δ ruler; once clustered, only the rows the clusters span, so the generator reads no id whose row it cannot see. Never a tally by label: a cluster is a mechanism and a tally shows none.
   - `sample_transcripts` — the whole trace; a looping one (`dispatch/bundle.py::LOOP_NOVELTY`) shows head and tail only.
   - `inner_narratives` — each row as its PAIRED difference from the origin on the same seed.
@@ -86,7 +86,7 @@ Two corollaries are easy to miss: input length is a quality tax and not only a b
 
 - **Entry points** — `render(name, bundle)` and `fill(template, bundle, *, node)`, both stateless; the layout is resolved inside from `node`, never passed in. `InjectionBundle` is the per-call frozen state built once via `build_bundle(cycle)` over the cycle's LAST round; the bench folds a round in (`Cycle.absorb_round`) before its adapters run, so `l1_critique` reads the round it distils like every other node.
 - **No optimizer prose token names an injection** — every surviving `{{token}}` in the shipped prompts is a caller extra, and every `problem_description` body is empty, so the template carries no per-ROUND value to void the stable prefix behind it.
-- **`L1_MANDATORY` is two kinds, and the second gets forgotten**: a field L1 cannot OPERATE without (parent prompt, plan, task framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND — `answer_distribution`, without which a collapse onto one label is invisible to the run collapsing, and `measurand` + `confounds`, without which the generator optimises a column it cannot name and reads a cold ruler as ability. Missing after a merged edit fires `l1_layout_missing_mandatory`, a guard breach routing to L3.
+- **`L1_MANDATORY` is two kinds, and the second gets forgotten**: a field L1 cannot OPERATE without (parent prompt, plan, task framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND — `answer_distribution`, without which a collapse onto one label is invisible to the run collapsing, and `measurand` + `confounds`, without which the generator optimises a column it cannot name and reads a cold ruler as ability, and `failing_samples`, without which `targets_rows` binds to rows L1 never read. Missing after a merged edit fires `l1_layout_missing_mandatory`, a guard breach routing to L3.
 
 ## L1 layout — L2's structural edit surface
 
@@ -125,7 +125,7 @@ The wire model is `dispatch/schemas.py::L2ContextOutput`. Every field is optiona
 
 - `axis_targeted` — the fire's evidence anchor; deliberately **not** a steering surface: L1 reads its axes from `axis_memory`, derived from measurement.
 - `rationale` — the diagnosis, carried forward as `described`, the fire's exit-view line; an absent one is REPORTED, never replaced by a stand-in — a placeholder makes an undiagnosed fire read like a diagnosed one.
-- `l1_layout` — **a per-slot EDIT, not a replacement layout**: `coerce_l1_layout(raw, base=node_layout("l1_generate", l2))` moves the listed panels and keeps the rest, the rule `resolve_node_layout` gives L4's `layout` param; a replacement silently loses every signal L2 did not restate. HARD failures roll back to the prior.
+- `l1_layout` — **a per-slot EDIT, not a replacement layout**: `coerce_l1_layout(raw, base=node_layout("l1_generate", l2))` moves the listed panels and keeps the rest, the rule `resolve_node_layout` gives L4's `layout` param; a replacement silently loses every signal L2 did not restate. An edit addresses only the slots `NodeLayoutSpec.slots` opens — for `l1_generate` the volatile slot alone, so L2 chooses what L1 sees, never where in the frame it sits. HARD failures roll back to the prior.
 - `l1_overrides` — the keys `L2Context.steers` names, numeric only, laid key by key over the standing steer.
 
 ### How L2 steers L1

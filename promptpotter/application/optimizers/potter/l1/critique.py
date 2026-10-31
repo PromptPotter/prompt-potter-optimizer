@@ -21,7 +21,6 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 )
 from promptpotter.application.optimizers.potter.records import Ladder
 from promptpotter.domain.optimizer_state import Critique, CritiqueReadout, FailureClusterReadout
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -51,7 +50,6 @@ async def distil_critique(ctx: NodeContext) -> Critique:
     """Of the round *ctx* stands on, whether the round adapts or a later walk re-runs it; the readout a dict so persistence does not drag Pydantic into the domain serialization path."""
     bundle = build_bundle(ctx, ctx.slice(Ladder))
     filled = DispatchHub.fill(load_optimizer_prompt("l1_critique"), bundle, node="l1_critique")
-    round_num = ctx.round_num
 
     result, _prompt, _repairs = await run_optimizer_node(
         template_name="l1_critique",
@@ -66,20 +64,12 @@ async def distil_critique(ctx: NodeContext) -> Critique:
     critique = cast(CritiqueReadout, result.model_dump())
     kept, dropped = spanning_clusters(critique["failure_highlights"], clustered_sample_ids(bundle))
     if dropped:
-        emit_round_warning(
-            kind="critique_cluster_dropped",
-            message=(
-                f"round {round_num} critique: {len(dropped)} of {len(kept) + len(dropped)} "
-                f"clusters span fewer than {CLUSTER_ROWS_MIN} rows the panels marked — dropped; "
-                f"the generator targets the {len(kept)} that do"
-            ),
-            detail={
-                "round": round_num,
-                "kept": len(kept),
-                "dropped": [
-                    {"mechanism": c["mechanism"], "sample_ids": c["sample_ids"]} for c in dropped
-                ],
-            },
+        logger.info(
+            "round %d critique: %d of %d clusters span fewer than %d marked rows — dropped",
+            ctx.round_num,
+            len(dropped),
+            len(kept) + len(dropped),
+            CLUSTER_ROWS_MIN,
         )
     critique["failure_highlights"] = kept
     return Critique(readout=critique)

@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import AliasPath, BaseModel, Field
 
-from promptpotter.config.settings import settings
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import (
     WIRE_TIMEOUT_S,
     LLMClientBase,
+    ProviderKey,
     post_json,
     wire_client,
 )
@@ -86,19 +86,16 @@ class AnthropicClient(LLMClientBase):
     RATE_CAP_HEADERS = (ANTHROPIC_RPM_HEADER, ANTHROPIC_TPM_HEADER)
     _schema_warned = False
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        rate_limiter: RateLimiter | None = None,
-    ):
-        super().__init__(provider="anthropic", display_name="Anthropic", rate_limiter=rate_limiter)
-        self._api_key = api_key or settings.ANTHROPIC_API_KEY.get_secret_value()
+    def __init__(self, key: ProviderKey, rate_limiter: RateLimiter | None = None):
+        super().__init__(
+            provider="anthropic", display_name="Anthropic", key=key, rate_limiter=rate_limiter
+        )
 
     @functools.cached_property
     def _http(self) -> httpx.AsyncClient:
         return wire_client(
             "https://api.anthropic.com",
-            {"x-api-key": self._api_key, "anthropic-version": "2023-06-01"},
+            {"x-api-key": self._key.secret.get_secret_value(), "anthropic-version": "2023-06-01"},
             timeout_s=WIRE_TIMEOUT_S,
         )
 

@@ -387,7 +387,7 @@ class Cycle:
         if self.sample_index is None:
             return None
         if self._axes is None:
-            self._axes = AxisIndex(self.sample_index)
+            self._axes = AxisIndex(self.sample_index, self.session.pipeline_schema)
         self._axes.refresh(self.closed_rounds)
         return self._axes
 

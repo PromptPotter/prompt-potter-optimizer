@@ -12,5 +12,5 @@
 .box-grid > *{min-width:0;margin:0}
 @media (min-width:880px){
   .box-grid{grid-template-columns:repeat(auto-fit,minmax(min(var(--box-min),100%),1fr))}
-  .box-grid > .card-full,.box-grid > .box-full,.box-grid > .dash-lane{grid-column:1 / -1}
+  .box-grid > .card-full,.box-grid > .box-full{grid-column:1 / -1}
 }

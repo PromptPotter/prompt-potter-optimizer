@@ -31,7 +31,6 @@
                 "type": "array"
               },
               "changes_description": {
-                "maxLength": 320,
                 "title": "Changes Description",
                 "type": "string"
               }
@@ -100,7 +99,6 @@
                 "type": "object"
               },
               "changes_description": {
-                "maxLength": 320,
                 "title": "Changes Description",
                 "type": "string"
               }
@@ -120,7 +118,6 @@
                 "type": "string"
               },
               "citation": {
-                "maxLength": 160,
                 "title": "Citation",
                 "type": "string"
               }
@@ -183,13 +180,11 @@
               },
               "mechanism": {
                 "description": "The ONE root cause, as a short label naming the cognitive move that fails.",
-                "maxLength": 60,
                 "title": "Mechanism",
                 "type": "string"
               },
               "claim": {
                 "description": "WHY these rows land wrong, in your own words: the step that breaks and what was said against the truth. General over the cluster, never one row's procedure.",
-                "maxLength": 240,
                 "title": "Claim",
                 "type": "string"
               }
@@ -215,14 +210,12 @@
             "type": "array"
           },
           "priority_fix": {
-            "default": "",
-            "description": "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before the colon, named VERBATIM from the vocabulary this node's prompt states. One you invent is dropped downstream and takes the steer's axis menu with it, so the next round reads a fix naming no lever it can pull.",
-            "maxLength": 320,
+            "description": "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before the colon, named VERBATIM from the axis list this node's prompt states. One you invent is dropped downstream and takes the steer's axis menu with it, so the next round reads a fix naming no lever it can pull.",
             "title": "Priority Fix",
             "type": "string"
           },
           "suggested_axes": {
-            "description": "≤4 short axis names. Each item ≤40 chars (downstream truncates).",
+            "description": "≤4 axis names from the same list.",
             "items": {
               "type": "string"
             },
@@ -231,6 +224,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "priority_fix"
+        ],
         "title": "L1CritiqueOutput",
         "type": "object"
       }
@@ -242,8 +238,7 @@
       "l1_layout",
       "l1_overrides",
       "rationale",
-      "fork_proposal",
-      "terminate_proposal"
+      "fork_proposal"
     ],
     "json_schema": {
       "name": "l2_context",
@@ -255,8 +250,7 @@
             "properties": {
               "reason": {
                 "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
+                "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
                 "title": "Reason",
                 "type": "string"
               },
@@ -269,55 +263,45 @@
             },
             "title": "ForkProposal",
             "type": "object"
-          },
-          "TerminateProposal": {
-            "additionalProperties": false,
-            "properties": {
-              "reason": {
-                "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
-                "title": "Reason",
-                "type": "string"
-              }
-            },
-            "title": "TerminateProposal",
-            "type": "object"
           }
         },
         "additionalProperties": false,
         "properties": {
           "axis_targeted": {
             "default": "",
-            "description": "The L1 axis the failure cluster routes to — a prompt field for a semantic failure, a param for a quantitative one. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
-            "maxLength": 30,
+            "description": "Where the failure cluster's fix lands in the TARGET prompt, as `<node>.<field>` for a semantic failure or a param for a quantitative one — even where it shares a name with an l1_layout slot. Name it on every fire; it is the anchor the lever is judged against, not a label for the lever.",
             "title": "Axis Targeted",
             "type": "string"
           },
           "l1_layout": {
             "additionalProperties": false,
-            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the four properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place. Legal panels: answer_distribution, axis_memory, block_pool, budget_state, confounds, critique, demo_pool, detectable_move, diagnostics, escalation_panel, failing_samples, inner_narratives, l1_wounds, measurand, mutation_memory, pipeline_param_catalogue, plan, recombination_pool, rendered_prompt, sample_transcripts, task_context.",
+            "description": "Where in the READING node's own prompt each evidence panel is rendered. A slot is a position in that prompt, never the target-prompt field the evidence is about: the reader gets every placed panel whichever slot holds it. Keyed by SLOT — the properties are the only slots there are — each listing the panels to place there: a listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only ever in one place.",
             "properties": {
-              "persona": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "task_intent": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "thinking_style": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
               "problem_description": {
                 "items": {
+                  "enum": [
+                    "answer_distribution",
+                    "axis_memory",
+                    "block_pool",
+                    "budget_state",
+                    "confounds",
+                    "critique",
+                    "demo_pool",
+                    "detectable_move",
+                    "diagnostics",
+                    "escalation_panel",
+                    "failing_samples",
+                    "inner_narratives",
+                    "l1_wounds",
+                    "measurand",
+                    "mutation_memory",
+                    "pipeline_param_catalogue",
+                    "plan",
+                    "recombination_pool",
+                    "rendered_prompt",
+                    "sample_transcripts",
+                    "task_context"
+                  ],
                   "type": "string"
                 },
                 "type": "array"
@@ -335,7 +319,6 @@
           "rationale": {
             "default": "",
             "description": "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the named data point behind it — a sample id, a count, a yield number. Required on every fire, including one that pulls no lever; a lever with no diagnosis behind it cannot be told from a guess.",
-            "maxLength": 400,
             "title": "Rationale",
             "type": "string"
           },
@@ -343,17 +326,6 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/ForkProposal"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "terminate_proposal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/TerminateProposal"
               },
               {
                 "type": "null"
@@ -372,8 +344,7 @@
       "plan",
       "note",
       "rationale",
-      "fork_proposal",
-      "terminate_proposal"
+      "fork_proposal"
     ],
     "json_schema": {
       "name": "l3_plan",
@@ -385,8 +356,7 @@
             "properties": {
               "reason": {
                 "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
+                "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
                 "title": "Reason",
                 "type": "string"
               },
@@ -399,39 +369,22 @@
             },
             "title": "ForkProposal",
             "type": "object"
-          },
-          "TerminateProposal": {
-            "additionalProperties": false,
-            "properties": {
-              "reason": {
-                "default": "",
-                "description": "1-2 sentences naming the cause and what the operator must fix.",
-                "maxLength": 150,
-                "title": "Reason",
-                "type": "string"
-              }
-            },
-            "title": "TerminateProposal",
-            "type": "object"
           }
         },
         "additionalProperties": false,
         "properties": {
           "plan": {
             "description": "The strategy every later prompt reads until the next replan. Say what L2 and L1 should DO with the levers they hold — L2 moves which panels L1 sees and how wide it explores; L1 rewrites the target prompt's fields. A plan written in the solver's vocabulary instructs neither, and rides every downstream call regardless.",
-            "maxLength": 800,
             "title": "Plan",
             "type": "string"
           },
           "note": {
             "default": "",
-            "maxLength": 150,
             "title": "Note",
             "type": "string"
           },
           "rationale": {
             "default": "",
-            "maxLength": 125,
             "title": "Rationale",
             "type": "string"
           },
@@ -439,17 +392,6 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/ForkProposal"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "terminate_proposal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/TerminateProposal"
               },
               {
                 "type": "null"

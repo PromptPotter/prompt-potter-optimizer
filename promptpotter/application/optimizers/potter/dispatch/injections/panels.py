@@ -40,11 +40,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
-from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
-from promptpotter.domain.arms import Concluded, Cut, Measured, arm_elimination
+from promptpotter.domain.arms import Concluded, Cut, Measured
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
@@ -304,18 +303,6 @@ def _critique_is_all_prompt_field(b: InjectionBundle) -> bool:
     return all(a in prompt_axes for a in sa)
 
 
-def _filter_axis_rankings_to_prompt(value: str) -> str:
-    if not value:
-        return value
-    kept: list[str] = []
-    for entry in value.split("; "):
-        name = entry.split(" (", 1)[0].strip()
-        tail = name.rsplit(".", 1)[-1]
-        if tail == "prompt":
-            kept.append(entry)
-    return "; ".join(kept)
-
-
 @signal(
     "axis_memory",
     kind=InjectionKind.DERIVED,
@@ -325,28 +312,21 @@ def _filter_axis_rankings_to_prompt(value: str) -> str:
 def _r_axis_memory(b: InjectionBundle) -> list[Item]:
     if b.axes is None:
         return []
-    digest = b.axes.digest()
+    semantic = _critique_is_all_prompt_field(b)
+    digest = b.axes.digest(only="prompt" if semantic else None)
     if not digest:
         return []
-    semantic = _critique_is_all_prompt_field(b)
-    header = "AXIS MEMORY (cross-cycle observations from MeasurementArchive):"
+    header = "AXIS MEMORY (loci ranked over this run's measured arms; failures from the archive):"
     if semantic:
         header = (
-            "AXIS MEMORY (cross-cycle observations from MeasurementArchive — "
-            "CRITIQUE IS SEMANTIC: param-axis rankings hidden, target a prompt-field axis):"
+            "AXIS MEMORY (loci ranked over this run's measured arms — "
+            "CRITIQUE IS SEMANTIC: config-axis rankings hidden, target a prompt-field axis):"
         )
     lines = [header]
     for key in _AXIS_MEMORY_LABEL_ORDER:
         val = digest.get(key)
-        if val is None:
+        if val is None or (semantic and key == "top_values"):
             continue
-        if semantic:
-            if key == "top_values":
-                continue
-            if key == "axis_rankings":
-                val = _filter_axis_rankings_to_prompt(val)
-                if not val:
-                    continue
         label = key.replace("_", " ")
         lines.append(f"  {label}: {val}")
     return [Item("\n".join(lines) if len(lines) > 1 else "")]
@@ -995,9 +975,6 @@ def _candidate_fate(cand: Concluded, fold: ScoreSummary | None, unit: MeasuredUn
     if kind == "broken":
         return f"{cut} — BROKEN: its measurements kept failing; charged to this candidate"
     if kind == "eliminated":
-        elimination = arm_elimination(cand)
-        if elimination is not None and elimination.context.get("gate") == EliminationGate.COLLAPSED:
-            return f"{cut} — answered ONE label to every {unit}; a VERDICT on this idea, not a stopped measurement"
         return f"{cut} — P(best) fell below ε; measurement stopped, NOT a verdict"
     if kind == "skipped":
         return "skipped mid-run by the operator"

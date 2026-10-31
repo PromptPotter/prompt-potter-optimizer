@@ -93,7 +93,6 @@ class LadderAsk:
 
 
 def bank_round(ladder: Ladder, advance: RoundAdvance) -> Ladder:
-    """Only an ADVANCE clears the stall: a crown is a point estimate, not separated from C0."""
     match ROUND_ADVANCE_INFO[advance].stall:
         case StallEffect.RESETS:
             return ladder.model_copy(update={"l1_stall_count": 0})
@@ -169,7 +168,6 @@ def observe(
     advance: RoundAdvance,
     l1_patience: int,
     escalation_ladder: EscalationLadder,
-    axes_with_positive_yield: int | None = None,
     l1_mandatory_breach: bool = False,
     l1_zero_candidates: bool = False,
     evidence_starved: bool = False,
@@ -179,7 +177,6 @@ def observe(
         l1_stall_count=banked.l1_stall_count,
         l1_patience=l1_patience,
         escalation_ladder=escalation_ladder,
-        axes_with_positive_yield=axes_with_positive_yield,
         l1_mandatory_breach=l1_mandatory_breach,
         l1_zero_candidates=l1_zero_candidates,
         evidence_starved=evidence_starved,

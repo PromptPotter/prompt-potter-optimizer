@@ -19,8 +19,14 @@ from promptpotter.application.runner.campaign_result import (
     line_run,
     read_line_spend,
 )
-from promptpotter.application.scoring.paired import MemberRows, as_family
-from promptpotter.domain.bench import BENCH_HEADLINE, BenchColumn, BenchScore
+from promptpotter.application.scoring.paired import (
+    MemberRows,
+    grade_measurands,
+    in_family,
+    read_arms,
+)
+from promptpotter.domain.arm_reading import ArmAbility, ElectionColumn
+from promptpotter.domain.bench import BENCH_HEADLINE, COLUMN_GRADE, BenchColumn, BenchScore
 from promptpotter.domain.campaign import (
     BenchSet,
     Campaign,
@@ -35,13 +41,20 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.campaign_config import over_the_default
 from promptpotter.domain.cycle_index import RunStatus
-from promptpotter.domain.paired_reading import PairedReading, ReadingState
+from promptpotter.domain.paired_reading import (
+    ROUND_LIFT_SPEC,
+    Measurand,
+    MeasuredLift,
+    PairedReading,
+    ReadingState,
+)
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError, NotFoundError
+from promptpotter.shared.statistics import bh_adjusted
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import CampaignConfig
@@ -277,6 +290,10 @@ class HeadToHeadRow(StrictModel):
     spend_metered: MeteredSpend | None
     human_intervened: bool
     status: RunStatus
+    election: ElectionColumn | None = Field(
+        description="The column the selection's electing round chose it on; null before a round "
+        "selects. Quote an `ability` pick on θ unless its caveat is served."
+    )
     bench: BenchScore
     bench_set: BenchSet | None
     spend: SpendRollup | None
@@ -288,11 +305,46 @@ class HeadToHeadRow(StrictModel):
     worked_ratio: float | None
 
 
-class SelectionPair(StrictModel):
-    """Two campaigns' selections paired on the bench rows both scored."""
+class ContrastArm(StrictModel):
+    """One arm of the matrix: a treatment, and the campaigns that ran it — its replicates."""
 
-    reading: PairedReading
+    optimizer: str
+    treatment_digest: str
+    replicates: list[str] = Field(
+        description="The campaigns running this treatment whose selection the bench graded, "
+        "oldest first: what each row's arm mean is taken over."
+    )
+
+
+class ArmContrast(StrictModel):
+    """Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline
+    column: per row, b's replicate mean less a's, and the row is the cluster."""
+
+    a: ContrastArm
+    b: ContrastArm
     guard: PairGuard
+    differences: dict[str, float] = Field(
+        description="The paired per-row differences, by `Sample.key`: every figure below is read "
+        "off them."
+    )
+    lift: MeasuredLift | None = Field(
+        description="Their mean, its Student-t interval and test over rows: an SE clustered by "
+        "row, so one row's replicates never count as rows. `family.p_adjusted` is Holm's across "
+        "the matrix. Null under two rows."
+    )
+    q_value: float | None = Field(
+        description="Benjamini-Hochberg's q over `lift.family`: the false-discovery reading, "
+        "served beside Holm's and never gating. Null where the contrast is in no family."
+    )
+    se_clustered: float | None
+    se_naive: float | None = Field(
+        description="The same mean's SE were every replicate pairing on every row independent: "
+        "what clustering corrects. It equals `se_clustered` at one replicate a side."
+    )
+    design_effect: float | None = Field(
+        description="(`se_clustered` / `se_naive`)²: how far a replicate-blind reading "
+        "overstates the evidence."
+    )
 
 
 class HeadToHead(StrictModel):
@@ -308,7 +360,10 @@ class HeadToHead(StrictModel):
     headline: BenchColumn
     verdict: bool | None
     verdict_absent: ReadingState | None
-    pairs: list[SelectionPair]
+    contrasts: list[ArmContrast] = Field(
+        description="The arm-by-arm matrix: every two treatments whose selections the bench "
+        "graded, oldest arm as `a`."
+    )
     ratio_reference: str | None
     verdict_line: str
     notes: list[str]
@@ -432,7 +487,7 @@ def head_to_head(
         headline=BENCH_HEADLINE,
         verdict=verdict,
         verdict_absent=verdict_absent,
-        pairs=_pairs(graded, record),
+        contrasts=_contrasts(graded, record, scorer),
         ratio_reference=None if base is None else base.campaign_id,
         verdict_line=_verdict_line(guard, verdict_absent, len(graded), ungraded_arms),
         notes=_notes(
@@ -442,6 +497,11 @@ def head_to_head(
             [g.row.campaign_id for g in read if any(_overlapped(g, o) for o in read if o is not g)],
             uncontrolled=[
                 g.row.campaign_id for g in read if g.row.guard.state is GuardState.UNCONTROLLED
+            ],
+            elected_apart=[
+                g.row.campaign_id
+                for g in graded
+                if g.row.election is not None and g.row.election.reads_on != BENCH_HEADLINE
             ],
         ),
     )
@@ -526,14 +586,20 @@ def _read(
     selected = select_optimizer(config.optimization)
     optimizer_models = sorted({selected.model(node) for node in selected.llm_nodes})
     passes = line_passes(stores, campaign.campaign_id)
-    line = bench_line(stores, campaign, hop, config, run=line_run(stores, hop))
+    run = line_run(stores, hop)
+    line = bench_line(stores, campaign, hop, config, run=run)
     bench = read_bench(stores, passes, scorer, line=line)
     origin_pass, selected_pass = (
         (None, None) if passes is None else bench_members(stores, passes, scorer, line=line)
     )
 
     drawn = stores.campaigns.read_bank_partition(hop)
-    origin_round = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
+    rounds = stores.campaigns.standing_rounds(hop, moment=None).rounds
+    origin_round = rounds.get(0)
+    pick = run.selection
+    electing = None if pick is None else rounds.get(pick.round)
+    election = None if electing is None else electing.close.election
+    fit = None if electing is None or pick is None else electing.close.fit(pick.key)
     bench_set = (
         None
         if drawn is None
@@ -591,6 +657,12 @@ def _read(
             else MeteredSpend.of(spend, ceiling_meter(campaign.declaration.purpose)),
             human_intervened=reading.human_intervened,
             status=_status(stores, campaign),
+            election=None
+            if election is None
+            else ElectionColumn.of(
+                election.elects_on,
+                None if fit is None else ArmAbility.of(fit.theta, fit.theta_se, fit.theta_caveat),
+            ),
             bench=bench,
             bench_set=bench_set,
             spend=spend,
@@ -610,34 +682,66 @@ def _read(
     )
 
 
-def _pairs(graded: list[_Graded], record: HeadToHeadRecord | None) -> list[SelectionPair]:
-    read: list[tuple[PairedReading, PairGuard]] = []
-    for i, a in enumerate(graded):
-        for b in graded[i + 1 :]:
-            if a.selected is None or b.selected is None:
-                continue
-            if a.row.treatment_digest == b.row.treatment_digest:
-                continue
-            read.append((_across(a.selected, b.selected, a.sample_keys), _guard([a, b], record)))
-    # decisions.md § 0009: a controlled and an uncontrolled reading never share a family; one that differs is in none.
-    families = {
-        state: iter(
-            as_family(
-                [pair for pair, guard in read if guard.state is state],
-                record.head_to_head_id
-                if record is not None and state is GuardState.CONTROLLED
-                else "bench",
-            )
-        )
-        for state in (GuardState.CONTROLLED, GuardState.UNCONTROLLED)
-    }
-    return [
-        SelectionPair(
-            reading=pair if guard.state is GuardState.DIFFERS else next(families[guard.state]),
-            guard=guard,
-        )
-        for pair, guard in read
+def _contrasts(
+    graded: list[_Graded], record: HeadToHeadRecord | None, scorer: Scorer
+) -> list[ArmContrast]:
+    arms: dict[str, list[_Graded]] = {}
+    for g in graded:
+        if g.selected is not None:
+            arms.setdefault(g.row.treatment_digest, []).append(g)
+    headline = next(m for m in grade_measurands(scorer.id) if m.key == COLUMN_GRADE[BENCH_HEADLINE])
+    groups = list(arms.values())
+    read = [
+        _contrast(a, b, headline, _guard([*a, *b], record))
+        for i, a in enumerate(groups)
+        for b in groups[i + 1 :]
     ]
+    # decisions.md § 0009: a controlled and an uncontrolled reading never share a family; one that differs is in none.
+    for state in (GuardState.CONTROLLED, GuardState.UNCONTROLLED):
+        at = [i for i, c in enumerate(read) if c.guard.state is state]
+        lifts = in_family(
+            [read[i].lift for i in at],
+            record.head_to_head_id
+            if record is not None and state is GuardState.CONTROLLED
+            else "bench",
+        )
+        q_values = iter(bh_adjusted([lift.estimate.p_value for lift in lifts if lift is not None]))
+        for i, lift in zip(at, lifts, strict=True):
+            read[i] = read[i].model_copy(
+                update={"lift": lift, "q_value": None if lift is None else next(q_values)}
+            )
+    return read
+
+
+def _contrast(
+    a: list[_Graded], b: list[_Graded], headline: Measurand, guard: PairGuard
+) -> ArmContrast:
+    def arm(group: list[_Graded]) -> ContrastArm:
+        return ContrastArm(
+            optimizer=group[0].row.optimizer,
+            treatment_digest=group[0].row.treatment_digest,
+            replicates=[g.row.campaign_id for g in group],
+        )
+
+    reading = read_arms(
+        [g.selected for g in a if g.selected is not None],
+        [g.selected for g in b if g.selected is not None],
+        cells=a[0].sample_keys,
+        measurand=headline,
+        spec=ROUND_LIFT_SPEC,
+    )
+    clustered, naive = reading.se_clustered, reading.se_naive
+    return ArmContrast(
+        a=arm(a),
+        b=arm(b),
+        guard=guard,
+        differences=reading.differences,
+        lift=reading.lift,
+        q_value=None,
+        se_clustered=clustered,
+        se_naive=naive,
+        design_effect=None if clustered is None or naive is None else (clustered / naive) ** 2,
+    )
 
 
 def _verdict_line(
@@ -660,6 +764,7 @@ def _notes(
     concurrent: list[str],
     *,
     uncontrolled: list[str],
+    elected_apart: list[str],
 ) -> list[str]:
     notes = []
     if guard.head_to_head_id is not None:
@@ -673,11 +778,17 @@ def _notes(
             "and take an operator's steer."
         )
     if verdict is True:
-        notes.append("Every pair below is read on the same rows.")
+        notes.append("Every contrast below is read on the same rows.")
     if verdict is False:
         notes.append(
-            "A row off the declared or most shared bench set is marked, and a pair across two "
+            "A row off the declared or most shared bench set is marked, and a contrast across two "
             "is read and labelled, outside the correction."
+        )
+    if elected_apart:
+        notes.append(
+            f"{', '.join(elected_apart)} elected its pick on another column than the bench's "
+            f"{BENCH_HEADLINE}: quote each election on its `election.reads_on`, every contrast "
+            f"on {BENCH_HEADLINE}."
         )
     notes += [f"`{d.value}`: {GUARD_DIFFERENCE_INFO[d]}" for d in guard.differs_on]
     if n_outside > 0:

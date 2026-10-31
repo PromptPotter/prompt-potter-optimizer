@@ -8,7 +8,7 @@
 
 ## Top-level modules
 
-- **Renaming a `CampaignConfig` / `Campaign` field is a data migration** — owned by [`domain/CLAUDE.md`](../domain/CLAUDE.md) § Tolerance; it covers `campaign.json::declaration` and `dataset.yaml` `campaign`.
+- **Renaming a `CampaignConfig` / `Campaign` field is a wipe** — owned by [`domain/CLAUDE.md`](../domain/CLAUDE.md) § Tolerance; it covers `campaign.json::declaration` and `dataset.yaml` `campaign`.
 - **A check-in's config is `pipeline_resolve.py::draft_config`'s**, and an optimizer resolves through `optimizer_manifest.py::select_optimizer` — take them, never derive beside them.
 - **`embedded_run.py` holds no machine slot, but a ceiling share and a reservation** (`jobs/launcher/admission.py::embedded_share`) — a declared exemption from `request_job`.
 - **`run_observers.py::build_run_observers` binds every projection for every caller; none is optional**, and an unbound paid call raises (`infrastructure/llm/telemetry.py::bound_ledger`).

@@ -4,7 +4,8 @@ import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import { fmtAgo } from "@/lib/format";
-import { STATUS_MARK, statusTone } from "@/lib/derivations";
+import { STATUS_MARK_INFO } from "@/lib/api/types.generated";
+import { runWord, statusTone } from "@/lib/derivations";
 import { readyData } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import type { HierarchyCourse, MachineSlot } from "@/lib/api";
@@ -61,8 +62,8 @@ export function JobsDock() {
           <button
             type="button"
             className={cx("jobs-dock-btn", statusTone(c.state.status))}
-            aria-label={`1 active job — ${label} (${c.state.status.label}). Go to it.`}
-            title={`${c.state.status.label}: ${label}`}
+            aria-label={`1 active job — ${label} (${runWord(c.state.status)}). Go to it.`}
+            title={`${runWord(c.state.status)}: ${label}`}
             onClick={() => pick(c)}
           >
             {POTTER_GLYPH}
@@ -122,7 +123,7 @@ export function JobsDock() {
                 <span className="jobs-dock-row">
                   <span className={cx("phase-chip", statusTone(r.state.status))}>
                     <span className="phase-dot" aria-hidden="true" />
-                    {r.state.status.label}
+                    {runWord(r.state.status)}
                   </span>
                   <span className="jobs-dock-item-label">{wordsOf(r)[0]}</span>
                   {wordsOf(r)[1] !== null && (
@@ -140,7 +141,7 @@ export function JobsDock() {
                 }}
               >
                 <span className="jobs-dock-row">
-                  <span className={cx("phase-chip", `tone-${STATUS_MARK[passMark(s)].tone}`)}>
+                  <span className={cx("phase-chip", `tone-${STATUS_MARK_INFO[passMark(s)].tone}`)}>
                     <span className="phase-dot" aria-hidden="true" />
                     {passMark(s)}
                   </span>

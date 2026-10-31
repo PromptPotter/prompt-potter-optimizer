@@ -34,7 +34,7 @@ const OPT_EDGES = [
   edge("l3_plan", "l2_context", "directive"),
 ];
 
-const OPTS = { cell: 132, rowH: 72, padTop: 16, padBottom: 38 };
+const OPTS = { cell: 132, rowH: 72, padTop: 16, padBottom: 38, maxCols: null };
 
 describe("cycleOf", () => {
   it("names the repeating steps in flow order, off the loop edge", () => {
@@ -123,5 +123,15 @@ describe("layoutGrid", () => {
     expect(odd.cols).toBe(3);
     expect(odd.rows).toBe(2);
     expect([...odd.pos.values()].filter((p) => p.row === 1)).toHaveLength(2);
+  });
+
+  it("folds into more rows when the box holds fewer columns, the fold still vertical", () => {
+    const narrow = layoutGrid(OPT_NODES, cycleOf(OPT_NODES, OPT_EDGES), { ...OPTS, maxCols: 2 });
+    expect(narrow.cols).toBe(2);
+    expect(narrow.rows).toBe(3);
+    expect(narrow.width).toBe(2 * OPTS.cell);
+    const p = (id: string) => narrow.pos.get(id)!;
+    expect(p("l1_generate").col).toBe(p("l1_score").col);
+    expect(p("l1_score").row).toBe(p("l1_generate").row + 1);
   });
 });

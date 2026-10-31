@@ -44,7 +44,7 @@ export function SteerForkPanel({
   const dash = useDashboardAt(path);
   const root = pathRoot(path);
   const rootCourse = useEntry(encodeCyclePath([root]));
-  const isLive = phaseWalks(rootCourse?.level === "course" ? rootCourse.state.run_phase : undefined);
+  const isLive = phaseWalks(rootCourse?.level === "course" ? rootCourse.state.status.run_phase : undefined);
   const { unfiled, doc } = useRound(path, candidate.round);
   const { me } = useAuth();
   const seed = unfiled

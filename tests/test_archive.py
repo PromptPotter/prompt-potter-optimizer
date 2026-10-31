@@ -12,11 +12,11 @@ import contextvars
 import json
 import threading
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
 import pytest
 from factories import (
     LLM_ONLY,
@@ -66,8 +66,6 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_course,
     subtree_version,
 )
-from promptpotter.application.initialization import loop_start
-from promptpotter.application.maintenance import restamp
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
@@ -79,11 +77,9 @@ from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.origin import (
-    CampaignOrigin,
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
@@ -94,7 +90,6 @@ from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
-from promptpotter.domain.campaign import Arm, Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -117,7 +112,7 @@ from promptpotter.domain.hierarchy import (
 )
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
@@ -160,7 +155,6 @@ from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import probe_lock, rewrite_lines, take_lock
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
-    ArchiveFile,
     MeasurementArchive,
     ReplayFeed,
     config_key,
@@ -168,7 +162,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
-from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
+from promptpotter.shared.errors import ConflictError, LedgerUnreadableError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -568,66 +562,6 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
         "a holdout read under the bank before a re-cut was not counted on the re-cut"
     )
 
-    # A re-stamp walks every file the archive writes.
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(built_stores.projects_root.parent))
-    # A re-stamp prunes a record against the union arm it IS: read as the first arm, a walked
-    # arm lost its `sp_hash`, and the rewritten ledger refused its cycle to every reader.
-    kept: list[ArmRecord] = []
-
-    def _retired_key(lines: list[str]) -> tuple[list[str], None]:
-        records = [json.loads(line) for line in lines]
-        arm = next(rec for rec in records if rec["record_type"] == "arm")
-        arm["state"] |= {
-            "state": "measuring",
-            "sp_hash": "h",
-            "resolved_params": {},
-            "expected_samples": 2,
-        }
-        kept.append(ArmRecord.model_validate(arm))
-        arm["retired_key"] = 1
-        return [json.dumps(rec) + "\n" for rec in records], None
-
-    arm_ledger = campaigns.ledger(arm_root)
-    rewrite_lines(arm_ledger, _retired_key)
-    assert restamp.check_readable()["ledgers_refused"] == 1, (
-        "guard: a retired key refuses its cycle"
-    )
-    restamp.compact_cycle_ledgers(apply=True)
-    assert restamp.check_readable()["ledgers_refused"] == 0, "the re-stamp left a refused cycle"
-    assert [r for _, r in CycleEventLog(arm_ledger).iter() if isinstance(r, ArmRecord)][
-        :1
-    ] == kept, "a re-stamp deleted a key the reader of that record still needs"
-    assert restamp.check_readable()["archive_refused"] == 0, (
-        "a file this journey's writers left is one no re-stamp walker reads"
-    )
-    # A row its model refuses after pruning cannot be keyed: it goes with the configuration and
-    # index row it alone described.
-    refused: Configs = [("llm_only", {"model": "R"})]
-    filed(archive, [archive_row("q_refused", predicted="p")], filed_under(refused, "refused"))
-    refused_key = config_key(refused)
-    refused_cells = archive.cell_path(refused_key)
-    refused_cells.write_text(
-        "".join(
-            json.dumps({k: v for k, v in json.loads(line).items() if k != "dataset_hash"}) + "\n"
-            for line in archive.detail_lines(refused_key)
-        ),
-        encoding="utf-8",
-    )
-    # A file no archive kind names is removed, its emptied folders with it.
-    unnamed = archive.base_dir / MEASUREMENTS_DIR / "unnamed" / "nested" / "rows.jsonl"
-    unnamed.parent.mkdir(parents=True)
-    unnamed.write_text(fold_row("x").model_dump_json() + "\n", encoding="utf-8")
-    assert restamp.check_readable()["archive_refused"] == 2, "guard: each unkeyable file refuses"
-    paid = {ref: archive.answer(ref) for ref in refs}
-    restamp.restamp_measurement_archives(apply=True)
-    assert not unnamed.parent.parent.exists(), "a file no archive kind names survived the re-stamp"
-    assert (
-        not archive.path(ArchiveFile.CONFIG, refused_key).exists() and not refused_cells.exists()
-    ), "an unkeyable answer, or the configuration it alone described, survived the re-stamp"
-    assert refused_key not in {e.config_key for e in archive.list_all()}
-    assert restamp.check_readable()["archive_refused"] == 0, "the re-stamp left a refused file"
-    assert {ref: archive.answer(ref) for ref in refs} == paid, "a re-stamp lost a paid answer"
-
 
 # 3. Replayed decisions, and forks
 
@@ -736,7 +670,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             NodeContext(racing, optimizers.NODE_MEMBERS.get("pobb")),
             Panel(cells=ten, order=ten, block_size=len(ten)),
             lambda _sp, _sample, _prior_id: None,  # type: ignore[arg-type, return-value]
-            measured_unit="sample",
         )
 
     walked = sheet(
@@ -867,41 +800,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
 
     assert served() == [(i, True, True) for i in ids] and selected() == ["C2.1"] * 3, "guard"
-    # A `--from` retracts rounds only once preflight admits the launch: here an arm whose cap a
-    # cell of its models, as billed, cannot fund one round of.
-    priced = samples(10, "g")
-    refused = replace(
-        loop_session(stores, pipeline_schema([]), priced, hop=hop),
-        pipeline_params=dict(LLM_ONLY),
-        purpose=Compare(arm=Arm(head_to_head_id="h2h", arm_key="arm")),
-    )
-    billed = {"step_tokens": {"llm_only": {"input": 1, "output": 1, "cost_usd": 1.0}}}
-    filed(
-        stores.archive,
-        [archive_row(s.query, truth="g", pipeline_data=billed) for s in priced],
-        filed_under(LLM_ONLY, refused.bank.dataset_hash),
-    )
-    capped = CampaignConfig.model_validate(
-        {"optimization": {"degradation_threshold": 0.0, "budget": {"usd": 0.01}}}
-    )
-    unread = ReadArm(ArmKey("origin"), arm_state("origin"), sheet([]))
-    with pytest.raises(PayloadInvalidError):
-        asyncio.run(
-            loop_start.init_optimization_loop(
-                CampaignOrigin(unread, TaskDecomposition()),
-                priced,
-                capped,
-                cb=RunCallbacks(CycleEventLog(stores.projects_root / "refused.jsonl")),
-                no_divergence_check=True,
-                fork_on_divergence=False,
-                resume_from_round_override=1,
-                session=refused,
-            )
-        )
-    assert refused.state.resumed_from_round == 2, "a refused launch reported another next round"
-    assert list(stores.campaigns.standing_rounds(hop, moment=None).rounds) == [0, 1, 2], (
-        "a refused launch's `--from` retracted rounds on the ledger"
-    )
     stores.campaigns.rewind_to_round(hop, 1)
     assert selected() == ["C1.1"] * 3, (
         "the ledger, the subtree and the index disagree on the selection"
@@ -1192,17 +1090,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     [line_course] = [c for c in listed.children if c.address == listed.facts.line]
     assert line_course.facts.standing is not None, "guard"
-    held_label = READING_STATE_INFO[ReadingState.HELD_ELSEWHERE].label
-    for course in listed.children:
-        graded = [s.value for s in course.stats if s.key == "bench"]
-        assert (graded == [held_label]) is (course is not line_course), (
-            "the bench graded a course that does not hold the line, or the line's read held elsewhere"
-        )
-    assert listed.stats[1:] == line_course.stats[1:], "the campaign's bench is not its line's"
-    [lift] = [s for s in line_course.stats if s.key == "lift"]
-    assert ("θ" in (lift.sub or "")) is (line_course.facts.elects_on == "ability"), (
-        "a lift column read beside a round won on θ does not say so, or says it where none was"
+    assert all(c.facts.bench is None for c in listed.children if c is not line_course), (
+        "the bench graded a course that does not hold the line"
     )
+    assert listed.facts.line_course == line_course.facts, "the campaign's bench is not its line's"
     # The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
     validator = subtree_version(stores, listed.address)
     filed(
@@ -1594,7 +1485,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # hole: its fingerprints decide EQUIVALENT against SUPERSEDE.
     repair_bank = samples(4, "g")
     repair_origin, holed = prompted(instruction="origin"), ArmKey(prompted(instruction="c1").id)
-    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
 
     async def _answered(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
         return MeasuredCell(
@@ -1681,6 +1571,18 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         assert readout is not None, "guard: round 1 banked a critique"
         return readout["priority_fix"]
 
+    offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
+    with pytest.raises(ConflictError):
+        repaired("cycle_unrederived", consumed=False)
+    cycles = Path(
+        stores.campaigns.cycle_dir(
+            CycleHop(campaign_id="cycle_unrederived__20260101-000000", cycle_id="cycle_unrederived")
+        )
+    ).parent
+    assert [d.name for d in cycles.iterdir()] == ["cycle_unrederived"], (
+        "a round its member could not re-derive was graded on a branch holding the stale state"
+    )
+    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
     ran, unread_branch = repaired("cycle_unread", consumed=False)
     assert fork_direction(unread_branch) is ForkDirection.EQUIVALENT, (
         "a correction no later round read forked the line off its parent"

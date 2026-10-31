@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -50,7 +51,12 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.draft_campaign import split_overlay
 from promptpotter.application.datasets.loaders import definition_source
-from promptpotter.application.embedded_run import grade_bench, open_session, run_campaign
+from promptpotter.application.embedded_run import (
+    grade_bench,
+    open_session,
+    run_campaign,
+    run_head_to_head,
+)
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
@@ -66,18 +72,19 @@ from promptpotter.config.paths import default_projects_root, install_datasets_ro
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
-from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
+from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
 )
-from promptpotter.domain.command_kinds import SkipSearchpointPayload
+from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest, SkipSearchpointPayload
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import MAX_AUTO_REBASES, CycleSeed
+from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -103,7 +110,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.paired_reading import PairedReading
+    from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.store.stores import Stores
 
 DATASET = "justlogic/d234"
@@ -118,6 +125,8 @@ CROSSED_HOSTS = ("l1_generate", "l2_context")
 CROSSED_OFFSPRING = 2
 # L2 fires every round, a leg's premise pinned rather than left to the fake replies.
 EVERY_L2 = {"l1_patience": 0}
+# The two stalls `offline_world.py::FakeBackend.SKILL` scripts for potter fire L2 at this pacing.
+SCRIPTED_L2 = {"l1_patience": 2}
 # Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
@@ -170,6 +179,16 @@ _ROW_MARK = re.compile(r"\[#(\d+)\]")
 
 def _marks(text: str) -> list[int]:
     return list(dict.fromkeys(int(m) for m in _ROW_MARK.findall(text)))
+
+
+_AXIS_MENU = re.compile(r"EXACTLY one of: (.+)")
+_TASK_CONTEXT = "TASK CONTEXT:\n"
+
+
+def _axis_menu(prompt: str) -> list[str]:
+    menu = _AXIS_MENU.search(prompt)
+    assert menu is not None, "offline run: the critique prompt names no axis list"
+    return menu.group(1).split(". ", 1)[0].removesuffix(".").split(", ")
 
 
 def _variant(tag: str, rng: random.Random) -> str:
@@ -348,16 +367,21 @@ class ByCallIdentity:
                 }
                 for k in range(0, min(len(ids), 4), 2)
             ]
-            obj["priority_fix"] = f"instruction: track every negation explicitly (critique {call})"
-            obj["suggested_axes"] = ["instruction", "thinking_style"]
+            # Read off the prompt's axis list, as a model naming its axis verbatim would.
+            axes = _axis_menu(prompt)
+            lead = next((a for a in axes if a.endswith(".instruction")), axes[0])
+            obj["priority_fix"] = f"{lead}: track every negation explicitly (critique {call})"
+            obj["suggested_axes"] = axes[:2]
         elif node.startswith("L2Context"):
             obj["axis_targeted"] = "instruction"
             obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
             _recombine(obj, filler.resolve(schema)["properties"], filler, call)
             obj.pop("fork_proposal", None)
             if self.rebasing:
-                obj["fork_proposal"] = {"reason": f"L2 fire {call}: rewind past the stall."}
-            obj.pop("terminate_proposal", None)
+                obj["fork_proposal"] = {
+                    "reason": f"L2 fire {call}: the stall is the output schema's names.",
+                    "unlock_schema_field_rename": True,
+                }
         elif node.startswith("L3Plan"):
             obj["plan"] = (
                 f"Replan {call}: L1 rewrites the instruction to track negation explicitly."
@@ -365,7 +389,6 @@ class ByCallIdentity:
             obj["note"] = f"l3 note {call}"
             obj["rationale"] = f"L2 stalled twice (replan {call})"
             obj.pop("fork_proposal", None)
-            obj.pop("terminate_proposal", None)
         return obj
 
     def _variant_edit(
@@ -375,10 +398,13 @@ class ByCallIdentity:
         v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
         grounding = filler.resolve(item["properties"]["evidence_grounding"])
         cited = filler.resolve(grounding["properties"]["field"])["enum"]
-        # A citation must quote the prompt; the offset is a function of the call, not the text.
-        start = draw("cite", generation, i) % max(len(prompt) - 60, 1)
+        # A citation quotes the panel it names: the framing, at an offset that is the call's, not the text's.
+        assert "task_context" in cited and _TASK_CONTEXT in prompt, (
+            "offline run: no framing to cite"
+        )
+        start = prompt.index(_TASK_CONTEXT) + len(_TASK_CONTEXT) + draw("cite", generation, i) % 20
         v["evidence_grounding"] = {
-            "field": cited[i % len(cited)],
+            "field": "task_context",
             "citation": prompt[start : start + 40],
         }
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
@@ -460,7 +486,7 @@ def campaign_config(
     if optimizer != templated:
         roster = resolve_optimizer(optimizer, {}, gate="off").manifest.nodes
         opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
-    knobs = dict(knobs or {})
+    knobs = ({"escalation": SCRIPTED_L2} if optimizer == "potter" else {}) | (knobs or {})
     # The draw's host and the LLM host *crossover* names at once, drawing on one measured pool; an
     # L2 host fires every round, so each round past the first can add its children.
     if crossover:
@@ -554,6 +580,26 @@ async def rebound_session(stores: Stores, hop: CycleHop) -> Session:
     return session.bound(hop, purpose=campaign.declaration.purpose)
 
 
+@dataclass(frozen=True)
+class Harness:
+    """Every network edge one act's campaigns reach, answered in-process."""
+
+    llm: ByCallIdentity
+    backend: FakeBackend
+    router: Router
+
+    @classmethod
+    def installed(
+        cls, out: Path, templates: dict[str, str], samples: list[Sample], *, crossing: bool
+    ) -> Harness:
+        (out / "requests").mkdir(parents=True)
+        llm = ByCallIdentity(out / "requests", templates, crossing=crossing)
+        backend = FakeBackend(samples)
+        router = Router(FakeLLM(llm), backend)
+        install_network(router)
+        return cls(llm, backend, router)
+
+
 async def run_one(
     optimizer: str,
     workspace: Path,
@@ -561,7 +607,6 @@ async def run_one(
     rounds: int,
     rows: int,
     out: Path | None = None,
-    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
     framing: bool = True,
     pause_after: int | None = None,
     bench_trigger: BenchTrigger = "at_end",
@@ -570,16 +615,13 @@ async def run_one(
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it."""
     out = workspace if out is None else out
-    (out / "requests").mkdir(parents=True)
-    arm = purpose.arm if isinstance(purpose, Compare) else None
     config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, crossover=crossover)
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
-    llm = ByCallIdentity(out / "requests", text_templates(config), crossing=crossover is not None)
-    backend = FakeBackend(samples)
-    router = Router(FakeLLM(llm), backend)
-    install_network(router)
+    harness = Harness.installed(
+        out, text_templates(config), samples, crossing=crossover is not None
+    )
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
@@ -591,7 +633,6 @@ async def run_one(
         budget=Budget(),
         step_rounds=pause_after,
         mode=RunMode(),
-        purpose=purpose,
     )
     await session.backend_client.aclose()
     if pause_after is not None:
@@ -612,47 +653,72 @@ async def run_one(
                 forked_at_init(stores, paused, session.hop)
                 await forked_twice(stores, session.hop, rounds)
         await session.backend_client.aclose()
+    cycle = await banked(
+        stores, session, result, harness, out, name=optimizer, bench_trigger=bench_trigger
+    )
+    return cycle, session.campaign_id
+
+
+async def banked(
+    stores: Stores,
+    session: Session,
+    result: CycleResult,
+    harness: Harness,
+    out: Path,
+    *,
+    name: str,
+    bench_trigger: BenchTrigger,
+) -> Path:
+    """Checks one campaign's run, then writes what it decided to *out*'s `decisions.json`."""
     if stop_reason_outcome(result.stop_reason).exit_code:
-        raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}")
+        raise SystemExit(f"offline run: {name} ended {result.stop_reason}")
     beside = sorted(
         f"{node.name}.{key}"
         for node in session.pipeline_schema.declared_nodes
         for key in node.param_keys
         if key not in node.prompt_fields
     )
-    if arm is not None and beside:
-        raise SystemExit(f"offline run: arm {arm.arm_key} searched {beside} beside its prompt")
+    arm = isinstance(session.purpose, Compare)
+    if arm and beside:
+        raise SystemExit(f"offline run: arm {name} searched {beside} beside its prompt")
     stores.campaigns.update_campaign(session.campaign_id, label=LABEL)
     cycle = Path(stores.campaigns.cycle_dir(session.hop))
     dashboard = json.loads((cycle / "dashboard.json").read_text(encoding="utf-8"))
     spend = SpendRollup.model_validate(dashboard["spend"])
     if billed := spend.total_used_usd:
         raise SystemExit(f"offline run billed ${billed}: a fake answered with a cost")
+    backend = harness.backend
     bench, searched_cells = result.bench, backend.cells
     # An arm is minted `at_end` whatever its config says, so only an ordinary campaign waits.
-    if bench_trigger == "manual" and arm is None:
+    if bench_trigger == "manual" and not arm:
         sent = spend.by_kind["bench"]
         if sent.incurred_usd or sent.input_tokens or sent.output_tokens:
-            raise SystemExit(f"offline run: a manual launch of {optimizer} sent bench cells")
+            raise SystemExit(f"offline run: a manual launch of {name} sent bench cells")
         if bench.status.state != "not_asked" or not bench.status.can_grade:
-            raise SystemExit(f"offline run: a manual launch of {optimizer} serves {bench}")
+            raise SystemExit(f"offline run: a manual launch of {name} serves {bench}")
         bench = await grade_bench(stores, session.hop.campaign_id)
     decisions = extract(cycle, bench)
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),
-        "unrouted": sorted(router.unrouted),
-        "llm_calls": dict(sorted(llm.calls.items())),
+        "unrouted": sorted(harness.router.unrouted),
+        "llm_calls": dict(sorted(harness.llm.calls.items())),
         "backend_cells": searched_cells,
         "bench_cells_asked_for": backend.cells - searched_cells,
     }
+    write_decisions(out, decisions)
+    return cycle
+
+
+def write_decisions(out: Path, decisions: dict[str, Any]) -> None:
+    out.mkdir(parents=True, exist_ok=True)
     (out / "decisions.json").write_text(
         json.dumps(decisions, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    return cycle, session.campaign_id
 
 
 async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
-    """Potter resumed with `--from` under an L2 proposing a fork at every fire, until the clock stops it."""
+    """Potter resumed with `--from` under an L2 proposing the same fork at every fire: only the
+    first changes something, and the line's forks spend one round budget between them."""
     # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall.
     config = campaign_config(
         "potter", rounds, bench_trigger="manual", knobs={"escalation": EVERY_L2}
@@ -685,17 +751,25 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     await session.backend_client.aclose()
     cycles = dict(stores.campaigns.campaign_cycles(session.campaign_id))
     forks = [index for index in cycles.values() if index.parent_cycle_id is not None]
-    if len(forks) != MAX_AUTO_REBASES:
-        raise SystemExit(
-            f"offline run: the line forked {len(forks)} times, its clock is {MAX_AUTO_REBASES}"
-        )
+    if not forks:
+        raise SystemExit("offline run: a fork that changes the config minted no fork")
     ended = [index.stop_reason for index in forks]
     if any(r is None or stop_reason_outcome(r).exit_code for r in ended):
         raise SystemExit(f"offline run: a rebase's fork re-applied the operator's rewind: {ended}")
+    spent = sum(
+        1
+        for hop, index in cycles.items()
+        for rnd in stores.campaigns.standing_rounds(hop, moment=None).rounds
+        if rnd >= (1 if index.cut_round is None else index.cut_round)
+    )
+    if spent > rounds:
+        raise SystemExit(
+            f"offline run: the line's forks ran {spent} rounds on a budget of {rounds}"
+        )
     final = cycles[session.hop].stop_reason
     if final in (None, StopReason.REBASED):
-        raise SystemExit(f"offline run: the clock stopped the line, which still reads {final}")
-    print(f"rebased {len(forks)} times, clock stopped at MAX_AUTO_REBASES, line ended {final}")
+        raise SystemExit(f"offline run: the line still reads {final}")
+    print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
 
 
 def run_terminal(
@@ -760,6 +834,53 @@ def interrupted(
     return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"
 
 
+async def run_arms(
+    workspace: Path, names: list[str], *, rounds: int, rows: int
+) -> dict[str, tuple[Path, str]]:
+    """Every arm minted in one act on one shared declaration, as `head-to-head` mints them, each
+    laying its own optimizer and node knobs over it; then run one after another."""
+    configs = {name: campaign_config(name, rounds, bench_trigger="at_end") for name in names}
+    samples = synthetic_rows(rows)
+    templates = {
+        node: t for config in configs.values() for node, t in text_templates(config).items()
+    }
+    harness = Harness.installed(workspace / "arms", templates, samples, crossing=False)
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    stand_in_fetch(stores, samples)
+    session = await open_session(DATASET, stores=stores)
+    sent = {name: c.model_dump(mode="json", exclude_unset=True) for name, c in configs.items()}
+    request = HeadToHeadRequest(
+        head_to_head_id="h2h",
+        arms=[
+            ArmRequest(
+                arm_key=name,
+                optimization=OptimizationOverrides.model_validate(
+                    {"optimizer": name, "nodes": sent[name]["optimization"].get("nodes", {})}
+                ),
+            )
+            for name in names
+        ],
+    )
+    # What every arm shares: the first's declaration less what each arm lays over it.
+    shared = sent[names[0]]
+    for knob in ("optimizer", "nodes"):
+        shared["optimization"].pop(knob, None)
+    ran = await run_head_to_head(
+        session,
+        CampaignConfig.model_validate(shared),
+        request,
+        mode=RunMode(),
+        readout_sink=print,
+    )
+    await session.backend_client.aclose()
+    arms = {}
+    for name, armed, result in ran:
+        out = workspace / f"arm-{name}"
+        cycle = await banked(stores, armed, result, harness, out, name=name, bench_trigger="at_end")
+        arms[name] = (cycle, armed.campaign_id)
+    return arms
+
+
 async def run_controlled(
     workspace: Path, arm_names: list[str], *, rounds: int, rows: int, foreign: bool
 ) -> None:
@@ -769,18 +890,8 @@ async def run_controlled(
             "potter", workspace, rounds=rounds, rows=rows, out=workspace / "foreign", framing=False
         )
         subjects.append(cid)
-    arms = {}
-    for name in arm_names:
-        cycle, cid = await run_one(
-            name,
-            workspace,
-            rounds=rounds,
-            rows=rows,
-            out=workspace / f"arm-{name}",
-            purpose=Compare(arm=Arm(head_to_head_id="h2h", arm_key=name)),
-        )
-        arms[name] = (cycle, cid)
-        subjects.append(cid)
+    arms = await run_arms(workspace, arm_names, rounds=rounds, rows=rows)
+    subjects += [cid for _, cid in arms.values()]
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     cycle, cid = arms[arm_names[0]]
     try:
@@ -838,14 +949,10 @@ async def run_controlled(
     (workspace / "head_to_head.json").write_text(table.model_dump_json(indent=1), encoding="utf-8")
     print(
         f"head-to-head {table.guard.head_to_head_id}: scorer {ev.scorer_id}, differs_on "
-        f"{[d.value for d in table.guard.differs_on]}, pairs "
-        f"{[(*_pair_ends(p.reading), p.guard.state.value) for p in table.pairs]}, "
+        f"{[d.value for d in table.guard.differs_on]}, contrasts "
+        f"{[(c.a.optimizer, c.b.optimizer, c.guard.state.value) for c in table.contrasts]}, "
         f"guard {[(r.optimizer, r.guard.state.value) for r in table.rows]}"
     )
-
-
-def _pair_ends(pair: PairedReading) -> tuple[str, ...]:
-    return tuple(m.address.path[-1].campaign_id for m in (pair.a, pair.b) if m is not None)
 
 
 def _graded(bench: dict[str, Any] | None) -> bool:

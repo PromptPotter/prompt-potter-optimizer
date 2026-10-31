@@ -10,8 +10,7 @@ from promptpotter.application.pipeline_resolve import campaign_runs_with, line_c
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits
-from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO, LevelUnit
-from promptpotter.domain.bench import BENCH_STATE_INFO, BenchScore
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
     Campaign,
@@ -30,7 +29,6 @@ from promptpotter.domain.cycle_paths import (
     hierarchy_address,
 )
 from promptpotter.domain.hierarchy import (
-    BenchStat,
     CampaignFacts,
     CourseFacts,
     CourseKind,
@@ -39,21 +37,13 @@ from promptpotter.domain.hierarchy import (
     HierarchyCourse,
     HierarchyResponse,
     HierarchySpan,
-    HierarchyStat,
     HierarchyState,
     HierarchyTag,
     ListingLifecycle,
-    StatKey,
     UnstartedCampaign,
     UnstartedFacts,
 )
-from promptpotter.domain.paired_reading import (
-    READING_STATE_INFO,
-    MeasurandUnit,
-    PairedReading,
-    ReadingState,
-)
-from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
+from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import billed_spend, campaign_spend
@@ -70,7 +60,6 @@ _MINT_WORDS: dict[CourseKind, str] = {
     "diag": "diag",
     "inner": "inner run",
 }
-_THETA_CLAUSE = "rounds are won on θ"
 _UNRESOLVED = "Its root pipeline did not resolve, so its settings and bench are unread."
 _UNMINTED = "Its line course has no mint record, so its rounds and standing are unread."
 
@@ -86,134 +75,6 @@ def superseded_tag(successor: str) -> HierarchyTag:
     return HierarchyTag(kind="superseded", value=successor, label=label)
 
 
-def _rate_priced(spent: LifetimeSpend | MeteredSpend) -> str | None:
-    if not spent.calls_rate_priced:
-        return None
-    return f"+ ${spent.rate_priced_usd:.2f} {RATE_PRICED_LABEL}"
-
-
-def _spend_stat(
-    key: StatKey, label: str, spent: LifetimeSpend | MeteredSpend, sub: str | None
-) -> HierarchyStat:
-    return HierarchyStat(
-        key=key,
-        label=label,
-        value=f"{'≥ ' if spent.bill_is_floor else ''}${spent.billed_usd:.2f}",
-        sub=sub,
-    )
-
-
-def _lifetime_stat(spent: LifetimeSpend) -> HierarchyStat:
-    unreported = f"up to ${spent.unreported_usd:.2f} more unreported"
-    sub = unreported if spent.sends_unreported else _rate_priced(spent)
-    return _spend_stat("spend_lifetime", "Spent", spent, sub)
-
-
-def level_text(unit: LevelUnit, value: float | None) -> str:
-    """An own level as every stat words it: a rate as a percent, a score or θ as a number."""
-    if value is None:
-        return "—"
-    return (
-        f"{value:.0%}"
-        if unit == "rate"
-        else f"θ {value:.2f}"
-        if unit == "theta"
-        else f"{value:.2f}"
-    )
-
-
-def _rounds_stat(closed: int, cap: int | None) -> HierarchyStat:
-    if cap == 0:
-        value = "origin only"
-    elif cap is None:
-        value = f"{closed} · no rounds axis"
-    else:
-        value = f"{closed} of {cap}"
-    return HierarchyStat(key="rounds", label="Rounds", value=value, sub=None)
-
-
-def lift_stat(
-    key: StatKey, label: str, pair: PairedReading, against: str, *, notes: list[str]
-) -> HierarchyStat:
-    """A paired reading as one stat: the lift with its interval, never a bare point; its levels
-    under it."""
-    lift = pair.headline
-    if lift is None:
-        return HierarchyStat(
-            key=key,
-            label=label,
-            value=READING_STATE_INFO[pair.state].label,
-            sub=" · ".join(notes) or None,
-        )
-    est = lift.estimate
-    if lift.measurand.unit is MeasurandUnit.RATE:
-        value = f"{est.value * 100:+.1f} pp"
-        band = f"[{est.ci_lo * 100:+.1f}, {est.ci_hi * 100:+.1f}]"
-        levels = f"{lift.rate_a:.1%} → {lift.rate_b:.1%}"
-    else:
-        value = f"{est.value:+.3f}"
-        band = f"[{est.ci_lo:+.3f}, {est.ci_hi:+.3f}]"
-        levels = f"{lift.rate_a:.3f} → {lift.rate_b:.3f}"
-    return HierarchyStat(
-        key=key,
-        label=label,
-        value=f"{value} {band}",
-        sub=" · ".join([f"{against} {levels}", *notes]),
-    )
-
-
-def _line_stats(index: CycleIndex, cap: int | None, *, on_theta: bool) -> list[HierarchyStat]:
-    rounds = _rounds_stat(index.rounds_closed, cap)
-    standing = index.standing
-    if standing is None:
-        return [rounds]
-    lives = (
-        []
-        if standing.lives is None
-        else [
-            HierarchyStat(
-                key="lives",
-                label="Lives",
-                value=standing.lives.bar,
-                sub=standing.lives.label,
-            )
-        ]
-    )
-    lift = lift_stat(
-        "lift",
-        "Lift vs origin",
-        standing.vs_origin,
-        "origin",
-        notes=[_THETA_CLAUSE] if on_theta else [],
-    )
-    return [rounds, lift, *lives]
-
-
-# The bench grades the course holding the line and no other, so every other course reads this.
-_HELD_BENCH = BenchStat(
-    label="Bench",
-    value=READING_STATE_INFO[ReadingState.HELD_ELSEWHERE].label,
-    sub=BENCH_STATE_INFO[ReadingState.HELD_ELSEWHERE].sentence,
-    status=None,
-    vs_origin=None,
-    lift_per_usd=None,
-)
-
-
-def _bench_stat(bench: BenchScore) -> BenchStat:
-    level = None if bench.selected is None else bench.selected.level
-    return BenchStat(
-        label="Bench",
-        value=READING_STATE_INFO[bench.status.state].label
-        if level is None
-        else level_text(DISPLAY_METRIC_INFO[bench.headline].unit, level.value),
-        sub=bench.line,
-        status=bench.status,
-        vs_origin=bench.vs_origin,
-        lift_per_usd=bench.cost.lift_per_usd,
-    )
-
-
 def course_entry(
     stores: Stores,
     inside: CyclePath,
@@ -225,7 +86,7 @@ def course_entry(
     moment: Moment | None,
     runs_with: CampaignRunsWith | None,
     config: CampaignConfig | None,
-    bench: BenchStat | None,
+    bench: BenchScore | None,
 ) -> HierarchyCourse:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
     # The producer as it is now: a moment replays the record, never a process.
@@ -266,23 +127,16 @@ def course_entry(
             issued_by=fork.issued_by.display,
         )
     )
-    on_theta = index.elects_on == "ability"
     task = None if index.spawned_by is None else index.spawned_by.task or None
     return HierarchyCourse(
         address=hierarchy_address(inside, hop.campaign_id, hop.cycle_id),
         parent=hierarchy_address(inside, hop.campaign_id),
         # An inner course is named for the outer panel cell it measures, by its last segment.
         label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
-        lede=None if index.standing is None else index.standing.selection_line,
         caveat=None,
         tags=tags,
         # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
         state=HierarchyState.of(run, head, lifecycle=campaign.lifecycle_status),
-        stats=[
-            _spend_stat("spend", "Spend", spent, _rate_priced(spent)),
-            *([] if bench is None else [bench]),
-            *_line_stats(index, cap, on_theta=on_theta),
-        ],
         span=HierarchySpan(
             opened_at=index.created_at,
             last_at=index.updated_at,
@@ -293,7 +147,10 @@ def course_entry(
             task=task,
             standing=index.standing,
             rounds_closed=index.rounds_closed,
+            rounds_cap=cap,
             elects_on=index.elects_on,
+            spend=spent,
+            bench=bench,
         ),
     )
 
@@ -318,7 +175,7 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
         tags.append(HierarchyTag(kind="self_optimization", value="l4", label="L4"))
     if isinstance(purpose := campaign.declaration.purpose, Compare):
         arm = purpose.arm
-        # The value is `new --arm`'s own address, so a taken head-to-head id is read off the listing.
+        # The value names the head-to-head and the key, so a taken id is read off the listing.
         tags.append(
             HierarchyTag(
                 kind="arm",
@@ -370,10 +227,9 @@ def campaign_entry(
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
     # The bench passes are read whole, so a replayed moment has no bench reading, as on the dashboard.
-    graded = moment is None
     bench = (
-        _bench_stat(cycle_bench(stores, campaign, holder, config))
-        if graded and config is not None
+        cycle_bench(stores, campaign, holder, config)
+        if moment is None and config is not None
         else None
     )
     courses: dict[str, HierarchyCourse] = {}
@@ -390,7 +246,7 @@ def campaign_entry(
             moment=moment,
             runs_with=runs_with,
             config=config if hop == holder else line_config(stores, campaign, hop),
-            bench=bench if hop == holder else _HELD_BENCH if graded else None,
+            bench=bench if hop == holder else None,
         )
     line = courses.get(holder.cycle_id)
     caveats = [
@@ -407,17 +263,14 @@ def campaign_entry(
         if line is None
         else line.state
     )
-    spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id))
+    spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
     return HierarchyCampaign(
         address=hierarchy_address(inside, campaign.campaign_id),
         parent=encode_cycle_path(inside) if inside else None,
         label=campaign.label or campaign.dataset_name,
-        lede=None if line is None else line.lede,
         caveat=" ".join(caveats) or None,
         tags=_campaign_tags(campaign, runs_with),
         state=state,
-        # The line's own spend is that course's headline; the campaign's is every cycle's.
-        stats=[_lifetime_stat(spend_lifetime), *([] if line is None else line.stats[1:])],
         span=HierarchySpan(
             opened_at=campaign.created_at,
             last_at=max(
@@ -432,6 +285,7 @@ def campaign_entry(
             lifecycle=campaign.lifecycle_status,
             spend_lifetime=spend_lifetime,
             runs_with=runs_with,
+            line_course=None if line is None else line.facts,
         ),
     )
 
@@ -446,20 +300,18 @@ def unstarted_entry(stores: Stores, draft: DraftCampaign, *, queued: bool) -> Un
     """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
     `queued` while a Start waits on a slot for it."""
     ledger = stores.drafts.ledger(draft.draft_id)
-    spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []))
+    spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name
     lifecycle = "queued" if queued else "unstarted"
     return UnstartedCampaign(
         address=draft.draft_id,
         parent=None,
         label=draft.slug,
-        lede=None,
         caveat=None,
         tags=[
             HierarchyTag(kind="dataset", value=dataset, label=dataset),
             HierarchyTag(kind="lifecycle", value=lifecycle, label=lifecycle),
         ],
-        stats=[_lifetime_stat(spend_lifetime)],
         span=HierarchySpan(opened_at=draft.created_at, last_at=draft.updated_at),
         facts=UnstartedFacts(spend_lifetime=spend_lifetime),
     )

@@ -5,23 +5,20 @@ import types
 import typing
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import MemberCoupling
     from promptpotter.domain.campaign import RunDeclaration
-
-shapes_optimizer_prompt(__name__)
 
 
 @dataclass(frozen=True)
@@ -109,11 +106,6 @@ def member_knob_count() -> int:
     )
 
 
-def _table(config: CampaignConfig) -> dict[tuple[str, ...], KnobDecl]:
-    bench = {p: d for p, d in KNOBS.items() if p != _NODES_PATH}
-    return {**bench, **_node_decls(select_optimizer(config.optimization))}
-
-
 def _models_in(annotation: object) -> Iterator[type[BaseModel]]:
     """Every model a field can hold, through ``Optional``, unions, ``dict`` values and ``list`` items."""
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
@@ -170,6 +162,18 @@ def measured_address(declaration: RunDeclaration) -> dict[str, Any]:
 
 # Gravest first: an ill-defined statistic, a silent waste, knobs that co-move.
 CouplingSeverity = Literal["collision", "inert", "info"]
+
+
+class CouplingSeverityInfo(NamedTuple):
+    # The badge an ACTIVE coupling wears; an inactive one wears none.
+    tone: Literal["danger", "accent", "default"]
+
+
+COUPLING_SEVERITY_INFO: dict[CouplingSeverity, CouplingSeverityInfo] = {
+    "collision": CouplingSeverityInfo("danger"),
+    "inert": CouplingSeverityInfo("accent"),
+    "info": CouplingSeverityInfo("default"),
+}
 
 
 @dataclass(frozen=True)
@@ -303,15 +307,15 @@ def _at(data: Any, path: tuple[str, ...]) -> Any:
     return cur
 
 
-def resolve_knob_states(config: CampaignConfig) -> list[KnobState]:
+def resolve_knob_states(config: CampaignConfig, selected: SelectedOptimizer) -> list[KnobState]:
     """``value`` is ``None`` where an opt-in submodel is off, not merely unset."""
-    selected = select_optimizer(config.optimization)
     dumped = config.model_dump(mode="json")
     authored = config.model_dump(mode="json", exclude_defaults=True)
     nodes = {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
     dumped["optimization"]["nodes"] = {n: {"config": v} for n, v in nodes.items()}
     states: list[KnobState] = []
-    for path, decl in _table(config).items():
+    bench = {p: d for p, d in KNOBS.items() if p != _NODES_PATH}
+    for path, decl in {**bench, **_node_decls(selected)}.items():
         value = _at(dumped, path)
         set_by_operator = _at(authored, path) is not _MISSING
         if path[: len(_NODES_PATH)] == _NODES_PATH:

@@ -20,7 +20,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import at_round
-from promptpotter.shared.errors import ErrorCategory, graceful
+from promptpotter.shared.errors import ConflictError, ErrorCategory
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign_config import LivesConfig
+    from promptpotter.domain.optimizer_state import OptimizerState, StatePart
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -215,43 +216,43 @@ def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[st
     return out
 
 
-async def _rederive(
-    campaign_store: CampaignStore,
-    branch: CycleHop,
-    cycle: Cycle,
-    rounds: list[RoundResult],
-    drifted: list[int],
-) -> list[RoundResult]:
-    """A repair, not a rewind: measurements and winner untouched; round 0's state is the origin path's."""
+async def _rederived(
+    cycle: Cycle, rounds: list[RoundResult], drifted: list[int]
+) -> dict[int, OptimizerState]:
+    """A repair, not a rewind: measurements and winner untouched; round 0's state is the origin path's. Before the branch exists, so a member that cannot re-derive refuses the repair rather than leave the branch graded on a hole."""
     restated = list(rounds)
+    states: dict[int, OptimizerState] = {}
     try:
         for slot, rr in enumerate(rounds):
             if rr.round not in drifted or rr.round == 0:
                 continue
             seat = _seat_on(cycle, restated, rr)
             # Outside the round loop this ContextVar still holds whatever the last round set.
-            with at_round(rr.round), graceful(f"round {rr.round} re-derivation failed"):
-                parts = [
-                    part
-                    for member in cycle.optimizer.members
-                    for part in await member.rederive(NodeContext(seat, member))
-                ]
-                if not parts:
-                    continue
-                state = rr.closed_state.holding(*parts)
-                restated[slot] = rr.model_copy(update={"optimizer_state": state})
-                campaign_store.restate_round(
-                    branch, campaign_store.restated_state(branch, restated[slot])
-                )
-                logger.warning(
-                    "Round %d %s re-derived: its input package drifted when the round was "
-                    "repaired, so what it recorded described evidence that no longer exists.",
-                    rr.round,
-                    ", ".join(part.kind for part in parts),
-                )
+            parts: list[StatePart] = []
+            for member in cycle.optimizer.members:
+                try:
+                    with at_round(rr.round):
+                        parts.extend(await member.rederive(NodeContext(seat, member)))
+                except Exception as exc:
+                    raise ConflictError(
+                        f"The repair refused: round {rr.round}'s {member.name} read evidence the "
+                        f"repair moved and could not re-derive what it recorded ({exc}). "
+                        f"`resume --from {rr.round - 1}` re-runs that round instead.",
+                        code="repair_refused",
+                    ) from exc
+            if not parts:
+                continue
+            states[rr.round] = rr.closed_state.holding(*parts)
+            restated[slot] = rr.model_copy(update={"optimizer_state": states[rr.round]})
+            logger.warning(
+                "Round %d %s re-derived: its input package drifted when the round was "
+                "repaired, so what it recorded described evidence that no longer exists.",
+                rr.round,
+                ", ".join(part.kind for part in parts),
+            )
     finally:
-        cycle.replay_priors(restated)
-    return restated
+        cycle.replay_priors(rounds)
+    return states
 
 
 def _package_drift(
@@ -307,6 +308,16 @@ async def apply_correction(
     ]
     if not repaired:
         return None
+    # The whole trajectory: a round above the cut reads those below, so its package shows the reach.
+    corrected = [*mended, *prior[cut.resume_at :]]
+    mismatches, drifted = _package_drift(
+        packages_before,
+        round_packages(cycle, corrected),
+        {t.round for t in corrected},
+        campaign_store,
+        hop,
+    )
+    rederived = await _rederived(cycle, corrected, drifted)
     # Read before the branch exists to displace it.
     carried = campaign_store.round_proposals(hop, cut.resume_at)
     repair_target = mint_fork(
@@ -332,15 +343,6 @@ async def apply_correction(
         "before deciding where it belongs.",
         ", ".join(str(r) for r in repaired),
     )
-    # The whole trajectory: a round above the cut reads those below, so its package shows the reach.
-    corrected = [*mended, *prior[cut.resume_at :]]
-    mismatches, drifted = _package_drift(
-        packages_before,
-        round_packages(cycle, corrected),
-        {t.round for t in corrected},
-        campaign_store,
-        hop,
-    )
     branch = CycleHop(campaign_id=hop.campaign_id, cycle_id=repair_target)
     corrected = _rebank_on_branch(
         campaign_store,
@@ -359,8 +361,12 @@ async def apply_correction(
         len(cut.retirements),
         repair_target,
     )
-    if drifted:
-        corrected = await _rederive(campaign_store, branch, cycle, corrected, drifted)
+    for slot, rr in enumerate(corrected):
+        if (state := rederived.get(rr.round)) is not None:
+            corrected[slot] = rr.model_copy(update={"optimizer_state": state})
+            campaign_store.restate_round(
+                branch, campaign_store.restated_state(branch, corrected[slot])
+            )
 
     equivalent = not mismatches
     campaign_store.grade_fork(

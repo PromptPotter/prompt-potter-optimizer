@@ -24,12 +24,12 @@ from promptpotter.application.optimizers.potter.escalation.state import Explorat
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
-from promptpotter.domain.results_health import evidence_starved_node
-from promptpotter.domain.run_records import MAX_AUTO_REBASES
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from promptpotter.domain.optimizer_state import CritiqueReadout
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -180,30 +180,33 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
 CLUSTER_IDS_SHOWN = 12
 
 
-def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> frozenset[str]:
-    out: set[str] = set()
+def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, ...]:
+    """The one axis vocabulary: the critique names from it, and its panel keeps only what it names."""
+    out: list[str] = []
     for node in schema.prompt_nodes():
-        out.update(Locus(node.name, f).name for f in node.open_prompt_fields)
+        out.extend(Locus(node.name, f).name for f in node.open_prompt_fields)
         if offers_shots:
-            out.add(Locus(node.name, SHOTS_KEY).name)
+            out.append(Locus(node.name, SHOTS_KEY).name)
     for node in schema.nodes:
-        if node.name:
-            out.add(node.name)
-        for pk in node.param_keys:
-            out.add(pk)
-            if node.name:
-                out.add(f"{node.name}.{pk}")
-    return frozenset(out)
+        out.extend(f"{node.name}.{pk}" if node.name else pk for pk in sorted(node.param_keys))
+    return tuple(dict.fromkeys(out))
 
 
-def _priority_fix_axis(priority_fix: str) -> str:
-    head, sep, _ = priority_fix.partition(":")
-    axis = head.strip()
-    return axis if sep and axis.isidentifier() else ""
+@signal(
+    "critique_axes",
+    kind=InjectionKind.DIRECTIVE,
+    char_cap=None,
+    citable=False,
+)
+def _r_critique_axes(b: InjectionBundle) -> list[Item]:
+    schema = b.pipeline_schema
+    if schema is None:
+        return []
+    return [Item(", ".join(critique_axes(schema, offers_shots=b.offers_shots)))]
 
 
 def format_l1_critique_for_prompt(
-    critique: CritiqueReadout | None, axes: frozenset[str] | None = None
+    critique: CritiqueReadout | None, axes: Collection[str] | None = None
 ) -> str:
     if not critique:
         return ""
@@ -213,7 +216,9 @@ def format_l1_critique_for_prompt(
         parts.append(f"Fix: {pf}")
     sa = list(critique.get("suggested_axes") or [])
     # The steer's own axis leads its menu, so `Fix:` and `Axes:` never name different things.
-    if lead := _priority_fix_axis(pf):
+    head, colon, _ = pf.partition(":")
+    lead = head.strip()
+    if colon and all(part.isidentifier() for part in lead.split(".")):
         sa = [lead, *(a for a in sa if a != lead)]
     if axes is not None:
         sa = [a for a in sa if a in axes]
@@ -238,8 +243,8 @@ def format_l1_critique_for_prompt(
 @signal(
     "critique",
     kind=InjectionKind.TRACE,
-    # Above the distiller's whole quota: 3 clusters (label 60c, `CLUSTER_IDS_SHOWN` ids, claim 240c) + priority_fix 320c + axes.
-    char_cap=2000,
+    # Above the distiller's whole quota: 3 clusters (label 60c, `CLUSTER_IDS_SHOWN` ids, claim 320c) + priority_fix 320c + axes.
+    char_cap=2400,
     citable=True,
 )
 def _r_critique(b: InjectionBundle) -> list[Item]:
@@ -273,7 +278,9 @@ def _r_skill_tiers(b: InjectionBundle) -> list[Item]:
 _REBASE_CAPABILITY_TEXT = (
     'FORK PROPOSAL — fork_proposal = {"reason": "<1-2 sentences>"} only when this lineage is '
     "exhausted (stalled, refining cannot recover); you judge WHETHER, the engine picks the "
-    f"ancestor round. At most {MAX_AUTO_REBASES} per session; default omit — it costs a cycle."
+    "individual it stands on and keeps this layer's memory. A fork changing nothing that only "
+    "rewinds to where the line stands, or to the origin, is refused; its rounds count against "
+    "the same budget. Default omit."
 )
 
 _SCHEMA_RENAME_UNLOCK_TEXT = (
@@ -300,15 +307,12 @@ def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
     return [Item(_REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else ""))]
 
 
+# Offered only where the round measured a backend fault (`InjectionBundle.terminate_offer`): a layer
+# shown it on a healthy round reads rows a prompt edit did not move as a broken backend, and aborts.
 _TERMINATE_CAPABILITY_TEXT = (
-    'TERMINATE PROPOSAL — terminate_proposal = {"reason": "<what the operator must fix>"} halts '
-    "the cycle; only for a backend fault no prompt move recovers, never a hard task or a "
-    "healthy stall. Default omit."
-)
-
-_TERMINATE_STARVED_TEXT = (
-    " THIS ROUND IT APPLIES: '{node}' failed on ~all {unit} (quota or rate limit), so every "
-    "failure cluster is cascade noise from it — terminate now, naming that node."
+    'TERMINATE PROPOSAL — terminate_proposal = {{"reason": "<what the operator must fix>"}} halts '
+    "the cycle. THIS ROUND IT APPLIES: '{node}' failed on ~all {unit} (quota or rate limit), so "
+    "every failure cluster is cascade noise from it — terminate now, naming that node."
 )
 
 
@@ -319,16 +323,8 @@ _TERMINATE_STARVED_TEXT = (
     citable=False,
 )
 def _r_terminate_capability(b: InjectionBundle) -> list[Item]:
-    if not b.terminate_capability:
+    if (starved := b.terminate_offer) is None:
         return []
-    starved = evidence_starved_node(b.digest.node_failure_rates)
     return [
-        Item(
-            _TERMINATE_CAPABILITY_TEXT
-            + (
-                _TERMINATE_STARVED_TEXT.format(node=starved, unit=unit_plural(b.measured_unit))
-                if starved
-                else ""
-            )
-        )
+        Item(_TERMINATE_CAPABILITY_TEXT.format(node=starved, unit=unit_plural(b.measured_unit)))
     ]

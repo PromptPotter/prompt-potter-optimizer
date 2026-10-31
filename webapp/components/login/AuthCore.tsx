@@ -33,6 +33,8 @@ const AUTH_ERROR_COPY: Record<string, string> = {
   provider_returned_error: "Google sign-in was cancelled. Try again when you're ready.",
   callback_missing_params: "That sign-in link was incomplete. Try again.",
   signin_unavailable: "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.",
+  accounts_full:
+    "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.",
 };
 
 interface Props {

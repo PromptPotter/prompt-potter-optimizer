@@ -8,7 +8,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 **The default operating context is the cloud team-online deployment (tier 3)**, not local-secure (tier 2): [`deploy-linux/`](deploy-linux/) — Cloudflare tunnel, open OIDC signup, a per-account spend ceiling.
 
-**Every run OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled `--arm` reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run** ([`docs/decisions.md`](docs/decisions.md) § 0009).
+**Every run OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled arm, minted by `head-to-head`, reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run** ([`docs/decisions.md`](docs/decisions.md) § 0009).
 
 **Origin = campaign root = C0** (for a fork, the point it branches from). An *individual/candidate* is a configuration (`OptSearchPoint`); its **parent** is what it was mutated from — each arm's `reference_id`.
 
@@ -37,7 +37,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 ## STOP — no backward compatibility, ever
 
-Zero released versions, zero data worth keeping. **The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers on-disk shape**: design the right shape, then wipe or migrate the data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
+Zero released versions, zero data worth keeping. **The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers on-disk shape**: design the right shape, then wipe the data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
 
 **Names are distinct and self-describing.** Grep for collisions; a second word for something the repo already names is a deletion, not a synonym; a name that stopped describing its contents is renamed with its doc and `CLAUDE.md` row in the same commit.
 
@@ -89,7 +89,7 @@ python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API + webapp at 
 
 **Print every operations command you invoke, verbatim, beside its result** (`python -m promptpotter …` and maintenance verbs; not `docker`/`curl`/`ls`). Showing it is not handing it over.
 
-The verbs are [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s. **The read verbs are the four whose answer is in no file**: `evidence`, `cycles`, `machine-status`, `trail`; every other read is opening the tree. **The file tree is the dashboard**: each run writes `cycles/{cycle_id}/readout.log` — read it instead of asking for console output.
+The verbs are [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s. **The read verbs are the ones whose answer is in no file**: `evidence`, `cycles`, `machine-status`, `trail`, `price-head-to-head`; every other read is opening the tree. **The file tree is the dashboard**: each run writes `cycles/{cycle_id}/readout.log` — read it instead of asking for console output.
 
 ## Conventions
 

@@ -28,6 +28,8 @@ L1_MANDATORY: frozenset[str] = frozenset(
         "demo_pool",
         # The one carrier of the ids `recombinations` names.
         "recombination_pool",
+        # The one carrier of the rows `targets_rows` names.
+        "failing_samples",
     }
 )
 
@@ -56,6 +58,8 @@ class NodeLayoutSpec(FrozenModel):
     extras: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout
+    # The slots an edit may place into, in render order.
+    slots: tuple[str, ...] = L1_LAYOUT_SLOTS
     # Only the DISCRETIONARY panels: the mandatory floor is the dataset's, so no whole-prompt ceiling.
     discretionary_chars: int
     # `compile_prompt` extras that are not signals; any other unknown token in a template body raises.
@@ -72,6 +76,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     "l1_generate": NodeLayoutSpec(
         # Room for two whole transcripts behind the frame.
         discretionary_chars=11_000,
+        # An edit places evidence, never a position: the slot names read as the target's fields.
+        slots=(VOLATILE_SLOT,),
         caller_extras=frozenset({"n_variants"}),
         extras=frozenset({"diagnostics", "axis_memory"}),
         mandatory=L1_MANDATORY,
@@ -106,7 +112,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         discretionary_chars=7_500,
         extras=frozenset({"measurand", "detectable_move", "axis_memory"}),
         # The matched pair a cluster's rows come from, one silent where the other fires: a marked row always renders.
-        mandatory=frozenset({"diagnostics", "failing_samples", "inner_narratives"}),
+        # `mutation_memory` is the one carrier of the tried mechanisms a cluster must not restate.
+        mandatory=frozenset(
+            {"diagnostics", "failing_samples", "inner_narratives", "mutation_memory"}
+        ),
         floor=L1Layout(
             problem_description=[
                 "confounds",
@@ -197,6 +206,7 @@ for _node, _spec in NODE_LAYOUTS.items():
         f"{_node}: floor names a placeholder in two places"
     )
     assert not _floor_ph & _spec.extras, f"{_node}: extras re-list a floor placeholder"
+    assert set(_spec.slots) <= set(L1_LAYOUT_SLOTS), f"{_node}: an edit slot L1Layout lacks"
     assert _floor_ph >= _spec.mandatory, (
         f"{_node}: floor must reference every mandatory placeholder"
     )
@@ -212,19 +222,17 @@ del _node, _spec, _floor_ph, _early
 def layout_json_schema(
     spec: NodeLayoutSpec, *, description: str, withheld: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
-    """Keyed by SLOT, the four stated as properties, so no reply can name one that does not exist; the provider enforces none of it (`strict: False`), so the panel menu is prompt text stated once."""
-    panels = ", ".join(sorted(spec.possible - withheld))
+    """Keyed by the spec's SLOTS, each an array of its legal panels, so the wire states both menus; the provider may enforce none of it (`strict: False`), so `unplaceable_edit` and `validate_l1_layout` still decide."""
+    panels = {"type": "string", "enum": sorted(spec.possible - withheld)}
     return {
         "type": "object",
-        "description": f"{description} Legal panels: {panels}.",
-        "properties": {
-            slot: {"type": "array", "items": {"type": "string"}} for slot in L1_LAYOUT_SLOTS
-        },
+        "description": description,
+        "properties": {slot: {"type": "array", "items": panels} for slot in spec.slots},
         "additionalProperties": False,
     }
 
 
-def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
+def unplaceable_edit(raw_layout: object, spec: NodeLayoutSpec) -> ValidatorOutcome | None:
     """ONE stray key refuses the whole edit: the rest would land as a layout nobody asked for."""
     if not raw_layout:
         return None
@@ -234,7 +242,7 @@ def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
         for slot, panels in asked.items()
         if not (
             isinstance(slot, str)
-            and slot in L1_LAYOUT_SLOTS
+            and slot in spec.slots
             and isinstance(panels, list)
             and all(isinstance(p, str) for p in panels)
         )
@@ -245,7 +253,7 @@ def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
         return None
     return ValidatorOutcome(
         validator_id="l1_layout_unparseable",
-        evidence={"not_a_slot": stray, "placed_twice": twice, "slots": list(L1_LAYOUT_SLOTS)},
+        evidence={"not_a_slot": stray, "placed_twice": twice, "slots": list(spec.slots)},
     )
 
 
@@ -339,7 +347,7 @@ def resolve_layout_override(
 ) -> tuple[L1Layout, list[ValidatorOutcome]]:
     """ONE derivation for both boundaries (`validators/l1_strict.py` at proposal, this module at render), so they cannot disagree."""
     spec = NODE_LAYOUTS[node]
-    if breach := unplaceable_edit(raw_layout):
+    if breach := unplaceable_edit(raw_layout, spec):
         return spec.floor, [breach]
     merged = coerce_l1_layout(raw_layout, base=spec.floor)
     if merged is None:

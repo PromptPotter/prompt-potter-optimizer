@@ -5,7 +5,7 @@ import type { DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
-import { fmtPaired, tagValue } from "@/lib/derivations";
+import { fmtPaired, livesBar, runWord, tagValue } from "@/lib/derivations";
 import type { CourseKind, CourseSpawn, HierarchyCourse, SubtreeCampaign } from "@/lib/api";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
@@ -324,7 +324,7 @@ export function Forest({
                   {spawn?.direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {` · ${course.state.status.label}`}
+                  {` · ${runWord(course.state.status)}`}
                   {standing?.selection
                     ? ` · selection ${standing.selection.label} ${fmtPaired(standing.vs_origin, "rates")}`
                     : ""}
@@ -344,8 +344,9 @@ export function Forest({
               const nodeCycleId = pathLeaf(n.coursePath).cycleId;
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
-              // Inside an <svg>, so `<Hearts>` can't mount; the served bar is the same pips as text.
-              const laneHearts = layoutEntry?.course.facts.standing?.lives?.bar ?? "";
+              // Inside an <svg>, so `<Hearts>` can't mount; the bar is the same pips as text.
+              const lives = layoutEntry?.course.facts.standing?.lives ?? null;
+              const laneHearts = lives === null ? "" : livesBar(lives);
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);

@@ -7,6 +7,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     LiveCandidate,
     RoundSummary,
@@ -17,7 +18,7 @@ from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
 from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
+from promptpotter.domain.run_records import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
@@ -51,14 +52,19 @@ class BackendWarning(StrictModel):
     detail: str | None = None
 
 
+class WaitingOn(StrictModel):
+    """The cell the producer's open call holds — worded `RAY_HEAD_WORDS` on every surface."""
+
+    label: str | None = Field(description="The owning arm's label; null for a pass no arm owns.")
+    position: int
+
+
 class DashboardError(StrictModel):
     """The structured failure of a stop whose ``STOP_REASON_INFO`` row is FAILED, else absent."""
 
     kind: str
     message: str
     stop_reason: StopReason
-    label: str
-    next_step: str
 
 
 class RacingBlock(StrictModel):
@@ -75,7 +81,20 @@ class CurrentRound(StrictModel):
 
     round: int = 0
     active_node: str | None = None
-    measurement_node: str | None = None
+    measurement_node: str = Field(
+        description="The optimizer node every scoring pass of the run runs as — origin, round, "
+        "bench and verify alike — as its wiring declares it."
+    )
+    measuring: bool = Field(
+        default=False,
+        description="Whether `measurement_node` is the node at work now: `measuring_arm` is "
+        "served only while it is.",
+    )
+    inner: CycleHop | None = Field(
+        default=None,
+        description="The inner cycle an open cell runs, where a cell is a whole campaign (L4), "
+        "in this cycle's sandbox; null where no open cell has named one.",
+    )
     candidates: list[LiveCandidate] = Field(default_factory=list)
     fitness_bands: list[int] = Field(
         description="How many scored rows across `candidates` graded into each tenth of [0, 1], "
@@ -85,8 +104,8 @@ class CurrentRound(StrictModel):
     racing: RacingBlock | None = None
 
     @classmethod
-    def unentered(cls) -> CurrentRound:
-        return cls(fitness_bands=fitness_bands(()))
+    def unentered(cls, measurement_node: str) -> CurrentRound:
+        return cls(measurement_node=measurement_node, fitness_bands=fitness_bands(()))
 
 
 class DashboardFacts(StrictModel):
@@ -130,7 +149,7 @@ class DashboardFacts(StrictModel):
     current_query_payload: str | None = None
     open_positions: list[int] = Field(default_factory=list)
 
-    waiting_on: str | None = None
+    waiting_on: WaitingOn | None = None
     backpressure: BackpressureReading | None = None
     measured_unit: MeasuredUnit
 
@@ -149,10 +168,15 @@ class DashboardFacts(StrictModel):
         "delta over moved since it was declared, under an unchanged origin: this launch runs "
         "today's values.",
     )
+    backend_revision: BackendRevision | None = Field(
+        default=None,
+        description="What this launch read of the backend's revision beside the one its connector "
+        "expects; `None` where the connector checks none. A drift is served, never refused.",
+    )
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
-    current_round: CurrentRound = Field(default_factory=CurrentRound.unentered)
+    current_round: CurrentRound
 
     error: DashboardError | None = None
 
@@ -191,7 +215,11 @@ class LiveDashboardState(DashboardFacts):
 
     @classmethod
     def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
-        return cls(at_time=wiring.timestamp, **cls.launched(wiring))
+        return cls(
+            at_time=wiring.timestamp,
+            current_round=CurrentRound.unentered(wiring.measurement_node),
+            **cls.launched(wiring),
+        )
 
     @staticmethod
     def launched(wiring: RunWiringRecord) -> dict[str, Any]:
@@ -205,6 +233,7 @@ class LiveDashboardState(DashboardFacts):
             "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
             "defaults_drift": wiring.defaults_drift,
+            "backend_revision": wiring.backend_revision,
             "state": DashboardState.INIT,
             "optimizer_step": None,
             "measuring_arm": None,

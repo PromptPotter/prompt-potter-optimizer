@@ -101,15 +101,15 @@ def _package_imports(nodes: Iterable[ast.AST]) -> list[list[str]]:
     ]
 
 
-def _top_level_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
+def _top_level_defs(tree: ast.Module) -> list[tuple[str, ast.stmt]]:
+    defs: list[tuple[str, ast.stmt]] = []
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            names.add(stmt.name)
+            defs.append((stmt.name, stmt))
         elif isinstance(stmt, ast.Assign | ast.AnnAssign):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-            names.update(t.id for t in targets if isinstance(t, ast.Name))
-    return names
+            defs.extend((t.id, stmt) for t in targets if isinstance(t, ast.Name))
+    return defs
 
 
 def _unit_name(unit: ast.AST) -> str | None:
@@ -170,10 +170,10 @@ class SourceFacts(TypedDict):
     """A function of ONE source text: ``source_scan.py`` resolves another module's imports."""
 
     names: list[str]
-    classes: list[str]
     imports: list[list[str]]
     reads: SourceReads
     units: list[UnitFacts]
+    defs: dict[str, UnitFacts]
 
 
 def _reads(unit: ast.AST, names: set[str], imported: set[str]) -> SourceReads:
@@ -204,30 +204,40 @@ def _reads(unit: ast.AST, names: set[str], imported: set[str]) -> SourceReads:
     }
 
 
-def source_facts(text: str) -> SourceFacts:
-    tree = ast.parse(text)
-    names = _top_level_names(tree)
-    imports = _package_imports(ast.walk(tree))
-    imported = {row[0] for row in imports}
-    marked = _marked(tree)
-    module_reads = _reads(tree, names, imported)
-    unit_reads = [module_reads if u is tree else _reads(u, names, imported) for u in marked]
-    # Last, and in marked order: normalizing rewrites the tree, an outer unit's pass included.
-    units: list[UnitFacts] = [
+def _unit_facts(units: list[ast.AST], tree: ast.Module, names: set[str]) -> list[UnitFacts]:
+    imported = {row[0] for row in _package_imports(ast.walk(tree))}
+    reads = [_reads(u, names, imported) for u in units]
+    # Last, and in unit order: normalizing rewrites the tree, an outer unit's pass included.
+    return [
         {
             "name": _unit_name(unit),
             "whole": unit is tree,
             "source": _normalized_source(unit),
-            "reads": reads,
+            "reads": unit_reads,
         }
-        for unit, reads in zip(marked, unit_reads, strict=True)
+        for unit, unit_reads in zip(units, reads, strict=True)
     ]
+
+
+def source_facts(text: str) -> SourceFacts:
+    """``units`` are the marked ones; ``defs`` every top-level name's, for a scan that reaches it."""
+    tree = ast.parse(text)
+    names = {name for name, _ in _top_level_defs(tree)}
+    imports = _package_imports(ast.walk(tree))
+    module_reads = _reads(tree, names, {row[0] for row in imports})
+    units = _unit_facts(_marked(tree), tree, names)
+    # A fresh tree: the marked units' normalizing above rewrote theirs.
+    fresh = ast.parse(text)
+    named = _top_level_defs(fresh)
+    defs = _unit_facts([stmt for _, stmt in named], fresh, names)
     return {
         "names": sorted(names),
-        "classes": sorted(s.name for s in tree.body if isinstance(s, ast.ClassDef)),
         "imports": imports,
         "reads": module_reads,
         "units": units,
+        "defs": {
+            name: {**facts, "name": name} for (name, _), facts in zip(named, defs, strict=True)
+        },
     }
 
 

@@ -11,7 +11,6 @@ from pydantic import (
     GetJsonSchemaHandler,
     PrivateAttr,
     SerializerFunctionWrapHandler,
-    ValidationError,
     field_validator,
     model_serializer,
 )
@@ -119,16 +118,6 @@ class TokenAccount(FrozenModel):
             return None
         return reduce(operator.add, accounts)
 
-    @classmethod
-    def from_payload(cls, usage: object) -> TokenAccount:
-        """Unreadable degrades to an EMPTY account: a resume REPLAYS the ledger, so a record renders, never raises."""
-        if not isinstance(usage, Mapping):
-            return cls()
-        try:
-            return cls.model_validate(usage)
-        except ValidationError:
-            return cls()
-
     def cache_share(self, *, replayed: bool) -> float | None:
         """``None`` where unanswerable, a replay included (its counts are the banked row's); ``0.0`` is a MEASUREMENT."""
         if replayed or self.cache_read is None or self.input <= 0:
@@ -189,6 +178,9 @@ SPEND_KIND_LABELS: dict[TokenUsageKind, str] = {
 }
 if set(SPEND_KIND_LABELS) != set(get_args(TokenUsageKind)):
     raise RuntimeError("SPEND_KIND_LABELS is out of step with TokenUsageKind (domain/spend.py)")
+
+# Whose wallet a send drew: the box's key under the account's coupon, or the account's own key.
+KeySource = Literal["host", "user"]
 
 # `search_incurred` is a controlled arm's budget: no sibling's cache or bench pass moves it.
 CeilingMeter = Literal["bill", "search_incurred"]
@@ -296,6 +288,20 @@ class Budget(FrozenModel):
 
 NOTHING_METERED = Budget.amount(0.0, 0)
 
+
+class CellPrice(FrozenModel):
+    """What one cell of a bank cost on its models, as the archive measured it."""
+
+    usd: float = Field(
+        description="Mean USD over the archive's newest rows of this bank and models."
+    )
+    seconds: float | None = Field(
+        description="Mean seconds producing one took (`MeasuredCell.cost_s`, which a replay "
+        "keeps); null where no priced row carried a timing."
+    )
+    cells: int = Field(description="Archive rows the means are over.")
+
+
 # The campaign's: one book its live cycles share. The rest bind one cycle (`rounds`) or launch.
 MONEY_AXES = frozenset({"usd", "tokens"})
 CYCLE_AXES = frozenset({"rounds", "wall_clock_s"})
@@ -378,6 +384,27 @@ class UserSpend(NamedTuple):
 
 
 ZERO_SPEND = UserSpend(0.0, 0, 0)
+
+
+class PaidSpend(NamedTuple):
+    """Spend split by whose key paid it: the host's key draws the coupon, the account's own never."""
+
+    host: UserSpend = ZERO_SPEND
+    user: UserSpend = ZERO_SPEND
+
+    @classmethod
+    def of(cls, paid_by: KeySource, spent: UserSpend) -> PaidSpend:
+        return cls(**{paid_by: spent})
+
+    @property
+    def total(self) -> UserSpend:
+        return self.host.plus(self.user)
+
+    def plus(self, other: PaidSpend) -> PaidSpend:
+        return PaidSpend(self.host.plus(other.host), self.user.plus(other.user))
+
+
+NOTHING_PAID = PaidSpend()
 
 
 class LifetimeSpend(StrictModel):
@@ -519,13 +546,22 @@ def _bucket_per_kind() -> dict[TokenUsageKind, SpendBucket]:
     return {kind: SpendBucket() for kind in get_args(TokenUsageKind)}
 
 
+def spend_slot[K, M: StrictModel](held: dict[K, M], key: K, make: type[M]) -> M:
+    """``held[key]``, made on first use. Never ``setdefault(key, M())``: that builds a model per
+    record on a ledger fold's hot path."""
+    slot = held.get(key)
+    if slot is None:
+        slot = held[key] = make()
+    return slot
+
+
 def _bank_into[K](buckets: dict[K, SpendBucket], key: K, record: TokenUsageRecord) -> None:
-    buckets.setdefault(key, SpendBucket()).bank(record)
+    spend_slot(buckets, key, SpendBucket).bank(record)
 
 
 def _absorb_into[K](buckets: dict[K, SpendBucket], other: Mapping[K, SpendBucket]) -> None:
     for key, theirs in other.items():
-        buckets.setdefault(key, SpendBucket()).absorb(theirs)
+        spend_slot(buckets, key, SpendBucket).absorb(theirs)
 
 
 class SpendRollup(StrictModel):
@@ -545,10 +581,11 @@ class SpendRollup(StrictModel):
     unpriced_tokens: int = 0
     # Folded in `bank`, never a `@computed_field`: that serializes but does not round-trip on resume.
 
-    # Outside every total and off the wire: only `review.md` reads them.
-    _by_role: dict[MeasurementRole | None, SpendBucket] = PrivateAttr(default_factory=dict)
-    _by_node: dict[str, SpendBucket] = PrivateAttr(default_factory=dict)
-    _by_nested_node: dict[str, SpendBucket] = PrivateAttr(default_factory=dict)
+    # Outside every total and off the wire: only `review.md` reads them. A `{}` default, never
+    # `default_factory`: pydantic signature-inspects a private factory on every instance.
+    _by_role: dict[MeasurementRole | None, SpendBucket] = PrivateAttr(default={})
+    _by_node: dict[str, SpendBucket] = PrivateAttr(default={})
+    _by_nested_node: dict[str, SpendBucket] = PrivateAttr(default={})
 
     @field_validator("by_kind")
     @classmethod

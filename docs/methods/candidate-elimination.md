@@ -37,13 +37,16 @@ The first candidate runs to completion. Each later one, once read on `eliminatio
 
 The **same ability the round election ranks by**, so the two cannot disagree, valid on partial prefixes. Code: `application/scoring/selection.py::elimination_p_best` under `::paired_p_best` (the one pairing, for live `check()` and the resume replayer), driven by `application/optimizers/potter/pobb/checks.py::PoBBCheck`. Cross-cycle comparison is the `ab` verb (`resume_and_fork/ab_replay.py`) — re-derived decisions, no new measurements.
 
-**The election's bar is this rule, mirrored.** `selection.py::elect_round_winner` admits an arm on a
-raw θ lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND step 4's
-bounded `P(θ_arm > θ_parent)` above `1 − ε`, PoBB's ε — so one discordant cell (support 0.75 whatever
-θ reads) never promotes. Admission is bounded; the election RANKS on the unbounded posterior
-(bounding it moved a banked crown across a 0.0007 gap). A pick's crowning cells are replayed by
-`rescore_parent` and kept out of later races (`selection.py::crowning_cells`), so the parent's bar
-needs no winner's-curse credit. What the bar does not test is
+**The election's bar reads step 4's posterior on its own confidence.** `selection.py::elect_round_winner`
+admits an arm on a raw θ lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on
+VERDICTS, AND step 4's bounded `P(θ_arm > θ_parent)` above potter's `theta_election` `admission` —
+never PoBB's ε, which says when to stop BUYING an arm, not when to promote one. `ElectionKnobs`
+refuses an `admission` below `sign_posterior(1, 0)` = 0.75, so one discordant cell never promotes.
+Admission is bounded; the election RANKS on the unbounded posterior (bounding it moved a banked crown
+across a 0.0007 gap). **A pick's crowning cells are its discordant wins over its bar**, on the rows
+that election read (`selection.py::crowning_cells`): there its rows are the luck the selection kept,
+so `AdaptiveQueue.draw` and `election_rows` keep them out of every race it judges. A cell it tied on
+reads it as any draw would and stays in the pool. What the bar does not test is
 [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § Open — multi-arc's.
 
 ## Two regimes
@@ -55,7 +58,8 @@ needs no winner's-curse credit. What the bar does not test is
 
 ## Tunable knobs
 
-- potter's `pobb` `epsilon` (`0.15` in its manifest). A stop ends measurement; it is **not** a verdict and never removes the candidate from the election (`is_leader_eligible`).
+- potter's `pobb` `epsilon` (`0.15` in its manifest). A stop ends measurement; it is **not** a verdict and never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/measurement.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/overlap.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
+- potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`; `lock_in_n_min` counts the same). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-accuracy until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
 
@@ -69,7 +73,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
-| 5 | **`PoBBCheck`** — three exits, in order: answer-collapse, leader lock-in, paired `P(best) < ε(n)` | every query | `n_min` | eliminated; records `elimination_cut` decision | — | `optimizers/potter/pobb/checks.py` |
+| 5 | **`PoBBCheck`** — two exits, in order: leader lock-in, paired `P(best) < ε(n)` | every query | `n_min` | eliminated; records `elimination_cut` decision | — | `optimizers/potter/pobb/checks.py` |
 
 **Per query:** cache lookup → stale-data protocol if degraded → `SampleScoredRecord` (`telemetry.py::emit_sample_scored`) → the cell's catch-ups commit → every check in `degradation_checks`, first signal ends the candidate (fatal beats rate beats PoBB).
 
@@ -77,7 +81,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 **Candidates walk at once and decide in turn** (`runner/measurement.py::measure_population`, one loop `scoring/query_loop.py::run_walks`): a later candidate may measure ahead but is checked and cut only once every earlier one is decided, so its priors are a serial round's. That horizon, summed over walks and catch-ups, is the concurrency served (`run_phase_control.py::FlightGauge`).
 
-**One comparator, one stop rule — do not add a sixth.** No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
+**One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; a constant answerer is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 
@@ -171,7 +175,7 @@ Departures from the paper:
 
 ## On-disk shape and replay
 
-Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` record (in `rounds/round_NNNN.json`) carries under `data`: `p_best`, `leader`, `candidate_cells` (the GRADED cells the posterior was fit on, by `Sample.key`, in walk order) and `prior_histories[cid]` (each prior's `response` and `verdict` there, after backfill); a collapse cut carries none. `inputs_ref` records the gate parameters **and which `EliminationGate` (`pobb/checks.py`) fired** — only ε computed a posterior.
+Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` record (in `rounds/round_NNNN.json`) carries under `data`: `p_best`, `leader`, `candidate_cells` (the GRADED cells the posterior was fit on, by `Sample.key`, in walk order) and `prior_histories[cid]` (each prior's `response` and `verdict` there, after backfill). `inputs_ref` records the gate parameters; the record's kind names the `EliminationGate` (`pobb/checks.py`) that fired.
 
 The replayer (`optimizers/potter/resume.py::_pobb_replay_snapshot`) feeds the rescored rows at `candidate_cells` and the recorded `prior_histories` to the same `paired_p_best` on the fixed δ ruler. **The record is the entire input — no cross-round lookup, no backfill** — so replay is bit-for-bit absent a scorer change; under one, the candidate side is rescored and priors stay recorded.
 

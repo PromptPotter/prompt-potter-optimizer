@@ -12,6 +12,7 @@ export * from "./lineage-candidates";
 export * from "./lineage-descendants";
 export * from "./node-config";
 export * from "./output-contract";
+export * from "./lives";
 export * from "./paired-reading";
 export * from "./pipeline-layout";
 export * from "./pipeline-nodes";

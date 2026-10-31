@@ -1,20 +1,12 @@
 "use client";
-import { useMemo } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import {
-  benchStat,
-  indexLineage,
-  readSpend,
-  runningInnerRun,
-  tagValue,
-} from "@/lib/derivations";
+import { readSpend, tagValue, waitingText } from "@/lib/derivations";
 import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
-import { useLineageTree } from "@/lib/lineage";
-import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
+import { encodeCyclePath } from "@/lib/ids";
 import { useEntry } from "@/lib/state/registry";
-import { useLeafIsL4, useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/workspace";
 
 export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
 
@@ -25,28 +17,21 @@ export function useRemoteModel() {
     drillInto,
     backToOuter,
   } = useWorkspace();
-  const leafIsL4 = useLeafIsL4();
   const leafEntry = useEntry(viewedPath ? encodeCyclePath(viewedPath) : null);
-  const { dash, status } = useCycleStream();
+  const { dash, status, isLive } = useCycleStream();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const isOuterView = (viewedPath?.length ?? 1) === 1;
-  const campaignAddress = viewedPath?.[0]?.campaignId ?? "";
-  const { root: lineageRoot } = useLineageTree(
-    campaignAddress,
-    campaignAddress !== "" && isOuterView && leafIsL4,
-  );
-  const innerRun = useMemo(() => runningInnerRun(indexLineage(lineageRoot)), [lineageRoot]);
 
   if (!viewedPath || !cycleId) return null;
 
   // No `settled` gate: a verb is still offered there, and this gates `RunControlButton`'s only mount.
   if (!dash) return null;
   const { lookahead, producer } = dash;
-  const innerHop = innerRun ? pathOfAddress(innerRun.address).at(-1) : undefined;
+  const innerHop = isLive ? dash.current_round.inner : null;
   const { metered, lines } = readSpend(dash);
   const waitNote =
     producer.call_holds && producer.open_for_s !== null && dash.waiting_on
-      ? `waiting on ${dash.waiting_on} · ${fmtDuration(producer.open_for_s)}`
+      ? `waiting on ${waitingText(dash.waiting_on)} · ${fmtDuration(producer.open_for_s)}`
       : null;
   const arm = (cells: number, auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
@@ -75,7 +60,7 @@ export function useRemoteModel() {
     budget: dash.run_limits.budget,
     share: dash.allotment,
     benchLiftPerUsd:
-      leafEntry?.level === "course" ? (benchStat(leafEntry)?.lift_per_usd ?? null) : null,
+      leafEntry?.level === "course" ? (leafEntry.facts.bench?.cost.lift_per_usd ?? null) : null,
     lookahead,
     waitNote,
     providerHeld: dash.backpressure,

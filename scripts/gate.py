@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
@@ -30,6 +31,7 @@ from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from processes import (
     REPO,
     Outcome,
+    clone_cache,
     close_job,
     end_children_with_this_process,
     free_mb,
@@ -96,8 +98,6 @@ class Selection:
     narrowed: tuple[str, ...] | None = None
     # The py lane's probes not kept green, asked in one host process.
     probes: tuple[_Probe, ...] = ()
-    # The commit-msg hook's message: a "commit" check then reads the index, not the working tree.
-    commit_msg: str | None = None
 
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
@@ -1007,8 +1007,8 @@ _RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
 @dataclass(frozen=True)
 class Check:
     name: str
-    # CI's `check` job, its `webapp` job, publish.yml, the commit-msg hook.
-    kind: Literal["py", "web", "release", "commit"]
+    # CI's `check` job, its `webapp` job, publish.yml.
+    kind: Literal["py", "web", "release"]
     run: Callable[[Selection], Outcome]
     # The pre-commit hook's fast set (`--staged`). The pre-push hook runs every check CI runs.
     on_commit: bool = False
@@ -1029,7 +1029,7 @@ class Check:
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
 
     def inputs(self) -> tuple[str, ...] | None:
-        if self.kind in ("release", "commit"):  # the answer lives on the network, or in HEAD
+        if self.kind == "release":  # the answer lives on the network
             return None
         reads = self.reads() if callable(self.reads) else self.reads
         return reads or (_ENGINE if self.kind == "py" else _WEBAPP_READS)
@@ -1107,6 +1107,64 @@ def _mypy(_sel: Selection) -> Outcome:
     return 0, ""
 
 
+# What the plug point must stamp on an arm the example's proposing node made.
+_PLUGIN_SOURCE = "example:propose"
+
+
+# Each proposed arm's source, over every round the run closed, read off its ledger.
+_PLUGIN_SOURCES_PROBE = """
+from promptpotter.config.paths import default_projects_root
+from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.shared.identity import default_identity
+campaigns = build_stores(default_identity(), projects_root=default_projects_root()).campaigns
+for campaign_id in campaigns.list_campaign_ids():
+    hop = campaigns.load_campaign(campaign_id).root_hop
+    for stood in campaigns.standing_rounds(hop, moment=None).rounds.values():
+        for arm in stood.close.panel.values():
+            print(arm.individual.lineage.source)
+"""
+
+
+def _optimizer_plugin(_: Selection) -> Outcome:
+    """The example installed as a distribution of its own, into a scratch venv layered on this
+    one, then run offline: the plug point holds only if its arms carry the example's source."""
+    uv = shutil.which("uv")
+    if not uv:
+        return 1, "`uv` is not on PATH, so the example plugin cannot be installed"
+    with tempfile.TemporaryDirectory(prefix="pp-plugin-") as scratch:
+        venv = Path(scratch) / "venv"
+        code, out = run([sys.executable, "-m", "venv", "--without-pip", str(venv)], REPO)
+        if code:
+            return code, out
+        where = {"base": str(venv), "platbase": str(venv)}
+        site = Path(sysconfig.get_path("purelib", "venv", where))
+        layered = f"import site; site.addsitedir({sysconfig.get_path('purelib')!r})\n"
+        (site / "_layered.pth").write_text(layered, encoding="utf-8")
+        python = Path(sysconfig.get_path("scripts", "venv", where)) / Path(sys.executable).name
+        # A copy: setuptools builds inside the directory it installs from.
+        plugin = shutil.copytree(REPO / _EXAMPLE_PLUGIN_DIR, Path(scratch) / "plugin")
+        install = [uv, "pip", "install", "--python", str(python), "--no-deps", str(plugin)]
+        code, out = run(install, REPO)
+        if code:
+            return code, out
+        home = Path(scratch) / "home"
+        argv = [str(python), "scripts/offline_run.py", "--optimizer", "example"]
+        code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(home))
+        if code:
+            return code, out
+        # `offline_run.py` homes each optimizer's run under its own name.
+        probe = [str(python), "-c", _PLUGIN_SOURCES_PROBE]
+        code, read = run(probe, REPO, PROMPTPOTTER_HOME=str(home / "example"))
+        if code:
+            return code, read
+        if _PLUGIN_SOURCE not in (sources := set(read.split())):
+            return (
+                1,
+                f"no arm carries source {_PLUGIN_SOURCE!r}; arms carry {sorted(sources)}\n{out}",
+            )
+    return 0, out
+
+
 _EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
 
 
@@ -1127,70 +1185,6 @@ def _extras(_: Selection) -> Outcome:
     if gone:
         return 1, "not an extra in pyproject.toml:\n" + "\n".join(gone)
     return 0, ""
-
-
-# The ledger's wire shape, kept fresh by the `specs` check: what `restamp` prunes a line against.
-_EVENTS_SPEC = "docs/specs/events-asyncapi.generated.json"
-
-
-def _ledger_shape(text: str) -> dict[str, bool]:
-    """Every key path a ledger line may carry → whether its reader requires it, walked from
-    `CycleRecord`'s discriminator; a list's or a mapping's members sit at their holder's path."""
-    schemas = json.loads(text)["components"]["schemas"]
-    shape: dict[str, bool] = {}
-
-    def walk(node: dict[str, Any], path: str, seen: frozenset[str]) -> None:
-        if ref := node.get("$ref"):
-            name = ref.rpartition("/")[2]
-            if name not in seen:
-                walk(schemas[name], path, seen | {name})
-            return
-        for branch in (*node.get("anyOf", ()), *node.get("oneOf", ()), *node.get("allOf", ())):
-            walk(branch, path, seen)
-        required = set(node.get("required", ()))
-        for key, sub in node.get("properties", {}).items():
-            shape[path + key] = shape.get(path + key, False) or key in required
-            walk(sub, f"{path}{key}.", seen)
-        for held in (node.get("items"), node.get("additionalProperties")):
-            if isinstance(held, dict):
-                walk(held, path, seen)
-
-    for kind, ref in schemas["CycleRecord"]["discriminator"]["mapping"].items():
-        shape[kind] = True
-        walk({"$ref": ref}, f"{kind}.", frozenset())
-    return shape
-
-
-def _ledger_fields(sel: Selection) -> Outcome:
-    """A commit that drops a ledger key, or requires one an older line lacks, leaves every
-    campaign written before it unreadable until `restamp` runs: its body says so."""
-    code, before = git("show", f"HEAD:{_EVENTS_SPEC}")
-    if code:
-        return code, before
-    if sel.commit_msg is None:
-        after = (REPO / _EVENTS_SPEC).read_text(encoding="utf-8")
-    elif (shown := git("show", f":{_EVENTS_SPEC}"))[0]:
-        return shown
-    else:
-        after = shown[1]
-    was, now = _ledger_shape(before), _ledger_shape(after)
-    moved = [f"  dropped {key}" for key in sorted(was.keys() - now.keys())] + [
-        f"  newly required {key}"
-        for key, required in sorted(now.items())
-        # Under a key the older line lacks, nothing is newly missing.
-        if required and not was.get(key) and key.rpartition(".")[0] in was
-    ]
-    body = "\n".join(
-        line for line in (sel.commit_msg or "").splitlines() if not line.startswith("#")
-    )
-    if not moved or "restamp" in body:
-        return 0, ""
-    return 1, (
-        "a ledger record's shape moved, so a campaign on disk written before it is unreadable "
-        "until `python -m promptpotter restamp --apply` prunes a dropped key (a newly required "
-        "one it cannot: its report names the campaign to delete). Name `restamp` in the commit "
-        "body:\n" + "\n".join(moved)
-    )
 
 
 CHECKS: tuple[Check, ...] = (
@@ -1308,10 +1302,18 @@ CHECKS: tuple[Check, ...] = (
         lambda _: run(
             [sys.executable, "scripts/offline_run.py"],
             REPO,
-            PROMPTPOTTER_HOME=str(REPO / ".gate_cache" / OFFLINE_RUN),
+            # The clone's, so a worktree's run answers for main and the worktree deletes clean.
+            PROMPTPOTTER_HOME=str(clone_cache() / OFFLINE_RUN),
         ),
         landing=True,
         reads=OFFLINE_RUN_READS,
+    ),
+    Check(
+        "optimizer-plugin",
+        "py",
+        _optimizer_plugin,
+        landing=True,
+        reads=(*OFFLINE_RUN_READS, f"{_EXAMPLE_PLUGIN_DIR}/", *_GATE),
     ),
     Check("lockfile", "web", _lockfile, on_commit=True),
     Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
@@ -1338,12 +1340,12 @@ CHECKS: tuple[Check, ...] = (
         alone=True,
         after="next-build",
         product=("webapp/out",),
-        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME),
+        # The cold server's backend is the offline world's (`e2e/serve_app.py`).
+        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME, "scripts/offline_world.py"),
     ),
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
-    Check("ledger-fields", "commit", _ledger_fields),
 )
 # A lane runs in this order, so what a check reads is built before it.
 assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)
@@ -1415,8 +1417,8 @@ def _lanes(
     return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
 
 
-# What a pushed tip's checkout borrows from the pushing tree: its env, and the store its greens key in.
-_BORROWED = (".venv", "webapp/node_modules", ".gate_cache")
+# What a pushed tip's checkout borrows from the pushing tree: its env. Its greens are the clone's.
+_BORROWED = (".venv", "webapp/node_modules")
 
 
 def _link(link: Path, target: Path) -> None:
@@ -1434,7 +1436,6 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
     code, out = git("worktree", "add", "--detach", str(tree), tip)
     if code:
         raise RuntimeError(f"git worktree add {tip}: {out}")
-    (REPO / ".gate_cache").mkdir(exist_ok=True)
     links = [tree / rel for rel in _BORROWED if (REPO / rel).is_dir()]
     try:
         for link in links:
@@ -1582,24 +1583,16 @@ def main() -> int:
     parser.add_argument(
         "--commit-msg",
         metavar="FILE",
-        help="the commit-msg hook: a subject opening on ASCII, and the `commit` checks",
+        help="the commit-msg hook: a subject opening on ASCII",
     )
     args = parser.parse_args()
     if args.commit_msg:
-        message = Path(args.commit_msg).read_bytes()
-        subject = message.split(b"\n", 1)[0]
+        subject = Path(args.commit_msg).read_bytes().split(b"\n", 1)[0]
         if not subject[:1].isascii():
             # A BOM (`EF BB BF`, PowerShell's `Out-File`) hides in front of the type `git log` greps.
             print(f"gate: the commit subject opens on a non-ASCII byte: {subject!r}")
             return 1
-        sel = Selection(True, (), (), commit_msg=message.decode("utf-8", errors="replace"))
-        refused = 0
-        for check in (c for c in CHECKS if c.kind == "commit"):
-            rc, out = check.run(sel)
-            if rc:
-                refused += 1
-                print(f"gate: {check.name}: {out}")
-        return 1 if refused else 0
+        return 0
 
     selected = (("py", args.py), ("web", args.web), ("release", args.release))
     kinds = {k for k, on in selected if on} or {"py", "web"}

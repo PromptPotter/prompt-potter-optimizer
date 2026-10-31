@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
@@ -47,38 +47,55 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     for rr in rounds:
         if rr.round == 0 or rr.election is None or rr.election.electable == 0:
             continue
-        promoted = ROUND_ADVANCE_INFO[rr.overlap.advance].promoted
-        bank = max(0, min(cap, bank + (1 if promoted else -1)))
+        match ROUND_ADVANCE_INFO[rr.overlap.advance].stall:
+            case StallEffect.RESETS:
+                bank = min(cap, bank + 1)
+            case StallEffect.COUNTS:
+                bank = max(0, bank - 1)
+            case StallEffect.STARTS | StallEffect.SKIPS:
+                pass
     return bank
 
 
-def lives_bar(left: int, cap: int | None) -> str:
-    if left <= 0:
-        return "💀"
-    if cap is None or cap < left:
-        return "♥" * left
-    return "♥" * left + "♡" * (cap - left)
-
-
-def lives_label(left: int, cap: int | None) -> str:
-    if left <= 0:
-        return "No lives left — the run stops after this round"
-    noun = "life" if left == 1 else "lives"
-    if cap is None or cap < left:
-        return f"{left} {noun} left"
-    return f"{left} of {cap} {noun} left"
+# A life bank's words: one pip per banked life, one per spent one, a skull on an empty bank.
+type LivesWord = Literal["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]
+LIVES_WORDS: dict[LivesWord, str] = {
+    "banked": "♥",
+    "spent_pip": "♡",
+    "empty": "💀",
+    "empty_sentence": "No lives left — the run stops after this round",
+    "life": "life",
+    "lives": "lives",
+}
 
 
 class LivesReading(FrozenModel):
-    """A run's life bank as every surface shows it. Built by :meth:`of` alone."""
+    """A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,
+    read off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`)."""
 
-    bar: str = Field(description="One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank.")
-    label: str
-    spent: bool = Field(description="The bank is empty: the run stops after this round.")
+    left: int
+    cap: int | None = Field(description="Null where the bank has no cap.")
 
-    @classmethod
-    def of(cls, left: int, cap: int | None) -> LivesReading:
-        return cls(bar=lives_bar(left, cap), label=lives_label(left, cap), spent=left <= 0)
+    @property
+    def spent(self) -> bool:
+        """The bank is empty: the run stops after this round."""
+        return self.left <= 0
+
+    @property
+    def bar(self) -> str:
+        if self.spent:
+            return LIVES_WORDS["empty"]
+        spent = 0 if self.cap is None or self.cap < self.left else self.cap - self.left
+        return LIVES_WORDS["banked"] * self.left + LIVES_WORDS["spent_pip"] * spent
+
+    @property
+    def label(self) -> str:
+        if self.spent:
+            return LIVES_WORDS["empty_sentence"]
+        noun = LIVES_WORDS["life" if self.left == 1 else "lives"]
+        if self.cap is None or self.cap < self.left:
+            return f"{self.left} {noun} left"
+        return f"{self.left} of {self.cap} {noun} left"
 
 
 class LineStep(NamedTuple):
@@ -174,8 +191,8 @@ class RunStanding(FrozenModel):
 
     rounds_without_advance: int
     lives: LivesReading | None = Field(
-        description="The life bank after this round: the pips and their words, as the readout "
-        "prints them. Null where the campaign banks no lives (`optimization.lives`)."
+        description="The life bank after this round. Null where the campaign banks no lives "
+        "(`optimization.lives`)."
     )
     selection: ArmName | None = Field(
         description="The optimizer's declared pick (`declared_selection`), as the arm it was "
@@ -215,7 +232,9 @@ class RunStanding(FrozenModel):
     def opening(cls, lives: tuple[int, int] | None) -> RunStanding:
         return cls(
             rounds_without_advance=0,
-            lives=None if lives is None else LivesReading.of(stalls_left([], lives), lives[1]),
+            lives=None
+            if lives is None
+            else LivesReading(left=stalls_left([], lives), cap=lives[1]),
             selection=None,
             parent=None,
             changes="",
@@ -252,7 +271,9 @@ class RunStanding(FrozenModel):
         after_origin = [rr for rr in rounds if rr.round > 0]
         return cls(
             rounds_without_advance=rounds_without_advance(rounds),
-            lives=None if lives is None else LivesReading.of(stalls_left(rounds, lives), lives[1]),
+            lives=None
+            if lives is None
+            else LivesReading(left=stalls_left(rounds, lives), cap=lives[1]),
             selection=arms[chosen],
             parent=arms[before[-1]] if before else None,
             changes=""

@@ -368,7 +368,8 @@ class BackendClient:
             wait: float | None = None
             unreachable: httpx.TransportError | None = None
             async with self.backpressure.send() as ticket:
-                with admitted(CELL, bound, model=None, provider=None) as admission:
+                # A backend sends on the box's keys, whoever holds one of their own.
+                with admitted(CELL, bound, model=None, provider=None, paid_by="host") as admission:
                     try:
                         # The cell's envelope and the run's wall clock end the wait, as a HALTED cut.
                         resp = await client.post(
@@ -474,7 +475,9 @@ class BackendClient:
             if bound is not None and self._connector.holds_own_sends:
                 hold.enter_context(reserved(CELL, bound))
             elif bound is not None:
-                admission = hold.enter_context(admitted(CELL, bound, model=None, provider=None))
+                admission = hold.enter_context(
+                    admitted(CELL, bound, model=None, provider=None, paid_by="host")
+                )
             started = time.monotonic()
             try:
                 result = await run(self.workload, sample, payload)

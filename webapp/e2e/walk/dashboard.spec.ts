@@ -23,19 +23,12 @@ test.describe("dashboard", () => {
     await expect(page.getByRole("region", { name: /Time-ray/ })).toBeVisible({ timeout: 60_000 });
   });
 
-  test("the secondary panes and the config map mount", async ({ page }) => {
-    await expect(page.getByRole("region", { name: /Config map/ })).toBeVisible();
-    await expect(page.getByRole("region", { name: /Run details/ })).toBeVisible();
-  });
-
   test("a served object in scope can be copied", async ({ page }) => {
     await expect(page.getByRole("button", { name: /Copy all candidates/ })).toBeVisible();
   });
 
-  test("the collapsed panes open, and what they draw survives a poll", async ({ page }) => {
+  test("the round charts draw, and survive a poll", async ({ page }) => {
     // Sit through a poll: the spend map arrives on the wire, not at mount.
-    const fold = page.getByRole("button", { name: /Run details/ }).first();
-    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
     await expect(page.getByText(/Cost by round/)).toBeVisible();
     await page.waitForTimeout(6000);
     await ready(page);

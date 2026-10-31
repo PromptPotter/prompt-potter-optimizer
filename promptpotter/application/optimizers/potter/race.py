@@ -30,19 +30,14 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.nodes import CatchUp, CatchUpFn, Panel
     from promptpotter.application.scoring.query_loop import Walk
-    from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
 
-def _reason(ctx: EliminationContext, unit: MeasuredUnit, labels: Mapping[ArmKey, str]) -> str:
+def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
     q = f"q{ctx['queries_scored']}/{ctx['total_queries']}"
-    if ctx["gate"] is EliminationGate.COLLAPSED:
-        return (
-            f"answer collapsed {q}  one label for every {unit} — no measurement of ability to score"
-        )
     n = ctx["n_priors"]
     priors = f"(of {n} prior{'' if n == 1 else 's'})"
     if ctx["gate"] is EliminationGate.LOCK_IN:
@@ -155,8 +150,6 @@ class PoBBRace(CatchUpPool):
         ctx: NodeContext,
         panel: Panel,
         catch_up: CatchUpFn,
-        *,
-        measured_unit: MeasuredUnit,
     ) -> None:
         # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
         parent = ArmKey(ctx.read(Lineage).parent.id)
@@ -173,7 +166,6 @@ class PoBBRace(CatchUpPool):
         )
         self._ctx = ctx
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
-        self._measured_unit = measured_unit
         frontier = ctx.read(Frontier)
         if parent_results := frontier.parent_own_rows:
             self._check.register_completed(parent_results, key=parent)
@@ -209,33 +201,26 @@ class PoBBRace(CatchUpPool):
             "round_num": round_num,
             # The fewest shared cells a prior is read on, which the replay's fit needs too.
             "n_min": int(self._check.n_min),
+            "recorded_p_best": context["p_best"],
         }
-        data: dict[str, Any] = {}
-        if fit is not None:
-            inputs["recorded_p_best"] = context["p_best"]
-            # Each cell by its `Sample.key`: a replay re-fits from this JSON record.
-            data = {
-                "p_best": context["p_best"],
-                "leader": context["leader"],
-                "paired_breakdown": signal.paired_breakdown,
-                "candidate_cells": fit.cells,
-                "prior_histories": {
-                    pid: {cell: grade._asdict() for cell, grade in grades.items()}
-                    for pid, grades in fit.priors.items()
-                },
-            }
+        # Each cell by its `Sample.key`: a replay re-fits from this JSON record.
+        data: dict[str, Any] = {
+            "p_best": context["p_best"],
+            "leader": context["leader"],
+            "paired_breakdown": signal.paired_breakdown,
+            "candidate_cells": fit.cells,
+            "prior_histories": {
+                pid: {cell: grade._asdict() for cell, grade in grades.items()}
+                for pid, grades in fit.priors.items()
+            },
+        }
         check = self._check
         if gate is EliminationGate.LOCK_IN:
             kind = PotterCheckpointKind.LEADER_LOCK_IN
             inputs |= {"lock_in": float(check.lock_in), "lock_in_n_min": int(check.lock_in_n_min)}
         else:
             kind = PotterCheckpointKind.ELIMINATION_CUT
-            # WHICH gate cut it, so the replayer re-derives the rule that fired.
-            inputs["gate"] = gate
-            if gate is EliminationGate.EPSILON:
-                inputs["epsilon"] = context["epsilon"]
+            inputs["epsilon"] = context["epsilon"]
         self._replay.decide(kind, inputs, True, data=data)
         named = {**labels, check.parent: "parent"}
-        return Elimination(
-            reason=_reason(context, self._measured_unit, named), context=dict(context)
-        )
+        return Elimination(reason=_reason(context, named), context=dict(context))

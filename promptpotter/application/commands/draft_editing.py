@@ -28,7 +28,7 @@ def origin_effect(
 ) -> OriginEditedEffect | NoEffect:
     """Recorded on the ack because the command payload states only what was ASKED for."""
     moved = origin_delta(before, origin_projection(owned_draft(stores, draft_id)))
-    return OriginEditedEffect(moved) if moved else NoEffect()
+    return OriginEditedEffect(moved=moved) if moved else NoEffect()
 
 
 def edit_draft_campaign(

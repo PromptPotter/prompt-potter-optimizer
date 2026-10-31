@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import Lineage, Replay, Ruler
 from promptpotter.application.optimizers.nodes import Selection
-from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+from promptpotter.application.optimizers.potter.knobs import ElectionKnobs
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
     closest_to_bar,
@@ -22,11 +23,18 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellSheet
 
 
-def _theta(value: float | None, *, signed: bool = True) -> str:
+def _theta(value: float | None) -> str:
     """A θ never fit prints ``n/a``, never ``0.000``, which is a real ability."""
-    if value is None:
-        return "n/a"
-    return f"{value:+.3f}" if signed else f"{value:.3f}"
+    return "n/a" if value is None else f"{value:+.3f}"
+
+
+def _lift(key: ArmKey, lift: float, abilities: RoundAbilities) -> str:
+    """The lift's own se, the one admission divides by: never either arm's alone."""
+    se = math.hypot(abilities.theta_se[key], abilities.bar[key][1])
+    return (
+        f"θ lift {lift:+.3f} logits, se {se:.3f} "
+        f"(θ {_theta(abilities.theta.get(key))} vs parent {_theta(abilities.bar[key][0])})"
+    )
 
 
 def _verdict_reason(
@@ -53,27 +61,19 @@ def _verdict_reason(
             f"no arm could be read against the parent; cells each θ was read on: "
             f"{read_on or 'none'}; {census}{scale}"
         )
-    lift = reads[leading]
-    parent = abilities.bar[leading][0]
-    numbers = (
-        f"θ {_theta(abilities.theta.get(leading))} vs parent {_theta(parent)}",
-        f"se {_theta(abilities.theta_se.get(leading), signed=False)}",
-    )
+    lift = _lift(leading, reads[leading], abilities)
     if winner is not None:
         runner = closest_to_bar(reads, beside=winner)
         return (
-            f"{labels[winner]} won on θ lift {lift:+.3f} ({numbers[0]}, {numbers[1]})"
+            f"{labels[winner]} won on {lift}"
             + (
-                f"; runner-up {labels[runner]} at {reads[runner]:+.3f}"
+                f"; runner-up {labels[runner]} at θ lift {reads[runner]:+.3f} logits"
                 if runner is not None
                 else ""
             )
             + scale
         )
-    return (
-        f"no arm cleared the parent: best {labels[leading]} {numbers[0]} "
-        f"(lift {lift:+.3f}, {numbers[1]}); {census}{scale}"
-    )
+    return f"no arm cleared the parent: best {labels[leading]} {lift}; {census}{scale}"
 
 
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
@@ -81,14 +81,14 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     lineage = ctx.read(Lineage)
     electable = measured.electable
     rows: dict[ArmKey, CellSheet] = {key: measured.pooled(key) for key in electable}
-    epsilon = ctx.knobs(PoBBKnobs).epsilon
+    admission = ctx.knobs(ElectionKnobs).admission
     selected, abilities = elect_round_winner(
         electable,
         rows,
         measured.pooled(measured.parent.key),
         measured.coverage_floor,
         ruler,
-        epsilon=epsilon,
+        admission=admission,
     )
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
@@ -98,7 +98,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
             "arms": electable,
             "round_num": ctx.round_num,
             "coverage_floor": measured.coverage_floor,
-            "epsilon": epsilon,
+            "admission": admission,
             # Names which of the round's banked references the bar was; its rows are the close's.
             "parent": measured.parent.key,
             "crowned": sorted(measured.crowned),

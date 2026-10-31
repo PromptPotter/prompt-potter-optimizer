@@ -30,6 +30,7 @@ import { OptimizerSetupSection } from "./OptimizerSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
+import { HeadToHeadSection, startOptions, type HeadToHeadDraft } from "./HeadToHeadArms";
 
 function CheckinLoadingWindow({ model }: { model: string }) {
   const [secs, setSecs] = useState(0);
@@ -164,11 +165,12 @@ export function IngestComposer() {
   );
 }
 
-function boundsLabel(launch: StartCheckinOptions, campaign: Budget): string {
+function boundsLabel(launch: StartCheckinOptions, campaign: Budget, arms: number): string {
   const usd = launch.budget?.usd;
   const spend = usd == null ? "account's cap" : `$${usd} cap`;
   const rounds = budgetAxis(campaign, "rounds");
-  return `${spend} · ${rounds == null ? "no round cap" : `${rounds} round${rounds === 1 ? "" : "s"}`}`;
+  const each = arms > 0 ? " · each arm" : "";
+  return `${spend} · ${rounds == null ? "no round cap" : `${rounds} round${rounds === 1 ? "" : "s"}`}${each}`;
 }
 
 type Step = "data" | "scoring" | "pipeline" | "run";
@@ -187,9 +189,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   // The schema's `writeOnly` subtree, already in `StartCheckinOptions` shape.
   const [launch, setLaunch] = useState<StartCheckinOptions>({});
   const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
+  const [h2h, setH2h] = useState<HeadToHeadDraft>({ id: "", arms: [] });
   const [seededFor, setSeededFor] = useState<string | null>(null);
   if (served && served.draft_id !== seededFor) {
     setSeededFor(served.draft_id);
+    setH2h({ id: `${served.slug}-h2h`, arms: [] });
     // Per step: a step's key is no patch path, so its fields commit from their own root.
     const stepSchemas = Object.values((served.setup_schema as FieldSchema).properties ?? {});
     setLaunch(
@@ -284,7 +288,24 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </PipelineSetupSection>
       </SetupStep>
 
-      <SetupStep title="Run bounds" answer={boundsLabel(launch, draft.optimization_overrides.budget)} open={gapped.has("run")}>
+      <SetupStep
+        title="Head-to-head"
+        answer={h2h.arms.length === 0 ? "one campaign" : h2h.arms.map((a) => a.key).join(" vs ")}
+        open={false}
+      >
+        <HeadToHeadSection
+          value={h2h}
+          onChange={setH2h}
+          base={draft.optimization_overrides.optimizer}
+          setup={draft.optimizer_setup}
+        />
+      </SetupStep>
+
+      <SetupStep
+        title="Run bounds"
+        answer={boundsLabel(launch, draft.optimization_overrides.budget, h2h.arms.length)}
+        open={gapped.has("run")}
+      >
         {steps.run ? (
           <SchemaFields schema={steps.run} values={{ ...draft, ...launch }} onCommit={commit} />
         ) : null}
@@ -313,9 +334,15 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         className="chat-cta-btn"
         disabled={blocked || flow.busy}
         aria-describedby={blocked ? blockersId : undefined}
-        onClick={() => flow.startFromReady(launch)}
+        onClick={() => flow.startFromReady(startOptions(launch, h2h))}
       >
-        {flow.busy ? "Starting…" : flow.saving ? "Saving…" : "Start campaign"}
+        {flow.busy
+          ? "Starting…"
+          : flow.saving
+            ? "Saving…"
+            : h2h.arms.length > 0
+              ? `Start ${h2h.arms.length} arms`
+              : "Start campaign"}
       </button>
     </div>
   );

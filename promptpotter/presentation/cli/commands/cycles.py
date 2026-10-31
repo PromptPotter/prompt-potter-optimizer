@@ -4,6 +4,7 @@ import argparse
 
 from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
 from promptpotter.application.hierarchy import list_hierarchy
+from promptpotter.application.views.render.primitives import rounds_readout
 from promptpotter.domain.cycle_paths import hierarchy_address
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
 from promptpotter.presentation.cli.commands.result import CommandResult
@@ -11,11 +12,10 @@ from promptpotter.presentation.cli.commands.workspace import open_stores
 
 
 def _line(course: HierarchyCourse, *, active: bool) -> str:
-    state = course.state
-    rounds = next((s.value for s in course.stats if s.key == "rounds"), None)
+    state, facts = course.state, course.facts
     return (
-        f"{course.address}  {state.run_phase.value}  {state.status.label}"
-        + (f"  {rounds}" if rounds else "")
+        f"{course.address}  {state.status.run_phase.value}  {state.status.label}"
+        + f"  {rounds_readout(facts.rounds_closed, facts.rounds_cap)}"
         + (
             f"  paused by {state.pause.cause.value}"
             + (f": {state.pause.detail}" if state.pause.detail else "")
@@ -58,7 +58,7 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
         if isinstance(campaign, HierarchyCampaign)
         for course in campaign.children
     ]
-    # Each arm campaign's `new --arm` address: the head-to-head ids already taken.
+    # Each arm campaign's `<h2h>:<key>`: the head-to-head ids already taken.
     arms = [
         f"  {tag.value}  {campaign.address}"
         for campaign in listing.entries

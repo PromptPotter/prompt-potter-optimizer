@@ -1,15 +1,20 @@
-"""GitHub is OAuth 2.0, not OIDC: no ID token to verify, and a synthetic issuer keeps `(iss, sub)` provider-distinct."""
+"""GitHub is OAuth 2.0, not OIDC: no ID token to verify, and a synthetic issuer keeps `(iss, sub)` provider-distinct.
+
+So the flow's `nonce` binds nothing here; the `state` the callback checks is the flow's one bind.
+"""
 
 from __future__ import annotations
 
+from typing import override
 from urllib.parse import urlencode
 
 import httpx
 
-from promptpotter.infrastructure.identity.google import ProviderIdentity
 from promptpotter.infrastructure.identity.provider_config import (
     CodeExchangeError,
     OIDCProviderConfig,
+    ProviderIdentity,
+    SignInClient,
 )
 from promptpotter.shared.tls import tls_context
 
@@ -20,11 +25,12 @@ GITHUB_USER_URL = "https://api.github.com/user"
 GITHUB_EMAIL_URL = "https://api.github.com/user/emails"
 
 
-class GitHubProviderClient:
+class GitHubProviderClient(SignInClient):
     def __init__(self, config: OIDCProviderConfig) -> None:
         self._config = config
 
-    def authorize_url(self, *, state: str) -> str:
+    @override
+    def authorize_url(self, *, state: str, nonce: str) -> str:
         params = {
             "client_id": self._config.client_id,
             "redirect_uri": self._config.redirect_uri,
@@ -34,7 +40,8 @@ class GitHubProviderClient:
         }
         return f"{GITHUB_AUTH_URL}?{urlencode(params)}"
 
-    async def exchange_code(self, *, code: str) -> ProviderIdentity:
+    @override
+    async def exchange_code(self, *, code: str, nonce: str) -> ProviderIdentity:
         async with httpx.AsyncClient(timeout=15.0, verify=tls_context()) as client:
             token_response = await client.post(
                 GITHUB_TOKEN_URL,

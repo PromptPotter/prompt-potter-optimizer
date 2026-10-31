@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
 import {
-  STOP_REASON_OUTCOMES,
+  STOP_REASON_INFO,
   type CommandKind,
   type CommandPayloads,
   type HierarchyResponse,
@@ -23,8 +23,8 @@ const EXPECTED_4XX: [RegExp, number][] = [
   [/\/evidence\b/, 400],
   // A campaign with no completed round 404s round 0; its audit twin answers `200 null`, so a 4xx on `/audit` is reported.
   [/\/rounds\/\d+(\?|$)/, 404],
-  // The throwaway world holds no provider key, so a check-in's resolver turn is refused `provider_unkeyed`.
-  [/\/commands\/resolve-origin\b/, 409],
+  // The throwaway world holds no provider key, so a check-in's resolver turn is refused `no_api_key`.
+  [/\/commands\/resolve-origin\b/, 422],
 ];
 
 type Problem = { kind: string; text: string };
@@ -278,12 +278,12 @@ export function assertBoundedStop(label: string, stopped: string) {
   if (!stopped) return;
   if (!isStopReason(stopped)) {
     throw new Error(
-      `${label} stopped on '${stopped}', which STOP_REASON_OUTCOMES does not classify — the ` +
+      `${label} stopped on '${stopped}', which STOP_REASON_INFO does not classify — the ` +
         `generated mirror has drifted from domain/phases.py::STOP_REASON_INFO`,
     );
   }
   expect(
-    STOP_REASON_OUTCOMES[stopped],
+    STOP_REASON_INFO[stopped].outcome,
     `${label} terminated on '${stopped}', which the engine classifies as a FAILURE rather than a ` +
       `bounded stop`,
   ).not.toBe("failed");

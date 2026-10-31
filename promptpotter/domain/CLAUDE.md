@@ -43,15 +43,11 @@ says why on itself, and the `surface-ledger` row `models_lax` counts them.
 
 ## Tolerance is scoped by what a payload is FOR
 
-`extra="forbid"` reaches every model nested in a `RoundStatement`, so **renaming a field is a data
-migration**, fatal one way or the other; which way is correct depends on the payload:
+`extra="forbid"` reaches every model nested in a `RoundStatement`, so **renaming a field wipes run
+data**; what a file written before it meets depends on the payload:
 
 - **Reporting** (`round_diagnostics.py`) — every field defaults; nothing gates on it.
 - **Scoring** (`ArmState`, `StopSignal`, `OptSearchPoint`) — required; a tolerant read hands back a
   silently defaulted winner.
-- **Ledger** (`CycleRecord` arms) — never tolerant (`infrastructure/store/read_model.py::ledger_record`);
-  a retired key is pruned by `application/maintenance/restamp.py::_prune_record`.
-
-A renamed or newly required field cannot be pruned: `application/maintenance/restamp.py::check_readable`
-names each refused cycle's campaign `delete`. **A commit moving a ledger key names `restamp` in its
-body** — the commit-msg hook's `scripts/gate.py::_ledger_fields` refuses it otherwise.
+- **Ledger** (`CycleRecord` arms) — never tolerant (`infrastructure/store/read_model.py::ledger_record`):
+  a line no arm accepts is `shared/errors.py::LedgerUnreadableError`, the refusal, never a repair.

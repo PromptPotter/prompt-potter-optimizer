@@ -17,7 +17,6 @@ from promptpotter.domain.run_records import (
     RoundEnteredRecord,
     RoundWarningRecord,
 )
-from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_cycle_facts,
@@ -75,7 +74,7 @@ def build_node_block(record: LLMCallRecord) -> NodeBlock:
             finish_reason=None,
             schema_repair_errors=[],
         )
-    usage = TokenAccount.from_payload(payload.get("usage"))
+    usage = record.usage
     rendered = "template_name" in payload
     return NodeBlock(
         input=NodeInput(
@@ -93,7 +92,7 @@ def build_node_block(record: LLMCallRecord) -> NodeBlock:
         model=payload.get("model"),
         usage=usage,
         # A replay's counts are the banked call's: a share of them is a discount this run never got.
-        prefix=usage.prefix(replayed=bool(payload.get("cached"))),
+        prefix=None if usage is None else usage.prefix(replayed=bool(payload.get("cached"))),
         duration_s=payload.get("duration_s"),
         finish_reason=payload.get("finish_reason") or None,
         schema_repair_errors=payload.get("schema_repair_errors") or [],

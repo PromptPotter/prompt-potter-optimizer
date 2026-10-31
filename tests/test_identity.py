@@ -38,7 +38,7 @@ from factories import (
 )
 from offline_world import Router
 
-from promptpotter.application import optimizers
+from promptpotter.application import optimizer_manifest, optimizers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -61,8 +61,10 @@ from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    CyclePlan,
+    arm_plans,
     declare,
-    mint_framed_cycle,
+    mint_arms,
     resolve_cycle_plan,
     resolve_resume,
 )
@@ -75,6 +77,7 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
 from promptpotter.application.optimizers.gepa.state import ParetoScores
@@ -121,7 +124,7 @@ from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
-from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
+from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -130,12 +133,14 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.command_kinds import (
+    ArmRequest,
     ForkSeed,
+    HeadToHeadRequest,
     StartCheckinPayload,
     SubmittedArm,
 )
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
@@ -406,6 +411,25 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert replace(capo, manifest=rewalked).treatment(every, shelf).digest != (
         capo.treatment(every, shelf).digest
     ), "a manifest walking its initial population apart ran under the treatment of one racing it"
+    # A prompt-shaping class's method re-keys the run though it is only ever read through an instance.
+    manifest_file, read_text = Path(optimizer_manifest.__file__), Path.read_text
+    as_shipped = read_text(manifest_file, "utf-8")
+    drawing_on = as_shipped.replace(
+        'self.access(member, pool) != "off"', 'self.access(member, pool) == "on"'
+    )
+    assert drawing_on != as_shipped, "the probe's edit no longer lands in `SelectedOptimizer.draws`"
+    as_run_source = potter.treatment(every, shelf).source
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            Path,
+            "read_text",
+            lambda p, *a, **k: drawing_on if p == manifest_file else read_text(p, *a, **k),
+        )
+        nodes._source_digest.cache_clear()
+        assert potter.treatment(every, shelf).source != as_run_source, (
+            "an edit to which pools a member draws ran under the unedited treatment"
+        )
+    nodes._source_digest.cache_clear()
     # A pool its readers could draw nothing from never runs: the silent outcome is a pool-less search.
     earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
@@ -1055,7 +1079,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             declaration=declaring(rungs),
             experiment=None,
             model_capabilities={},
-            backend_revision=None,
         )
     fork_seed = parse_cycle_seed(
         ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
@@ -1147,15 +1170,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
 
-    def minted(declaration: RunDeclaration, campaign_id: str) -> object:
-        return asyncio.run(
-            mint_framed_cycle(arming, declaration, rows_30, campaign_id=campaign_id, task_text=None)
+    def arm_of(key: str, budget: Budget) -> list[CyclePlan]:
+        request = HeadToHeadRequest(
+            head_to_head_id="h",
+            arms=[
+                ArmRequest(
+                    arm_key=key,
+                    optimization=OptimizationOverrides(optimizer=door.optimization.optimizer),
+                )
+            ],
+            budget=budget,
         )
+        return asyncio.run(arm_plans(arming, door, request, rows_30))
 
-    minted(armed, "decl__0000h1")
-    # An arm declared over other bench defaults never joins its head-to-head.
+    # No dollar cap: a backend holding its own sends prices no cell before a run.
+    mint_arms(arm_of("a", Budget(usd=None, rounds=2)), billed=None)
+    # An arm declared over another budget never joins its head-to-head, and takes no campaign.
+    standing = stores.campaigns.list_campaigns(lifecycle="all")
     with pytest.raises(ConflictError):
-        minted(twin.model_copy(update={"bench_defaults_pin": "moved"}), "decl__0000h2")
+        arm_of("b", Budget(usd=None, rounds=3))
+    assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
+        "an arm refused off its head-to-head's record minted a campaign"
+    )
     # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
     # campaign minted on that declaration resolves to.
     panel = InnerTasks(
@@ -1297,7 +1333,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         declaration={},
         experiment=None,
         model_capabilities={"": {"m": floored}},
-        backend_revision=None,
     )
     with pytest.raises(ConfigDriftError) as refused:
         resolve_resume(recut, held_campaign, rows_30[:-1])

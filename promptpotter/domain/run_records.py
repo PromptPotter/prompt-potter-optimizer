@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import ConfigDict, Field, RootModel, TypeAdapter, field_validator, model_validator
+from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmState, Proposal, Proposed
@@ -45,14 +45,16 @@ from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
+    KeySource,
+    TokenAccount,
     TokenUsageKind,
+    UserSpend,
     bill_or_rate_usd,
     cycle_axes_only,
 )
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import ARM_ROLES, MeasurementRole
 
@@ -436,6 +438,9 @@ class TokenUsageRecord(FrozenModel):
     cost_usd: float | None = None
     # OUR rate's price of an unbilled call, stamped once: it counts against ceilings, never spent.
     rate_priced_usd: float | None = None
+    # Whose wallet paid: the one fact a ledger's path cannot name, since the path names the account.
+    # ``None`` exactly on a replay (``cached``), which no wallet paid.
+    key_source: KeySource | None
     # The `SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay).
     hold_id: str | None = None
     # A nested run's own view of its call; money is summed off the copy on the outer ledger.
@@ -469,6 +474,8 @@ class SpendHoldRecord(FrozenModel):
     # ``None`` where nothing capped the reply: such a send holds no tokens.
     output_tokens: int | None
     cost_usd: float | None = None
+    # Whose wallet an unclosed hold may have drawn: its `TokenUsageRecord` never came to say.
+    key_source: KeySource
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -496,6 +503,27 @@ def _one_subject(subject: BankedSubject) -> None:
         raise ValueError("a banked cycle names its campaign")
 
 
+class BankedSpend(FrozenModel):
+    """One wallet's `UserSpend`, as a tombstone banks it."""
+
+    used_usd: float
+    # What our rate table priced the calls no provider billed (`TokenUsageRecord.rate_priced_usd`).
+    rate_priced_usd: float
+    used_tokens: int
+    unpriced_tokens: int
+    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
+    unreported_usd: float
+    unreported_tokens: int
+
+    @classmethod
+    def of(cls, spent: UserSpend) -> BankedSpend:
+        return cls(**spent._asdict())
+
+    @property
+    def spend(self) -> UserSpend:
+        return UserSpend(**self.model_dump())
+
+
 class SpendTombstoneRecord(FrozenModel):
     """On the WORKSPACE ledger, so deleting what spent it cannot re-earn a spend ceiling."""
 
@@ -504,14 +532,8 @@ class SpendTombstoneRecord(FrozenModel):
     # Empty for a whole-campaign bank.
     cycle_id: str = ""
     draft_id: str = ""
-    used_usd: float
-    # What our rate table priced the calls no provider billed (`TokenUsageRecord.rate_priced_usd`).
-    rate_priced_usd: float
-    used_tokens: int
-    unpriced_tokens: int
-    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
-    unreported_usd: float = 0.0
-    unreported_tokens: int = 0
+    # By whose key paid it, so a deletion keeps the coupon's count as it keeps the account's.
+    spent: dict[KeySource, BankedSpend]
     # What the campaign's ceiling counted of it in each meter, so a bank needs no manifest to name one.
     metered: dict[CeilingMeter, Budget]
     timestamp: str = Field(default_factory=utcnow_iso)
@@ -604,6 +626,7 @@ class LLMCallRecord(FrozenModel):
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
+    usage: TokenAccount | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -678,34 +701,41 @@ class CommandRecord(FrozenModel):
 class NoEffect(FrozenModel):
     """An ack whose command names no effect beyond having happened."""
 
+    kind: Literal["none"] = "none"
+
 
 class PausedEffect(FrozenModel):
     """``pause-cycle``, taken by the loop."""
 
+    kind: Literal["paused"] = "paused"
     run_phase: Literal[RunPhase.PAUSED]
 
 
 class SkippedEffect(FrozenModel):
     """``skip-sample``, taken by the loop."""
 
+    kind: Literal["skipped"] = "skipped"
     skipped: int
 
 
 class GateDecidedEffect(FrozenModel):
     """``origin-gate-decision``, taken by the loop."""
 
+    kind: Literal["gate_decided"] = "gate_decided"
     decision: GateDecision
 
 
 class ArmsTakenEffect(FrozenModel):
     """``submit-arms``: how many arms the round banked."""
 
+    kind: Literal["arms_taken"] = "arms_taken"
     arms: int
 
 
 class LookaheadTakenEffect(FrozenModel):
     """``set-sample-lookahead``, spent by the round that took it."""
 
+    kind: Literal["lookahead_taken"] = "lookahead_taken"
     cells: int
     auto: bool
 
@@ -713,18 +743,18 @@ class LookaheadTakenEffect(FrozenModel):
 class ArmedCeilingEffect(FrozenModel):
     """``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands."""
 
+    kind: Literal["armed_ceiling"] = "armed_ceiling"
     armed: Budget
 
 
-class OriginEditedEffect(RootModel[dict[str, dict[Literal["from", "to"], Any]]]):
+class OriginEditedEffect(FrozenModel):
     """A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new."""
 
-    model_config = ConfigDict(frozen=True)
-    root: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
+    kind: Literal["origin_edited"] = "origin_edited"
+    moved: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
 
 
-# Told apart by their fields, so an ack written before any tag still reads as its kind.
-CommandEffect = (
+CommandEffect = Annotated[
     NoEffect
     | PausedEffect
     | SkippedEffect
@@ -732,8 +762,9 @@ CommandEffect = (
     | ArmsTakenEffect
     | LookaheadTakenEffect
     | ArmedCeilingEffect
-    | OriginEditedEffect
-)
+    | OriginEditedEffect,
+    Field(discriminator="kind"),
+]
 
 
 class CommandAckRecord(FrozenModel):
@@ -747,29 +778,17 @@ class CommandAckRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+# A halt is its `StopReason`, and an outcome the loop decided is a field of the record of its step.
 RoundWarningKind = Literal[
-    "l1_zero_candidates",
-    "injection_budget_overrun",
+    # An L2/L3 reply that never parsed: its refinement is discarded, the prior framing kept.
     "layer_parse_failure",
-    "layer_terminated_cycle",
-    "send_refused",
-    # A `terminate_proposal` carrying no reason: ignored, never silently.
-    "layer_terminate_blank",
-    # A `fork_proposal` dropped: no ancestor holds a level (naming what withholds θ), or the
-    # launch's rebase clock is spent.
-    "layer_rebase_dropped",
-    # An adapter landed no round output, and the re-runs before the next walk failed: the run halts.
-    "adapter_output_unavailable",
-    # A critique cluster spanning fewer marked rows than a cluster is: dropped before the generator reads it.
-    "critique_cluster_dropped",
-    # Nothing failed: the round promoted an arm the origin panel does not back (`runner/round.py`).
-    "round_not_advanced",
-    # A declared child no node could make: `mating`'s pool under two, a `locus_crossover` pair on
-    # under two loci, or an `l1_generate` recombination naming no two pool entries.
-    "offspring_dropped",
+    # A state panel over its runaway backstop: the items past it never reach the LLM.
+    "injection_budget_overrun",
     # A configured trace sink that failed to open at the run's start: the run traces nothing to it.
     "trace_sink_failed",
 ]
+# `error` = the step produced nothing usable; `warning` = degraded but progressed.
+RoundWarningSeverity = Literal["warning", "error"]
 
 
 class RoundWarningRecord(FrozenModel):
@@ -777,8 +796,7 @@ class RoundWarningRecord(FrozenModel):
 
     record_type: Literal["round_warning"] = "round_warning"
     kind: RoundWarningKind
-    # `error` = the round produced nothing usable; `warning` = degraded but progressed.
-    severity: Literal["warning", "error"] = "warning"
+    severity: RoundWarningSeverity = "warning"
     message: str
     round: int | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
@@ -854,6 +872,13 @@ class ForkRemainder(FrozenModel):
             parent_rounds=rounds,
             rounds=None if rounds is None else max(1, rounds - rounds_closed),
         )
+
+    def past_cut(self, cut_round: int) -> ForkRemainder:
+        """A superseding fork's cap re-counts the rounds it lifts below *cut_round*, so its line
+        runs only what was left."""
+        if self.rounds is None:
+            return self
+        return self.model_copy(update={"rounds": max(cut_round - 1, 0) + self.rounds})
 
     def under(self, overrides: ConfigOverrides) -> ConfigOverrides:
         """A rounds axis the overrides NAME wins, ``0`` and a lift included."""
@@ -1004,6 +1029,26 @@ class DefaultsDrift(FrozenModel):
         ]
 
 
+class BackendRevision(FrozenModel):
+    """What a launch read of the backend's revision, beside the one its connector was written against."""
+
+    expected: str
+    # `None`: the backend answered with none, or could not be asked (`unread`).
+    reported: str | None
+    # Why it could not be asked: the failure's class alone, since its message names the backend's address.
+    unread: str | None
+
+    def drift(self) -> str | None:
+        """``None`` where the backend runs the revision expected; else what differs, in a sentence."""
+        if self.reported == self.expected:
+            return None
+        if self.unread is not None:
+            said = f"its revision could not be read ({self.unread})"
+        else:
+            said = f"it reports revision {self.reported or 'none'}"
+        return f"the backend's connector expects revision {self.expected}, and {said}"
+
+
 class RunWiringRecord(FrozenModel):
     """LAST wins, over the whole chain: a fork stands on its parent's until its own lands."""
 
@@ -1014,11 +1059,15 @@ class RunWiringRecord(FrozenModel):
     elects_on: DisplayMetric
     max_cells_in_flight: int
     measured_unit: MeasuredUnit
+    # The optimizer's gateway node: every scoring pass of the run, the origin's included, runs as it.
+    measurement_node: str
     # ``None`` when Langfuse is disabled, and on a mint's record: no launch has opened a trace.
     langfuse_trace_url: str | None
     run_limits: RunLimits
     # `None` on a mint's record: nothing has moved since the declaration was made.
     defaults_drift: DefaultsDrift | None
+    # `None` where the connector checks no revision; a drift is served, never refused (`wiring.py`).
+    backend_revision: BackendRevision | None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1049,8 +1098,6 @@ class ResolvedRunRecord(FrozenModel):
     experiment: dict[str, Any] | None
     # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
     model_capabilities: CapabilityMenu = Field(default_factory=dict)
-    # `None` where the connector checks no revision or the backend reported none.
-    backend_revision: str | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1294,12 +1341,9 @@ RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(
 class RebaseRequest(FrozenModel):
     """A policy change and a rewind are ONE move: the new axis is searched only on the sibling."""
 
-    fork_from_round: int
+    # The cut: the first round the fork runs, every round below it lifted.
+    fork_from_round: int = Field(ge=1)
     trigger: ForkTrigger
     reason: str
     issued_by: Principal
     config_overrides: ConfigOverrides | None = None
-
-
-# PER LEVEL: an inner campaign gets its own, so a `fork_proposal` on every fire cannot spiral.
-MAX_AUTO_REBASES: Annotated[int, shapes_optimizer_prompt] = 10

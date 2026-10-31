@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING — an individual is `{prompts: {node: NodePrompt}, pipeline_params, lineage}`**; each prompt node declares its fields, shots are sample keys; `PromptTemplate` is deleted. (f0625b8b8)
 - **BREAKING — a dataset is its content.** `dataset_hash` hashes the banked rows, the archive keys on `sample_key`, served `sample_id` is `position`; `replace-dataset` is deleted; `StopReason.max_rounds` is `rounds_budget`. (86fe03da0)
 - **BREAKING — `RunDeclaration.purpose`** (`Optimize | Compare(arm)`) replaces `arm`. (2d17020ad)
+- **BREAKING — one act mints a head-to-head.** `head-to-head <dataset> --head-to-head <id> --arm <key>=<optimizer>[,<knob>=<v>…]` (REST `mint-head-to-head`, the embedded `run_head_to_head`, a check-in's Start with `head_to_head`) plans, prices and admits every arm before any takes a key, all or none; each arm runs the one budget on its own book, and a retry under the act's key answers its arms. `new --arm` and `mint-campaign`'s `purpose` are gone.
 - **BREAKING — arms are keyed by content `ArmKey`**; `Candidate*Record`, `ScoredCandidate`, `CandidateProposal` and `CycleResult`'s level lists are deleted, `RoundClosedRecord` carries the `level_series`. (609b060d6)
 - **BREAKING — one tenant δ ruler**: the `RulerRecord` ledger record is deleted. (6a6901b40)
 - **BREAKING — the control-plane specs are generated** (`docs/specs/openapi.generated.json`, `events-asyncapi.generated.json`): the hand-written `api-openapi.yaml` / `events-asyncapi.yaml` are deleted; an invalid payload answers `422 request_invalid`; CLI `step-cycle --step-rounds`, `submit-arms --arms`. (731e31328)
@@ -35,7 +36,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Every paid pass scores at most 150 rows and stops on the one pause** — round, origin, bench, verify, noise-floor; a definition or request asking for more is refused (ADR-0010).
 - **An election pools the round's draw with each arm's origin-panel cells**, promotes only where PoBB would cut the parent, and a round draws blind of the leader's θ.
 - **BREAKING — block libraries are packs the operator installs** under `block_packs/`; core ships none and `config/prompt_variants.json` is deleted.
-- **BREAKING — a ledger line no model accepts refuses its cycle** to every reader of its kind; `restamp` lists each refused cycle.
+- **BREAKING — a ledger line no model accepts refuses its cycle** to every reader of its kind.
+- **BREAKING — no migration: a shape change wipes run data.** The `restamp` verb is deleted and `update.sh` no longer runs it or fails a deploy on an unreadable campaign; a released job's file is deleted by the job registry once its day ends; hard samples, prompt exports and ledger `llm_call` usage read strictly.
 - **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), the `round_standing` record (carried by `round_closed`), and the `optimizer_state` record (a `round_restated` statement, which a repair's re-bank writes too).
 
 ## [0.8.17] — 2026-10-15

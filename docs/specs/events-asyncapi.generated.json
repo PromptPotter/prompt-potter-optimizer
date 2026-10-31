@@ -255,6 +255,24 @@
             "description": "The quieter half of the line.",
             "title": "Detail"
           },
+          "healed": {
+            "anyOf": [
+              {
+                "enum": [
+                  "layer_parse_failure",
+                  "injection_budget_overrun",
+                  "trace_sink_failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The self-heal a round warning reports; null on every other item.",
+            "title": "Healed"
+          },
           "icon": {
             "title": "Icon",
             "type": "string"
@@ -895,6 +913,12 @@
         "properties": {
           "armed": {
             "$ref": "#/components/schemas/Budget"
+          },
+          "kind": {
+            "const": "armed_ceiling",
+            "default": "armed_ceiling",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -910,12 +934,57 @@
           "arms": {
             "title": "Arms",
             "type": "integer"
+          },
+          "kind": {
+            "const": "arms_taken",
+            "default": "arms_taken",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
           "arms"
         ],
         "title": "ArmsTakenEffect",
+        "type": "object"
+      },
+      "BackendRevision": {
+        "additionalProperties": false,
+        "description": "What a launch read of the backend's revision, beside the one its connector was written against.",
+        "properties": {
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "reported": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported"
+          },
+          "unread": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unread"
+          }
+        },
+        "required": [
+          "expected",
+          "reported",
+          "unread"
+        ],
+        "title": "BackendRevision",
         "type": "object"
       },
       "BackendWarningRecord": {
@@ -1124,6 +1193,46 @@
           "user_id"
         ],
         "title": "BankedCommand",
+        "type": "object"
+      },
+      "BankedSpend": {
+        "additionalProperties": false,
+        "description": "One wallet's `UserSpend`, as a tombstone banks it.",
+        "properties": {
+          "rate_priced_usd": {
+            "title": "Rate Priced Usd",
+            "type": "number"
+          },
+          "unpriced_tokens": {
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
+          "unreported_tokens": {
+            "title": "Unreported Tokens",
+            "type": "integer"
+          },
+          "unreported_usd": {
+            "title": "Unreported Usd",
+            "type": "number"
+          },
+          "used_tokens": {
+            "title": "Used Tokens",
+            "type": "integer"
+          },
+          "used_usd": {
+            "title": "Used Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "used_usd",
+          "rate_priced_usd",
+          "used_tokens",
+          "unpriced_tokens",
+          "unreported_usd",
+          "unreported_tokens"
+        ],
+        "title": "BankedSpend",
         "type": "object"
       },
       "BenchEnterView": {
@@ -1410,6 +1519,21 @@
         "title": "BenchReading",
         "type": "object"
       },
+      "BenchRefusal": {
+        "description": "Why a bench pass cannot be asked for now.",
+        "enum": [
+          "inner",
+          "no_manifest",
+          "held_elsewhere",
+          "not_held",
+          "selecting",
+          "origin_unscored",
+          "graded",
+          "no_selection"
+        ],
+        "title": "BenchRefusal",
+        "type": "string"
+      },
       "BenchScope": {
         "additionalProperties": false,
         "description": "One dataset's rows of a bench spanning several, read apart: a level is never averaged\nacross datasets.",
@@ -1494,11 +1618,6 @@
             "title": "Headline",
             "type": "string"
           },
-          "line": {
-            "description": "The headline on one line — both levels, the lift in each column and the held-out row count, or `status.sentence` where the bench is not graded. The ONE wording of it: the completion box, the `bench` verb and every screen print this. Stamped by :meth:`of` alone.",
-            "title": "Line",
-            "type": "string"
-          },
           "origin": {
             "anyOf": [
               {
@@ -1550,8 +1669,7 @@
           "origin",
           "selected",
           "vs_origin",
-          "cost",
-          "line"
+          "cost"
         ],
         "title": "BenchScore",
         "type": "object"
@@ -1627,14 +1745,13 @@
           "refusal": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/BenchRefusal"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why not, exactly where `can_grade` is false.",
-            "title": "Refusal"
+            "description": "Why not, exactly where `can_grade` is false."
           },
           "scored": {
             "anyOf": [
@@ -1646,11 +1763,6 @@
               }
             ],
             "title": "Scored"
-          },
-          "sentence": {
-            "description": "`state` in words, with the rows and the stop behind it.",
-            "title": "Sentence",
-            "type": "string"
           },
           "state": {
             "$ref": "#/components/schemas/ReadingState"
@@ -1694,7 +1806,6 @@
         "required": [
           "state",
           "trigger",
-          "sentence",
           "can_grade",
           "refusal",
           "offered",
@@ -1913,7 +2024,20 @@
             "type": "string"
           },
           "effect": {
-            "anyOf": [
+            "discriminator": {
+              "mapping": {
+                "armed_ceiling": "#/components/schemas/ArmedCeilingEffect",
+                "arms_taken": "#/components/schemas/ArmsTakenEffect",
+                "gate_decided": "#/components/schemas/GateDecidedEffect",
+                "lookahead_taken": "#/components/schemas/LookaheadTakenEffect",
+                "none": "#/components/schemas/NoEffect",
+                "origin_edited": "#/components/schemas/OriginEditedEffect",
+                "paused": "#/components/schemas/PausedEffect",
+                "skipped": "#/components/schemas/SkippedEffect"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/NoEffect"
               },
@@ -3698,6 +3822,12 @@
             ],
             "title": "Decision",
             "type": "string"
+          },
+          "kind": {
+            "const": "gate_decided",
+            "default": "gate_decided",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -4114,6 +4244,17 @@
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -4491,27 +4632,28 @@
       },
       "LivesReading": {
         "additionalProperties": false,
-        "description": "A run's life bank as every surface shows it. Built by :meth:`of` alone.",
+        "description": "A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,\nread off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`).",
         "properties": {
-          "bar": {
-            "description": "One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank.",
-            "title": "Bar",
-            "type": "string"
+          "cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null where the bank has no cap.",
+            "title": "Cap"
           },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "spent": {
-            "description": "The bank is empty: the run stops after this round.",
-            "title": "Spent",
-            "type": "boolean"
+          "left": {
+            "title": "Left",
+            "type": "integer"
           }
         },
         "required": [
-          "bar",
-          "label",
-          "spent"
+          "left",
+          "cap"
         ],
         "title": "LivesReading",
         "type": "object"
@@ -4527,6 +4669,12 @@
           "cells": {
             "title": "Cells",
             "type": "integer"
+          },
+          "kind": {
+            "const": "lookahead_taken",
+            "default": "lookahead_taken",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -4617,14 +4765,9 @@
           "n_samples": {
             "title": "N Samples",
             "type": "integer"
-          },
-          "node": {
-            "title": "Node",
-            "type": "string"
           }
         },
         "required": [
-          "node",
           "n_candidates",
           "n_samples"
         ],
@@ -5103,7 +5246,14 @@
       "NoEffect": {
         "additionalProperties": false,
         "description": "An ack whose command names no effect beyond having happened.",
-        "properties": {},
+        "properties": {
+          "kind": {
+            "const": "none",
+            "default": "none",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
         "title": "NoEffect",
         "type": "object"
       },
@@ -5434,18 +5584,34 @@
         "type": "object"
       },
       "OriginEditedEffect": {
-        "additionalProperties": {
-          "additionalProperties": true,
-          "propertyNames": {
-            "enum": [
-              "from",
-              "to"
-            ]
-          },
-          "type": "object"
-        },
+        "additionalProperties": false,
         "description": "A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new.",
-        "minProperties": 1,
+        "properties": {
+          "kind": {
+            "const": "origin_edited",
+            "default": "origin_edited",
+            "title": "Kind",
+            "type": "string"
+          },
+          "moved": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "propertyNames": {
+                "enum": [
+                  "from",
+                  "to"
+                ]
+              },
+              "type": "object"
+            },
+            "minProperties": 1,
+            "title": "Moved",
+            "type": "object"
+          }
+        },
+        "required": [
+          "moved"
+        ],
         "title": "OriginEditedEffect",
         "type": "object"
       },
@@ -5821,7 +5987,8 @@
           "interrupt",
           "cancelled",
           "step",
-          "bound"
+          "bound",
+          "owed"
         ],
         "title": "PauseCause",
         "type": "string"
@@ -5830,6 +5997,12 @@
         "additionalProperties": false,
         "description": "``pause-cycle``, taken by the loop.",
         "properties": {
+          "kind": {
+            "const": "paused",
+            "default": "paused",
+            "title": "Kind",
+            "type": "string"
+          },
           "run_phase": {
             "const": "paused",
             "title": "Run Phase",
@@ -6442,18 +6615,6 @@
         "additionalProperties": false,
         "description": "What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST.",
         "properties": {
-          "backend_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Backend Revision"
-          },
           "declaration": {
             "additionalProperties": true,
             "title": "Declaration",
@@ -7265,17 +7426,8 @@
           },
           "kind": {
             "enum": [
-              "l1_zero_candidates",
-              "injection_budget_overrun",
               "layer_parse_failure",
-              "layer_terminated_cycle",
-              "send_refused",
-              "layer_terminate_blank",
-              "layer_rebase_dropped",
-              "adapter_output_unavailable",
-              "critique_cluster_dropped",
-              "round_not_advanced",
-              "offspring_dropped",
+              "injection_budget_overrun",
               "trace_sink_failed"
             ],
             "title": "Kind",
@@ -7658,7 +7810,7 @@
                 "type": "null"
               }
             ],
-            "description": "The life bank after this round: the pips and their words, as the readout prints them. Null where the campaign banks no lives (`optimization.lives`)."
+            "description": "The life bank after this round. Null where the campaign banks no lives (`optimization.lives`)."
           },
           "parent": {
             "anyOf": [
@@ -7714,6 +7866,16 @@
         "additionalProperties": false,
         "description": "LAST wins, over the whole chain: a fork stands on its parent's until its own lands.",
         "properties": {
+          "backend_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackendRevision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "defaults_drift": {
             "anyOf": [
               {
@@ -7765,6 +7927,10 @@
             "title": "Measured Unit",
             "type": "string"
           },
+          "measurement_node": {
+            "title": "Measurement Node",
+            "type": "string"
+          },
           "record_type": {
             "const": "run_wiring",
             "default": "run_wiring",
@@ -7789,9 +7955,11 @@
           "elects_on",
           "max_cells_in_flight",
           "measured_unit",
+          "measurement_node",
           "langfuse_trace_url",
           "run_limits",
-          "defaults_drift"
+          "defaults_drift",
+          "backend_revision"
         ],
         "title": "RunWiringRecord",
         "type": "object"
@@ -8249,6 +8417,12 @@
         "additionalProperties": false,
         "description": "``skip-sample``, taken by the loop.",
         "properties": {
+          "kind": {
+            "const": "skipped",
+            "default": "skipped",
+            "title": "Kind",
+            "type": "string"
+          },
           "skipped": {
             "title": "Skipped",
             "type": "integer"
@@ -8456,6 +8630,14 @@
             "title": "Input Tokens",
             "type": "integer"
           },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "optimizer",
@@ -8534,7 +8716,8 @@
           "kind",
           "node",
           "input_tokens",
-          "output_tokens"
+          "output_tokens",
+          "key_source"
         ],
         "title": "SpendHoldRecord",
         "type": "object"
@@ -8571,48 +8754,32 @@
             "title": "Metered",
             "type": "object"
           },
-          "rate_priced_usd": {
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
           "record_type": {
             "const": "spend_tombstone",
             "default": "spend_tombstone",
             "title": "Record Type",
             "type": "string"
           },
+          "spent": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BankedSpend"
+            },
+            "propertyNames": {
+              "enum": [
+                "host",
+                "user"
+              ]
+            },
+            "title": "Spent",
+            "type": "object"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
-          },
-          "unpriced_tokens": {
-            "title": "Unpriced Tokens",
-            "type": "integer"
-          },
-          "unreported_tokens": {
-            "default": 0,
-            "title": "Unreported Tokens",
-            "type": "integer"
-          },
-          "unreported_usd": {
-            "default": 0.0,
-            "title": "Unreported Usd",
-            "type": "number"
-          },
-          "used_tokens": {
-            "title": "Used Tokens",
-            "type": "integer"
-          },
-          "used_usd": {
-            "title": "Used Usd",
-            "type": "number"
           }
         },
         "required": [
-          "used_usd",
-          "rate_priced_usd",
-          "used_tokens",
-          "unpriced_tokens",
+          "spent",
           "metered"
         ],
         "title": "SpendTombstoneRecord",
@@ -8667,6 +8834,7 @@
           "lives_exhausted",
           "paused",
           "panel_cut",
+          "adapter_output_owed",
           "crashed",
           "diverged",
           "optimizer_abort",
@@ -8677,6 +8845,7 @@
           "target_hit",
           "spend_budget",
           "token_budget",
+          "host_allowance",
           "wall_clock",
           "origin_gate",
           "backend_unreachable",
@@ -8831,6 +9000,21 @@
             "title": "Input Tokens",
             "type": "integer"
           },
+          "key_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source"
+          },
           "kind": {
             "enum": [
               "optimizer",
@@ -8946,7 +9130,8 @@
           "kind",
           "node",
           "input_tokens",
-          "output_tokens"
+          "output_tokens",
+          "key_source"
         ],
         "title": "TokenUsageRecord",
         "type": "object"

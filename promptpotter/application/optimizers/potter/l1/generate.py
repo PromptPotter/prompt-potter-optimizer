@@ -28,6 +28,7 @@ from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.records import Ladder, Recombination
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_blocks_in_pool,
+    l1_citation_in_panel,
     l1_shots_in_demo_pool,
 )
 from promptpotter.application.optimizers.variation.members import crossable, most_donated
@@ -40,7 +41,6 @@ from promptpotter.domain.optimizer_state import (
 )
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -86,7 +86,6 @@ async def l1_generate(
 
     round_num = ctx.round_num
     calls, knobs = ctx.read(Calls), ctx.knobs(L1GenerateKnobs)
-    model = calls.model
     opt_sp = ctx.read(Lineage).parent
     pipeline_schema = ctx.read(Target).schema
 
@@ -151,23 +150,6 @@ async def l1_generate(
             parse_err.failing_chars,
             parse_err.diagnosis(),
         )
-        emit_round_warning(
-            kind="l1_zero_candidates",
-            severity="error",
-            message=(
-                "Optimizer produced 0 candidates this round — "
-                + (
-                    "the optimizer LLM's response was cut off at max_tokens; shrink the "
-                    "optimizer prompt or raise the node's max_tokens"
-                    if truncated
-                    else "the optimizer LLM returned empty/truncated output"
-                    if is_empty
-                    else "the optimizer LLM's response failed schema validation after a repair retry"
-                )
-                + f" (model {model})."
-            ),
-            detail={"reason": reason, "model": model, **parse_err.warning_detail()},
-        )
         return L1Generation([], reason, citable, budget)
     # The repair-retry path can leak a raw str/dict/list when JSON parses but does not bind.
     if not isinstance(generated, L1GenerateOutput):
@@ -176,16 +158,6 @@ async def l1_generate(
             "treating as parse failure, returning zero candidates",
             round_num,
             type(generated).__name__,
-        )
-        emit_round_warning(
-            kind="l1_zero_candidates",
-            severity="error",
-            message=(
-                "Optimizer produced 0 candidates this round — the optimizer LLM's "
-                f"response decoded as {type(generated).__name__} instead of the expected "
-                f"schema (model {model})."
-            ),
-            detail={"reason": PARSE_FAILURE_WRONG_TYPE, "model": model},
         )
         return L1Generation([], PARSE_FAILURE_WRONG_TYPE, citable, budget)
 
@@ -211,6 +183,8 @@ async def l1_generate(
             }
         )
         failures += l1_shots_in_demo_pool(v.shots, demo_ids=key_of.keys(), k_max=knobs.k_max)
+        grounding = _parse_evidence_grounding(v.evidence_grounding)
+        failures += l1_citation_in_panel(grounding, rendered=filled.rendered)
         population.append(
             children.child(
                 [opt_sp],
@@ -218,7 +192,7 @@ async def l1_generate(
                 failures=failures,
                 prompt_loci=prompt_loci,
                 changes_description=v.changes_description,
-                evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
+                evidence_grounding=grounding,
             )
         )
     lineage = ctx.read(Lineage)
@@ -249,7 +223,7 @@ def _recombined(
 ) -> list[Proposal]:
     """Each spec a child of its main, a population member, and its donor, any other measured
     individual, both by id head, the donor giving the loci it names: from one to `most_donated` of
-    those the two differ on. A spec failing any of these is dropped and warned."""
+    those the two differ on. A spec failing any of these is dropped."""
     by_id = {individual.id[:RECOMBINATION_ID_CHARS]: individual for individual in lineage.measured}
     mains = {individual.id for individual in lineage.population}
     out: list[Proposal] = []
@@ -268,10 +242,5 @@ def _recombined(
             )
         )
     if dropped:
-        emit_round_warning(
-            kind="offspring_dropped",
-            message=f"{len(dropped)} recombination(s) dropped: each named no population main and "
-            "other measured donor, or a donor giving none or over half the loci the two differ on.",
-            detail={"pairs": dropped},
-        )
+        logger.info("%d recombination(s) dropped: %s", len(dropped), dropped)
     return out

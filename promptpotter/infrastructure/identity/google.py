@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import override
 from urllib.parse import urlencode
 
 import httpx
@@ -9,6 +9,8 @@ from promptpotter.infrastructure.identity.jwks import JWKSCache
 from promptpotter.infrastructure.identity.provider_config import (
     CodeExchangeError,
     OIDCProviderConfig,
+    ProviderIdentity,
+    SignInClient,
 )
 from promptpotter.infrastructure.identity.verifier import (
     IDTokenInvalidError,
@@ -23,15 +25,7 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 
 
-@dataclass(frozen=True)
-class ProviderIdentity:
-    issuer: str
-    subject: str
-    email: str | None
-    provider: str
-
-
-class GoogleProviderClient:
+class GoogleProviderClient(SignInClient):
     def __init__(self, config: OIDCProviderConfig, jwks_cache: JWKSCache) -> None:
         self._config = config
         self._jwks = jwks_cache
@@ -40,6 +34,7 @@ class GoogleProviderClient:
         self._token_url = config.token_url or GOOGLE_TOKEN_URL
         self._jwks_url = config.jwks_url or GOOGLE_JWKS_URL
 
+    @override
     def authorize_url(self, *, state: str, nonce: str) -> str:
         params = {
             "response_type": "code",
@@ -53,7 +48,8 @@ class GoogleProviderClient:
         }
         return f"{self._authorize_url}?{urlencode(params)}"
 
-    async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
+    @override
+    async def exchange_code(self, *, code: str, nonce: str) -> ProviderIdentity:
         async with httpx.AsyncClient(timeout=15.0, verify=tls_context()) as client:
             response = await client.post(
                 self._token_url,
@@ -81,10 +77,8 @@ class GoogleProviderClient:
         )
 
         nonce_claim = verified.claims.get("nonce")
-        if nonce_claim != expected_nonce:
-            raise IDTokenInvalidError(
-                f"nonce mismatch: got {nonce_claim!r}, expected {expected_nonce!r}"
-            )
+        if nonce_claim != nonce:
+            raise IDTokenInvalidError(f"nonce mismatch: got {nonce_claim!r}, expected {nonce!r}")
 
         return ProviderIdentity(
             issuer=verified.issuer,

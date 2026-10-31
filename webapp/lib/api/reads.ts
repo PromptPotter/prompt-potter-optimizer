@@ -11,6 +11,7 @@ import type {
   CampaignPipelineResponse,
   CampaignStorageResponse,
   ConfigMapResponse,
+  CouponStatus,
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
   DatasetIndexResponse,
@@ -81,6 +82,11 @@ export function userSettingsRead(): ReadDescriptor<UserSettings> {
 
 export function quotaRead(): ReadDescriptor<QuotaStatus> {
   return once("quota", `${API}/auth/quota-status`);
+}
+
+// The account's money: the host's allowance, what each wallet paid, and the keys it holds.
+export function couponRead(): ReadDescriptor<CouponStatus> {
+  return once("coupon", `${API}/auth/coupon`);
 }
 
 export function activityRead(

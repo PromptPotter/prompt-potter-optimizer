@@ -10,7 +10,13 @@ from promptpotter.application.views.render.primitives import (
     fmt_pct,
     overlap_series,
 )
-from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
+from promptpotter.domain.bench import (
+    BENCH_STATE_INFO,
+    BandedValue,
+    BenchColumn,
+    BenchReading,
+    BenchScore,
+)
 from promptpotter.domain.paired_reading import ArmKey, LiftEstimate
 from promptpotter.domain.phases import StopReason, stop_next_step
 from promptpotter.domain.results import RoundResult
@@ -187,7 +193,8 @@ def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[st
         return []
     graded = bench.graded
     if graded is None:
-        return ["## Bench score — the headline", "", f"Not graded. {bench.status.sentence}", ""]
+        sentence = BENCH_STATE_INFO[bench.status.state].sentence
+        return ["## Bench score — the headline", "", f"Not graded. {sentence}", ""]
 
     def lift(column: BenchColumn) -> LiftEstimate | None:
         measured = bench.lift(column)

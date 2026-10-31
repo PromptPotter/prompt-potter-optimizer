@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.initialization.loop_start import verb_ledger
+from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -52,7 +53,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
-from promptpotter.infrastructure.llm.send_pacing import set_abort_check, set_rate_tenant
+from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     LiveHold,
@@ -157,7 +158,9 @@ def request_job(
     with job_registry.admission_gate():
         match holder:
             case CampaignLaunch():
-                check_launch_quotas(user=user, stores=stores, job_registry=job_registry, hop=hop)
+                check_launch_quotas(
+                    user=user, stores=stores, job_registry=job_registry, hop=hop, launches=1
+                )
             case ScoringPass(verb=verb):
                 refuse_verb_rate(stores, user, verb)
             case _:
@@ -217,8 +220,12 @@ def claim_cycle(stores: Stores, job_registry: JobRegistry, job: Job, hop: CycleH
 def refuse_as_busy(stores: Stores, job_registry: JobRegistry, job: Job) -> NoReturn:
     # A REFUSAL takes its queue entry with it: one left behind starts the run later.
     withdraw_queued(stores, job_registry, job.job_id, principal_id=job.principal_id)
+    raise _machine_busy(job_registry)
+
+
+def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
     oldest = next(iter(job_registry.list_running()), None)
-    raise MachineBusyError(
+    return MachineBusyError(
         holding="" if oldest is None else oldest.what,
         holder_user="" if oldest is None else oldest.user_id,
         started_at=None if oldest is None else oldest.started_at,
@@ -304,11 +311,10 @@ def admit_and_share(
                 job_id=job.job_id,
                 hop=hop,
             )
-            # The campaign's ceiling as composed, never as the account clamped it: the account
-            # binds through the reservation. An axis it leaves open is the headroom admitted on it.
-            ceiling = Budget(
-                usd=admitted.usd if declared.usd is None else declared.usd,
-                tokens=admitted.tokens if declared.tokens is None else declared.tokens,
+            # The campaign's ceiling as composed, never as a delegate's claim clamped it: the
+            # account binds through the reservation.
+            ceiling = admitted.over(
+                Budget(usd=admitted.usd if declared.usd is None else declared.usd)
             )
         else:
             # The enclosing book's room is spendable from NOW, on top of what the campaign spent.
@@ -339,6 +345,73 @@ def admit_and_share(
         share=allotment,
         step_rounds=step_rounds,
     )
+
+
+def admit_arms(
+    declared: Sequence[Budget],
+    *,
+    stores: Stores,
+    job_registry: JobRegistry,
+    holder: CampaignLaunch | EmbeddedRun,
+) -> list[tuple[Job, HeldBudget]]:
+    """Every arm's job and share, or none, under one gate: never queued, so no arm searches while
+    a sibling waits on another machine. An embedded host holds no slot (`embedded_share`)."""
+    user = account_of(stores)
+    admitted: list[tuple[Job, HeldBudget]] = []
+    with job_registry.admission_gate():
+        job: Job | None = None
+        try:
+            if isinstance(holder, CampaignLaunch):
+                check_launch_quotas(
+                    user=user,
+                    stores=stores,
+                    job_registry=job_registry,
+                    hop=UNRESOLVED_HOP,
+                    launches=len(declared),
+                )
+            for budget in declared:
+                job = _arm_job(stores, job_registry, holder)
+                if job.queued:
+                    raise _machine_busy(job_registry)
+                held = admit_and_share(
+                    budget,
+                    Budget(),
+                    stores=stores,
+                    job_registry=job_registry,
+                    job=job,
+                    hop=None,
+                    step_rounds=None,
+                )
+                admitted.append((job, held))
+                job = None
+        except BaseException as exc:
+            # Inside the gate, so no admission between reads the arms a refusal takes back.
+            for refused in [*(j for j, _ in admitted), *([] if job is None else [job])]:
+                release_slot(job_registry, refused.job_id, exc, stores=stores, hop=None)
+            raise
+    return admitted
+
+
+def _arm_job(
+    stores: Stores, job_registry: JobRegistry, holder: CampaignLaunch | EmbeddedRun
+) -> Job:
+    user_id, workspace = str(stores.identity.user_id), stores.campaigns.workspace
+    principal_id = acting_principal(stores.identity).id
+    match holder:
+        case CampaignLaunch():
+            return job_registry.request_slot(
+                user_id=user_id, principal_id=principal_id, workspace=workspace, holder=holder
+            )
+        case EmbeddedRun():
+            return job_registry.create(
+                user_id=user_id,
+                principal_id=principal_id,
+                workspace=workspace,
+                hop=UNRESOLVED_HOP,
+                holder=holder,
+            )
+        case _:
+            assert_never(holder)
 
 
 def _within(declared: Budget, enclosing: Budget) -> Budget:
@@ -512,9 +585,12 @@ async def paid_pass(
         )
         admitted = True
         job_registry.mark_started(job.job_id)
-        set_rate_tenant(str(stores.identity.tenant_id))
-        with spending_under(book):
-            yield book
+        unbind = bind_account(stores)
+        try:
+            with spending_under(book):
+                yield book
+        finally:
+            unbind()
     except BaseException as exc:
         job_registry.release(job.job_id, refusal="" if admitted else str(exc))
         stopped_by = _let_go(stores, holding)

@@ -17,7 +17,7 @@ from promptpotter.application.datasets.ingest import (
 from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
 from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import RequestBody
 from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 from promptpotter.shared.errors import ContentTooLargeError
@@ -90,7 +90,7 @@ async def upload_candidate_library(
     return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, key))
 
 
-class _BuildLibraryBody(StrictModel):
+class _BuildLibraryBody(RequestBody):
     """Body for building a candidate library from one of the draft's own columns."""
 
     # Bounded as `domain/command_kinds.py::DraftAddressedPayload` bounds it.

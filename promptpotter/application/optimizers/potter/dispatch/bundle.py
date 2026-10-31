@@ -14,6 +14,7 @@ from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
 from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
@@ -60,7 +61,7 @@ SCHEMA_RENAME_INSTRUCTION = (
 LAYOUT_SCHEMA_INSTRUCTION = (
     "Where in the READING node's own prompt each evidence panel is rendered. A slot is a "
     "position in that prompt, never the target-prompt field the evidence is about: the "
-    "reader gets every placed panel whichever slot holds it. Keyed by SLOT — the four "
+    "reader gets every placed panel whichever slot holds it. Keyed by SLOT — the "
     "properties are the only slots there are — each listing the panels to place there: a "
     "listed panel MOVES to that slot, an omitted one stays where it is, and a panel is only "
     "ever in one place."
@@ -253,6 +254,13 @@ class InjectionBundle:
             tuple(p.id for p in self.recombination_pool),
             tuple(locus.name for locus in self.recombination_loci),
         )
+
+    @property
+    def terminate_offer(self) -> str | None:
+        """The evidence-starved node a stop must name; ``None`` withdraws the directive and the field."""
+        if not self.terminate_capability:
+            return None
+        return evidence_starved_node(self.digest.node_failure_rates)
 
     @property
     def offers_shots(self) -> bool:

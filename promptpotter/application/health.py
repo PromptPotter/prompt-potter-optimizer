@@ -112,13 +112,10 @@ def probes() -> list[Probe]:
     """The roster: every remote backend service, every configured sign-in provider, every LLM key."""
     paths = default_identity_paths()
     bundle = build_identity_bundle(paths)
-    redeem: dict[str, Callable[[], Awaitable[object]]] = {}
-    if bundle.google is not None:
-        redeem["google"] = partial(
-            bundle.google.exchange_code, code=_NOBODYS_CODE, expected_nonce=_NOBODYS_CODE
-        )
-    if bundle.github is not None:
-        redeem["github"] = partial(bundle.github.exchange_code, code=_NOBODYS_CODE)
+    redeem = {
+        provider: partial(client.exchange_code, code=_NOBODYS_CODE, nonce=_NOBODYS_CODE)
+        for provider, client in bundle.clients.items()
+    }
     return [
         *(
             _backend(name)

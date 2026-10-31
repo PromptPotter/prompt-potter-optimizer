@@ -10,7 +10,7 @@ import json
 
 from pydantic import Field, JsonValue
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.store.site_records import SiteRecord, default_site_record_store
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError
@@ -20,7 +20,7 @@ _MAX_ROW_CHARS = 16_384
 _MAX_KEY_CHARS = 320
 
 
-class SiteRecordBody(StrictModel):
+class SiteRecordBody(RequestBody):
     row: dict[str, JsonValue] = Field(description="What to keep, returned as sent")
     key: str = Field(
         default="",

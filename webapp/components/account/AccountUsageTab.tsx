@@ -3,6 +3,7 @@
 import { invalidateReads } from "@/lib/read-cache";
 import { AccountSection } from "./AccountSection";
 import {
+  Button,
   SegmentedControl,
   CommitInput,
   DataTable,
@@ -12,14 +13,17 @@ import {
   type Segment,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { allowanceCaveats, billText } from "@/lib/derivations";
-import { cssPct, fmtAgo, fmtTokens, fmtUsd } from "@/lib/format";
+import { allowanceCaveats, billText, couponFaceText, couponLeftText } from "@/lib/derivations";
+import { cssPct, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { useWorkspace } from "@/lib/workspace";
 import {
+  couponRead,
   quotaRead,
   postCommand,
+  type CouponStatus,
   type MachineSlot,
   type MachineStatusResponse,
   type QuotaStatus,
@@ -29,25 +33,30 @@ const SEGMENTED_MAX = 8;
 
 export function AccountUsageTab() {
   const read = useRead(quotaRead(), { auth: true });
+  const coupon = useRead(couponRead(), { auth: true });
   const machine = readyData(useMachineStatus());
   return (
-    <ReadState read={read} subject="your usage">
-      {(quota) => (
-        <>
-          <SpendSection quota={quota} />
-          <RunsSection quota={quota} machine={machine} />
-          <AccountSection
-            title="Campaigns today"
-            lede="An abuse limit, not an allowance. It resets at UTC midnight."
-          >
-            <p className="account-figure">
-              {quota.campaigns_today}
-              <span className="account-figure-of"> of {quota.max_campaigns_per_day}</span>
-            </p>
-          </AccountSection>
-        </>
-      )}
-    </ReadState>
+    <>
+      <ReadState read={coupon} subject="your allowance">
+        {(c) => <AllowanceSection coupon={c} />}
+      </ReadState>
+      <ReadState read={read} subject="your usage">
+        {(quota) => (
+          <>
+            <RunsSection quota={quota} machine={machine} />
+            <AccountSection
+              title="Campaigns today"
+              lede="An abuse limit, not an allowance. It resets at UTC midnight."
+            >
+              <p className="account-figure">
+                {quota.campaigns_today}
+                <span className="account-figure-of"> of {quota.max_campaigns_per_day}</span>
+              </p>
+            </AccountSection>
+          </>
+        )}
+      </ReadState>
+    </>
   );
 }
 
@@ -59,48 +68,59 @@ function Meter({ share, warn = false }: { share: number; warn?: boolean }) {
   );
 }
 
-function SpendSection({ quota }: { quota: QuotaStatus }) {
-  const lifetime = quota.spend_lifetime;
-  const blind = lifetime.bill_is_floor;
-  const usdCap = quota.spend_budget_usd_total;
-  const tokenCap = quota.token_budget_total;
-  const usdShare = quota.spend_budget_used_share;
-  const tokenShare = quota.token_budget_used_share;
-  const metered = usdCap !== null || tokenCap !== null;
+function allowanceLede(c: CouponStatus): string {
+  if (c.host) {
+    return "This account runs the box, so its sends on the box's own provider keys are not metered.";
+  }
+  if (c.void) {
+    return "Retired: this account holds a key of its own, so the host's keys no longer send for it.";
+  }
+  if (c.exhausted) {
+    return "Used up: nothing more is sent on the host's keys. Add a key of your own to keep running — every result stays readable.";
+  }
+  return "What the host's provider keys may pay for this account over its life. A key of your own sends instead, billed to you, and never draws it.";
+}
+
+function AllowanceSection({ coupon }: { coupon: CouponStatus }) {
+  const { openAccount } = useWorkspace();
+  const host = coupon.host_key_spend;
+  const own = coupon.own_key_spend;
+  // A retired coupon serves `exhausted` too, but nothing is wrong: the account sends on its own keys.
+  const spent = !coupon.host && !coupon.void && coupon.exhausted;
+  const held = coupon.keys.length;
   return (
     <AccountSection
-      title="Spend"
-      lede={
-        metered
-          ? "Lifetime, across every campaign this account ran. A launch the rest cannot cover is refused whole."
-          : "Lifetime, across every campaign this account ran. No ceiling: this account runs on the server's own provider key."
-      }
+      title="Host allowance"
+      lede={allowanceLede(coupon)}
+      aside={<Button onClick={() => openAccount("keys")}>API keys</Button>}
     >
       <div className="account-wallet">
         <div className="account-wallet-cell">
-          <span className="account-kicker">Model spend</span>
+          <span className="account-kicker">On the host&rsquo;s keys</span>
           <span className="account-figure">
-            {billText(lifetime.billed_usd, blind)}
-            <span className="account-figure-of">
-              {usdCap === null ? " no ceiling" : ` of ${fmtUsd(usdCap)}`}
-            </span>
+            {billText(host.billed_usd, host.bill_is_floor)}
+            <span className="account-figure-of"> {couponFaceText(coupon)}</span>
           </span>
-          {usdShare !== null ? <Meter share={usdShare} warn={blind} /> : null}
-          {allowanceCaveats(lifetime).map((line) => (
+          {coupon.used_share !== null ? <Meter share={coupon.used_share} warn={spent} /> : null}
+          {coupon.host ? null : (
+            <span className={spent ? "account-warn" : "account-note"}>
+              Left: {couponLeftText(coupon)}
+            </span>
+          )}
+          {allowanceCaveats(host).map((line) => (
             <span key={line} className="account-warn">
               {line}
             </span>
           ))}
         </div>
         <div className="account-wallet-cell">
-          <span className="account-kicker">Tokens</span>
-          <span className="account-figure">
-            {fmtTokens(quota.tokens_used_total)}
-            <span className="account-figure-of">
-              {tokenCap === null ? " no ceiling" : ` of ${fmtTokens(tokenCap)}`}
-            </span>
+          <span className="account-kicker">On your own keys</span>
+          <span className="account-figure">{billText(own.billed_usd, own.bill_is_floor)}</span>
+          <span className="account-note">
+            {held === 0
+              ? "No key held."
+              : `${held} key${held === 1 ? "" : "s"} held. Billed to you, never drawn from the allowance.`}
           </span>
-          {tokenShare !== null ? <Meter share={tokenShare} /> : null}
         </div>
       </div>
     </AccountSection>

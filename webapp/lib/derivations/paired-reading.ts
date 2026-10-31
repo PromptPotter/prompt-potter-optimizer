@@ -1,9 +1,4 @@
-import {
-  READING_STATE_KINDS,
-  READING_STATE_LABELS,
-  READING_STATE_SENTENCES,
-  type ReadingStateKind,
-} from "@/lib/api/types.generated";
+import { READING_STATE_INFO, type ReadingStateKind } from "@/lib/api/types.generated";
 import type { LiftEstimate, MeasuredLift, PairedReading } from "@/lib/api/types";
 import { fmtUnit } from "@/lib/format";
 
@@ -16,12 +11,8 @@ export function readPaired(reading: PairedReading): PairRead {
   if (headline !== null && coverage !== null) {
     return { read: true, lift: headline, cells: coverage.scored };
   }
-  return {
-    read: false,
-    kind: READING_STATE_KINDS[state],
-    label: READING_STATE_LABELS[state],
-    sentence: READING_STATE_SENTENCES[state],
-  };
+  const { kind, label, sentence } = READING_STATE_INFO[state];
+  return { read: false, kind, label, sentence };
 }
 
 export function liftOf(reading: PairedReading | null): LiftEstimate | null {

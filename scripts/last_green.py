@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 
-from processes import REPO, git
+from processes import REPO, clone_cache, git
 
 # No prose is among them, so a docs edit reruns nothing that only RUNS the engine.
 ENGINE_RUNTIME = ("promptpotter/", "examples/", "pyproject.toml", "uv.lock")
@@ -60,11 +60,16 @@ def reads(rel: str, prefixes: Sequence[str]) -> bool:
 
 
 class LastGreen:
-    _STORE = REPO / ".gate_cache" / "last_green.json"
+    """One store per clone: a key is content, so a green any worktree recorded holds in every other."""
+
     # What `npm ci` leaves naming the tree it installed: whether the install still matches the lock.
     _INSTALLED = ("webapp/node_modules/.package-lock.json",)
+    # Per check, the newest greens kept: enough for main, a few worktrees and a pushed tip to stop
+    # evicting each other.
+    _KEPT = 8
 
-    def __init__(self, listed: str) -> None:
+    def __init__(self, listed: str, store: Path) -> None:
+        self._store = store
         self._files = sorted(filter(None, listed.split("\0")))
         # The interpreter's own site dirs: a build product in the tree is on `sys.path`, never a tool.
         site = sorted({sysconfig.get_path("purelib"), sysconfig.get_path("platlib")})
@@ -78,7 +83,7 @@ class LastGreen:
         if os.environ.get("CI"):
             return None
         code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
-        return None if code else cls(listed)
+        return None if code else cls(listed, clone_cache() / "greens.json")
 
     def key(
         self, prefixes: Sequence[str], products: Sequence[str] = (), without: Sequence[str] = ()
@@ -102,18 +107,24 @@ class LastGreen:
             ),
         ).hex()
 
-    def _load(self) -> dict[str, str]:
+    def _load(self) -> dict[str, list[str]]:
         try:
-            return dict(json.loads(self._STORE.read_text(encoding="utf-8"))["green"])
+            return dict(json.loads(self._store.read_text(encoding="utf-8"))["green"])
         except (OSError, ValueError, KeyError, TypeError):
             return {}
 
     def holds(self, name: str, key: str) -> bool:
-        return self._load().get(name) == key
+        return key in self._load().get(name, ())
 
     def record(self, verdicts: Mapping[str, str | None]) -> None:
-        green = {n: k for n, k in {**self._load(), **verdicts}.items() if k is not None}
-        self._STORE.parent.mkdir(exist_ok=True)
-        self._STORE.write_text(
+        """A key files a green beside the others; ``None`` drops every green the check holds."""
+        green = self._load()
+        for name, key in verdicts.items():
+            if key is None:
+                green.pop(name, None)
+            else:
+                kept = [k for k in green.get(name, ()) if k != key]
+                green[name] = [*kept, key][-self._KEPT :]
+        self._store.write_text(
             json.dumps({"green": green}, indent=1, sort_keys=True), encoding="utf-8"
         )

@@ -12,6 +12,7 @@ from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.statistics import sign_posterior
 
 shapes_optimizer_prompt(__name__)
 
@@ -145,13 +146,12 @@ class L1GenerateKnobs(StrictModel):
 class PoBBKnobs(StrictModel):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
-    epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.GATE)] = Field(
+    epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         gt=0.0,
         lt=1.0,
         description="Stop a candidate when its posterior probability of being the "
-        "round's best drops below this threshold. Smaller → fewer stops. Mirrored, it is the "
-        "election's admission bar: an arm is promoted only where its parent, read against it, "
-        "falls below it. Smaller → fewer promotions.",
+        "round's best drops below this threshold. Smaller → fewer stops. A stop ends "
+        "measurement only; what is promoted is ``theta_election.admission``'s.",
     )
     epsilon_floor: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         gt=0.0,
@@ -197,6 +197,19 @@ class PoBBKnobs(StrictModel):
     )
 
 
+class ElectionKnobs(StrictModel):
+    admission: Annotated[float, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+        ge=sign_posterior(1, 0),
+        lt=1.0,
+        description=(
+            "The confidence an arm must exceed to be promoted over its parent: its posterior "
+            "P(θ_arm > θ_parent), capped by what its discordant cells support. Never below "
+            "what one discordant cell supports (0.75), so one cell never promotes. Higher → "
+            "fewer promotions."
+        ),
+    )
+
+
 class EscalationKnobs(StrictModel):
     l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0, description="Consecutive non-improving L1 rounds before L2 fires."
@@ -237,7 +250,7 @@ class EscalationKnobs(StrictModel):
             "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
             "injection renders the rare-escape-hatch instruction into L2 + L3 "
             "prompts and the runner auto-mints a sibling cycle on each fired "
-            "fork_proposal (capped at ``MAX_AUTO_REBASES`` per session). When "
+            "fork_proposal that changes something, its rounds charged to the line. When "
             "False, the injection renders empty — L2/L3 prompts contain no "
             "fork_proposal guidance, the LLM never emits one, the runner's "
             "rebase loop never fires. Flip to ``false`` for ablation runs "

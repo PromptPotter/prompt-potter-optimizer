@@ -31,7 +31,7 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
             fold = rr.folds.get(key)
             match arm:
                 case Cut(reason=Eliminated(elimination=cut)) if fold and fold.total:
-                    # ε alone measured this arm against its priors; COLLAPSED is no measurement.
+                    # ε alone measured this arm against its priors; lock-in cut it on the leader's.
                     lost = cut.context.get("gate") == EliminationGate.EPSILON
                 case Measured() if fold and fold.total:
                     lost = (

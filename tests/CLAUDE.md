@@ -72,4 +72,4 @@ the fields a test bends. **Add a parameter to bend one; never add a builder an e
 ## Frozen cycle fixtures
 
 **None, on either side** — the webapp's is [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing
-posture; an on-disk-compat guarantee is `deploy-linux/update.sh`'s `restamp` smoke check.
+posture.

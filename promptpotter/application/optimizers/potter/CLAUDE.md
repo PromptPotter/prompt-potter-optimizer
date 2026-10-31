@@ -31,7 +31,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## L2 — what `l2_context` may write
 
-**L2 fires on L1 stall, yield drought or evidence starvation; the rule set in `escalation/rules.py` is the policy.** A fact about one node lives on its member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
+**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; the rule set in `escalation/rules.py` is the policy.** A fact about one node lives on its member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
 
 - **Deterministic rules route; they never diagnose or stop.** L2 judges recoverability, and `terminate_proposal` is its exit for a backend fault.
 - **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params` — **and, as the recombination host, `recombinations`** (`L2Memory.recombinations`, ids and loci only, which the next round's `l1_generate` adds). Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
@@ -43,11 +43,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
-**Each is gated by a capability bit whose injection renders empty when off; terminate outranks fork.**
-
-- **`fork_proposal` carries no round offset**: the layer decides whether to rewind, UCB decides where (`application/mask/backprop.py::select_rewind_round`).
-- **`unlock_schema_field_rename` is a bool, never `ConfigOverrides`** — a layer must not move its own spend ceiling.
-- **A blank `terminate_proposal` reason is ignored**; honored and ignored both land on the operator's warnings channel.
+**Each sits behind its capability bit; terminate outranks fork.** `terminate_proposal` is in the reply schema only where `InjectionBundle.terminate_offer` holds (a measured starved node); a blank reason is ignored, an honored one stops the cycle `optimizer_abort`. `fork_proposal` names no round — UCB picks the node the fork stands on, the current one or an ancestor (`mask/backprop.py::select_branch_round`); **a fork changing no config stands only on a promoted individual the line left, never the origin or the standing pick**. A fork keeps the parent's latest working state and runs only the rounds its line had left (`runner/entry.py::_mint_and_rebase_fork`). `unlock_schema_field_rename` is a bool: a layer never moves its own spend ceiling.
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
@@ -57,7 +53,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 ## Editing a renderer's PROSE is a measurement change
 
 **`nodes.py::source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data, only the entries its `active` keeps of what the campaign admits (`nodes.py::Initializer.starting_content`, `nodes.py::admits`).
-**A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else**, and its module is in the hashed set or carries `shared/hashing.py::shapes_optimizer_prompt`.
+**A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else.** Hashed code's reads are followed (`source_scan.py::optimizer_prompt_shapers`), so only a unit reached through an instance or a registry carries `shared/hashing.py::shapes_optimizer_prompt`; the closure stops at `source_scan.py::PLUMBING_MODULES`.
 
 ## A validator either REJECTS or SCORES — never both
 

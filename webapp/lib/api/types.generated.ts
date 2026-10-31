@@ -48,7 +48,7 @@ export interface ServedDashboard {
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
   state_since: string;
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
   rounds: ServedRound[];
@@ -66,7 +66,7 @@ export interface ServedDashboard {
   total_backend_calls: number;
   current_query_payload: string | null;
   open_positions: number[];
-  waiting_on: string | null;
+  waiting_on: WaitingOn | null;
   backpressure: ServedBackpressure | null;
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
@@ -77,6 +77,10 @@ export interface ServedDashboard {
    * delta over moved since it was declared, under an unchanged origin: this
    * launch runs today's values. */
   defaults_drift: DefaultsDrift | null;
+  /** What this launch read of the backend's revision beside the one its connector
+   * expects; `None` where the connector checks none. A drift is served, never
+   * refused. */
+  backend_revision: BackendRevision | null;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
@@ -637,8 +641,8 @@ export interface VerificationMark {
    * the pass's reading once `done`. Null before the first row, and on a
    * `failed` pass, which reads nothing. */
   level: BandedValue | null;
-  /** Why a `failed` pass ended without a reading. */
-  failure: string | null;
+  /** How a `failed` pass reads, so why it ended without a reading; null otherwise. */
+  failed_as: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
 }
 
 /** A backend transport or 5xx retry; a 429 is ``backpressure``, never one of these. */
@@ -658,11 +662,18 @@ export interface BackendWarning {
 /** One optimizer-loop degradation the self-healing rails recovered from. */
 export interface LoopWarning {
   ts: string;
-  kind: string;
-  severity: string;
+  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed';
+  severity: 'warning' | 'error';
   message: string;
   round: number | null;
   detail: Record<string, unknown>;
+}
+
+/** The cell the producer's open call holds — worded `RAY_HEAD_WORDS` on every surface. */
+export interface WaitingOn {
+  /** The owning arm's label; null for a pass no arm owns. */
+  label: string | null;
+  position: number;
 }
 
 /** A provider hold as served: the banked reading with both clocks read at the response. */
@@ -734,6 +745,13 @@ export interface Treatment {
   source: string;
 }
 
+/** What a launch read of the backend's revision, beside the one its connector was written against. */
+export interface BackendRevision {
+  expected: string;
+  reported: string | null;
+  unread: string | null;
+}
+
 /** One race catch-up: the priors eliminator ``member`` re-measured on one sample. */
 export interface CatchUpLogEntry {
   member: string;
@@ -748,7 +766,15 @@ export interface CatchUpLogEntry {
 export interface CurrentRound {
   round: number;
   active_node: string | null;
-  measurement_node: string | null;
+  /** The optimizer node every scoring pass of the run runs as — origin, round,
+   * bench and verify alike — as its wiring declares it. */
+  measurement_node: string;
+  /** Whether `measurement_node` is the node at work now: `measuring_arm` is served
+   * only while it is. */
+  measuring: boolean;
+  /** The inner cycle an open cell runs, where a cell is a whole campaign (L4), in
+   * this cycle's sandbox; null where no open cell has named one. */
+  inner: CycleHop | null;
   candidates: LiveCandidate[];
   /** How many scored rows across `candidates` graded into each tenth of [0, 1],
    * lowest first, banded as a closed round's `fitness_bands` is. */
@@ -918,29 +944,12 @@ export interface RacingBlock {
 export interface DashboardError {
   kind: string;
   message: string;
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
-  label: string;
-  next_step: string;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 }
 
-/** One cycle's producer as served: its state, its two server-measured clocks and its words. */
+/** One cycle's producer as served: its state and its two server-measured clocks. Its words are */
 export interface ProducerReading {
   state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
-  /** The state as a walking run's head reads it: the state's own word, or the
-   * measuring word while it sits on an open cell with no recent step. */
-  label: string;
-  /** The same head while the run's newest step is a child run's — the one word for
-   * a parent whose call is open on it. */
-  label_on_child: string;
-  /** A record landed inside the recent-step window, so the run's newest step is
-   * where it stands now. */
-  stepping: boolean;
-  /** How long a wedged producer has made no progress, as a sentence; empty on every
-   * other state. */
-  stalled: string;
-  /** What this state raises on its own (`silent`, `wedged`); null where nothing is
-   * wrong with the producer. */
-  alert: ProducerAlert | null;
   /** A process holds this cycle — running it, or launching it (`claimed`) — so the
    * cycle is neither deleted, compacted, resumed nor billed by a second
    * party. */
@@ -955,12 +964,6 @@ export interface ProducerReading {
   /** That cell has been open past `CALL_HOLDS_AFTER_S`: calls are taken in walk
    * order, so it is what holds every call behind it. */
   call_holds: boolean;
-}
-
-/** What a producer's state raises on its own, worded once for every surface. */
-export interface ProducerAlert {
-  title: string;
-  detail: string;
 }
 
 /** Which run verbs a cycle admits now: the one answer the run control and the dispatcher read. */
@@ -978,11 +981,11 @@ export interface RunAdmission {
 
 /** Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach. */
 export interface PauseReading {
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound';
+  /** Null on an accepted pause the loop has yet to reach. */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed';
   /** Who or what asked, in the declarer's own words. */
   detail: string;
-  next_step: string;
   at: string;
 }
 
@@ -1006,9 +1009,9 @@ export interface SampleLookahead {
   scoring_now: boolean;
   /** The deepest press the next walk can take. */
   pick_max: number;
-  /** How many more cells the spend limits admit, in words, where money and not the
-   * armed depth holds the walk; null where it does not. */
-  money_hold: string | null;
+  /** How many more cells the spend limits admit, where money and not the armed
+   * depth holds the walk (`LOOKAHEAD_WORDS`); null where it does not. */
+  affordable: number | null;
   /** What each call out holds of the ceiling; null where no book binds. */
   cell_reserve_usd: number | null;
   /** Why holding calls ahead does not apply to this backend at all (`ceiling` of
@@ -1408,6 +1411,8 @@ export interface ActivityItem {
   round: number | null;
   /** The arm the record is about, by its key; `label` renders it. */
   arm: string | null;
+  /** The self-heal a round warning reports; null on every other item. */
+  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | null;
 }
 
 /** A choice the run is holding for: what to say about it, and the commands that answer it. */
@@ -1573,7 +1578,9 @@ export interface HeadToHead {
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
   verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
-  pairs: SelectionPair[];
+  /** The arm-by-arm matrix: every two treatments whose selections the bench graded,
+   * oldest arm as `a`. */
+  contrasts: ArmContrast[];
   ratio_reference: string | null;
   verdict_line: string;
   notes: string[];
@@ -1598,6 +1605,9 @@ export interface HeadToHeadRow {
   spend_metered: MeteredSpend | null;
   human_intervened: boolean;
   status: RunStatus;
+  /** The column the selection's electing round chose it on; null before a round
+   * selects. Quote an `ability` pick on θ unless its caveat is served. */
+  election: ElectionColumn | null;
   bench: BenchScore;
   bench_set: BenchSet | null;
   spend: SpendRollup | null;
@@ -1668,10 +1678,21 @@ export interface DeterminismClamp {
   route_order: string[] | null;
 }
 
-/** How a run reads on a row: one word and the mark drawn beside it. */
+/** How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. Its word */
 export interface RunStatus {
-  label: string;
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
+  /** Null while the run has not stopped. */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+}
+
+/** The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or */
+export interface ElectionColumn {
+  /** What the electing round's selector ranked on. */
+  elects_on: 'accuracy' | 'composite' | 'ability';
+  /** The pick's θ on its electing round. */
+  ability: ArmAbility | null;
+  reads_on: 'accuracy' | 'composite' | 'ability';
 }
 
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
@@ -1697,24 +1718,17 @@ export interface BenchScore {
    * levels above then read no column, since two datasets' levels never
    * average, while `vs_origin` still pairs every row. */
   scopes: BenchScope[];
-  /** The headline on one line — both levels, the lift in each column and the held-
-   * out row count, or `status.sentence` where the bench is not graded. The
-   * ONE wording of it: the completion box, the `bench` verb and every screen
-   * print this. Stamped by :meth:`of` alone. */
-  line: string;
 }
 
 /** Where a campaign's bench stands, and whether asking for its pass would be admitted. */
 export interface BenchStatus {
   state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
   trigger: 'manual' | 'at_end' | 'each_round';
-  /** `state` in words, with the rows and the stop behind it. */
-  sentence: string;
   /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
    * one answer. */
   can_grade: boolean;
   /** Why not, exactly where `can_grade` is false. */
-  refusal: string | null;
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'not_held' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
   /** Whether the grade control shows: admitted, or a pass still waited on. Never on
    * an inner run, whose line no command grades. */
   offered: boolean;
@@ -1735,7 +1749,7 @@ export interface BenchStatus {
 export interface PassStop {
   /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
    * spent budget before it was sent. */
-  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
+  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
 }
@@ -1813,10 +1827,37 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** Two campaigns' selections paired on the bench rows both scored. */
-export interface SelectionPair {
-  reading: PairedReading;
+/** Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline */
+export interface ArmContrast {
+  a: ContrastArm;
+  b: ContrastArm;
   guard: PairGuard;
+  /** The paired per-row differences, by `Sample.key`: every figure below is read
+   * off them. */
+  differences: Record<string, number>;
+  /** Their mean, its Student-t interval and test over rows: an SE clustered by row,
+   * so one row's replicates never count as rows. `family.p_adjusted` is
+   * Holm's across the matrix. Null under two rows. */
+  lift: MeasuredLift | null;
+  /** Benjamini-Hochberg's q over `lift.family`: the false-discovery reading, served
+   * beside Holm's and never gating. Null where the contrast is in no family. */
+  q_value: number | null;
+  se_clustered: number | null;
+  /** The same mean's SE were every replicate pairing on every row independent: what
+   * clustering corrects. It equals `se_clustered` at one replicate a side. */
+  se_naive: number | null;
+  /** (`se_clustered` / `se_naive`)²: how far a replicate-blind reading overstates
+   * the evidence. */
+  design_effect: number | null;
+}
+
+/** One arm of the matrix: a treatment, and the campaigns that ran it — its replicates. */
+export interface ContrastArm {
+  optimizer: string;
+  treatment_digest: string;
+  /** The campaigns running this treatment whose selection the bench graded, oldest
+   * first: what each row's arm mean is taken over. */
+  replicates: string[];
 }
 
 /** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
@@ -2011,6 +2052,146 @@ export interface EditSpread {
   n_edits: number;
 }
 
+/** Every arm of every budget point, priced at what the archive says a cell of this bank costs. */
+export interface HeadToHeadPrice {
+  /** One per budget point: dispatched as `mint-head-to-head`, it mints the arms
+   * priced. */
+  heads: MintHeadToHeadPayload[];
+  dataset_hash: string;
+  search_rows: number;
+  bench_rows: number;
+  cell: CellPrice;
+  /** Null where no campaign here called it in a round: its arms' figures leave its
+   * own calls out. */
+  optimizers: Record<string, OptimizerRoundPrice | null>;
+  /** The connector's ceiling (`Connector.max_cells_in_flight`) `wall_clock_s` is
+   * read at. */
+  cells_in_flight: number;
+  arms: ArmPrice[];
+  usd: number;
+  /** Every arm minted after the last, in turn. */
+  wall_clock_s: number | null;
+  serial_s: number | null;
+}
+
+/** Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned, */
+export interface MintHeadToHeadPayload {
+  dataset_name: string;
+  head_to_head: HeadToHeadRequest;
+}
+
+/** Arms of one head-to-head asked in one act: all minted and admitted, or none. */
+export interface HeadToHeadRequest {
+  head_to_head_id: string;
+  /** An id already declared takes these as further arms, each held to its record. */
+  arms: ArmRequest[];
+  /** Every arm's own: each campaign spends up to it on its own book. An axis left
+   * out is the dataset's. */
+  budget: Budget;
+}
+
+/** One arm as asked: its key, and the optimizer it runs with that optimizer's knobs. */
+export interface ArmRequest {
+  arm_key: string;
+  /** Laid over the dataset's own `optimization`: `optimizer` is required, and
+   * `budget` and `halt_at_accuracy` are refused, since every arm runs the
+   * head-to-head's budget to its end. */
+  optimization: OptimizationOverrides;
+}
+
+/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
+export interface OptimizationOverrides {
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
+  /** The optimizer manifest this campaign runs — a directory under
+   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
+   * nothing selects it install-wide. */
+  optimizer: string;
+  /** This campaign's overlay on the selected manifest, keyed by node name —
+   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
+   * An optimizer's knobs, a paper's configuration and each llm node's
+   * ``config.model`` all ride here; each node validates its own knobs when
+   * the optimizer is selected. */
+  nodes: Record<string, ManifestNodeOverlay>;
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
+}
+
+/** One optimizer node's delta over its manifest's ``config``. */
+export interface ManifestNodeOverlay {
+  config: Record<string, unknown>;
+}
+
+/** What one cell of a bank cost on its models, as the archive measured it. */
+export interface CellPrice {
+  /** Mean USD over the archive's newest rows of this bank and models. */
+  usd: number;
+  /** Mean seconds producing one took (`MeasuredCell.cost_s`, which a replay keeps);
+   * null where no priced row carried a timing. */
+  seconds: number | null;
+  /** Archive rows the means are over. */
+  cells: number;
+}
+
+/** What one round of an optimizer's own calls cost, over its newest campaigns here, any */
+export interface OptimizerRoundPrice {
+  /** Mean optimizer USD incurred per round that called it. */
+  usd: number;
+  /** Mean optimizer call seconds per such round; calls sent together each count. */
+  seconds: number;
+  /** Rounds the means are over. */
+  rounds: number;
+  /** Campaigns those rounds ran in. */
+  campaigns: number;
+}
+
+export interface ArmPrice {
+  /** The budget point's head-to-head this arm joins. */
+  head_to_head_id: string;
+  arm_key: string;
+  optimizer: string;
+  /** Rounds closed after the origin: the point's `rounds`, or what its `usd` buys
+   * first. */
+  rounds: number;
+  /** Cells the search measures, the origin's included: the calls a budget-matched
+   * head-to-head holds equal, so arms of one point are compared on it. */
+  search_cells: number;
+  /** The origin's and the selection's held-out passes. */
+  bench_cells: number;
+  /** Search and bench at the measured cell price, plus the optimizer's measured
+   * round price for every round it opens. */
+  usd: number;
+  /** At `cells_in_flight`; null where no priced cell carried a timing. */
+  wall_clock_s: number | null;
+  /** One cell at a time, the look-ahead's default. */
+  serial_s: number | null;
+  /** What this arm's mint refuses (`spend_cap_below_round`): its budget closes no
+   * round. */
+  refused: string | null;
+}
+
 export interface FilesResponse {
   campaign_id: string;
   cycle_id: string;
@@ -2116,51 +2297,6 @@ export interface DraftCampaignWire {
    * wire's own field of that path. A `writeOnly` subtree is
    * `StartCheckinPayload`'s, sent with Start and stored nowhere. */
   setup_schema: Record<string, unknown>;
-}
-
-/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
-export interface OptimizationOverrides {
-  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
-   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
-   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
-  budget: Budget;
-  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
-   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
-   * only on its record's rule. */
-  halt_at_accuracy: number | null;
-  /** The optimizer manifest this campaign runs — a directory under
-   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
-   * nothing selects it install-wide. */
-  optimizer: string;
-  /** This campaign's overlay on the selected manifest, keyed by node name —
-   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
-  nodes: Record<string, ManifestNodeOverlay>;
-  /** Hold every round, before any arm is measured, until the operator answers with
-   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
-   * ``review``: the proposers run, their proposals are drafts, and the
-   * operator keeps any of them by index, adds arms of their own, or both.
-   * ``author``: no proposer runs and every arm is the operator's. An arm of
-   * theirs is an edit of the round's parent — prompt fields, a pipeline
-   * overlay — and is measured and elected like any other. The hold has no
-   * deadline; a pause ends it resumably, and a resume holds again unless an
-   * answer was already banked. */
-  arm_gate: 'off' | 'review' | 'author';
-}
-
-/** One optimizer node's delta over its manifest's ``config``. */
-export interface ManifestNodeOverlay {
-  config: Record<string, unknown>;
 }
 
 /** What the selected optimizer runs under a config, derived once for check-in and campaign. */
@@ -2277,6 +2413,9 @@ export interface PoolRow {
    * order; none for a pool no pack feeds or no member draws, and none before
    * the facts a Start mints against are known */
   packs: PackOffer[];
+  /** The packs it would offer but refuses, each with why, served beside `packs`:
+   * one bad pack never hides the rest */
+  refused: PackRefusal[];
 }
 
 /** One path an initializer's `active` knob may name, with what it keeps. */
@@ -2325,6 +2464,17 @@ export interface PackOffer {
   entries: number;
   /** Whether `packs` names it under this config */
   on: boolean;
+}
+
+/** A pack the shelf holds but serves none of: the rest of the library serves on without it. */
+export interface PackRefusal {
+  /** Its directory name, as a `packs` knob names it */
+  name: string;
+  /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
+   * install and this account both hold the name */
+  code: 'block_pack_invalid' | 'block_pack_collision';
+  /** What to fix, in a sentence */
+  reason: string;
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
@@ -2853,6 +3003,8 @@ export interface LibraryResponse {
   sources: LibrarySource[];
   /** By pack name, then each pack's own order */
   snippets: LibrarySnippet[];
+  /** Each pack held but served none of, by name, and why: the rest serve on */
+  refused: PackRefusal[];
 }
 
 /** One source a snippet names: a cited work as its pack declares it, or the authored one. */
@@ -2914,13 +3066,9 @@ export interface HierarchyCampaign {
   parent: string | null;
   /** The display name. */
   label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
   /** What could not be read; null where all was. */
   caveat: string | null;
   tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
@@ -2939,45 +3087,14 @@ export interface HierarchyTag {
   label: string;
 }
 
-/** One number an entry shows, worded by the server in the order it is served. */
-export interface HierarchyStat {
-  key: 'spend_lifetime' | 'spend' | 'rounds' | 'accuracy' | 'lives' | 'ability' | 'lift';
-  label: string;
-  /** The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`. */
-  value: string;
-  /** The second line under the value; null where none. */
-  sub: string | null;
-}
-
-/** The bench as one stat: its wording, and the readings a control or a headline acts on. */
-export interface BenchStat {
-  key: 'bench';
-  label: string;
-  value: string;
-  /** `BenchScore.line`, or why the bench is not read here. */
-  sub: string | null;
-  /** Null on a course beside the line, which no command grades. */
-  status: BenchStatus | null;
-  /** `BenchScore.vs_origin`; null with `status`. */
-  vs_origin: PairedReading | null;
-  /** `BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread. */
-  lift_per_usd: number | null;
-}
-
-/** A run's state as one value: the phase, its word and mark, whether it is held, the verbs. */
+/** A run's state as one value: its status, whether it is held, the verbs. */
 export interface HierarchyState {
-  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   status: RunStatus;
   /** A process holds this cycle, running or launching it. */
   attached: boolean;
   /** Why the run reads paused; null otherwise. */
   pause: PauseReading | null;
   admission: RunAdmission;
-  /** What the operator does now, as the run's stop reason states it
-   * (`STOP_REASON_INFO::next_step`) — the sentence the terminal and
-   * `review.md` advise. Empty while the run has not stopped, or where its
-   * reason owes nothing. */
-  next_step: string;
   /** An operator intervened by hand, so the run is no longer purely reproducible. */
   intervened: boolean;
 }
@@ -3004,6 +3121,9 @@ export interface CampaignFacts {
   spend_lifetime: LifetimeSpend;
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
+  /** The facts of the course holding the line, which the campaign's row reads as
+   * its own; null where that course has no mint record. */
+  line_course: CourseFacts | null;
 }
 
 /** What an account, or one campaign's share of it, was billed over its whole life. */
@@ -3066,29 +3186,6 @@ export interface VendorModels {
   models: string[];
 }
 
-/** A course — one cycle's run, root, fork, diag or inner — as the listing serves it. */
-export interface HierarchyCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: (HierarchyStat | BenchStat)[];
-  state: HierarchyState;
-  span: HierarchySpan;
-  level: 'course';
-  facts: CourseFacts;
-}
-
 /** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
 export interface CourseFacts {
   /** How the course was minted; the `mint` tag renders it. */
@@ -3101,9 +3198,18 @@ export interface CourseFacts {
   standing: RunStanding | null;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
+  /** The rounds cap that binds it: its wiring's, before its first launch its
+   * campaign's. 0 runs the origin only; null where it has no rounds axis. */
+  rounds_cap: number | null;
   /** The column the course's newest election elected on; null before its first.
    * `ability`: its rounds are won on θ, not on accuracy. */
   elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** This course's own ledger's bill, at the moment. */
+  spend: MeteredSpend;
+  /** The campaign's bench, on the course holding the line, read whole at the head;
+   * null on every other course (the line's reads `held_elsewhere` there) and
+   * under a moment. */
+  bench: BenchScore | null;
 }
 
 /** Where a fork was born on its parent's time line: the cut, as an event. */
@@ -3122,8 +3228,7 @@ export interface CourseSpawn {
 /** Where the run stands after a round: its selection, over whom, and how it reads against C0. */
 export interface RunStanding {
   rounds_without_advance: number;
-  /** The life bank after this round: the pips and their words, as the readout
-   * prints them. Null where the campaign banks no lives
+  /** The life bank after this round. Null where the campaign banks no lives
    * (`optimization.lives`). */
   lives: LivesReading | null;
   /** The optimizer's declared pick (`declared_selection`), as the arm it was first
@@ -3151,13 +3256,30 @@ export interface RunStanding {
   advanced: number;
 }
 
-/** A run's life bank as every surface shows it. Built by :meth:`of` alone. */
+/** A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`, */
 export interface LivesReading {
-  /** One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank. */
-  bar: string;
+  left: number;
+  /** Null where the bank has no cap. */
+  cap: number | null;
+}
+
+/** A course — one cycle's run, root, fork, diag or inner — as the listing serves it. */
+export interface HierarchyCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
   label: string;
-  /** The bank is empty: the run stops after this round. */
-  spent: boolean;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'course';
+  facts: CourseFacts;
 }
 
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
@@ -3170,13 +3292,9 @@ export interface UnstartedCampaign {
   parent: string | null;
   /** The display name. */
   label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
   /** What could not be read; null where all was. */
   caveat: string | null;
   tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: (HierarchyStat | BenchStat)[];
   level: 'unstarted';
   span: HierarchySpan;
   facts: UnstartedFacts;
@@ -3235,13 +3353,9 @@ export interface SubtreeCampaign {
   parent: string | null;
   /** The display name. */
   label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
   /** What could not be read; null where all was. */
   caveat: string | null;
   tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
@@ -3265,6 +3379,9 @@ export interface SubtreeCampaignFacts {
   spend_lifetime: LifetimeSpend;
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
+  /** The facts of the course holding the line, which the campaign's row reads as
+   * its own; null where that course has no mint record. */
+  line_course: CourseFacts | null;
   /** How many cycles `cleanup-empty-cycles` deletes here now
    * (`CampaignStore.deletable_stubs`, the command's own list). */
   deletable_stubs: number;
@@ -3280,13 +3397,9 @@ export interface SubtreeCourse {
   parent: string | null;
   /** The display name. */
   label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
   /** What could not be read; null where all was. */
   caveat: string | null;
   tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'course';
@@ -3308,9 +3421,18 @@ export interface SubtreeCourseFacts {
   standing: RunStanding | null;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
+  /** The rounds cap that binds it: its wiring's, before its first launch its
+   * campaign's. 0 runs the origin only; null where it has no rounds axis. */
+  rounds_cap: number | null;
   /** The column the course's newest election elected on; null before its first.
    * `ability`: its rounds are won on θ, not on accuracy. */
   elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** This course's own ledger's bill, at the moment. */
+  spend: MeteredSpend;
+  /** The campaign's bench, on the course holding the line, read whole at the head;
+   * null on every other course (the line's reads `held_elsewhere` there) and
+   * under a moment. */
+  bench: BenchScore | null;
   /** The `per_cell` formula this course was read under for the request's lens — a
    * `dials:` lens realized against this campaign's anchors, a `score:` one as
    * given. What a fork applying the lens carries as `scoring.per_cell`. Null
@@ -3374,13 +3496,9 @@ export interface HierarchyCandidate {
   parent: string | null;
   /** The display name. */
   label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
   /** What could not be read; null where all was. */
   caveat: string | null;
   tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: (HierarchyStat | BenchStat)[];
   level: 'candidate';
   facts: CandidateFacts;
   children: SubtreeCampaign[];
@@ -3397,6 +3515,7 @@ export interface CandidateFacts {
   /** The variation nodes that wrote this individual, in the order they ran. Empty
    * on an origin. */
   variations: Variation[];
+  standing: 'origin' | 'proposed' | 'rewound' | 'rewound_stood_on' | 'retired';
   /** `reading.arm` is the key every per-cycle document of this course speaks;
    * `reading.sp_hash` joins to the archive rows. A retired candidate's
    * election wears no crown: the course that took its place re-asks it. */
@@ -3769,6 +3888,18 @@ export interface StartCheckinResponse {
   hop: CycleHop | null;
 }
 
+/** What a head-to-head's act answers, and its retry under the same key: each arm's job and */
+export interface HeadToHeadStarted {
+  head_to_head_id: string;
+  arms: ArmStarted[];
+}
+
+export interface ArmStarted {
+  arm_key: string;
+  job_id: string;
+  hop: CycleHop;
+}
+
 /** What a pass did, or would do. */
 export interface ArchiveReport {
   files_touched: number;
@@ -3819,22 +3950,8 @@ export interface ConnectedAccount {
   email: string | null;
 }
 
-/** Usage against the next launch's gates: spend and tokens LIFETIME, campaigns per day. */
+/** Usage against the next launch's machine gates; the money is `/auth/coupon`'s. */
 export interface QuotaStatus {
-  spend_lifetime: LifetimeSpend;
-  spend_budget_usd_total: number | null;
-  /** How full the USD meter draws: `spend_lifetime.billed_usd` plus its
-   * `rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where
-   * no ceiling bounds the account. */
-  spend_budget_used_share: number | null;
-  /** The allowance is SPENT in either unit, unreported sends counted. What a
-   * running launch holds is not spent: a run declaring no cap holds the whole
-   * headroom. False on an account no ceiling bounds. */
-  allowance_exhausted: boolean;
-  tokens_used_total: number;
-  token_budget_total: number | null;
-  /** The token meter's twin of `spend_budget_used_share`. */
-  token_budget_used_share: number | null;
   concurrent_running: number;
   /** This account's launches waiting for a machine slot. They count against
    * `max_concurrent_cycles` exactly as running ones do. */
@@ -3864,8 +3981,9 @@ export interface TermsConsent {
 /** Time-bucketed spend / requests / tokens over the requested window. */
 export interface ActivityResponse {
   window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
-  /** The colour axis: `model` is the exact model id, `api_key` is who billed the
-   * call (`TokenUsageRecord.provider`). */
+  /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
+   * the provider that billed the call, and whether the host's key under the
+   * coupon or the account's own sent it (`TokenUsageRecord.key_source`). */
   group_by: 'model' | 'api_key';
   buckets: ActivityBucket[];
   /** Every series in the window, in first-seen order — one colour per label, stable
@@ -3901,6 +4019,42 @@ export interface ActivityBucket {
   series_spend: Record<string, number>;
   series_tokens: Record<string, number>;
   series_requests: Record<string, number>;
+}
+
+/** The host's allowance for this account, and the keys it sends on past it. */
+export interface CouponStatus {
+  /** This account is the box's operator: its sends on the box's keys are unmetered. */
+  host: boolean;
+  /** What the box's keys may pay for this account over its life; null is unbounded. */
+  face_usd: number | null;
+  face_tokens: number | null;
+  /** The face less what the box's keys paid, unreported sends counted; null where
+   * the face is unbounded. */
+  left_usd: number | null;
+  left_tokens: number | null;
+  /** How full the allowance draws in the unit nearest its face, at most 1; null
+   * where no unit is bounded. */
+  used_share: number | null;
+  /** Nothing more is sent on the box's keys; a provider this account holds a key
+   * for still sends on it. */
+  exhausted: boolean;
+  /** Retired because this account holds a key of its own
+   * (`HOST_COUPON.void_on_byo`). */
+  void: boolean;
+  /** What the box's keys paid for this account. */
+  host_key_spend: LifetimeSpend;
+  /** What this account's own keys paid. */
+  own_key_spend: LifetimeSpend;
+  keys: AccountKey[];
+  /** Every provider a key may be held for. */
+  providers: string[];
+}
+
+export interface AccountKey {
+  provider: string;
+  /** The key's last four characters: all that is ever served back. */
+  last4: string;
+  added_at: string;
 }
 
 export interface SiteRecordWire {
@@ -4063,9 +4217,6 @@ export interface MintCampaignPayload {
   /** Laid over the dataset's own `optimization` before the mint freezes it; only
    * the fields sent move anything */
   optimization: OptimizationOverrides | null;
-  /** `compare` mints a controlled arm of its head-to-head, declared by its first
-   * arm; an arm off the declared instrument or budget is refused 409 */
-  purpose: Optimize | Compare;
   /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
    * the other run-mode fields are `start-run`'s alone. */
   diag: boolean;
@@ -4243,9 +4394,9 @@ export interface OptimizationConfig {
   halt_at_accuracy: number | null;
   /** Consecutive closed rounds without an advance of the best-so-far line on the
    * origin panel (``RunStanding.rounds_without_advance``) after which the run
-   * stops ``converged``, under any optimizer. A promotion that has not
-   * separated from the origin counts toward it; a round whose origin-panel
-   * reading was not taken counts neither way. ``None`` → no such stop. */
+   * stops ``converged``, under any optimizer. A promotion resets it,
+   * separated from the origin or not; a round whose origin-panel reading was
+   * not taken counts neither way. ``None`` → no such stop. */
   convergence_patience: number | null;
   degradation_threshold: number;
   /** End a candidate at the first FATAL sample (empty response, content-filtered,
@@ -4391,6 +4542,10 @@ export interface StartCheckinPayload {
   budget: Budget;
   /** Run the diagnostic shape. */
   diag: boolean;
+  /** Start the draft as these arms of one head-to-head, its origin every arm's, in
+   * place of one campaign. Its own `budget` binds each arm, so `budget` and
+   * `diag` are refused beside it. */
+  head_to_head: HeadToHeadRequest | null;
 }
 
 /** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
@@ -4478,7 +4633,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "mint-head-to-head" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -4501,6 +4656,7 @@ export interface CommandPayloads {
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
   "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
+  "mint-head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
   "origin-gate-decision": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
   "pause-cycle": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
@@ -4531,6 +4687,7 @@ export interface CommandResponses {
   "fork-cycle": CommandAcceptedBody;
   "grade-bench": CommandAcceptedBody;
   "mint-campaign": CommandAcceptedBody;
+  "mint-head-to-head": HeadToHeadStarted;
   "origin-gate-decision": CommandAcceptedBody;
   "pause-cycle": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
@@ -4538,7 +4695,7 @@ export interface CommandResponses {
   "set-concurrent-cycles": CommandAcceptedBody;
   "set-sample-lookahead": CommandAcceptedBody;
   "skip-searchpoint": CommandAcceptedBody;
-  "start-checkin": StartCheckinResponse;
+  "start-checkin": StartCheckinResponse | HeadToHeadStarted;
   "start-run": CommandAcceptedBody;
   "step-cycle": CommandAcceptedBody;
   "submit-arms": CommandAcceptedBody;
@@ -4546,203 +4703,418 @@ export interface CommandResponses {
   "verify-candidate": CommandAcceptedBody;
 }
 
-// Why a cycle ended (domain/phases.py::StopReason).
-export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+// promptpotter.domain.phases::StopReason
+export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
-// Whether a stop SUCCEEDED, and the only half of the table that decides anything —
-// `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than
-// matching names: a hand-listed set of crash names rots in both directions.
+// promptpotter.domain.phases::StopOutcome
 export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
-export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
-  'perfect_score': 'success',
-  'rounds_budget': 'success',
-  'target_hit': 'success',
-  'lives_exhausted': 'success',
-  'hard_cap_reached': 'success',
-  'diag_complete': 'success',
-  'converged': 'success',
-  'optimizer_exhausted': 'success',
-  'rebased_to_fork': 'success',
-  'paused': 'paused',
-  'panel_cut': 'paused',
-  'optimizer_abort': 'halted',
-  'spend_budget': 'halted',
-  'token_budget': 'halted',
-  'wall_clock': 'halted',
-  'origin_gate': 'halted',
-  'backend_unreachable': 'halted',
-  'provider_credit_exhausted': 'halted',
-  'provider_throttled': 'halted',
-  'price_list_unreachable': 'halted',
-  'no_rate': 'halted',
-  'crashed': 'failed',
-  'input_refused': 'failed',
-  'not_admitted': 'halted',
-  'producer_vanished': 'failed',
-  'render_error': 'failed',
-  'diverged': 'failed',
-  'optimizer_timeout': 'failed',
-};
 
-// WHAT ended a run (`StopCategory`) — a budget, a declared limit, the search itself, an
-// operator, the outside world or a failure. Ask it rather than listing reasons.
+// promptpotter.domain.phases::StopCategory
 export type StopCategory = 'search' | 'limit' | 'budget' | 'operator' | 'external' | 'failure';
-export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {
-  'perfect_score': 'search',
-  'rounds_budget': 'limit',
-  'target_hit': 'search',
-  'lives_exhausted': 'search',
-  'hard_cap_reached': 'limit',
-  'diag_complete': 'search',
-  'converged': 'search',
-  'optimizer_exhausted': 'search',
-  'rebased_to_fork': 'search',
-  'paused': 'operator',
-  'panel_cut': 'limit',
-  'optimizer_abort': 'search',
-  'spend_budget': 'budget',
-  'token_budget': 'budget',
-  'wall_clock': 'budget',
-  'origin_gate': 'operator',
-  'backend_unreachable': 'external',
-  'provider_credit_exhausted': 'external',
-  'provider_throttled': 'external',
-  'price_list_unreachable': 'external',
-  'no_rate': 'budget',
-  'crashed': 'failure',
-  'input_refused': 'failure',
-  'not_admitted': 'limit',
-  'producer_vanished': 'failure',
-  'render_error': 'failure',
-  'diverged': 'failure',
-  'optimizer_timeout': 'failure',
-};
 
-// What each run phase IS. Mirror of domain/phases.py::RUN_PHASE_INFO — the single
-// source of a phase's label and facts; the terminal reads the same rows.
+// promptpotter.domain.paired_reading::ReadingState
+export type ReadingState = 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+
+// promptpotter.domain.paired_reading::ReadingStateKind
+export type ReadingStateKind = 'read' | 'waiting' | 'unpaired' | 'absent' | 'refused';
+
+// promptpotter.domain.bench::BenchRefusal
+export type BenchRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'not_held' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
+
+// promptpotter.domain.hierarchy::CandidateStanding
+export type CandidateStanding = 'origin' | 'proposed' | 'rewound' | 'rewound_stood_on' | 'retired';
+
+// promptpotter.domain.origin_panel::RoundAdvance
+export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
+
+// promptpotter.domain.origin_panel::StallEffect
+export type StallEffect = 'starts' | 'resets' | 'counts' | 'skips';
+
+// promptpotter.domain.ruler::ThetaCaveat
+export type ThetaCaveat = 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
+
+// promptpotter.application.evidence.head_to_head::GuardState
+export type GuardState = 'controlled' | 'uncontrolled' | 'differs';
+
+// promptpotter.application.evidence.head_to_head::GuardDifference
+export type GuardDifference = 'instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading';
+
+export interface StopReasonInfo {
+  label: string;
+  outcome: StopOutcome;
+  category: StopCategory;
+  halts_mid_round: boolean;
+  has_traceback: boolean;
+  next_step: string;
+  grades_selection: boolean;
+}
+
 export interface RunPhaseInfo {
   label: string;
   walks: boolean;
   settled: boolean;
   awaits_operator: boolean;
   dock_priority: number;
+  action: 'pause' | 'resume' | 'start' | null;
+  no_action: string;
   parked: string;
   parked_attached: string;
 }
+
+export interface ProducerStateInfo {
+  label: string;
+  stepping: boolean;
+  alert: string;
+  alert_detail: string;
+}
+
+export interface ReadingStateInfo {
+  kind: ReadingStateKind;
+  label: string;
+  sentence: string;
+}
+
+export interface BenchStateInfo {
+  label: string;
+  sentence: string;
+  fault: boolean;
+}
+
+export interface RoundAdvanceInfo {
+  label: string;
+  sentence: string;
+  stall: StallEffect;
+}
+
+export interface ThetaCaveatInfo {
+  head: string;
+  body: string;
+}
+
+export interface VerificationKindInfo {
+  name: string;
+  rows: string;
+}
+
+export interface StatusMarkInfo {
+  glyph: string;
+  tone: 'live' | 'attention' | 'quiet' | 'success' | 'warn' | 'danger';
+}
+
+export interface CouplingSeverityInfo {
+  tone: 'danger' | 'accent' | 'default';
+}
+
+// Mirror of domain/phases.py::STOP_REASON_INFO.
+export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
+  "perfect_score": { label: "Perfect score", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "`verify` the winner on more cells — this is one round's panel, not the dataset.", grades_selection: true },
+  "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "`set-limits --max-rounds <more>` then `resume` if the curve was still moving; else read `review.md`.", grades_selection: true },
+  "target_hit": { label: "Target reached", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "lives_exhausted": { label: "Out of lives", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "hard_cap_reached": { label: "Arm cap", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "diag_complete": { label: "Diagnostic complete", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "converged": { label: "Converged", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false },
+  "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "`resume` picks it up at the next checkpoint.", grades_selection: false },
+  "panel_cut": { label: "Panel cut by a declared bound", outcome: "paused", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Give the cut cells room (`Connector.cell_envelope_s`, or the backend deadline their rows name) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.", grades_selection: false },
+  "adapter_output_owed": { label: "Adapter output owed", outcome: "paused", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The round before's adapter landed nothing in its re-runs; `resume` re-runs it before the next walk.", grades_selection: false },
+  "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "spend_budget": { label: "Spend budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "`set-limits --max-usd <above what the cap already counts>` then `resume`.", grades_selection: true },
+  "token_budget": { label: "Token budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "`set-limits --max-tokens <above what is already spent>` then `resume`.", grades_selection: true },
+  "host_allowance": { label: "Host allowance used up", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The box's allowance for this account is spent. Add your own key for the provider under Account → API keys, then `resume`; a backend's sends still run on the box's key.", grades_selection: true },
+  "wall_clock": { label: "Wall clock reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "`resume` runs another launch under the same clock; `set-limits --max-wall-clock` moves it.", grades_selection: true },
+  "origin_gate": { label: "Origin gate (unhealthy origin)", outcome: "halted", category: "operator", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true },
+  "backend_unreachable": { label: "Backend unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "The unreached cell is a hole, not a score: restore the backend or the network it needs, then `resume` re-measures it.", grades_selection: true },
+  "provider_credit_exhausted": { label: "Provider out of credit", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.", grades_selection: true },
+  "provider_throttled": { label: "Provider rate-limited", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Use your own key for that provider (OpenRouter BYOK) or route to another host (`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it re-measures.", grades_selection: true },
+  "price_list_unreachable": { label: "Price list unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Nothing was sent and the backend is untouched: the gateway's host price list did not answer, so no send under the USD ceiling could be priced. `resume` once it answers; a refused cell is a hole it re-measures.", grades_selection: true },
+  "no_rate": { label: "No rate under the spend cap", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Nothing was sent: no rate bounds the call, so the dollar cap cannot be enforced for it. Run it on a (provider, model) pair the rate table prices (`nodes.{node}.config`), or drop the dollar cap and bound the run in tokens (`budget: {usd: null, tokens: N}`); then `resume`.", grades_selection: true },
+  "crashed": { label: "Crashed", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "Read `index.json::crash_traceback` for the cause; `python -m promptpotter resume` re-runs from the last closed round.", grades_selection: false },
+  "input_refused": { label: "Input refused", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "`dashboard.json::error` names the input the run declined; refused at run init, nothing was searched. A spend cap under one round is raised with `set-limits --max-usd` or met by narrowing the round in `optimization.nodes`; then `resume`.", grades_selection: false },
+  "not_admitted": { label: "Not admitted", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false },
+  "producer_vanished": { label: "Producer vanished", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: false },
+  "render_error": { label: "Render error", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "", grades_selection: true },
+  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "`resume --fork-on-divergence` to branch here, or revert the config edit to continue.", grades_selection: false },
+  "optimizer_timeout": { label: "Optimizer timeout", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: true },
+};
+
+// Mirror of domain/phases.py::RUN_PHASE_INFO.
 export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  'queued': { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, parked: "waiting for a machine slot", parked_attached: "waiting for a machine slot" },
-  'starting': { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, parked: "coming up", parked_attached: "coming up" },
-  'running': { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
-  'scoring': { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
-  'paused': { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, parked: "resumable", parked_attached: "stopping at its next checkpoint" },
-  'gate': { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, parked: "awaiting your decision", parked_attached: "awaiting your decision" },
-  'detached': { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, parked: "producer gone", parked_attached: "producer gone" },
-  'terminal': { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, parked: "", parked_attached: "writing its last files" },
+  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "waiting for a machine slot", parked_attached: "waiting for a machine slot" },
+  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "coming up", parked_attached: "coming up" },
+  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "", parked_attached: "" },
+  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "", parked_attached: "" },
+  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "resumable", parked_attached: "stopping at its next checkpoint" },
+  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "awaiting your decision", parked_attached: "awaiting your decision" },
+  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone", parked_attached: "producer gone" },
+  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "", parked_attached: "writing its last files" },
 };
 
-// What a run asked to pause is finishing, per `dashboard.json::state`. Mirror of
-// domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS; `""` names nothing worth saying.
+// Mirror of domain/phases.py::PRODUCER_STATE_INFO.
+export const PRODUCER_STATE_INFO: Record<ProducerState, ProducerStateInfo> = {
+  "live": { label: "Running", stepping: true, alert: "", alert_detail: "" },
+  "idle": { label: "Running", stepping: false, alert: "", alert_detail: "" },
+  "wedged": { label: "Wedged", stepping: false, alert: "Run wedged", alert_detail: "heartbeats only" },
+  "held": { label: "Running", stepping: false, alert: "", alert_detail: "" },
+  "silent": { label: "Running", stepping: false, alert: "Run went silent", alert_detail: "its producer is gone — Start relaunches from the last closed round" },
+  "claimed": { label: "Starting", stepping: false, alert: "", alert_detail: "" },
+  "absent": { label: "Running", stepping: false, alert: "", alert_detail: "" },
+};
+
+// Mirror of domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS.
 export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
-  'init': "starting up",
-  'origin': "scoring origin",
-  'proposing': "generating candidates",
-  'scoring': "scoring samples",
-  'between_samples': "scoring samples",
-  'between_candidates': "scoring samples",
-  'optimizer_step': "",
-  'bench': "grading on the bench set",
-  'stopped': "",
+  "init": "starting up",
+  "origin": "scoring origin",
+  "proposing": "generating candidates",
+  "scoring": "scoring samples",
+  "between_samples": "scoring samples",
+  "between_candidates": "scoring samples",
+  "optimizer_step": "",
+  "bench": "grading on the bench set",
+  "stopped": "",
 };
 
-// Whether a pair was read, and why not (domain/paired_reading.py::ReadingState).
-export type ReadingState = 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-
-// What kind of answer a ReadingState is: waiting is not a fault, refused is not absent.
-export type ReadingStateKind = 'read' | 'waiting' | 'unpaired' | 'absent' | 'refused';
-
-// The served label and sentence per state. Mirror of
-// domain/paired_reading.py::READING_STATE_INFO — the single wording source.
-export const READING_STATE_LABELS: Record<ReadingState, string> = {
-  'read': 'read',
-  'not_asked': 'not asked',
-  'pending': 'pending',
-  'not_held': 'no cells held',
-  'held_elsewhere': 'held elsewhere',
-  'pass_stopped': 'pass stopped',
-  'past_tolerance': 'past tolerance',
-  'member_unscoreable': 'unscoreable',
-  'under_two_cells': 'under two cells',
-  'no_selection': 'no selection',
-  'same_individual': 'same individual',
-  'run_failed': 'run failed',
-  'scope_differs': 'scopes differ',
-  'measurand_differs': 'scorers differ',
-  'dataset_differs': 'datasets differ',
-  'cell_set_differs': 'cell sets differ',
-  'instrument_differs': 'instruments differ',
+// Mirror of domain/paired_reading.py::READING_STATE_INFO.
+export const READING_STATE_INFO: Record<ReadingState, ReadingStateInfo> = {
+  "read": { kind: "read", label: "read", sentence: "Read on the cells both members scored." },
+  "not_asked": { kind: "waiting", label: "not asked", sentence: "Nobody has asked for this reading yet." },
+  "pending": { kind: "waiting", label: "pending", sentence: "The pass this reading waits on has not finished." },
+  "not_held": { kind: "unpaired", label: "no cells held", sentence: "The cell set this reading is taken on holds no cell." },
+  "held_elsewhere": { kind: "unpaired", label: "held elsewhere", sentence: "The cycle holding this line takes the reading, not this one." },
+  "pass_stopped": { kind: "absent", label: "pass stopped", sentence: "The pass that measures a member stopped before it finished." },
+  "past_tolerance": { kind: "absent", label: "past tolerance", sentence: "A member's pass lost more cells than its tolerance allows." },
+  "member_unscoreable": { kind: "absent", label: "unscoreable", sentence: "A member holds no scoreable cell on this set." },
+  "under_two_cells": { kind: "absent", label: "under two cells", sentence: "Fewer than two cells were scored by both members, so nothing was tested." },
+  "no_selection": { kind: "unpaired", label: "no selection", sentence: "No individual was selected, so there is nothing to pair." },
+  "same_individual": { kind: "unpaired", label: "same individual", sentence: "Both members are one individual on one pass, so there is no difference to read." },
+  "run_failed": { kind: "absent", label: "run failed", sentence: "The run failed before this reading was taken." },
+  "scope_differs": { kind: "refused", label: "scopes differ", sentence: "The members were read in different scopes." },
+  "measurand_differs": { kind: "refused", label: "scorers differ", sentence: "The members were graded by different scorers." },
+  "dataset_differs": { kind: "refused", label: "datasets differ", sentence: "The members were measured on different datasets." },
+  "cell_set_differs": { kind: "refused", label: "cell sets differ", sentence: "The members were sent on different declared cell sets." },
+  "instrument_differs": { kind: "refused", label: "instruments differ", sentence: "The members were measured by different instruments." },
 };
 
-export const READING_STATE_SENTENCES: Record<ReadingState, string> = {
-  'read': 'Read on the cells both members scored.',
-  'not_asked': 'Nobody has asked for this reading yet.',
-  'pending': 'The pass this reading waits on has not finished.',
-  'not_held': 'The cell set this reading is taken on holds no cell.',
-  'held_elsewhere': 'The cycle holding this line takes the reading, not this one.',
-  'pass_stopped': 'The pass that measures a member stopped before it finished.',
-  'past_tolerance': "A member's pass lost more cells than its tolerance allows.",
-  'member_unscoreable': 'A member holds no scoreable cell on this set.',
-  'under_two_cells': 'Fewer than two cells were scored by both members, so nothing was tested.',
-  'no_selection': 'No individual was selected, so there is nothing to pair.',
-  'same_individual': 'Both members are one individual on one pass, so there is no difference to read.',
-  'run_failed': 'The run failed before this reading was taken.',
-  'scope_differs': 'The members were read in different scopes.',
-  'measurand_differs': 'The members were graded by different scorers.',
-  'dataset_differs': 'The members were measured on different datasets.',
-  'cell_set_differs': 'The members were sent on different declared cell sets.',
-  'instrument_differs': 'The members were measured by different instruments.',
+// Mirror of domain/bench.py::BENCH_STATE_INFO.
+export const BENCH_STATE_INFO: Partial<Record<ReadingState, BenchStateInfo>> = {
+  "read": { label: "graded", sentence: "The origin and the selection are graded on the held-out rows.", fault: false },
+  "not_asked": { label: "not asked", sentence: "Rows are held out and nobody has asked for the selection's pass: `python -m promptpotter bench` sends it.", fault: false },
+  "pending": { label: "pending", sentence: "The line grades its selection when its run ends.", fault: false },
+  "not_held": { label: "nothing held out", sentence: "The campaign's dataset_split holds no bench rows out.", fault: false },
+  "held_elsewhere": { label: "held elsewhere", sentence: "This cycle runs beside the campaign's line, and the bench grades the line's result.", fault: false },
+  "pass_stopped": { label: "pass stopped", sentence: "A bench pass stopped before its last row, so it reads nothing.", fault: true },
+  "past_tolerance": { label: "past tolerance", sentence: "A bench pass ended with more rows carrying no verdict than the split's tolerance allows.", fault: true },
+  "no_selection": { label: "no selection", sentence: "No round closed past the origin, so there is no selection to grade.", fault: false },
+  "run_failed": { label: "run failed", sentence: "The run failed before the line graded its selection.", fault: true },
 };
 
-export const READING_STATE_KINDS: Record<ReadingState, ReadingStateKind> = {
-  'read': 'read',
-  'not_asked': 'waiting',
-  'pending': 'waiting',
-  'not_held': 'unpaired',
-  'held_elsewhere': 'unpaired',
-  'pass_stopped': 'absent',
-  'past_tolerance': 'absent',
-  'member_unscoreable': 'absent',
-  'under_two_cells': 'absent',
-  'no_selection': 'unpaired',
-  'same_individual': 'unpaired',
-  'run_failed': 'absent',
-  'scope_differs': 'refused',
-  'measurand_differs': 'refused',
-  'dataset_differs': 'refused',
-  'cell_set_differs': 'refused',
-  'instrument_differs': 'refused',
+// Mirror of domain/bench.py::BENCH_REFUSAL_INFO.
+export const BENCH_REFUSAL_INFO: Record<BenchRefusal, string> = {
+  "inner": "An inner run is one cell of its outer campaign; no command grades its line.",
+  "no_manifest": "This campaign has no manifest on disk.",
+  "held_elsewhere": "Another cycle (`held_by`) holds this campaign's line, and the bench grades the campaign's result. Ask for that cycle.",
+  "not_held": "The campaign's dataset_split holds no bench rows out.",
+  "selecting": "The run is still selecting. Pause it or let it end first.",
+  "origin_unscored": "The origin has not been scored, so there is no reference to grade against.",
+  "graded": "The line's selection is already graded.",
+  "no_selection": "No round closed past the origin, so there is no selection to grade.",
 };
 
-// What a closed round did to the best-so-far line (domain/origin_panel.py::RoundAdvance).
-export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
-
-// The served label and sentence per advance. Mirror of
-// domain/origin_panel.py::ROUND_ADVANCE_INFO — the single wording source.
-export const ROUND_ADVANCE_LABELS: Record<RoundAdvance, string> = {
-  'origin': 'origin',
-  'advanced': 'advanced',
-  'advanced_unpaired': 'advanced, unpaired',
-  'not_separated': 'not separated',
-  'held': 'held',
-  'unread': 'unread',
+// Mirror of domain/phases.py::RAY_HEAD_WORDS.
+export const RAY_HEAD_WORDS: Record<"measuring" | "on_child" | "on_child_detail" | "stalled" | "no_recent_step" | "pass" | "sample", string> = {
+  "measuring": "Measuring",
+  "on_child": "Waiting",
+  "on_child_detail": "on a child run",
+  "stalled": "no progress",
+  "no_recent_step": "no recent step",
+  "pass": "pass",
+  "sample": "sample",
 };
 
-export const ROUND_ADVANCE_SENTENCES: Record<RoundAdvance, string> = {
-  'origin': 'Round 0 measured the origin every later pick is read against.',
-  'advanced': "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's.",
-  'advanced_unpaired': 'An arm was promoted, and the origin panel held nothing to pair it with the origin on.',
-  'not_separated': 'An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick.',
-  'held': 'No arm was promoted.',
-  'unread': 'An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall.',
+// Mirror of application/served_dashboard.py::LOOKAHEAD_WORDS.
+export const LOOKAHEAD_WORDS: Record<"no_further_cell" | "more_affordable", string> = {
+  "no_further_cell": "holds no further cell",
+  "more_affordable": "more affordable",
+};
+
+// Mirror of domain/run_standing.py::LIVES_WORDS.
+export const LIVES_WORDS: Record<"banked" | "spent_pip" | "empty" | "empty_sentence" | "life" | "lives", string> = {
+  "banked": "♥",
+  "spent_pip": "♡",
+  "empty": "💀",
+  "empty_sentence": "No lives left — the run stops after this round",
+  "life": "life",
+  "lives": "lives",
+};
+
+// Mirror of domain/hierarchy.py::CANDIDATE_STANDING_INFO.
+export const CANDIDATE_STANDING_INFO: Record<CandidateStanding, string> = {
+  "origin": "This course's ORIGIN: the specification it started from, measured.",
+  "proposed": "A candidate this course proposed and measured.",
+  "rewound": "Rewound: its course re-ran this round in place after a fork was cut from it. It stays as the record of what ran.",
+  "rewound_stood_on": "Rewound: its course re-ran this round in place after a fork was cut from it. It stays as the record of what ran, and a fork's line stands on it.",
+  "retired": "Retired: the run branched and continued in the course that took its place. It stays as the record of what ran, its line as it ran.",
+};
+
+// Mirror of domain/hierarchy.py::ROUNDS_CAP_WORDS.
+export const ROUNDS_CAP_WORDS: Record<"origin_only" | "no_axis", string> = {
+  "origin_only": "origin only",
+  "no_axis": "no rounds axis",
+};
+
+// Mirror of domain/origin_panel.py::ROUND_ADVANCE_INFO.
+export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
+  "origin": { label: "origin", sentence: "Round 0 measured the origin every later pick is read against.", stall: "starts" },
+  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's.", stall: "resets" },
+  "advanced_unpaired": { label: "advanced, unpaired", sentence: "An arm was promoted, and the origin panel held nothing to pair it with the origin on.", stall: "resets" },
+  "not_separated": { label: "not separated", sentence: "An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick.", stall: "resets" },
+  "held": { label: "held", sentence: "No arm was promoted.", stall: "counts" },
+  "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall.", stall: "skips" },
+};
+
+// Mirror of domain/ruler.py::THETA_CAVEAT_INFO.
+export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
+  "disjoint_scopes": { head: "θ mixes datasets that share no scale", body: "These cells measure more than one dataset, and a difficulty is only ever fitted within one, so θ here averages scales that never met. Read each dataset's cells on their own; a lift paired on the same cells still holds." },
+  "cold_ruler": { head: "θ is not ability yet", body: "No difficulty ruler could be fitted from what this account measured before the round, so θ is plain accuracy on the logit scale. A candidate and the parent it is judged against are read on the cells both answered, so their lift holds; a θ compared across rounds or against another candidate's does not." },
+  "flat_ruler": { head: "θ is not ability here", body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider." },
+  "collapsed_band": { head: "θ is not ability this round", body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument." },
+  "prior_pinned": { head: "θ is not ability here", body: "The ruler gave most of this round's cells one shared difficulty, its prior, because every candidate that saw them answered the same way. That pinned value moves as the ruler takes in new rounds, so a higher θ than before can be the scale shifting, not the prompt improving. Compare within a round; don't read the level across rounds." },
+  "unmeasured_delta": { head: "θ skips some of these cells", body: "The ruler does not carry some of these cells, because no candidate outside this round's judging had answered them when the round opened. θ leaves them out, so it is read on fewer cells than the accuracy beside it, and two candidates can be read on different ones. A later round reads them once this round's answers have joined the ruler." },
+  "floor_pinned": { head: "θ reads nothing for an all-miss arm", body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected." },
+};
+
+// Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS.
+export const ARM_VERDICT_LABELS: Record<"retired" | "invalid" | "origin" | "elected" | "uncontested" | "selected" | "not_elected" | "unmeasured" | "awaiting", string> = {
+  "retired": "retired",
+  "invalid": "invalid — never measured",
+  "origin": "origin",
+  "elected": "won its round",
+  "uncontested": "advanced uncontested",
+  "selected": "selected",
+  "not_elected": "not elected",
+  "unmeasured": "not measured yet",
+  "awaiting": "awaiting election",
+};
+
+// Mirror of domain/campaign.py::LIFECYCLE_STATUS_LABELS.
+export const LIFECYCLE_STATUS_LABELS: Record<"active" | "archived" | "deleted", string> = {
+  "active": "Active",
+  "archived": "Archived",
+  "deleted": "Deleted",
+};
+
+// Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_LABELS.
+export const SAMPLE_MOVEMENT_LABELS: Record<"new" | "readded" | "gained" | "lost" | "kept", string> = {
+  "new": "new",
+  "readded": "re-added",
+  "gained": "gained position",
+  "lost": "lost position",
+  "kept": "kept position",
+};
+
+// Mirror of domain/dashboard_rows.py::PRECISION_VERDICT_ADVICE.
+export const PRECISION_VERDICT_ADVICE: Record<"noise" | "spread", string> = {
+  "noise": "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
+  "spread": "The cells genuinely differ — that spread is signal about where this optimizer prompt works.",
+};
+
+// Mirror of domain/dashboard_rows.py::VERIFICATION_KIND_INFO.
+export const VERIFICATION_KIND_INFO: Record<"verify" | "bench", VerificationKindInfo> = {
+  "verify": { name: "verify", rows: " never seen" },
+  "bench": { name: "held-out bench", rows: "" },
+};
+
+// Mirror of domain/cycle_index.py::STATUS_MARK_INFO.
+export const STATUS_MARK_INFO: Record<"running" | "scoring" | "starting" | "queued" | "gate" | "paused" | "detached" | "success" | "halted" | "failed" | "archived" | "unknown", StatusMarkInfo> = {
+  "running": { glyph: "●", tone: "live" },
+  "scoring": { glyph: "◐", tone: "live" },
+  "starting": { glyph: "◌", tone: "live" },
+  "queued": { glyph: "…", tone: "quiet" },
+  "gate": { glyph: "◆", tone: "attention" },
+  "paused": { glyph: "‖", tone: "quiet" },
+  "detached": { glyph: "⊘", tone: "warn" },
+  "success": { glyph: "✓", tone: "success" },
+  "halted": { glyph: "■", tone: "warn" },
+  "failed": { glyph: "✕", tone: "danger" },
+  "archived": { glyph: "▫", tone: "quiet" },
+  "unknown": { glyph: "?", tone: "quiet" },
+};
+
+// Mirror of application/knobs.py::COUPLING_SEVERITY_INFO.
+export const COUPLING_SEVERITY_INFO: Record<"collision" | "inert" | "info", CouplingSeverityInfo> = {
+  "collision": { tone: "danger" },
+  "inert": { tone: "accent" },
+  "info": { tone: "default" },
+};
+
+// Mirror of domain/verify_pass.py::VERIFY_STRATEGY_LABELS.
+export const VERIFY_STRATEGY_LABELS: Record<"random" | "hard", string> = {
+  "random": "picked at random",
+  "hard": "hardest first",
+};
+
+// Mirror of domain/pipeline_schema.py::MOVABLE_AGENT_LABELS.
+export const MOVABLE_AGENT_LABELS: Record<"proposer" | "optimizer", string> = {
+  "proposer": "the optimizer's proposer, every round",
+  "optimizer": "the optimizer itself, mid-run",
+};
+
+// Mirror of domain/spend.py::PREFIX_STATE_TITLES.
+export const PREFIX_STATE_TITLES: Record<"discounted" | "cold" | "unreported" | "replayed", string> = {
+  "discounted": "The provider served this share of the input off its own prompt-prefix cache, billed at a discount. Unrelated to 📖, which means no provider was reached at all.",
+  "cold": "The provider reported its cache accounting and served none of this input from it — the prefix was cold. A measurement, not a missing one.",
+  "unreported": "This provider reported no cache accounting, so whether it collected the prefix is unknown. Not the same as no hit.",
+  "replayed": "Replayed from our own archive — no provider was reached, so there is no discount to report.",
+};
+
+// Mirror of domain/spend.py::CEILING_METER_LABELS.
+export const CEILING_METER_LABELS: Record<"bill" | "search_incurred", string> = {
+  "bill": "billed + priced at our rate",
+  "search_incurred": "search incurred",
+};
+
+// Mirror of application/evidence/subjects.py::SUBJECT_KIND_LABELS.
+export const SUBJECT_KIND_LABELS: Record<"campaign" | "course" | "candidate", string> = {
+  "campaign": "origin",
+  "course": "branch head",
+  "candidate": "searchpoint",
+};
+
+// Mirror of application/evidence/head_to_head.py::GUARD_STATE_INFO.
+export const GUARD_STATE_INFO: Record<GuardState, string> = {
+  "controlled": "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, split, held-out rows, scorer, target model, origin and budget, with one optimizer model set and no operator's steer.",
+  "uncontrolled": "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a head-to-head, or an arm a launch act ran off it, could read other campaigns' measurements, take an operator's steer or re-run its own rounds.",
+  "differs": "Not one quantity: what graded or bounded these headlines differs, so a gap between two is not the optimizer's alone.",
+};
+
+// Mirror of application/evidence/head_to_head.py::GUARD_STATE_LABELS.
+export const GUARD_STATE_LABELS: Record<GuardState, string> = {
+  "controlled": "controlled",
+  "uncontrolled": "not controlled",
+  "differs": "differs",
+};
+
+// Mirror of application/evidence/head_to_head.py::GUARD_DIFFERENCE_INFO.
+export const GUARD_DIFFERENCE_INFO: Record<GuardDifference, string> = {
+  "instrument_id": "Different instruments measured the cells: another dataset, or another inner origin under it.",
+  "dataset_hash": "The banks hold different rows.",
+  "split": "The banks were split differently.",
+  "bench_rows": "Different rows were held out, so the headlines are graded on different cells.",
+  "scorer_id": "Different scorers graded the headlines.",
+  "models": "The target pipelines ran different models.",
+  "origin": "The campaigns started from different origins.",
+  "budget": "The campaigns declared different budgets, stopping rules or determinism clamps.",
+  "defaults": "The campaigns were declared over different code defaults, so a key neither set ran at different values.",
+  "optimizer_models": "The optimizers called different models, so a gap between two headlines is the model's as much as the method's.",
+  "human_intervened": "An operator steered, skipped or model-overrode a cycle on a campaign's line.",
+  "origin_reading": "Campaigns on one bench set read the same origin apart beyond its own noise under one formula, so the backend or a judge moved between them — a change no stamp names.",
+};
+
+// Mirror of application/evidence/head_to_head.py::VERDICT_ABSENT_INFO.
+export const VERDICT_ABSENT_INFO: Partial<Record<ReadingState, string>> = {
+  "under_two_cells": "No verdict: a head-to-head needs two campaigns with a graded bench set.",
+  "pending": "No verdict yet: a declared arm of this head-to-head has no bench headline, so the graded rows are not the comparison that was declared.",
 };
 
 // Who spent it (domain/spend.py::TokenUsageKind).
@@ -4760,77 +5132,8 @@ export const SPEND_KINDS: readonly { key: SpendKind; label: string }[] = [
 // A provider prefix-cache reading's state (domain/spend.py::PrefixState).
 export type PrefixState = 'discounted' | 'cold' | 'unreported' | 'replayed';
 
-// What each state means. Mirror of domain/spend.py::PREFIX_STATE_TITLES.
-export const PREFIX_STATE_TITLES: Record<PrefixState, string> = {
-  'discounted': 'The provider served this share of the input off its own prompt-prefix cache, billed at a discount. Unrelated to 📖, which means no provider was reached at all.',
-  'cold': 'The provider reported its cache accounting and served none of this input from it — the prefix was cold. A measurement, not a missing one.',
-  'unreported': 'This provider reported no cache accounting, so whether it collected the prefix is unknown. Not the same as no hit.',
-  'replayed': 'Replayed from our own archive — no provider was reached, so there is no discount to report.',
-};
-
-// The word beside a figure a ceiling counted. Mirror of domain/spend.py::CEILING_METER_LABELS.
-export const CEILING_METER_LABELS: Record<'bill' | 'search_incurred', string> = {
-  'bill': 'billed + priced at our rate',
-  'search_incurred': 'search incurred',
-};
-
 // The word beside a figure our rate table priced, which is never spent. Mirror of domain/spend.py::RATE_PRICED_LABEL.
 export const RATE_PRICED_LABEL = 'priced at our rate';
-
-// What each θ caveat says. Mirror of domain/ruler.py::THETA_CAVEAT_INFO — the single
-// wording; the terminal prints the same `head`.
-export const THETA_CAVEAT_INFO: Record<'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned', { head: string; body: string }> = {
-  'disjoint_scopes': { head: "θ mixes datasets that share no scale", body: "These cells measure more than one dataset, and a difficulty is only ever fitted within one, so θ here averages scales that never met. Read each dataset's cells on their own; a lift paired on the same cells still holds." },
-  'cold_ruler': { head: "θ is not ability yet", body: "No difficulty ruler could be fitted from what this account measured before the round, so θ is plain accuracy on the logit scale. A candidate and the parent it is judged against are read on the cells both answered, so their lift holds; a θ compared across rounds or against another candidate's does not." },
-  'flat_ruler': { head: "θ is not ability here", body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider." },
-  'collapsed_band': { head: "θ is not ability this round", body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument." },
-  'prior_pinned': { head: "θ is not ability here", body: "The ruler gave most of this round's cells one shared difficulty, its prior, because every candidate that saw them answered the same way. That pinned value moves as the ruler takes in new rounds, so a higher θ than before can be the scale shifting, not the prompt improving. Compare within a round; don't read the level across rounds." },
-  'unmeasured_delta': { head: "θ skips some of these cells", body: "The ruler does not carry some of these cells, because no candidate outside this round's judging had answered them when the round opened. θ leaves them out, so it is read on fewer cells than the accuracy beside it, and two candidates can be read on different ones. A later round reads them once this round's answers have joined the ruler." },
-  'floor_pinned': { head: "θ reads nothing for an all-miss arm", body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected." },
-};
-
-// Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS — the single wording.
-export const ARM_VERDICT_LABELS: Record<'retired' | 'invalid' | 'origin' | 'elected' | 'uncontested' | 'selected' | 'not_elected' | 'unmeasured' | 'awaiting', string> = {
-  'retired': "retired",
-  'invalid': "invalid — never measured",
-  'origin': "origin",
-  'elected': "won its round",
-  'uncontested': "advanced uncontested",
-  'selected': "selected",
-  'not_elected': "not elected",
-  'unmeasured': "not measured yet",
-  'awaiting': "awaiting election",
-};
-
-// Mirror of application/evidence/head_to_head.py::GUARD_STATE_LABELS — the single wording.
-export const GUARD_STATE_LABELS: Record<'controlled' | 'uncontrolled' | 'differs', string> = {
-  'controlled': "controlled",
-  'uncontrolled': "not controlled",
-  'differs': "differs",
-};
-
-// Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_LABELS — the single wording.
-export const SAMPLE_MOVEMENT_LABELS: Record<'new' | 'readded' | 'gained' | 'lost' | 'kept', string> = {
-  'new': "new",
-  'readded': "re-added",
-  'gained': "gained position",
-  'lost': "lost position",
-  'kept': "kept position",
-};
-
-// Mirror of application/evidence/subjects.py::SUBJECT_KIND_LABELS — the single wording.
-export const SUBJECT_KIND_LABELS: Record<'campaign' | 'course' | 'candidate', string> = {
-  'campaign': "origin",
-  'course': "branch head",
-  'candidate': "searchpoint",
-};
-
-// Who may move a search axis, worded. Mirror of
-// domain/pipeline_schema.py::MOVABLE_AGENT_LABELS.
-export const MOVABLE_AGENT_LABELS: Record<"proposer" | "optimizer", string> = {
-  proposer: "the optimizer's proposer, every round",
-  optimizer: "the optimizer itself, mid-run",
-};
 
 // domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.
 export const SCHEMA_DESCRIPTION_PREFIX = "output_schema_descriptions.";
@@ -4865,13 +5168,6 @@ export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {
   'composite': 'score',
 };
 
-// How a verify pass's pick of fresh cells reads, by strategy. Mirror of
-// domain/verify_pass.py::VERIFY_STRATEGY_LABELS.
-export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> = {
-  'random': 'picked at random',
-  'hard': 'hardest first',
-};
-
 // What `GET …/export?tier=` serves, in offer order. Mirror of
 // domain/export.py::EXPORT_TIER_INFO — `pasted` tiers are text to copy, the rest download.
 export type ExportTier = "chat" | "report" | "notebook" | "deploy" | "package";
@@ -4895,7 +5191,6 @@ export const SCORE_LENS_LABELS: Record<string, string> = {
 export const ABORT_LENS_LABELS: Record<string, string> = {
   'abort:epsilon_off': 'No ε-elimination',
   'abort:lock_in_off': 'No lock-in',
-  'abort:collapsed_off': 'No collapse cut',
   'abort:all_off': 'No early abort',
 };
 

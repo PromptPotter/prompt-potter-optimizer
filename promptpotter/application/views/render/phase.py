@@ -12,6 +12,7 @@ from promptpotter.application.views.render.primitives import (
     YELLOW,
     _dbox_block,
     _node_line,
+    bench_readout,
     fmt_coverage,
     fmt_fitness,
     fmt_pct,
@@ -174,7 +175,7 @@ def render_round_stats(
 def render_patience_status(advance: RoundAdvance, stall: int, patience: int | None) -> str:
     info = ROUND_ADVANCE_INFO[advance]
     if info.stall is StallEffect.RESETS:
-        return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
+        return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
     bound = "" if patience is None else f" (converges at {patience})"
     return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{bound}{RESET}")
@@ -207,7 +208,7 @@ def render_completion(
     # Repeated under a terminal's readout: a notebook cell has no readout, only this box.
     fields: list[str] = [
         *stop_lines(result.stop_reason),
-        f"Bench        {result.bench.line}",
+        f"Bench        {bench_readout(result.bench)}",
         headline,
     ]
     if result.error is not None:

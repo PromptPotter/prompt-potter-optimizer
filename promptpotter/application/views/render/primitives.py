@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
+from promptpotter.domain.bench import BENCH_STATE_INFO, BenchColumn
+from promptpotter.domain.hierarchy import ROUNDS_CAP_WORDS
 from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -13,11 +15,43 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.domain.arm_reading import ArmReading
+    from promptpotter.domain.bench import BenchReading, BenchScore
     from promptpotter.domain.origin_panel import OverlapReading
     from promptpotter.domain.paired_reading import Coverage
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def bench_readout(bench: BenchScore) -> str:
+    """The bench headline on one terminal line: both levels, each column's lift, the rows."""
+    graded = bench.graded
+    if graded is None:
+        return BENCH_STATE_INFO[bench.status.state].sentence
+
+    def level(reading: BenchReading) -> str:
+        return "—" if reading.level is None else f"{reading.level.value:.3f}"
+
+    # `—` where the selection is the origin: one pass read twice compares nothing.
+    read = bench.lift(bench.headline)
+    lift = "—" if read is None else f"{read.estimate.value:+.3f}"
+    for column in get_args(BenchColumn):
+        beside = bench.lift(column)
+        if column != bench.headline and beside is not None:
+            lift += f" ({column} {beside.estimate.value:+.3f})"
+    return (
+        f"{bench.headline} {level(graded.selected)} selected (round {graded.selected.round}) · "
+        f"{level(graded.origin)} origin · lift {lift} · {bench.bench_size} held-out rows"
+    )
+
+
+def rounds_readout(closed: int, cap: int | None) -> str:
+    """A course's rounds against its cap: `lib/derivations/hierarchy.ts::roundsText`, the same."""
+    if cap == 0:
+        return ROUNDS_CAP_WORDS["origin_only"]
+    if cap is None:
+        return f"{closed} · {ROUNDS_CAP_WORDS['no_axis']}"
+    return f"{closed} of {cap}"
 
 
 def fmt_coverage(coverage: Coverage) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from statistics import fmean
 from typing import NamedTuple
 
 from promptpotter.application.scoring.formula.compiler import (
@@ -43,6 +44,7 @@ from promptpotter.shared.statistics import (
     discordant_counts,
     holm_adjusted,
     p_floor,
+    paired_diff_posterior,
     paired_mean_t,
 )
 
@@ -231,27 +233,65 @@ def read_pair(
 
 def as_family(readings: Sequence[PairedReading], family_id: str) -> list[PairedReading]:
     """A reading that was not read was not tested: it carries no family and counts for none."""
-    tested = [r.headline for r in readings if r.headline is not None]
+    lifts = iter(in_family([r.headline for r in readings], family_id))
+    return [r.model_copy(update={"headline": next(lifts)}) for r in readings]
+
+
+def in_family(lifts: Sequence[MeasuredLift | None], family_id: str) -> list[MeasuredLift | None]:
+    tested = [lift for lift in lifts if lift is not None]
     adjusted = iter(holm_adjusted([lift.estimate.p_value for lift in tested]))
     return [
-        r
-        if r.headline is None
-        else r.model_copy(
+        None
+        if lift is None
+        else lift.model_copy(
             update={
-                "headline": r.headline.model_copy(
-                    update={
-                        "family": TestFamily(
-                            id=family_id,
-                            n_tests=len(tested),
-                            method="holm",
-                            p_adjusted=next(adjusted),
-                        )
-                    }
+                "family": TestFamily(
+                    id=family_id, n_tests=len(tested), method="holm", p_adjusted=next(adjusted)
                 )
             }
         )
-        for r in readings
+        for lift in lifts
     ]
+
+
+class ArmsReading(NamedTuple):
+    """Arm *b* over arm *a*, each its replicates' mean per cell: the cell is the cluster."""
+
+    differences: dict[str, float]
+    lift: MeasuredLift | None
+    se_clustered: float | None
+    se_naive: float | None
+
+
+def read_arms(
+    a: Sequence[MemberRows],
+    b: Sequence[MemberRows],
+    *,
+    cells: Collection[str],
+    measurand: Measurand,
+    spec: EstimatorSpec,
+) -> ArmsReading:
+    """On the *cells* every replicate of both arms scored; under two of them, no lift."""
+    read = _Reader(measurand)
+
+    def scored(member: MemberRows) -> dict[str, float]:
+        held = member.by_key()
+        return {k: v for k in cells if k in held and (v := read(held[k])) is not None}
+
+    sides = [[scored(m) for m in side] for side in (a, b)]
+    keys = sorted(set(cells).intersection(*(rows.keys() for side in sides for rows in side)))
+    by_cell = [[[rows[k] for rows in side] for k in keys] for side in sides]
+    means = [[fmean(values) for values in side] for side in by_cell]
+    differences = {k: hi - lo for k, lo, hi in zip(keys, *means, strict=True)}
+    if len(keys) < 2:
+        return ArmsReading(differences, None, None, None)
+    pairs = [(x, y) for xs, ys in zip(*by_cell, strict=True) for x in xs for y in ys]
+    return ArmsReading(
+        differences,
+        _lift(measurand, means[0], means[1], spec),
+        paired_diff_posterior(means[1], means[0])[1],
+        paired_diff_posterior([y for _, y in pairs], [x for x, _ in pairs])[1],
+    )
 
 
 class FlippedCells[K](NamedTuple):

@@ -7,7 +7,7 @@ from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
-from promptpotter.application.scoring.closed_rounds import walked_rows
+from promptpotter.application.scoring.closed_rounds import closed_rounds, walked_rows
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -126,7 +126,7 @@ def _read_pass(
         return _PassReading(bench_pass, None, outcome, sheet)
 
     if bench_pass.stop is not None:
-        return unread(ReadingState.PASS_STOPPED)
+        return unread(bench_pass.stop.state)
     if expected - scored > tolerance:
         return unread(ReadingState.PAST_TOLERANCE)
     # Rows on several datasets read no level: `BenchScore.scopes` reads each apart.
@@ -168,6 +168,42 @@ def bench_series(
             standing = None if taken is None else headline(taken)
         series.append(standing)
     return origin, series
+
+
+class LineSpan(NamedTuple):
+    """One cycle of a line: the L1 rounds it stood on, and the first of them it ran itself."""
+
+    rounds: list[RoundResult]
+    cut: int
+
+    @property
+    def own(self) -> list[RoundResult]:
+        return [rr for rr in self.rounds if rr.round >= self.cut]
+
+
+def line_spans(stores: Stores, scorer: Scorer, hop: CycleHop) -> list[LineSpan]:
+    """The supersede line ending at *hop*, oldest first: a round a rebase discarded was still spent."""
+    spans: list[LineSpan] = []
+    for at in stores.campaigns.line_to(hop):
+        index = stores.campaigns.load(at, moment=None)
+        assert index is not None, "a cycle on a line folds to an index"
+        rounds = [rr for rr in closed_rounds(stores, at, scorer, moment=None) if rr.round > 0]
+        spans.append(LineSpan(rounds, 1 if index.cut_round is None else index.cut_round))
+    return spans
+
+
+def line_bench_series(
+    stores: Stores, passes: BenchPasses | None, scorer: Scorer, spans: Sequence[LineSpan]
+) -> tuple[float | None, list[float | None]]:
+    """`bench_series` per round the line spent, in the order spent."""
+    if passes is None:
+        return None, []
+    origin: float | None = None
+    levels: list[float | None] = []
+    for span in spans:
+        origin, series = bench_series(stores, passes, scorer, rounds=span.rounds)
+        levels += [lvl for rr, lvl in zip(span.rounds, series, strict=True) if rr.round >= span.cut]
+    return origin, levels
 
 
 def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) -> MemberRows | None:
@@ -235,7 +271,6 @@ def read_bench(
     status = bench_status(
         trigger=line.trigger,
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
-        tolerance=0 if passes is None else passes.tolerance,
         on_line=line.on_line,
         inner=line.inner,
         held_by=line.held_by,
@@ -254,7 +289,7 @@ def read_bench(
             spec=ROUND_LIFT_SPEC,
             instrument_id=line.instrument_id,
         )
-    return BenchScore.of(
+    return BenchScore(
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
         scorer_id=scorer.id,
         headline=BENCH_HEADLINE,

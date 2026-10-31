@@ -28,12 +28,14 @@
   box-shadow:0 0 28px var(--color-accent-glow),inset 0 1px 0 rgba(255,255,255,0.05);
   backdrop-filter:blur(10px);
   -webkit-backdrop-filter:blur(10px);
-  min-width:200px
+  min-width:0
 }
 .wf-hero-node.llm .head{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:var(--space-10)}
 .wf-hero-node.llm .ico{color:var(--color-accent)}
 .wf-hero-node .lbl{font-size:var(--text-md);letter-spacing:.08em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:600}
-.wf-hero-node.llm .lbl{font-size:var(--text-3xl);color:var(--color-text-primary);letter-spacing:.06em}
+/* The label wraps at the `<wbr>` after each underscore; unbroken it pushed the box over its Output chip. */
+.wf-hero-node.llm .lbl{font-size:var(--text-xl);color:var(--color-text-primary);letter-spacing:.04em;min-width:0}
+.wf-hero-end{min-width:0;padding:var(--space-10) var(--space-14)}
 .wf-hero-node .val{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
 .wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
 .wf-hero-node.llm.running{
@@ -44,7 +46,7 @@
 .wf-hero-node.llm.running .val{color:var(--color-success)}
 .wf-hero-node.llm.scoring{animation:wf-running-pulse 2s ease-in-out infinite}
 .wf-hero-arrow{
-  flex:1;max-width:180px;min-width:65px;height:2px;position:relative;margin:0 -1px;
+  flex:1 0 40px;max-width:180px;min-width:40px;height:2px;position:relative;margin:0 -1px;
   background:linear-gradient(90deg,transparent 0%,var(--color-accent) 18%,var(--color-accent) 82%,transparent 100%);
   box-shadow:0 0 10px var(--color-accent-glow),0 0 22px var(--color-accent-glow)
 }
@@ -111,6 +113,8 @@
   min-width:280px;max-width:560px;
   width:auto
 }
+/* A ring folds to its box (`layoutGrid` `maxCols`), so it takes the whole width it is given. */
+.wf-hero-node.llm.wf-hero-node-multi.is-ring{width:100%;max-width:none}
 /* Here, not in responsive.css: domains/ load after foundation/, so the same override there loses at equal specificity. */
 @media (max-width:640px){
   .wf-hero-node.llm.wf-hero-node-multi{min-width:0;max-width:100%}
@@ -175,6 +179,8 @@
 .wf-hero-sole:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow);border-radius:8px}
 /* `max-width` is load-bearing: unbounded, the wrapper squeezes the flanking chips instead of letting the rail scroll. */
 .wf-hero-unit{display:flex;flex-direction:column;min-width:0;max-width:100%;position:relative;z-index:2}
+/* A sole node has no rail to scroll, so it keeps its own width and the arrows give instead. */
+.wf-hero-unit:has(> .wf-hero-node > .wf-hero-sole){flex-shrink:0}
 /* Child combinators: a descendant selector would re-cut every deeper box too. */
 .wf-hero-unit.has-nested{border-radius:12px}
 .wf-hero-unit.has-nested > .wf-hero-node.llm{
@@ -184,16 +190,18 @@
   border:0;box-shadow:none;background:none;border-radius:12px 12px 0 0
 }
 .wf-hero-unit.tone-accent.has-nested > .wf-hero-node.llm{background:rgba(var(--color-accent-rgb),0.10)}
+/* The tag is the level's name: it keeps its width and the rail scrolls, never the other way. */
 .wf-hero-unit.has-nested > .wf-hero-node.llm > .wf-hero-multi-tag{
   padding-bottom:0;line-height:1;text-align:left;
-  flex:0 1 auto;min-width:0;max-width:30%;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  flex:0 0 auto;white-space:nowrap
 }
 .wf-hero-unit.has-nested > .wf-hero-node.llm > .wf-hero-multi-rail{flex:1 1 auto;min-width:0}
 .wf-hero-nested{padding:var(--space-6) var(--space-8);border-radius:0 0 12px 12px}
 .wf-hero-nested > .wf-hero-flow{padding:0;gap:0}
 .wf-hero-nested .wf-hero-node{min-width:0;padding:var(--space-8) var(--space-10)}
-.wf-hero-nested .wf-hero-arrow{min-width:14px;max-width:56px}
+.wf-hero-nested .wf-hero-node.llm .lbl{font-size:var(--text-lg);letter-spacing:.02em}
+/* Room for the connector dot at its middle: narrower and the dot sits on the end chips. */
+.wf-hero-nested .wf-hero-arrow{min-width:36px;max-width:56px}
 .wf-hero-nested .wf-hero-node .ico svg{width:20px;height:20px}
 @media (max-width:640px){
   .wf-hero-nested{padding-left:var(--space-4);padding-right:var(--space-4)}

@@ -62,7 +62,7 @@ if [[ -n "$DATA_DIR" ]]; then
         "$INSTALL_DIR"|"$INSTALL_DIR"/*) die "DATA_DIR=$DATA_DIR is inside INSTALL_DIR=$INSTALL_DIR — it must be outside, or the service can still rewrite its own code and .env" ;;
     esac
     # `projects/` is the marker, because DATA_DIR *is* the data root — a `.promptpotter/` found
-    # under it means the contents were moved one level too deep, which is the migration's one
+    # under it means the contents were moved one level too deep, which is the move's one
     # silent failure: the service comes up healthy on an empty workspace and the campaign list
     # is simply blank.
     if [[ -d "$DATA_DIR/.promptpotter" ]]; then

@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
+from statistics import fmean
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -15,6 +16,8 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
@@ -28,7 +31,7 @@ from promptpotter.domain.scoring import (
     extract_item_label,
     turn_scalars,
 )
-from promptpotter.domain.spend import StepUsage, TokenAccount
+from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -183,6 +186,7 @@ def emit_replayed_step_tokens(
             served_by=part.served_by,
             cost_usd=part.cost_usd,
             recorded_rate_usd=part.rate_priced_usd,
+            key_source=None,
             cached=True,
         )
 
@@ -274,6 +278,35 @@ async def attempt_bounds(session: Session, wire_params: Mapping[str, Any]) -> di
         for node, cfg, spend in _node_spends(session, wire_params)
         if isinstance(spend, LLMSpendBound)
     }
+
+
+_PRICED_RUNS = 32
+
+
+def measured_cell_price(session: Session, wire_params: Mapping[str, Any]) -> CellPrice | None:
+    """What a cell BILLED on these models over the archive's newest rows; ``None`` before any."""
+    on_models = {
+        name: {"model": cfg["model"]}
+        for name, cfg in node_config_items(dict(wire_params))
+        if cfg.get("model")
+    }
+    costs: list[float] = []
+    seconds: list[float] = []
+    for m in session.store.archive.measurements_for_config(
+        on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
+    ):
+        # An archive row carries no grade, and the price is no formula's reading.
+        channels = cell_channels_of(m.cell, None)
+        if (cost := channels.get("cost")) is None:
+            continue
+        costs.append(cost)
+        if (spent := channels.get("latency")) is not None:
+            seconds.append(spent)
+    if not costs:
+        return None
+    return CellPrice(
+        usd=fmean(costs), seconds=fmean(seconds) if seconds else None, cells=len(costs)
+    )
 
 
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:

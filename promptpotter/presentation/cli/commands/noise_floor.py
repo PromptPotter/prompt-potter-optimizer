@@ -22,7 +22,7 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     pause = PauseCyclePayload(campaign_id=campaign_id, cycle_id=cycle_id, reason="Ctrl+C")
 
     try:
-        with ctrl_c_pauses(stores, pause):
+        with ctrl_c_pauses(stores, [pause]):
             outcome = await measure_noise_floor(
                 stores=stores,
                 hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),

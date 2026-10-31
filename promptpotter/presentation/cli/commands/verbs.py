@@ -111,13 +111,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "`--set column.query=input`, applied before the resolver runs.",
             ),
             Arg(
-                "--arm",
-                default=None,
-                metavar="HEAD_TO_HEAD:KEY",
-                help="Mint as a controlled arm of a head-to-head, declared by its first arm off that "
-                "arm's instrument and budget; a later arm on any other is refused.",
-            ),
-            Arg(
                 "--diag",
                 dest="diag",
                 action="store_true",
@@ -136,6 +129,37 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "campaign's own knob, so `--set halt_at_accuracy=ACC` spelled short.",
             ),
             NO_WAIT,
+            *BUDGET_AXES,
+        ),
+    ),
+    Verb(
+        "head-to-head",
+        "new:cmd_head_to_head",
+        help="Mint the arms of one controlled head-to-head on a dataset NAME in one act, each a "
+        "campaign on the same origin and bench set that searches prompts alone, and run them side "
+        "by side, each in its own process, until every arm ends. Every arm is planned, priced on "
+        "the budget axes below (each arm's own) and admitted before any is minted: a refused arm "
+        "leaves none behind. An id already declared takes these as further arms, held to its "
+        "record. `evidence` reads the result.",
+        args=(
+            Arg("dataset", help="The dataset name every arm runs on."),
+            Arg(
+                "--head-to-head",
+                required=True,
+                metavar="ID",
+                help="The head-to-head's id: letters, digits, '-' and '_'.",
+            ),
+            Arg(
+                "--arm",
+                dest="arms",
+                action="append",
+                required=True,
+                metavar="KEY=OPTIMIZER[,KNOB=VALUE…]",
+                help="Repeatable, one per arm: its key, the optimizer it runs, and that "
+                "optimizer's knobs in `new --set`'s spelling — `--arm capo=capo "
+                "--arm capo-b5=capo,nodes.<node>.max_blocks=5`. No `budget.*` or "
+                "`halt_at_accuracy`: every arm runs the budget below to its end.",
+            ),
             *BUDGET_AXES,
         ),
     ),
@@ -357,25 +381,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         ),
     ),
     Verb(
-        "restamp",
-        "restamp:cmd_restamp",
-        help="Bring on-disk data onto today's shape. (1) Prune knobs the engine no longer "
-        "has from every CampaignConfig — the minted snapshots and the dataset templates; "
-        "every dropped key is reported with the value its file held. (2) Re-project each "
-        "finished cycle's ledger onto the current record shape, dropping what the archive "
-        "and the round files already hold. A cycle with a live producer is left alone. (3) "
-        "Walk every file the measurement archive writes: prune retired keys, and remove a "
-        "record its model still refuses with what it alone describes. (4) "
-        "REPORT whether every ledger, manifest and archive file still loads — "
-        "read-only, because "
-        "pruning cannot restore a renamed field's value, so a repair there would be silently "
-        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (4) is "
-        "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
-        args=(
-            Arg("--apply", action="store_true", help="Rewrite the files (default: report only)."),
-        ),
-    ),
-    Verb(
         "evidence",
         "evidence:cmd_evidence",
         help="What a SET of subjects jointly says: the campaigns' bench headlines head-to-head, "
@@ -536,6 +541,21 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         ),
     ),
     Verb(
+        "price-head-to-head",
+        "head_to_head_price:cmd_price_head_to_head",
+        help="Price a planned head-to-head before it is minted: every budget point, arm and "
+        "replicate a plan file declares, in dollars, calls and wall clock, at the cell price the "
+        "archive measured on this bank and its models and each optimizer's measured rounds, then "
+        "print the one command that mints them. No LLM call, zero spend.",
+        args=(
+            Arg(
+                "plan",
+                help="A head-to-head plan (YAML, `HeadToHeadPlan`), e.g. "
+                "paper/plans/comparability.yaml.",
+            ),
+        ),
+    ),
+    Verb(
         "noise-floor",
         "noise_floor:cmd_noise_floor",
         help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "
@@ -591,7 +611,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
         "a line with a run in flight, a split holding nothing out and a selection already graded "
-        "— the served status's own answer (the course's `BenchStat.status`). Spends: two passes "
+        "— the served status's own answer (the course's `facts.bench.status`). Spends: two passes "
         "over the bench rows.",
         args=(ACTIVE_CAMPAIGN,),
     ),
@@ -599,8 +619,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "cycles",
         "cycles:cmd_cycles",
         help="Every cycle of every campaign you own that loads, with its run state (`run_phase`) — derived at each read and written to "
-        "no file, so this is where a terminal reads which runs are live, then each head-to-head arm "
-        "as its `--arm` address. Read-only, zero spend.",
+        "no file, so this is where a terminal reads which runs are live, then each head-to-head's "
+        "arms by key. Read-only, zero spend.",
         args=(
             Arg("--campaign", default="", help="Only this campaign's cycles."),
             Arg("--attached", action="store_true", help="Only cycles a producer process holds."),

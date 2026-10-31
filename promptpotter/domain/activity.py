@@ -32,11 +32,12 @@ from promptpotter.domain.run_records import (
     ProviderHoldRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
+    RoundWarningKind,
     RoundWarningRecord,
     RunPhaseRecord,
     SampleScoredRecord,
 )
-from promptpotter.domain.spend import TokenAccount, prefix_reading
+from promptpotter.domain.spend import prefix_reading
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import duration_words
 
@@ -98,6 +99,9 @@ class ActivityItem(FrozenModel):
     round: int | None = Field(default=None, description="The round the record names.")
     arm: ArmKey | None = Field(
         default=None, description="The arm the record is about, by its key; `label` renders it."
+    )
+    healed: RoundWarningKind | None = Field(
+        default=None, description="The self-heal a round warning reports; null on every other item."
     )
 
 
@@ -373,6 +377,7 @@ class ActivityFeed:
                     label=record.message or "round degraded",
                     tone="bad" if error else "warn",
                     round=record.round,
+                    healed=record.kind,
                 )
             case ErrorRecord():
                 return ActivityItem(
@@ -430,17 +435,17 @@ class ActivityFeed:
     def _call(item_id: str, record: LLMCallRecord) -> ActivityItem:
         inner = record.payload
         replayed = bool(inner.get("cached"))
-        usage = TokenAccount.from_payload(inner.get("usage"))
         bits: list[str] = []
         if (duration := _num(inner.get("duration_s"))) is not None:
             bits.append(f"{duration:.1f}s")
-        if usage.total > 0:
-            bits.append(f"{usage.total} tok")
-        prefix = prefix_reading(usage.cache_share(replayed=replayed), replayed=replayed)
-        if prefix.state == "unreported":
-            bits.append("prefix not reported")
-        elif prefix.share is not None:
-            bits.append(f"{prefix.share:.0%} prefix cached")
+        if (usage := record.usage) is not None:
+            if usage.total > 0:
+                bits.append(f"{usage.total} tok")
+            prefix = prefix_reading(usage.cache_share(replayed=replayed), replayed=replayed)
+            if prefix.state == "unreported":
+                bits.append("prefix not reported")
+            elif prefix.share is not None:
+                bits.append(f"{prefix.share:.0%} prefix cached")
         # "replayed", not "cached": OUR archive served it, and `cached` names the provider's discount.
         if replayed:
             bits.append("replayed")

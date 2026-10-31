@@ -1,8 +1,16 @@
 import type { ActivityItem, HierarchyStep, ProducerReading } from "@/lib/api/types";
-import type { RunPhase, RunStatus } from "@/lib/api/types.generated";
+import type { RunPhase, RunStatus, WaitingOn } from "@/lib/api/types.generated";
+import { PRODUCER_STATE_INFO, RAY_HEAD_WORDS, STATUS_MARK_INFO } from "@/lib/api/types.generated";
 import { fmtDuration } from "@/lib/format";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
-import { STATUS_MARK, phaseParked, phaseWalks, type RunPhaseTone } from "./run-phase";
+import {
+  phaseParked,
+  phaseWalks,
+  producerWord,
+  runWord,
+  waitingText,
+  type RunPhaseTone,
+} from "./run-phase";
 
 export interface RayStep {
   // Never a window index, which shifts when a new cycle is discovered.
@@ -69,34 +77,37 @@ export function rayHead(
   run: { run_phase: RunPhase; status: RunStatus; producer: ProducerReading } | null,
   rootPathKey: string,
   // served: `dashboard.json::waiting_on`
-  waitingOn: string | null,
+  waitingOn: WaitingOn | null,
 ): RayHead | null {
   if (run === null) return null;
   const newestStep = steps[steps.length - 1];
   const target = newestStep && newestStep.pathKey !== rootPathKey ? newestStep.path : null;
 
   const { run_phase: runPhase, status, producer } = run;
-  const tone = STATUS_MARK[status.mark].tone;
+  const tone = STATUS_MARK_INFO[status.mark].tone;
   if (!phaseWalks(runPhase)) {
     return {
       tone,
       wedged: false,
-      label: status.label,
+      label: runWord(status),
       detail: phaseParked(runPhase, producer.attached),
       target: null,
     };
   }
 
-  if (producer.stalled) {
-    return { tone, wedged: true, label: producer.label, detail: producer.stalled, target };
+  const word = producerWord(producer);
+  if (producer.state === "wedged") {
+    const silent = producer.silent_for_s;
+    const detail = `${RAY_HEAD_WORDS.stalled}${silent === null ? "" : ` for ${fmtDuration(silent)}`}`;
+    return { tone, wedged: true, label: word, detail, target };
   }
-  const recent = producer.stepping;
+  const recent = PRODUCER_STATE_INFO[producer.state].stepping;
   if (!recent && waitingOn && producer.open_for_s != null) {
     return {
       tone,
       wedged: false,
-      label: producer.label,
-      detail: `${waitingOn} · open ${fmtDuration(producer.open_for_s)}`,
+      label: word,
+      detail: `${waitingText(waitingOn)} · open ${fmtDuration(producer.open_for_s)}`,
       target,
     };
   }
@@ -107,8 +118,8 @@ export function rayHead(
     return {
       tone: "quiet",
       wedged: false,
-      label: producer.label_on_child,
-      detail: newestStep?.activity.label ?? "on a child run",
+      label: RAY_HEAD_WORDS.on_child,
+      detail: newestStep?.activity.label ?? RAY_HEAD_WORDS.on_child_detail,
       target,
     };
   }
@@ -116,8 +127,8 @@ export function rayHead(
   return {
     tone,
     wedged: false,
-    label: producer.label,
-    detail: newestStep && recent ? newestStep.activity.label : "no recent step",
+    label: word,
+    detail: newestStep && recent ? newestStep.activity.label : RAY_HEAD_WORDS.no_recent_step,
     target,
   };
 }

@@ -152,10 +152,6 @@ def parse_prompt_export(text: str) -> PromptExport:
         raise ExportVersionError(
             f"export artifact_version {found!r}, this build reads {EXPORT_ARTIFACT_VERSION}"
         )
-    if "lineage" not in raw:
-        raise ExportVersionError(
-            "its export.json is pre-lineage, written before candidates were exported"
-        )
     return PromptExport.model_validate(raw)
 
 

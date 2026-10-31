@@ -25,25 +25,27 @@ if TYPE_CHECKING:
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
-PLUMBING_MODULES = frozenset(
-    {
-        "promptpotter.infrastructure.llm.telemetry",
-        "promptpotter.application.bench.llm_call",
-        "promptpotter.application.bench.resume_and_fork.decisions",
-        "promptpotter.application.optimizers.nodes",
-        "promptpotter.application.runner.measurement",
-        "promptpotter.shared.hashing",
-        __name__,
-        "promptpotter.infrastructure.store.io",
-        "promptpotter.config.paths",
-    }
+# Where the reached closure stops: each module or package moves values, never shapes their text.
+PLUMBING_MODULES = (
+    "promptpotter.infrastructure",
+    "promptpotter.application.bench.llm_call",
+    "promptpotter.application.bench.node_context",
+    "promptpotter.application.bench.resume_and_fork.decisions",
+    "promptpotter.application.optimizers.nodes",
+    "promptpotter.application.runner.measurement",
+    "promptpotter.shared.hashing",
+    "promptpotter.config.paths",
 )
+
+
+def _plumbing(module: str) -> bool:
+    return any(module == p or module.startswith(f"{p}.") for p in PLUMBING_MODULES)
 
 
 class _Scope(NamedTuple):
     names: frozenset[str]
-    classes: frozenset[str]
     imports: dict[str, tuple[str, str | None]]
+    defs: dict[str, UnitFacts]
 
 
 def _module_name(path: Path) -> str:
@@ -107,9 +109,7 @@ class _Package:
         return table
 
     def _scope_of(self, facts: SourceFacts) -> _Scope:
-        return _Scope(
-            frozenset(facts["names"]), frozenset(facts["classes"]), self._bind(facts["imports"])
-        )
+        return _Scope(frozenset(facts["names"]), self._bind(facts["imports"]), facts["defs"])
 
     def scope(self, module: str) -> _Scope | None:
         if module not in self._scopes:
@@ -119,9 +119,10 @@ class _Package:
             )
         return self._scopes[module]
 
-    def is_class(self, module: str, name: str) -> bool:
+    def definition(self, module: str, name: str) -> UnitFacts:
         scope = self.scope(module)
-        return scope is not None and name in scope.classes
+        assert scope is not None
+        return scope.defs[name]
 
     def resolve(self, module: str, name: str) -> tuple[str, str] | None:
         seen: set[tuple[str, str]] = set()
@@ -159,7 +160,10 @@ def optimizer_prompt_shapers(
     covered: Iterable[ModuleType] = (),
     foreign: Collection[str] = (),
 ) -> tuple[NormalizedSource, ...]:
-    """Read off the source, so the set cannot depend on which modules this process imported."""
+    """The marked units and every top-level definition hashed code reaches from them.
+
+    Read off the source, so the set cannot depend on which modules this process imported.
+    """
     texts = {path: path.read_text(encoding="utf-8") for path in sorted(_PACKAGE_ROOT.rglob("*.py"))}
     units: list[tuple[str, UnitFacts]] = [
         (module, unit)
@@ -170,26 +174,20 @@ def optimizer_prompt_shapers(
     ]
     whole = {m for m, unit in units if unit["whole"]}
     scanned = [m for m in hashed if m.__name__ not in whole]
-    covered_names = whole | {m.__name__ for m in (*scanned, *covered)} | PLUMBING_MODULES
-    marked = {(m, unit["name"]) for m, unit in units if unit["name"]}
+    covered_names = whole | {m.__name__ for m in (*scanned, *covered)}
+    reached = {(m, unit["name"]) for m, unit in units if unit["name"]}
     modules = [(m.__name__, _FACTS.of(Path(str(m.__file__)).read_text("utf-8"))) for m in scanned]
     package = _Package(modules)
-    checked = [*((m, unit["reads"]) for m, unit in units), *((m, f["reads"]) for m, f in modules)]
-    breaches = sorted(
-        {
-            f"{target[0]}.{target[1]} (read by {module})"
-            for module, reads in checked
-            for target in package.reached(module, reads)
-            if target[0] not in covered_names
-            and target not in marked
-            and not package.is_class(*target)
-        }
-    )
+    sources = [unit["source"] for _, unit in units]
+    walk = [*((m, unit["reads"]) for m, unit in units), *((m, f["reads"]) for m, f in modules)]
+    while walk:
+        module, reads = walk.pop()
+        for target in package.reached(module, reads) - reached:
+            reached.add(target)
+            if target[0] not in covered_names and not _plumbing(target[0]):
+                unit = package.definition(*target)
+                sources.append(unit["source"])
+                walk.append((target[0], unit["reads"]))
     _FACTS.keep(texts.values())
-    if breaches:
-        raise RuntimeError(
-            "hashed code reads package names nothing hashes — mark each one whose value reaches "
-            f"prompt text `shapes_optimizer_prompt`: {breaches}"
-        )
-    # Sorted by content, never path: relocating a marked unit moves no digest.
-    return tuple(sorted(NormalizedSource(unit["source"]) for _, unit in units))
+    # Sorted by content, never path: relocating a hashed unit moves no digest.
+    return tuple(sorted(NormalizedSource(source) for source in sources))

@@ -342,7 +342,7 @@ def _by_sample(sheet: CellSheet) -> list[tuple[str, GradedCell, str]]:
 
 class CycleResult(StrictModel):
     rounds: list[RoundResult]
-    # Origin-EXCLUSIVE, unlike `CycleIndex.rounds`, which holds round 0.
+    # The LINE's, origin-exclusive: every round its cycles ran, a rebase's discarded ones included.
     n_rounds_after_origin: int
     result_accuracy: float | None
     result_round: int
@@ -350,13 +350,14 @@ class CycleResult(StrictModel):
     origin: OwnLevel | None
     # The individual each round ended on, never the proposals; `None` on a cycle that never started.
     level_series: LevelSeries | None
-    # The held-out bench: the origin's headline on its rows, then per L1 round the STANDING
-    # selection's on the same rows, held forward across rounds that held. ``None`` in the series
-    # is a round whose selection pass read nothing or was never sent; ``None`` origin, no bench
-    # pass read.
+    # The held-out bench: the origin's headline on its rows, then per round the LINE spent, in the
+    # order spent, the STANDING selection's on the same rows, held forward across rounds that held.
+    # ``None`` in the series is a round whose selection pass read nothing or was never sent;
+    # ``None`` origin, no bench pass read.
     bench_origin_level: float | None = None
     bench_round_levels: list[float | None] = Field(default_factory=list)
-    # From config, never the rounds that ran: `lives` stops a stalling cycle short. ``None`` = no cap.
+    # The line's, from config, never the rounds that ran: `lives` stops a stalling cycle short.
+    # ``None`` = no cap.
     round_budget: int | None = None
     result_prompt_fields: dict[str, dict[str, str]]
     result_pipeline_params: dict[str, Any] | None = None

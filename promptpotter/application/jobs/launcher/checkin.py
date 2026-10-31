@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
+from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
-from promptpotter.application.datasets.loaders import cut_bank
+from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
@@ -45,6 +47,7 @@ from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.registry import Job, JobRegistry
     from promptpotter.domain.campaign_config import CampaignConfig
 
@@ -97,67 +100,92 @@ class CheckinStart:
         return draft_config(stores, owned_draft(stores, self.claim.draft_id))
 
 
-def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict[str, Any]) -> None:
-    """Before the dataset lands, so a refused Start takes no slug and its retry is a Start like the first."""
-    params, _rows, schema = draft_pipeline(stores, draft)
-    config = draft_config(stores, draft)
-    refuse_unrunnable(
-        config,
-        select_optimizer(config.optimization),
-        cut_bank(stores, source),
-        params,
-        schema,
-        free=on_free_tier(stores),
-        shelf=stores.block_packs,
-    )
-
-
-async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
-    draft = start_ready_draft(stores, draft_id)
-    dataset_name = draft.dataset_name
-    canonical = draft.source_dataset
-    if canonical is None:
-        if stores.tenant_datasets.slug_exists(draft.slug):
-            raise LaunchError(
-                f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
-            )
-        upload = stores.drafts.upload_of(draft.draft_id)
-        if upload is None:
-            raise LaunchError(f"draft {draft.draft_id} names no upload to commit")
-        source = upload_source(draft, upload)
-        _refuse_unrunnable_upload(stores, draft, source)
-        commit_upload_definition(stores, draft, source=source)
-        origin_override = None
-    else:
+def _land_draft(
+    stores: Stores, draft: DraftCampaign, overlays: Sequence[Mapping[str, JsonValue]]
+) -> dict[str, NodePrompt] | None:
+    """An upload's definition lands once its cut passed every mint refusal of each config the
+    Start runs (the draft's, under each overlay), so a refused Start takes no slug. One its own
+    upload landed is a Start refused after landing: the retry lands the draft again. Answers the
+    origin an authored check-in over an existing dataset overrides."""
+    if (canonical := draft.source_dataset) is not None:
         persist_origin_candidate_library(stores, canonical, draft)
         # An origin authored over an existing slug writes no dataset: only the override carries it.
         # `committed_prompts` rather than the raw map, or the label enumeration is lost.
-        origin_override = (
+        return (
             {step: NodePrompt(fields=f) for step, f in draft.committed_prompts().items()}
             if draft.authored_prompts()
             else None
         )
+    upload = stores.drafts.upload_of(draft.draft_id)
+    if upload is None:
+        raise LaunchError(f"draft {draft.draft_id} names no upload to commit")
+    source = upload_source(draft, upload)
+    datasets = stores.tenant_datasets
+    if datasets.slug_exists(draft.slug) and definition_source(
+        datasets.dataset_dir(draft.slug)
+    ) != Source.of(source):
+        raise LaunchError(
+            f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
+        )
+    params, _rows, schema = draft_pipeline(stores, draft)
+    rows = cut_bank(stores, source)
+    for overlay in overlays:
+        config = with_optimization(draft_config(stores, draft), overlay)
+        refuse_unrunnable(
+            config,
+            select_optimizer(config.optimization),
+            rows,
+            params,
+            schema,
+            free=on_free_tier(stores),
+            shelf=stores.block_packs,
+        )
+    commit_upload_definition(stores, draft, source=source)
+    return None
 
+
+@dataclass(frozen=True, slots=True)
+class OpenedCheckin:
+    """A Start's draft past its landing, with the session and config every arm of it declares on."""
+
+    draft: DraftCampaign
+    session: Session
+    declared: CampaignConfig
+    origin_override: dict[str, NodePrompt] | None
+
+
+async def open_checkin(
+    stores: Stores, draft_id: str, *, overlays: Sequence[Mapping[str, JsonValue]]
+) -> OpenedCheckin:
+    """*overlays* are what each campaign the Start mints lays over the draft's `optimization`."""
+    draft = start_ready_draft(stores, draft_id)
+    origin_override = _land_draft(stores, draft, overlays)
     session = await init_services(
-        dataset_name=dataset_name, identity=stores.identity, stores=stores
+        dataset_name=draft.dataset_name, identity=stores.identity, stores=stores
     )
-    campaign_config = draft_config(
+    declared = draft_config(
         stores, draft, session_chain=[n.name for n in session.pipeline_schema.nodes]
     )
+    return OpenedCheckin(draft, session, declared, origin_override)
+
+
+async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
+    opened = await open_checkin(stores, draft_id, overlays=[{}])
+    session = opened.session
     plan = resolve_cycle_plan(
         session,
-        declare(session, campaign_config, purpose=Optimize()),
+        declare(session, opened.declared, purpose=Optimize()),
         session.bank.samples,
-        origin_override=origin_override,
+        origin_override=opened.origin_override,
     )
-    ledger = stores.drafts.ledger(draft.draft_id)
+    ledger = stores.drafts.ledger(draft_id)
     minted = mint(
         plan,
         campaign_id=fresh_campaign_id(session),
         billed=ledger if ledger.is_file() else None,
     )
     relabel_minted(minted.session)
-    stores.drafts.close(draft.draft_id)
+    stores.drafts.close(draft_id)
     return minted
 
 

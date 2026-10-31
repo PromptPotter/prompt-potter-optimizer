@@ -188,8 +188,7 @@ def compile_expression(formula: str, *, source: str) -> CompiledExpression:
             carried = sorted(k for k, v in namespace.items() if not callable(v))
             raise ScoringTermMissingError(
                 f"The {source} {formula!r} names a term {subject} does not carry: {exc}. "
-                f"{subject} carries {carried} — either the formula is wrong, or this record "
-                "predates the term."
+                f"{subject} carries {carried}."
             ) from exc
         except Exception as exc:
             raise ScoringFormulaError(

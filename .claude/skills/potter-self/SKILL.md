@@ -145,7 +145,6 @@ Code enforces `optimizers/potter/validators/l1_strict.py` and `overlay_failures(
 - **Evidence availability.** `axis_memory` needs ≥1 prior archive measurement; `runtime_failures` empty in round 1 while sibling forks failed means broken inheritance (`bench/cycle.py::Cycle.runtime_failures`). `critique` / `escalation_panel` are empty in round 1 by design.
 - **Near re-proposal.** `l1_config_not_in_runtime_failures` catches exact `(param, value)` matches only; flag an unjustified value near a failing one.
 - **Standing constraints** (PEAKED axes, param axes last, numeric envelopes) — read off `resolved_prompts['l1_generate/1']` at review time; flag each crossing without its demanded evidence.
-- **Grounding grounds.** A citation quotes the named `field`, one the layout rendered (`citable_fields`); otherwise a fabrication.
 - **Intra-round paraphrase.** Jaccard ≥ 0.5 over a pair's `changes_description` → `intra_round_paraphrase`; a theme word (verify, check, restate) in ≥ N/2 → `theme_mode_collapse`.
 - **Format integrity.** LaTeX escapes survive; no template placeholders in values; `pipeline_overlay` keys are real `param_keys`.
 

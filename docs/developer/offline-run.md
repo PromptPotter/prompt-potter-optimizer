@@ -24,14 +24,15 @@ its `decisions.json` holds the same rounds and headline as the default `at_end` 
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.
 
-**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in a
-home of its own — whenever a file the engine runs from has changed since it was last green, so an
+**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in the
+clone's home (`processes.py::clone_cache`, one for every worktree) — whenever a file the engine runs from has changed since it was last green, so an
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
 docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-push
 hook runs it on each pushed tip** with every other CI check (`gate.py --push`), in a throwaway `git worktree` of that tip
-borrowing the pushing tree's `.venv`, `webapp/node_modules` and `.gate_cache` as links
-(`gate.py::_tip_checkout`), so its verdict is the tip's whatever the working tree holds, and a tip
-already green is a stamp read. The pre-commit hook and `--changed` leave it out: it proves a
+borrowing the pushing tree's `.venv` and `webapp/node_modules` as links
+(`gate.py::_tip_checkout`), so its verdict is the tip's whatever the working tree holds. The green
+store is the clone's (`last_green.py::LastGreen`), keyed by content, so a tip already green in any
+worktree is a stamp read. The pre-commit hook and `--changed` leave it out: it proves a
 landing, not an edit. CI runs it on every push.
 
 **A green optimizer is not run twice.** Each optimizer's workspace, with every leg nested in it, is
@@ -43,8 +44,10 @@ green optimizer under the same arguments prints `unchanged since green` for it; 
 or pass `--against` to rerun all. A default-argument green by hand is the gate's green too.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
-§ The controlled comparison): two workspaces, each running one head-to-head's arms (`--optimizer`,
-potter and capo by default), one after a foreign campaign on the dataset — the one layout putting
+§ The controlled comparison): two workspaces, each minting one head-to-head's arms (`--optimizer`,
+potter and capo by default) in one act through `application/embedded_run.py::run_head_to_head`, as
+the `head-to-head` verb mints them, and running them one after another, one workspace after a
+foreign campaign on the dataset — the one layout putting
 several optimizers' campaigns in ONE workspace, for the webapp's Compare tab. It fails unless a
 skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory holds only
 runs it filed, and every election read its head-to-head's freeze plus its own lines; whether the
@@ -77,8 +80,9 @@ decisions. Each campaign is a child process, as many at once as free memory hold
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
 | `diverged/` | The first optimizer's campaign resumed with `--fork-on-divergence` under an edited proposer prompt: the parent ends on one `REBASED` stop, the fork runs on, and two further forks give one campaign four courses (the multi-course sidebar fixture). |
-| `rebased/` | Potter's campaign paused at round 1, beside a prior campaign, resumed with `--from 1` under an L2 proposing a fork at every fire: it fails unless the line forks `MAX_AUTO_REBASES` times, each fork ends on a stop that is not a failure, and the line ends on a stop other than `REBASED`. |
+| `rebased/` | Potter's campaign paused at round 1, beside a prior campaign, resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire: it fails unless the line forks, each fork ends on a stop that is not a failure, the line's cycles together run no more rounds than its budget, and the line ends on a stop other than `REBASED`. |
 | `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
+| `controlled/arms/requests/`, `controlled/arm-<optimizer>/` | A head-to-head's arms share one world, minted in one act: every arm's requests land in one directory, and each arm's `decisions.json` `harness` counts the whole act. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
 its producer lock dropped — the cycle `paused` after one SIGINT — its `mint-campaign` record must
@@ -120,18 +124,20 @@ only the bank and the call-identity policy below.
   benchmark rows before the session opens, so nothing is downloaded and nothing licensed is copied.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
   `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt. Potter's markers follow
-  a scripted trajectory that fires L2 and L3; every other marker draws its `k` from its name.
+  a scripted trajectory whose stalls fire L2 at the leg's pinned `l1_patience`; every other marker draws its `k` from its name.
   `FakeBackend(hardness=…)` spreads `k` per row, so a δ ruler fits; at `0` the ruler is flat and a
   rewind is dropped.
 - **The optimizer LLM** answers by CALL IDENTITY — the node, the request's seed, the call's turn
   among sends sharing both — never by wording or arrival order. A structured call gets a minimal
   valid instance of its response schema; a paper preset's text call is matched to the manifest
   template it opens with and answered in the form that template asks for. `ByCallIdentity(rebasing=True)`
-  adds a `fork_proposal` to every L2 answer; off, no answer carries one.
+  adds a `fork_proposal` unlocking `schema_field_rename` to every L2 answer; off, no answer carries one.
 - **The knobs** are the dataset's `campaign` under the script's `BENCH` sizes; an optimizer the
   template's overlay does not select takes its `SCALED` entry or runs its manifest as declared, and
   a sampler's size knob draws `ROUND_CELLS`. One seeded determinism clamp holds every optimizer:
   unseeded, draws follow the freshly minted campaign id and two runs of one tree would differ.
 
 **Adding an optimizer** needs nothing here: it runs as its manifest declares, one installed through
-its entry points alone included — `examples/optimizer-plugin/` is that case.
+its entry points alone included. `examples/optimizer-plugin/` is that case, and the gate proves it
+(`gate.py --only optimizer-plugin`): installed into a scratch venv layered on the tree's, run
+`--optimizer example`, red unless an arm carries `source="example:propose"`.

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { cx } from "@/lib/cx";
-import { phaseWalks } from "@/lib/derivations";
+import { phaseWalks, runWord } from "@/lib/derivations";
 import { useViewedCourse } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
@@ -15,6 +15,8 @@ import {
 } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
+import { KnobClashes, useKnobClashes } from "./KnobClashes";
+import { RaceCatchUp } from "./RaceCatchUp";
 import { RoundAxis } from "./RoundAxis";
 import type { PipelineDoc } from "@/lib/types";
 
@@ -24,13 +26,13 @@ interface Props {
 
 export function OptimizerCard({ pipeline }: Props) {
   const [knobsOpen, setKnobsOpen] = useState(false);
+  const clashes = useKnobClashes();
   const { dash, isLive } = useCycleStream();
   const runState = useViewedCourse()?.state ?? null;
   const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
   const {
     nodes: roundNodes,
-    round: viewedRound,
     showsCurrent: viewingLive,
     loading: nodesLoading,
   } = useRoundNodes();
@@ -40,18 +42,16 @@ export function OptimizerCard({ pipeline }: Props) {
   );
   const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
   const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
-  // The SERVER's phase, never a local "idle": that word covers paused, held and dead alike.
-  const status = !dash
-    ? "pending"
-    : !viewingLive
-      ? `round ${viewedRound}`
+  // What the round axis beside it does not already say: the node firing, else the SERVER's phase
+  // (never a local "idle": that word covers paused, held and dead alike).
+  const status =
+    !dash || !viewingLive
+      ? null
       : isLive
         ? activeLabel
-          ? `live · ${activeLabel}`
-          : "live"
         : runState
-          ? runState.status.label
-          : "pending";
+          ? runWord(runState.status)
+          : null;
 
   // Off the audit twin: a node can be configured for a model and not have fired at all.
   const models = {
@@ -66,12 +66,8 @@ export function OptimizerCard({ pipeline }: Props) {
       <Toolbar className="workflow-toolbar">
         <span className="workflow-title">Optimizer</span>
         <RoundAxis />
-        <span
-          className="workflow-status"
-          style={{ color: runIsRunning ? "var(--color-success)" : "var(--color-text-secondary)" }}
-          aria-live="polite"
-        >
-          ● {status}
+        <span className={cx("workflow-status", runIsRunning && "is-running")} aria-live="polite">
+          {status}
         </span>
         <ToolbarSpacer />
         <CopyButton
@@ -85,14 +81,19 @@ export function OptimizerCard({ pipeline }: Props) {
         />
         <Button
           variant="ghost"
-          className="workflow-mech"
+          className={cx("workflow-mech", clashes.length > 0 && "has-clash")}
           aria-haspopup="dialog"
           aria-expanded={knobsOpen}
-          aria-label="Optimizer knobs"
+          aria-label={
+            clashes.length > 0
+              ? `Optimizer knobs — ${clashes.length} clash${clashes.length === 1 ? "" : "es"} in this config`
+              : "Optimizer knobs"
+          }
           title="Optimizer knobs — each node's configuration for this campaign"
           onClick={() => setKnobsOpen(true)}
         >
           <IconSliders />
+          {clashes.length > 0 ? <span className="workflow-mech-count">{clashes.length}</span> : null}
         </Button>
       </Toolbar>
       <div className="workflow-graph">
@@ -112,12 +113,14 @@ export function OptimizerCard({ pipeline }: Props) {
           models={models}
         />
       </div>
+      <RaceCatchUp />
       <Dialog
         open={knobsOpen}
         title="Optimizer knobs"
         onClose={() => setKnobsOpen(false)}
       >
         <p className="mech-lead">The manifest&apos;s values, with this campaign&apos;s overlay</p>
+        <KnobClashes />
         <NodeKnobsPanel />
       </Dialog>
     </div>

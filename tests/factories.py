@@ -19,7 +19,7 @@ from promptpotter.application.initialization.session import LaunchState, ScorerS
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
-from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
     L1Readout,
@@ -388,6 +388,7 @@ def billed_call(cost_usd: float | None = None, **fields: Any) -> TokenUsageRecor
         "input_tokens": 1,
         "output_tokens": 0,
         "cost_usd": cost_usd,
+        "key_source": "host",
     } | fields
     return TokenUsageRecord(**record)
 
@@ -677,6 +678,12 @@ def inner_cells(*optimizers: str) -> InnerCells:
 def pobb_knobs(**bend: Any) -> PoBBKnobs:
     shipped = cast("PoBBKnobs", resolve_optimizer("potter", {}, gate="off").knobs("pobb"))
     return shipped.model_copy(update=bend)
+
+
+def election_knobs() -> ElectionKnobs:
+    return cast(
+        "ElectionKnobs", resolve_optimizer("potter", {}, gate="off").knobs("theta_election")
+    )
 
 
 def degradation_health(
@@ -1016,14 +1023,13 @@ def cycle_result(
     if bench_levels is None:
         bench_levels = [bench_origin if bench_origin is not None else 0.5] * len(levels)
     unheld = PairedReading.unread(ReadingState.NOT_HELD)
-    bench = BenchScore.of(
+    bench = BenchScore(
         bench_size=0,
         scorer_id="",
         headline=BENCH_HEADLINE,
         status=bench_status(
             trigger="at_end",
             bench_size=0,
-            tolerance=0,
             on_line=True,
             inner=False,
             held_by=None,

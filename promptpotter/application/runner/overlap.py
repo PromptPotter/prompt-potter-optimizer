@@ -13,7 +13,7 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_point
-from promptpotter.domain.arms import Cut, Measured, arm_name
+from promptpotter.domain.arms import Measured, arm_name, walked_short
 from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -208,12 +208,14 @@ async def measure_overlap(
 def panel_triggers(
     rounds: Sequence[RoundResult], n_min: int
 ) -> list[tuple[LineStep, PanelTrigger]]:
-    """Every walked arm of the cycle a trigger fired for, by first walk; a parent re-read is no walk."""
+    """Every arm of the cycle walked to its draw's end a trigger fired for, by first walk: a stop
+    buys no cell after it, and a parent re-read is no walk."""
     fired: dict[str, tuple[LineStep, PanelTrigger]] = {}
     for rr in rounds:
         for key, arm in rr.arms.items():
             if (
-                not isinstance(arm, Cut | Measured)
+                not isinstance(arm, Measured)
+                or walked_short(arm)
                 or arm.role is MeasurementRole.PARENT
                 or arm.individual.id in fired
             ):

@@ -105,3 +105,5 @@ class SpineCycle(FrozenModel):
     # Subset-invariant, so it alone averages up a lineage whose rounds scored different subsets.
     # Every round the cycle closed is a node; ``None`` where its level does not difference.
     theta_by_round: dict[int, float | None]
+    # The individual each node's line stands on once it closed: a held round's is its parent.
+    pick_by_round: dict[int, str]

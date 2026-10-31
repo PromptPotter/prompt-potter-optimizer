@@ -1,6 +1,8 @@
 import type { MachineNotice } from "@/lib/api/types";
+import { STOP_REASON_INFO } from "@/lib/api/types.generated";
 import type { ServedDashboard } from "@/lib/api";
 import type { StatusKind } from "@/lib/poll";
+import { producerAlert } from "./run-phase";
 
 interface CriticalAlert {
   severity: "critical" | "warn" | "info";
@@ -36,11 +38,8 @@ export function criticalAlert({
   }
   const err = dash?.error;
   if (err) {
-    return {
-      severity: "critical",
-      title: `${err.label} — ${err.kind}`,
-      detail: err.next_step,
-    };
+    const info = STOP_REASON_INFO[err.stop_reason];
+    return { severity: "critical", title: `${info.label} — ${err.kind}`, detail: info.next_step };
   }
   if (bannerStatus === "offline") {
     return { severity: "critical", title: bannerText, detail: bannerHint };
@@ -53,7 +52,7 @@ export function criticalAlert({
     };
   }
   if (machineNotice) return { severity: "warn", ...machineNotice };
-  const stuck = dash?.producer.alert;
+  const stuck = dash ? producerAlert(dash.producer) : null;
   if (stuck) return { severity: "warn", title: stuck.title, detail: stuck.detail };
   // Only a `critical` round carries an alert; `degraded` is `round-health.ts`'s.
   const latest = dash?.rounds.at(-1);

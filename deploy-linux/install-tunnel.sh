@@ -126,7 +126,7 @@ logs:
   journalctl -u $SERVICE_NAME -f    # uvicorn
 
 reminder: this is currently public. Sign-in is open and grants access — what
-bounds a stranger is FREE_TIER_SPEND_CAP_USD, and the blocklist is the revoke;
+bounds a stranger is the host coupon HOST_COUPON, and the blocklist is the revoke;
 see the Security posture section in deploy-linux/README.md.
 EOF
 else

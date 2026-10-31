@@ -16,7 +16,7 @@ import {
   campaigns,
   type Campaign,
 } from "../harness";
-import { STOP_REASON_CATEGORIES, type RunLimits } from "@/lib/api/types.generated";
+import { STOP_REASON_INFO, type RunLimits } from "@/lib/api/types.generated";
 import { isStopReason } from "@/lib/derivations";
 
 // Minted through the control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.
@@ -141,7 +141,7 @@ test.describe("the recursion, end to end", () => {
 
     assertBoundedStop("the recursion", stopped);
     expect(
-      completed > 0 || (isStopReason(stopped) && STOP_REASON_CATEGORIES[stopped] === "budget"),
+      completed > 0 || (isStopReason(stopped) && STOP_REASON_INFO[stopped].category === "budget"),
       `nothing was measured and the run stopped on '${stopped}' rather than on its ceiling`,
     ).toBeTruthy();
 

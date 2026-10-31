@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -29,7 +30,6 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.run_records import CycleRecord, RunPhaseRecord, RunWiringRecord
 from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
-from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     bind_spend_book,
@@ -164,6 +164,7 @@ def declare_run_wiring(
             elects_on=selected.elects_on,
             max_cells_in_flight=session.backend_client.max_cells_in_flight,
             measured_unit=session.backend_client.measured_unit,
+            measurement_node=selected.plan.measurement,
             # Composed here: the Langfuse host is backend-only, so a browser cannot.
             langfuse_trace_url=None
             if tracing is None
@@ -178,6 +179,7 @@ def declare_run_wiring(
                     session.store.block_packs,
                 ),
             ),
+            backend_revision=session.backend_revision,
         )
     )
 
@@ -316,8 +318,7 @@ def _bind_observers(
         else RunCallbacks(ledger=ledger, view_context=forked_from.callbacks.view_context)
     )
     ledger_token = set_cycle_ledger(ledger)
-    # No token to reset: the run's task owns its context, and an inner cell rebinds the same account.
-    set_rate_tenant(str(session.store.identity.tenant_id))
+    bind_account(session.store)
 
     return RunObservers(
         cycle_dir=cycle_dir,

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import functools
+import re
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
 from pydantic import (
+    AfterValidator,
     BeforeValidator,
     Field,
     WithJsonSchema,
     create_model,
+    model_validator,
 )
 
 from promptpotter.application.bench.llm_call import OptimizerResponseModel
@@ -41,7 +44,25 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
 
 VARIANT_PROSE_MAX = 320
 
-CITATION_MAX = 160
+# A run this short inside prose of another script is a decoding slip, never a quote.
+_CJK_RUN = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]+")
+_STRAY_RUN_MAX = 3
+
+
+def _one_script(value: str) -> str:
+    runs = _CJK_RUN.findall(value)
+    letters = sum(c.isalpha() for c in value)
+    if any(len(r) <= _STRAY_RUN_MAX for r in runs) and 2 * sum(map(len, runs)) < letters:
+        raise ValueError(f"stray {runs[0]!r} inside prose of another script: write it in one")
+    return value
+
+
+def _one_script_values(value: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    for fields in value.values():
+        for text in fields.values():
+            if isinstance(text, str):
+                _one_script(text)
+    return value
 
 
 def _drop_blank_values(value: object) -> object:
@@ -59,6 +80,8 @@ def _drop_blank_node_values(value: object) -> object:
 def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
     """The marker is VISIBLE: a silent mid-quote cut reads downstream as a complete-but-wrong steer."""
 
+    # Never beside a wire `maxLength`: a provider grammar enforcing it cuts first, unmarked.
+
     def _v(value: Any) -> Any:
         if isinstance(value, str) and len(value) > max_len:
             return value[: max_len - 1].rsplit(" ", 1)[0] + "…"
@@ -68,7 +91,7 @@ def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
 
 
 CLUSTER_MECHANISM_MAX = 60
-CLUSTER_CLAIM_MAX = 240
+CLUSTER_CLAIM_MAX = 320
 # A cluster is a MECHANISM, and one row shows no mechanism: the next generator rewrites around that row.
 CLUSTER_ROWS_MIN = 2
 
@@ -77,8 +100,8 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
     """PERMISSIVE on ``field`` at the parse boundary: not every provider honours the grafted enum, so the validator enforces it."""
 
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
-    # The parse boundary must NOT truncate: `_citation_in_prompt` substring-matches this against the prompt.
-    citation: Annotated[str, WithJsonSchema({"type": "string", "maxLength": CITATION_MAX})]
+    # Never truncated: `l1_strict.py::l1_citation_in_panel` matches it against the panel `field` names.
+    citation: str
 
 
 class L1Variant(OptimizerResponseModel):
@@ -95,17 +118,21 @@ class L1Variant(OptimizerResponseModel):
             "inside ONE critique cluster where the CRITIQUE panel lists clusters."
         ),
     )
-    pipeline_overlay: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description=(
-            "Nested {node: {param: value}} — scalar backend tunables and "
-            "`output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a "
-            "top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a "
-            "last resort: at most one, and only where a panel or a runtime failure points there."
-        ),
+    pipeline_overlay: Annotated[dict[str, dict[str, Any]], AfterValidator(_one_script_values)] = (
+        Field(
+            default_factory=dict,
+            description=(
+                "Nested {node: {param: value}} — scalar backend tunables and "
+                "`output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a "
+                "top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a "
+                "last resort: at most one, and only where a panel or a runtime failure points there."
+            ),
+        )
     )
     prompt_fields_updates: Annotated[
-        dict[str, dict[str, str]], BeforeValidator(_drop_blank_node_values)
+        dict[str, dict[str, str]],
+        BeforeValidator(_drop_blank_node_values),
+        AfterValidator(_one_script_values),
     ] = Field(
         default_factory=dict,
         description="Per prompt node, its prompt fields: {node: {field: new full text}}.",
@@ -115,10 +142,9 @@ class L1Variant(OptimizerResponseModel):
         description="Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL "
         "panel, in order. Replaces that node's list; omit a node to keep it.",
     )
-    # Capped: a response truncated at `max_tokens` is a ZERO-CANDIDATE ROUND, not a short answer.
-    changes_description: Annotated[str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX))] = (
-        Field(max_length=VARIANT_PROSE_MAX)
-    )
+    changes_description: Annotated[
+        str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX)), AfterValidator(_one_script)
+    ]
 
 
 class L1Recombination(OptimizerResponseModel):
@@ -133,9 +159,9 @@ class L1Recombination(OptimizerResponseModel):
         description="The loci, as `node.field`, the donor gives: fewer than half of those the two "
         "differ on, one where they differ on two; more drops the child mechanically."
     )
-    changes_description: Annotated[str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX))] = (
-        Field(max_length=VARIANT_PROSE_MAX)
-    )
+    changes_description: Annotated[
+        str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX)), AfterValidator(_one_script)
+    ]
 
 
 class L1GenerateOutput(OptimizerResponseModel):
@@ -181,12 +207,14 @@ class FailureCluster(OptimizerResponseModel):
             "Two rows that fail for different reasons are two clusters, never one."
         ),
     )
-    mechanism: Annotated[str, BeforeValidator(_truncate_marked(CLUSTER_MECHANISM_MAX))] = Field(
-        max_length=CLUSTER_MECHANISM_MAX,
+    mechanism: Annotated[
+        str, BeforeValidator(_truncate_marked(CLUSTER_MECHANISM_MAX)), AfterValidator(_one_script)
+    ] = Field(
         description=("The ONE root cause, as a short label naming the cognitive move that fails."),
     )
-    claim: Annotated[str, BeforeValidator(_truncate_marked(CLUSTER_CLAIM_MAX))] = Field(
-        max_length=CLUSTER_CLAIM_MAX,
+    claim: Annotated[
+        str, BeforeValidator(_truncate_marked(CLUSTER_CLAIM_MAX)), AfterValidator(_one_script)
+    ] = Field(
         description=(
             "WHY these rows land wrong, in your own words: the step that breaks and what was "
             "said against the truth. General over the cluster, never one row's procedure."
@@ -201,12 +229,12 @@ class L1CritiqueOutput(OptimizerResponseModel):
         max_length=3,
         description="One per DISTINCT failure cluster, ≤3, largest first.",
     )
-    priority_fix: Annotated[str, BeforeValidator(_truncate_marked(320))] = Field(
-        default="",
-        max_length=320,
+    priority_fix: Annotated[
+        str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX)), AfterValidator(_one_script)
+    ] = Field(
         description=(
             "The single strongest steer, as `<axis>: <concrete change>`. The axis leads, before "
-            "the colon, named VERBATIM from the vocabulary this node's prompt states. One you "
+            "the colon, named VERBATIM from the axis list this node's prompt states. One you "
             "invent is dropped downstream and takes the steer's axis menu with it, so the next "
             "round reads a fix naming no lever it can pull."
         ),
@@ -214,17 +242,33 @@ class L1CritiqueOutput(OptimizerResponseModel):
     suggested_axes: Annotated[list[str], BeforeValidator(_truncate(4))] = Field(
         default_factory=list,
         max_length=4,
-        description="≤4 short axis names. Each item ≤40 chars (downstream truncates).",
+        description="≤4 axis names from the same list.",
     )
+
+    @model_validator(mode="after")
+    def _one_cluster_per_row(self) -> Self:
+        if not self.priority_fix.strip():
+            raise ValueError("priority_fix is empty: name the one change")
+        owner: dict[int, int] = {}
+        for k, cluster in enumerate(self.failure_highlights, start=1):
+            for row in set(cluster.sample_ids):
+                if (first := owner.setdefault(row, k)) != k:
+                    raise ValueError(
+                        f"row {row} sits in clusters {first} and {k}: a row shows one mechanism"
+                    )
+        return self
+
+
+FORK_REASON_MAX = 400
 
 
 class ForkProposal(OptimizerResponseModel):
     """Carries no round offset: ``optimizers/potter/CLAUDE.md`` § The layer-control channel."""
 
-    reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
+    # Uncapped on the wire: a decoder held to a length cuts the reason mid-word.
+    reason: Annotated[str, BeforeValidator(_truncate_marked(FORK_REASON_MAX))] = Field(
         default="",
-        max_length=150,
-        description="1-2 sentences naming the cause and what the operator must fix.",
+        description="1-2 sentences: why this line is exhausted, and what the fork changes.",
     )
     unlock_schema_field_rename: bool = Field(
         False,
@@ -240,7 +284,6 @@ class ForkProposal(OptimizerResponseModel):
 class TerminateProposal(OptimizerResponseModel):
     reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
         default="",
-        max_length=150,
         description="1-2 sentences naming the cause and what the operator must fix.",
     )
 
@@ -248,13 +291,13 @@ class TerminateProposal(OptimizerResponseModel):
 class L2ContextOutput(OptimizerResponseModel):
     """Carries neither ``task_context`` (operator-authored, frozen for the run) nor ``action``."""
 
-    axis_targeted: Annotated[str, BeforeValidator(_truncate_marked(30))] = Field(
+    axis_targeted: Annotated[str, BeforeValidator(_truncate_marked(60))] = Field(
         default="",
-        max_length=30,
         description=(
-            "The L1 axis the failure cluster routes to — a prompt field for a semantic failure, "
-            "a param for a quantitative one. Name it on every fire; it is the anchor the lever "
-            "is judged against, not a label for the lever."
+            "Where the failure cluster's fix lands in the TARGET prompt, as `<node>.<field>` for "
+            "a semantic failure or a param for a quantitative one — even where it shares a name "
+            "with an l1_layout slot. Name it on every fire; it is the anchor the lever is judged "
+            "against, not a label for the lever."
         ),
     )
     # A plain dict on purpose: typed, one off-enum panel fails the whole model before `validate_l1_layout` can report it.
@@ -271,7 +314,6 @@ class L2ContextOutput(OptimizerResponseModel):
     # Optional at PARSE time only, so a fire that omits it still lands its layout edit.
     rationale: Annotated[str, BeforeValidator(_truncate_marked(400))] = Field(
         default="",
-        max_length=400,
         description=(
             "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the "
             "named data point behind it — a sample id, a count, a yield number. Required on "
@@ -280,11 +322,20 @@ class L2ContextOutput(OptimizerResponseModel):
         ),
     )
     fork_proposal: ForkProposal | None = None
-    terminate_proposal: TerminateProposal | None = None
 
 
 class L2RecombiningOutput(L2ContextOutput):
     recombinations: list[L1Recombination] = Field(default_factory=list)
+
+
+# The reply carries `terminate_proposal` only where `InjectionBundle.terminate_offer` names a
+# starved node: a model volunteers any field its schema carries, and an honored stop aborts.
+class L2TerminatingOutput(L2ContextOutput):
+    terminate_proposal: TerminateProposal | None = None
+
+
+class L2RecombiningTerminatingOutput(L2RecombiningOutput, L2TerminatingOutput):
+    pass
 
 
 def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
@@ -309,7 +360,7 @@ def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
                 "minItems": 1,
                 "description": described["from_donor"].description,
             },
-            "changes_description": {"type": "string", "maxLength": VARIANT_PROSE_MAX},
+            "changes_description": {"type": "string"},
         },
         "required": ["main", "donor", "from_donor", "changes_description"],
         "additionalProperties": False,
@@ -319,9 +370,17 @@ def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
 
 @functools.lru_cache(maxsize=4)
 def build_l2_response_model(
-    withheld: frozenset[str], recombination: RecombinationOffer | None = None
+    withheld: frozenset[str],
+    recombination: RecombinationOffer | None = None,
+    terminating: bool = False,
 ) -> type[L2ContextOutput]:
     """``None`` *recombination* offers no slot."""
+    base: type[L2ContextOutput] = {
+        (False, False): L2ContextOutput,
+        (True, False): L2RecombiningOutput,
+        (False, True): L2TerminatingOutput,
+        (True, True): L2RecombiningTerminatingOutput,
+    }[recombination is not None, terminating]
     fields: dict[str, Any] = {}
     if withheld:
         schema = layout_json_schema(
@@ -336,15 +395,13 @@ def build_l2_response_model(
             Annotated[list[L1Recombination], WithJsonSchema(recombinations_schema(recombination))],
             Field(default_factory=list),
         )
-        return create_model("L2ContextOutput", __base__=L2RecombiningOutput, **fields)
     if not fields:
-        return L2ContextOutput
-    return create_model("L2ContextOutput", __base__=L2ContextOutput, **fields)
+        return base
+    return create_model("L2ContextOutput", __base__=base, **fields)
 
 
 class L3PlanOutput(OptimizerResponseModel):
     plan: Annotated[str, BeforeValidator(_truncate_marked(L3_PLAN_MAX_CHARS))] = Field(
-        max_length=L3_PLAN_MAX_CHARS,
         description=(
             "The strategy every later prompt reads until the next replan. Say what L2 and L1 "
             "should DO with the levers they hold — L2 moves which panels L1 sees and how wide it "
@@ -352,11 +409,12 @@ class L3PlanOutput(OptimizerResponseModel):
             "vocabulary instructs neither, and rides every downstream call regardless."
         ),
     )
-    note: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(default="", max_length=150)
-    rationale: Annotated[str, BeforeValidator(_truncate_marked(125))] = Field(
-        default="", max_length=125
-    )
+    note: Annotated[str, BeforeValidator(_truncate_marked(150))] = ""
+    rationale: Annotated[str, BeforeValidator(_truncate_marked(125))] = ""
     fork_proposal: ForkProposal | None = None
+
+
+class L3TerminatingOutput(L3PlanOutput):
     terminate_proposal: TerminateProposal | None = None
 
 

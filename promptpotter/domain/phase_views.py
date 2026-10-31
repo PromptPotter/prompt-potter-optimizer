@@ -94,7 +94,6 @@ class CandidatesGeneratedView(FrozenModel):
 
 class MeasureEnterView(FrozenModel):
     kind: Literal["measure_enter"] = "measure_enter"
-    node: str
     n_candidates: int
     n_samples: int
 

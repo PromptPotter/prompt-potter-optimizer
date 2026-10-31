@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, get_args
 
 from pydantic import Field
 
@@ -16,7 +16,7 @@ from promptpotter.domain.origin_panel import (
     line_by_individual,
     overlap_line,
 )
-from promptpotter.domain.paired_reading import ArmKey, ArmName
+from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import critical_health_title
 from promptpotter.domain.round_health import HealthGrade
@@ -34,6 +34,12 @@ if TYPE_CHECKING:
 
 #: `noise`: the cells were measured no more sharply than they landed apart; `spread`: they differ.
 PrecisionVerdict = Literal["noise", "spread"]
+
+PRECISION_VERDICT_ADVICE: dict[PrecisionVerdict, str] = {
+    "noise": "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
+    "spread": "The cells genuinely differ — that spread is signal about where this optimizer "
+    "prompt works.",
+}
 
 
 def precision_verdict(precision: PanelPrecision) -> PrecisionVerdict:
@@ -164,6 +170,18 @@ class RunLimits(StrictModel):
 
 #: `verify` re-scores search rows the arm never read; `bench` reads the held-out rows.
 VerificationKind = Literal["verify", "bench"]
+
+
+class VerificationKindInfo(NamedTuple):
+    name: str
+    # Appended to the row count: what the rows are, where the name does not already say it.
+    rows: str
+
+
+VERIFICATION_KIND_INFO: dict[VerificationKind, VerificationKindInfo] = {
+    "verify": VerificationKindInfo("verify", " never seen"),
+    "bench": VerificationKindInfo("held-out bench", ""),
+}
 VerificationState = Literal["running", "done", "failed"]
 
 
@@ -180,32 +198,30 @@ class VerificationMark(FrozenModel):
         "the pass's reading once `done`. Null before the first row, and on a `failed` pass, "
         "which reads nothing."
     )
-    failure: str | None = Field(description="Why a `failed` pass ended without a reading.")
+    failed_as: ReadingState | None = Field(
+        description="How a `failed` pass reads, so why it ended without a reading; null otherwise."
+    )
 
     def scored_one(self, accuracy: float | None) -> VerificationMark:
         level = None if accuracy is None else BandedValue(value=accuracy, ci_lo=None, ci_hi=None)
         return self.model_copy(update={"scored": self.scored + 1, "level": level})
 
     def ended(
-        self, *, scored: int, level: BandedValue | None, failure: str | None
+        self, *, scored: int, level: BandedValue | None, failed_as: ReadingState | None
     ) -> VerificationMark:
-        state: VerificationState = "done" if failure is None else "failed"
+        state: VerificationState = "done" if failed_as is None else "failed"
         return self.model_copy(
             update={
                 "state": state,
                 "scored": scored,
-                "level": level if failure is None else None,
-                "failure": failure,
+                "level": level if failed_as is None else None,
+                "failed_as": failed_as,
             }
         )
 
     def orphaned(self) -> VerificationMark:
         """A pass whose process is gone before it was graded."""
-        return self.ended(
-            scored=self.scored,
-            level=None,
-            failure="The process ended before the pass was graded.",
-        )
+        return self.ended(scored=self.scored, level=None, failed_as=ReadingState.PASS_STOPPED)
 
 
 class RoundHealth(FrozenModel):

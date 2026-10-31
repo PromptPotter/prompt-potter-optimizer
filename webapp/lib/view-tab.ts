@@ -54,6 +54,7 @@ export function isTab(s: string): s is Tab {
 export type AccountPane =
   | "profile"
   | "usage"
+  | "keys"
   | "activity"
   | "storage"
   | "preferences"
@@ -62,6 +63,7 @@ export type AccountPane =
 const ACCOUNT_PANES: readonly AccountPane[] = [
   "profile",
   "usage",
+  "keys",
   "activity",
   "storage",
   "preferences",

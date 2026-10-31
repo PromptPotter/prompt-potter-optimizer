@@ -8,7 +8,7 @@ import {
 } from "@/lib/api/types.generated";
 import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
-import { spendHeadline } from "@/lib/derivations";
+import { affordableText, spendHeadline } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens, PLACEHOLDER } from "@/lib/format";
 import { RunLimitsControl } from "@/components/shell/remote/RunLimitsControl";
 import type { RemoteModel } from "./useRemoteModel";
@@ -91,7 +91,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           <span className="val remote-spend-warn">{m.waitNote}</span>
         </div>
       ) : null}
-      {la.money_hold !== null ? (
+      {la.affordable !== null ? (
         <div className="row">
           <span className="lbl">Ceiling</span>
           <Term
@@ -100,7 +100,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
               la.cell_reserve_usd != null ? `, ${fmtUsd(la.cell_reserve_usd)} here` : ""
             }, so once the ceiling cannot hold another the walk runs one at a time — whatever depth is armed. Raise the budget below to widen it.`}
           >
-            {la.money_hold}
+            {affordableText(la.affordable)}
           </Term>
         </div>
       ) : null}

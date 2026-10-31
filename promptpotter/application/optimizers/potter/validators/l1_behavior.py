@@ -123,11 +123,10 @@ def _check_param_scope_discipline(
 
 
 def _check_evidence_grounding_present(
-    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+    variants: Variants, _audit: RoundAudit, ctx: ValidatorContext
 ) -> tuple[bool, str]:
-    """A round that banked no menu is judged on the quote alone."""
+    """Whether the quote is in its panel is `l1_strict.py::l1_citation_in_panel`'s, which rejects."""
     citable = ctx.citable
-    shown = _rendered_l1_prompt(audit)
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
         label = f"C{i + 1}"
@@ -142,9 +141,6 @@ def _check_evidence_grounding_present(
             continue
         if not citation:
             offenders.append((label, "empty_citation"))
-            continue
-        if not _citation_in_prompt(citation, shown):
-            offenders.append((label, "citation_not_in_prompt"))
             continue
         peaked_hit = _cited_peaked_axis(v, citation, field_name, ctx)
         if peaked_hit and not _has_peaked_rebut(v, citation, ctx):
@@ -219,31 +215,6 @@ def run_all_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult
     """Empty on no variants: every check passes on none, and "nothing to check" is not a pass."""
     variants = extract_l1_variants(audit)
     return judged(CHECK_REGISTRY, variants, audit, ctx) if variants else []
-
-
-_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
-
-# A shorter quoted run matches a long prompt by coincidence, so the check abstains.
-_CITATION_MIN_RUN = 12
-
-
-def _normalize_quote(text: str) -> str:
-    """A citation re-types a panel line, so only the WORDS are matched."""
-    return _NORMALIZE_RE.sub(" ", text.lower()).strip()
-
-
-def _rendered_l1_prompt(audit: RoundAudit) -> str:
-    return _normalize_quote(_shown_l1_prompt(audit))
-
-
-def _citation_in_prompt(citation: str, shown: str) -> bool:
-    """An honest citation may ELIDE: the longest ellipsis-free run is tested. No prompt abstains."""
-    if not shown:
-        return True
-    longest = max((_normalize_quote(part) for part in re.split(r"[.]{3}|…", citation)), key=len)
-    if len(longest) < _CITATION_MIN_RUN:
-        return True
-    return longest in shown
 
 
 def _uncitable_reason(field_name: str) -> str:

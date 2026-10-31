@@ -101,17 +101,29 @@ def _ancestors(
     return out
 
 
-def select_rewind_round(
+def select_branch_round(
     spine: list[SpineCycle],
     *,
     cycle_id: str,
     current_round: int,
+    origin_id: str,
+    changing: bool,
 ) -> int | None:
-    """The round is in the current cycle's coordinates; ``None`` ⇒ the caller must not fork."""
+    """The node a fork stands on, the current one or an ancestor, in the current cycle's
+    coordinates; ``None`` ⇒ the caller must not fork. A fork carrying no change stands only on a
+    promoted individual the line does not stand on now: anything else replays what it left."""
     stats = accumulate_node_stats(spine)
     qs = {key: q for key, s in stats.items() if (q := s.q) is not None}
     node: NodeKey = (cycle_id, current_round)
-    candidates = [a for a in _ancestors(stats, spine, node) if a[1] < current_round and a in qs]
+    picks = {(c.cycle_id, rnd): pick for c in spine for rnd, pick in c.pick_by_round.items()}
+    if node not in picks:
+        return None
+    stale = {origin_id, picks[node]}
+    candidates = [
+        a
+        for a in (node, *_ancestors(stats, spine, node))
+        if a in qs and a in picks and (changing or picks[a] not in stale)
+    ]
     if not candidates:
         return None
 

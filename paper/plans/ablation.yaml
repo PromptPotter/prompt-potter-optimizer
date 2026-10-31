@@ -1,0 +1,11 @@
+# The M14 ablation rows (paper/README.md § The sequence, item 7) on the first run to publish: only
+# `escalation_ladder` differs. `own` lays no axis, so every arm runs the dataset's head-to-head budget.
+head_to_head_id: m14-ladder
+dataset_name: justlogic/d234-held
+arms:
+  l1: {optimizer: potter, nodes: {escalation: {config: {escalation_ladder: l1}}}}
+  l1_l2: {optimizer: potter, nodes: {escalation: {config: {escalation_ladder: l1_l2}}}}
+  full: {optimizer: potter, nodes: {escalation: {config: {escalation_ladder: full}}}}
+replicates: 3
+budgets:
+  own: {}

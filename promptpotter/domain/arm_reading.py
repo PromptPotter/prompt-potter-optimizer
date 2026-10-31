@@ -193,6 +193,23 @@ class ArmAbility(FrozenModel):
         return cls(theta=theta, se=se, ci_lo=lo, ci_hi=hi, caveat=caveat)
 
 
+class ElectionColumn(FrozenModel):
+    """The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or
+    carries a caveat — there θ is not ability, and the election reads on accuracy."""
+
+    elects_on: DisplayMetric = Field(description="What the electing round's selector ranked on.")
+    ability: ArmAbility | None = Field(description="The pick's θ on its electing round.")
+    reads_on: DisplayMetric
+
+    @classmethod
+    def of(cls, elects_on: DisplayMetric, ability: ArmAbility | None) -> ElectionColumn:
+        unread = ability is None or ability.theta is None or ability.caveat is not None
+        caveated = elects_on == "ability" and unread
+        return cls(
+            elects_on=elects_on, ability=ability, reads_on="accuracy" if caveated else elects_on
+        )
+
+
 class ArmElection(FrozenModel):
     """What one arm's round decided about it. Built by :meth:`of` alone."""
 

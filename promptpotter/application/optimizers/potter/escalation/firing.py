@@ -42,7 +42,6 @@ from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import (
-    MAX_AUTO_REBASES,
     ConfigOverrides,
     ForkTrigger,
     RebaseRequest,
@@ -192,47 +191,21 @@ async def _run_transition(fired: LayerCall, fire: Fire) -> TransitionResult | No
 def _layer_control(fired: LayerCall, result: TransitionResult) -> None:
     """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
     layer, ctx = fired
-    round_num = ctx.round_num
     capability = ctx.knobs(EscalationKnobs)
     if result.terminate_proposal is not None:
+        # Present only where the reply schema offered it (`InjectionBundle.terminate_offer`).
         reason = result.terminate_proposal.reason.strip()
-        if not capability.terminate_capability:
-            # A model can volunteer the field with no guidance in the prompt; it must not abort the run.
-            logger.warning(
-                "%s emitted terminate_proposal while terminate_capability is off — ignored",
-                layer.layer_id,
-            )
-        elif not reason:
+        if not reason:
             # Never substitute a stand-in reason: a blank stop is not a decision.
             logger.warning(
                 "%s emitted a blank terminate_proposal — ignored, cycle continues",
                 layer.layer_id,
-            )
-            emit_round_warning(
-                kind="layer_terminate_blank",
-                message=(
-                    f"{layer.layer_id} asked to stop the cycle but named no reason, so the "
-                    "request was ignored and the run continued. Nothing is wrong with this "
-                    "cycle; the layer's own output schema let it fill the stop field with an "
-                    "empty string."
-                ),
-                detail={"layer": layer.layer_id, "round": round_num},
             )
         else:
             logger.info(
                 "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
                 layer.layer_id,
                 reason,
-            )
-            emit_round_warning(
-                kind="layer_terminated_cycle",
-                message=(
-                    f"{layer.layer_id} stopped this cycle: {reason} Nothing here resumes on "
-                    "its own — fix what that names, then `python -m promptpotter resume` picks "
-                    "the cycle up where it halted."
-                ),
-                severity="error",
-                detail={"layer": layer.layer_id, "reason": reason, "round": round_num},
             )
             raise StopLoop(StopReason.OPTIMIZER_ABORT)
 
@@ -250,57 +223,36 @@ def _rebase_request(
     ctx: NodeContext, layer_id: str, proposal: ForkProposal
 ) -> RebaseRequest | None:
     round_num = ctx.round_num
-    lineage = ctx.read(Lineage)
-    if lineage.rebases >= MAX_AUTO_REBASES:
-        emit_round_warning(
-            kind="layer_rebase_dropped",
-            message=(
-                f"{layer_id} asked to rewind this cycle, but this launch has already rebased "
-                f"{lineage.rebases} times, the most one launch may. The request was dropped and "
-                "the run continued on this line."
-            ),
-            detail={"layer": layer_id, "round": round_num, "caveats": []},
-        )
-        return None
-    target_round = lineage.rewind_round()
-    if target_round is None:
-        # A rewind to nowhere mints a duplicate of this cycle.
+    unlock = proposal.unlock_schema_field_rename and not (
+        ctx.knobs(L1GenerateKnobs).schema_field_rename
+    )
+    branch = ctx.read(Lineage).branch_round(changing=unlock)
+    if branch is None:
         series = ctx.read(Ruler).level_series
         withheld = sorted(
             {
                 read.caveat
                 for rnd in series.rounds
-                if rnd < round_num
+                if rnd <= round_num
                 and (read := series.reading(rnd)) is not None
                 and read.caveat is not None
             }
         )
-        why = (
-            f"θ is withheld there under {', '.join(c.value for c in withheld)}"
-            if withheld
-            else "none holds a level"
-        )
-        emit_round_warning(
-            kind="layer_rebase_dropped",
-            message=(
-                f"{layer_id} asked to rewind this cycle, but no earlier round can be chosen: "
-                f"{why}. The request was dropped and the run continued on this line."
-            ),
-            detail={
-                "layer": layer_id,
-                "round": round_num,
-                "caveats": [c.value for c in withheld],
-            },
+        logger.warning(
+            "%s emitted fork_proposal changing %s, and no round it may stand on holds a level%s "
+            "— dropped",
+            layer_id,
+            "schema_field_rename"
+            if unlock
+            else "nothing (only a promoted individual the line left may take it)",
+            f" (θ withheld under {', '.join(c.value for c in withheld)})" if withheld else "",
         )
         return None
 
-    unlock = bool(proposal.unlock_schema_field_rename) and not (
-        ctx.knobs(L1GenerateKnobs).schema_field_rename
-    )
     request = RebaseRequest(
-        fork_from_round=target_round,
+        fork_from_round=branch + 1,
         trigger=ForkTrigger.OPTIMIZER_REBASE,
-        reason=str(proposal.reason or f"{layer_id} fork_proposal"),
+        reason=proposal.reason or f"{layer_id} fork_proposal",
         issued_by=Principal(f"{layer_id}/round_{round_num}", layer_id),
         config_overrides=(
             ConfigOverrides(
@@ -311,10 +263,10 @@ def _rebase_request(
         ),
     )
     logger.info(
-        "%s emitted fork_proposal; UCB selected round %d of %d as the rewind target%s "
+        "%s emitted fork_proposal; UCB stands the fork on round %d of %d%s "
         "— cycle will exit with REBASED",
         layer_id,
-        target_round,
+        branch,
         round_num,
         ", unlocking schema_field_rename" if unlock else "",
     )

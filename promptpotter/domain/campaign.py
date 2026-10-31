@@ -101,11 +101,15 @@ class DeterminismClamp(StrictModel):
     )
 
 
+# A head-to-head id or an arm key: one path segment of the arms listing's `<h2h>:<key>`.
+ArmName = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
+
+
 class Arm(FrozenModel):
     """The head-to-head a campaign is an arm of, frozen at mint."""
 
-    head_to_head_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-    arm_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    head_to_head_id: ArmName
+    arm_key: ArmName
 
 
 class Optimize(FrozenModel):

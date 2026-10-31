@@ -121,7 +121,7 @@ def build_l1_response_schema(
 
     # Without `maxItems` an over-generating model is BILLED for every variant the slice then discards.
     if n_variants is not None:
-        inlined["properties"]["variants"]["maxItems"] = n_variants
+        inlined["properties"]["variants"].update(minItems=n_variants, maxItems=n_variants)
     if recombination is None:
         del inlined["properties"]["recombinations"]
     else:
@@ -158,10 +158,10 @@ def build_l1_response_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
-            # Only on the recursion; elsewhere the declaration is prompt text that never binds.
+            # Stated, never a `maxLength`: `l1_strict.py::l1_prose_within_ceiling` rejects past it.
             ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
             if ceiling is not None and inner_cells is not None:
-                param_props[param]["maxLength"] = ceiling
+                param_props[param]["description"] = f"At most {ceiling} characters."
         # The one lever that can break a parser: locked, it is absent from the schema, never policed per round.
         if not schema_field_rename:
             nested.discard(SCHEMA_RENAME_PARAM)
@@ -169,9 +169,12 @@ def build_l1_response_schema(
             prop = _nested_param_property(node, param)
             if prop is not None:
                 param_props[param] = prop
-        # Bounded HERE: the winner's descriptions become the next round's parent, so an unbounded one compounds.
+        # Bounded: the winner's descriptions become the next round's parent, so an unbounded one compounds.
         for key in described:
-            param_props[key] = {"type": "string", "maxLength": SCHEMA_DESCRIPTION_MAX_CHARS}
+            param_props[key] = {
+                "type": "string",
+                "description": f"At most {SCHEMA_DESCRIPTION_MAX_CHARS} characters.",
+            }
         assert param_props.keys() <= keys, (
             f"{node_name}: the schema offers a key the node declares no param for"
         )

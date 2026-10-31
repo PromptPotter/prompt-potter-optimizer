@@ -83,8 +83,7 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         except (OSError, JSONDecodeError) as exc:
             logger.warning("Skipping unreadable campaign.json at %s: %s", manifest, exc)
             continue
-        current = data.get("owner_user_id")
-        if current == user_id or (current not in (None, "", "default")):
+        if data["owner_user_id"] != "default":
             continue
         data["owner_user_id"] = user_id
         write_json(manifest, data)

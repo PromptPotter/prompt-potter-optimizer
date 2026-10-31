@@ -36,10 +36,9 @@ version exists.
 ## 4. Deploy `main` to the box and verify there (`/potter-box`)
 
 - [ ] Back up the data root first: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
-- [ ] A BREAKING record shape: load a copy of the box data under the release code first (accounts,
-      sessions, campaigns, `restamp --apply`). Only the API keys and the user list must survive; move
-      whatever will not load out of the data root, and never delete it. Delete the local copy afterwards,
-      because it holds live session credentials.
+- [ ] A BREAKING shape wipes run data on the box after the backup; only the API keys and the user
+      list must survive. Load a copy of the accounts and sessions under the release code first, and
+      delete the local copy afterwards, because it holds live session credentials.
 - [ ] Deploy `main` as `/potter-box` says, which owns the commands, the sudo and the TermNorm restart.
 - [ ] Verify on the box: health on 127.0.0.1 and on the public host, both units active,
       `offer_faults()` empty for the unit's `DATASET_OFFER`, every `user.json` loads.

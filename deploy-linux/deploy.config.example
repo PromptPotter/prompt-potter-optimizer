@@ -54,7 +54,7 @@ RUN_USER="$USER"
 # .env: a read-or-exec bug in the app can then rewrite its own code and secrets and outlive a
 # restart. Set it OUTSIDE INSTALL_DIR and the checkout goes read-only to the service.
 # install-service.sh refuses a path inside INSTALL_DIR and warns if the state tree is not there
-# yet — migrate before switching, the note in that script has the exact commands.
+# yet — move the tree there before switching, the note in that script has the exact commands.
 #DATA_DIR="/var/lib/$APP_NAME"
 
 # --- runtime ------------------------------------------------------------

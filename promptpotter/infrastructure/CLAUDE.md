@@ -41,6 +41,10 @@ always `state.round`, with no `live` flag beside it; `current_round.nodes` holds
 calls; a live row is the closed row's shape (`domain/dashboard_rows.py`), each field landing when its fact
 exists, θ at the election.
 
+**A `RoundWarningRecord` is a self-heal only** — owned by `domain/run_records.py::RoundWarningKind`:
+a halt is its `StopReason`, a decided outcome a field of its step's record, neither a
+`llm/telemetry.py::emit_round_warning`. <!-- probe: git grep -cE "emit_round_warning\(" -- promptpotter/*.py <= 4 -->
+
 **The SSE highway tails the on-disk ledger cross-process** (`projections/event_stream.py::CycleLedgerTail`),
 never a subscriber.
 

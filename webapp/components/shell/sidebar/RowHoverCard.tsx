@@ -11,7 +11,7 @@ import {
   type UnstartedCampaign,
 } from "@/lib/api";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
-import { entryAlone } from "@/lib/derivations";
+import { entryAlone, entryLede } from "@/lib/derivations";
 import { fmtAgo, fmtBytes, fmtDateTime, fmtValue } from "@/lib/format";
 
 // A knob moving several estimands is listed under each, so the path dedupes it.
@@ -91,6 +91,7 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
         ["Opened", fmtDateTime(span.opened_at)],
       ]
     : [];
+  const lede = entryLede(entry);
   if (reading) facts.push(["Round", String(reading.arm.round)]);
   if (reading?.sp_hash) facts.push(["Searchpoint", reading.sp_hash]);
   facts.push(["Address", entry.address]);
@@ -99,7 +100,7 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
     <div className="rowhover">
       <SummaryBlock
         facts={entry}
-        lede={entry.lede ? <p className="rowhover-lede">{entry.lede}</p> : null}
+        lede={lede ? <p className="rowhover-lede">{lede}</p> : null}
         // The served entry alone, one shape whatever the card has opened: a program reads it.
         actions={<CopyButton title="Copy this entry as JSON" data={entryAlone(entry)} />}
       />

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import importlib
 import json
 import sys
 import textwrap
@@ -23,8 +24,8 @@ from promptpotter.presentation.api.routers.commands import commands_router
 
 def _served_roots() -> list[typing.Any]:
     roots: list[typing.Any] = [app.router.responses["default"]["model"]]
-    for router, _gate in API_ROUTERS:
-        for route in router.routes:
+    for mount in API_ROUTERS:
+        for route in mount.router.routes:
             # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
             if isinstance(route, APIRoute) and (answer := vars(route)["response_model"]):
                 roots.append(answer)
@@ -195,160 +196,128 @@ def _emit_command_contract() -> str:
     )
 
 
-def _emit_stop_reason_tables() -> str:
-    from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
+# Every closed set's wording, whole and under its Python name: the browser reads a state's words
+# where the terminal does, so no surface holds a table of its own. A row's columns are its
+# NamedTuple's; an enum a table is keyed by, or a column holds, is exported as its union once.
+_WORD_TABLES: tuple[tuple[str, str], ...] = (
+    ("promptpotter.domain.phases", "STOP_REASON_INFO"),
+    ("promptpotter.domain.phases", "RUN_PHASE_INFO"),
+    ("promptpotter.domain.phases", "PRODUCER_STATE_INFO"),
+    ("promptpotter.domain.phases", "DASHBOARD_STATE_PAUSE_WORDS"),
+    ("promptpotter.domain.paired_reading", "READING_STATE_INFO"),
+    ("promptpotter.domain.bench", "BENCH_STATE_INFO"),
+    ("promptpotter.domain.bench", "BENCH_REFUSAL_INFO"),
+    ("promptpotter.domain.phases", "RAY_HEAD_WORDS"),
+    ("promptpotter.application.served_dashboard", "LOOKAHEAD_WORDS"),
+    ("promptpotter.domain.run_standing", "LIVES_WORDS"),
+    ("promptpotter.domain.hierarchy", "CANDIDATE_STANDING_INFO"),
+    ("promptpotter.domain.hierarchy", "ROUNDS_CAP_WORDS"),
+    ("promptpotter.domain.origin_panel", "ROUND_ADVANCE_INFO"),
+    ("promptpotter.domain.ruler", "THETA_CAVEAT_INFO"),
+    ("promptpotter.domain.arm_reading", "ARM_VERDICT_LABELS"),
+    ("promptpotter.domain.campaign", "LIFECYCLE_STATUS_LABELS"),
+    ("promptpotter.domain.dashboard_rows", "SAMPLE_MOVEMENT_LABELS"),
+    ("promptpotter.domain.dashboard_rows", "PRECISION_VERDICT_ADVICE"),
+    ("promptpotter.domain.dashboard_rows", "VERIFICATION_KIND_INFO"),
+    ("promptpotter.domain.cycle_index", "STATUS_MARK_INFO"),
+    ("promptpotter.application.knobs", "COUPLING_SEVERITY_INFO"),
+    ("promptpotter.domain.verify_pass", "VERIFY_STRATEGY_LABELS"),
+    ("promptpotter.domain.pipeline_schema", "MOVABLE_AGENT_LABELS"),
+    ("promptpotter.domain.spend", "PREFIX_STATE_TITLES"),
+    ("promptpotter.domain.spend", "CEILING_METER_LABELS"),
+    ("promptpotter.application.evidence.subjects", "SUBJECT_KIND_LABELS"),
+    ("promptpotter.application.evidence.head_to_head", "GUARD_STATE_INFO"),
+    ("promptpotter.application.evidence.head_to_head", "GUARD_STATE_LABELS"),
+    ("promptpotter.application.evidence.head_to_head", "GUARD_DIFFERENCE_INFO"),
+    ("promptpotter.application.evidence.head_to_head", "VERDICT_ABSENT_INFO"),
+)
 
-    def table(column: str) -> str:
-        return "\n".join(
-            f"  {reason.value!r}: {str(getattr(info, column))!r},"
-            for reason, info in STOP_REASON_INFO.items()
+
+def _wire(value: object) -> object:
+    return value.value if isinstance(value, enum.Enum) else value
+
+
+def _emit_word_tables(emitted: set[str]) -> str:
+    unions: dict[str, str] = {}
+
+    def named(cls: type[enum.Enum]) -> str:
+        if cls.__name__ not in emitted:
+            unions.setdefault(
+                cls.__name__, _emit_enum_union(cls, f"{cls.__module__}::{cls.__name__}")
+            )
+        return cls.__name__
+
+    def column(hint: typing.Any) -> str:
+        enums = [
+            a
+            for a in (hint, *typing.get_args(hint))
+            if isinstance(a, type) and issubclass(a, enum.Enum)
+        ]
+        return (
+            " | ".join(
+                [named(e) for e in enums]
+                + (["null"] if type(None) in typing.get_args(hint) else [])
+            )
+            if enums
+            else _emit_type(hint)
         )
 
-    outcome_union = " | ".join(repr(o.value) for o in StopOutcome)
-    category_union = " | ".join(repr(c.value) for c in StopCategory)
-    return (
-        _emit_enum_union(StopReason, "Why a cycle ended (domain/phases.py::StopReason).") + "\n\n"
-        "// Whether a stop SUCCEEDED, and the only half of the table that decides anything —\n"
-        "// `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than\n"
-        "// matching names: a hand-listed set of crash names rots in both directions.\n"
-        f"export type StopOutcome = {outcome_union};\n"
-        "export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {\n"
-        f"{table('outcome')}\n"
-        "};\n\n"
-        "// WHAT ended a run (`StopCategory`) — a budget, a declared limit, the search itself, an\n"
-        "// operator, the outside world or a failure. Ask it rather than listing reasons.\n"
-        f"export type StopCategory = {category_union};\n"
-        "export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {\n"
-        f"{table('category')}\n"
-        "};"
-    )
-
-
-def _emit_run_phase_tables() -> str:
-    from promptpotter.domain.phases import DASHBOARD_STATE_PAUSE_WORDS, RUN_PHASE_INFO
-
-    columns = (
-        "label",
-        "walks",
-        "settled",
-        "awaits_operator",
-        "dock_priority",
-        "parked",
-        "parked_attached",
-    )
-    rows = "\n".join(
-        f"  {phase.value!r}: {{ "
-        + ", ".join(f"{column}: {json.dumps(getattr(info, column))}" for column in columns)
-        + " },"
-        for phase, info in RUN_PHASE_INFO.items()
-    )
-    words = "\n".join(
-        f"  {state.value!r}: {json.dumps(said)},"
-        for state, said in DASHBOARD_STATE_PAUSE_WORDS.items()
-    )
-    return (
-        "// What each run phase IS. Mirror of domain/phases.py::RUN_PHASE_INFO — the single\n"
-        "// source of a phase's label and facts; the terminal reads the same rows.\n"
-        "export interface RunPhaseInfo {\n"
-        "  label: string;\n"
-        "  walks: boolean;\n"
-        "  settled: boolean;\n"
-        "  awaits_operator: boolean;\n"
-        "  dock_priority: number;\n"
-        "  parked: string;\n"
-        "  parked_attached: string;\n"
-        "}\n"
-        "export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {\n"
-        f"{rows}\n"
-        "};\n\n"
-        "// What a run asked to pause is finishing, per `dashboard.json::state`. Mirror of\n"
-        '// domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS; `""` names nothing worth saying.\n'
-        "export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {\n"
-        f"{words}\n"
-        "};"
-    )
-
-
-def _emit_reading_state_tables() -> str:
-    from promptpotter.domain.paired_reading import (
-        READING_STATE_INFO,
-        ReadingState,
-        ReadingStateKind,
-    )
-
-    def table(column: str) -> str:
-        return "\n".join(
-            f"  {state.value!r}: {str(getattr(info, column))!r},"
-            for state, info in READING_STATE_INFO.items()
+    tables: list[str] = []
+    rows_seen: dict[str, str] = {}
+    for module, name in _WORD_TABLES:
+        table: Mapping[typing.Any, typing.Any] = vars(importlib.import_module(module))[name]
+        first_key, first = next(iter(table.items()))
+        keys = (
+            named(type(first_key))
+            if isinstance(first_key, enum.Enum)
+            else " | ".join(json.dumps(str(k)) for k in table)
         )
+        if isinstance(first, tuple):
+            row = type(first).__name__
+            hints = typing.get_type_hints(type(first))
+            rows_seen[row] = (
+                f"export interface {row} {{\n"
+                + "".join(f"  {col}: {column(hint)};\n" for col, hint in hints.items())
+                + "}"
+            )
 
-    return (
-        _emit_enum_union(
-            ReadingState,
-            "Whether a pair was read, and why not (domain/paired_reading.py::ReadingState).",
+            def render(info: typing.Any) -> str:
+                return (
+                    "{ "
+                    + ", ".join(
+                        f"{col}: {json.dumps(_wire(v), ensure_ascii=False)}"
+                        for col, v in info._asdict().items()
+                    )
+                    + " }"
+                )
+        else:
+            row = "string"
+
+            def render(info: typing.Any) -> str:
+                return json.dumps(info, ensure_ascii=False)
+
+        body = "\n".join(f"  {json.dumps(str(_wire(k)))}: {render(v)}," for k, v in table.items())
+        owner = module.removeprefix("promptpotter.").replace(".", "/")
+        # A table over a subset of its enum is partial: a reader handles the member it lacks.
+        whole = not isinstance(first_key, enum.Enum) or len(table) == len(type(first_key))
+        record = f"Record<{keys}, {row}>" if whole else f"Partial<Record<{keys}, {row}>>"
+        tables.append(
+            f"// Mirror of {owner}.py::{name}.\nexport const {name}: {record} = {{\n{body}\n}};"
         )
-        + "\n\n"
-        + _emit_enum_union(
-            ReadingStateKind,
-            "What kind of answer a ReadingState is: waiting is not a fault, refused is not absent.",
-        )
-        + "\n\n"
-        "// The served label and sentence per state. Mirror of\n"
-        "// domain/paired_reading.py::READING_STATE_INFO — the single wording source.\n"
-        "export const READING_STATE_LABELS: Record<ReadingState, string> = {\n"
-        f"{table('label')}\n"
-        "};\n\n"
-        "export const READING_STATE_SENTENCES: Record<ReadingState, string> = {\n"
-        f"{table('sentence')}\n"
-        "};\n\n"
-        "export const READING_STATE_KINDS: Record<ReadingState, ReadingStateKind> = {\n"
-        f"{table('kind')}\n"
-        "};"
-    )
-
-
-def _emit_round_advance_tables() -> str:
-    from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance
-
-    def table(column: str) -> str:
-        return "\n".join(
-            f"  {advance.value!r}: {str(getattr(info, column))!r},"
-            for advance, info in ROUND_ADVANCE_INFO.items()
-        )
-
-    return (
-        _emit_enum_union(
-            RoundAdvance,
-            "What a closed round did to the best-so-far line (domain/origin_panel.py::RoundAdvance).",
-        )
-        + "\n\n"
-        "// The served label and sentence per advance. Mirror of\n"
-        "// domain/origin_panel.py::ROUND_ADVANCE_INFO — the single wording source.\n"
-        "export const ROUND_ADVANCE_LABELS: Record<RoundAdvance, string> = {\n"
-        f"{table('label')}\n"
-        "};\n\n"
-        "export const ROUND_ADVANCE_SENTENCES: Record<RoundAdvance, string> = {\n"
-        f"{table('sentence')}\n"
-        "};"
-    )
+    # A row interface named like an exported model would MERGE with it, silently.
+    if clash := emitted & set(rows_seen):
+        raise SystemExit(f"word-table rows share a name with an exported type: {sorted(clash)}")
+    return "\n\n".join([*unions.values(), *rows_seen.values(), *tables])
 
 
 def _emit_spend_tables() -> str:
-    from promptpotter.domain.spend import (
-        CEILING_METER_LABELS,
-        PREFIX_STATE_TITLES,
-        RATE_PRICED_LABEL,
-        SPEND_KIND_LABELS,
-    )
+    from promptpotter.domain.spend import PREFIX_STATE_TITLES, RATE_PRICED_LABEL, SPEND_KIND_LABELS
 
-    meter_keys = " | ".join(repr(m) for m in CEILING_METER_LABELS)
-    meters = "\n".join(f"  {meter!r}: {word!r}," for meter, word in CEILING_METER_LABELS.items())
     kinds = " | ".join(repr(k) for k in SPEND_KIND_LABELS)
     rows = "\n".join(
         f"  {{ key: {key!r}, label: {label!r} }}," for key, label in SPEND_KIND_LABELS.items()
     )
     states = " | ".join(repr(s) for s in PREFIX_STATE_TITLES)
-    titles = "\n".join(f"  {state!r}: {title!r}," for state, title in PREFIX_STATE_TITLES.items())
     return (
         "// Who spent it (domain/spend.py::TokenUsageKind).\n"
         f"export type SpendKind = {kinds};\n\n"
@@ -358,63 +327,9 @@ def _emit_spend_tables() -> str:
         "];\n\n"
         "// A provider prefix-cache reading's state (domain/spend.py::PrefixState).\n"
         f"export type PrefixState = {states};\n\n"
-        "// What each state means. Mirror of domain/spend.py::PREFIX_STATE_TITLES.\n"
-        "export const PREFIX_STATE_TITLES: Record<PrefixState, string> = {\n"
-        f"{titles}\n"
-        "};\n\n"
-        "// The word beside a figure a ceiling counted. Mirror of "
-        "domain/spend.py::CEILING_METER_LABELS.\n"
-        f"export const CEILING_METER_LABELS: Record<{meter_keys}, string> = {{\n"
-        f"{meters}\n"
-        "};\n\n"
         "// The word beside a figure our rate table priced, which is never spent. Mirror of "
         "domain/spend.py::RATE_PRICED_LABEL.\n"
         f"export const RATE_PRICED_LABEL = {RATE_PRICED_LABEL!r};"
-    )
-
-
-def _emit_theta_caveat_table() -> str:
-    from promptpotter.domain.ruler import THETA_CAVEAT_INFO
-
-    members = " | ".join(repr(c.value) for c in THETA_CAVEAT_INFO)
-    rows = "\n".join(
-        f"  {caveat.value!r}: {{ head: {json.dumps(info.head, ensure_ascii=False)}, "
-        f"body: {json.dumps(info.body, ensure_ascii=False)} }},"
-        for caveat, info in THETA_CAVEAT_INFO.items()
-    )
-    return (
-        "// What each θ caveat says. Mirror of domain/ruler.py::THETA_CAVEAT_INFO — the single\n"
-        "// wording; the terminal prints the same `head`.\n"
-        f"export const THETA_CAVEAT_INFO: Record<{members}, {{ head: string; body: string }}> = {{\n"
-        f"{rows}\n"
-        "};"
-    )
-
-
-def _emit_label_tables() -> str:
-    from promptpotter.application.evidence.head_to_head import GUARD_STATE_LABELS
-    from promptpotter.application.evidence.subjects import SUBJECT_KIND_LABELS
-    from promptpotter.domain.arm_reading import ARM_VERDICT_LABELS
-    from promptpotter.domain.dashboard_rows import SAMPLE_MOVEMENT_LABELS
-
-    def table(name: str, owner: str, labels: Mapping[typing.Any, str]) -> str:
-        members = " | ".join(repr(str(member)) for member in labels)
-        rows = "\n".join(
-            f"  {str(member)!r}: {json.dumps(label, ensure_ascii=False)},"
-            for member, label in labels.items()
-        )
-        return (
-            f"// Mirror of {owner}::{name} — the single wording.\n"
-            f"export const {name}: Record<{members}, string> = {{\n{rows}\n}};"
-        )
-
-    return "\n\n".join(
-        [
-            table("ARM_VERDICT_LABELS", "domain/arm_reading.py", ARM_VERDICT_LABELS),
-            table("GUARD_STATE_LABELS", "application/evidence/head_to_head.py", GUARD_STATE_LABELS),
-            table("SAMPLE_MOVEMENT_LABELS", "domain/dashboard_rows.py", SAMPLE_MOVEMENT_LABELS),
-            table("SUBJECT_KIND_LABELS", "application/evidence/subjects.py", SUBJECT_KIND_LABELS),
-        ]
     )
 
 
@@ -473,19 +388,6 @@ def _emit_export_tiers() -> str:
     )
 
 
-def _emit_verify_strategy_labels() -> str:
-    from promptpotter.domain.verify_pass import VERIFY_STRATEGY_LABELS
-
-    rows = "\n".join(f"  {name!r}: {label!r}," for name, label in VERIFY_STRATEGY_LABELS.items())
-    return (
-        "// How a verify pass's pick of fresh cells reads, by strategy. Mirror of\n"
-        "// domain/verify_pass.py::VERIFY_STRATEGY_LABELS.\n"
-        'export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> = {\n'
-        f"{rows}\n"
-        "};"
-    )
-
-
 def _emit_lens_labels() -> str:
     from promptpotter.application.mask.record import SCORE_LENS_LABELS, Lens
     from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
@@ -532,22 +434,9 @@ def _emit_cell_term_meta() -> str:
 
 
 def _emit_pipeline_schema_words() -> str:
-    from promptpotter.domain.pipeline_schema import (
-        MOVABLE_AGENT_LABELS,
-        SCHEMA_DESCRIPTION_PREFIX,
-    )
+    from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
 
-    agents = " | ".join(json.dumps(a) for a in MOVABLE_AGENT_LABELS)
-    rows = "\n".join(
-        f"  {agent}: {json.dumps(label, ensure_ascii=False)},"
-        for agent, label in MOVABLE_AGENT_LABELS.items()
-    )
     return (
-        "// Who may move a search axis, worded. Mirror of\n"
-        "// domain/pipeline_schema.py::MOVABLE_AGENT_LABELS.\n"
-        f"export const MOVABLE_AGENT_LABELS: Record<{agents}, string> = {{\n"
-        f"{rows}\n"
-        "};\n\n"
         "// domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.\n"
         f"export const SCHEMA_DESCRIPTION_PREFIX = {json.dumps(SCHEMA_DESCRIPTION_PREFIX)};"
     )
@@ -684,16 +573,15 @@ def main() -> int:
     )
     blocks.append(_emit_lifecycle_filter())
     blocks.append(command_contract)
-    blocks.append(_emit_stop_reason_tables())
-    blocks.append(_emit_run_phase_tables())
-    blocks.append(_emit_reading_state_tables())
-    blocks.append(_emit_round_advance_tables())
+    emitted = {owner.__name__ for owner in _EXPORTED} | {
+        "RunPhase",
+        "ProducerState",
+        "DashboardState",
+    }
+    blocks.append(_emit_word_tables(emitted))
     blocks.append(_emit_spend_tables())
-    blocks.append(_emit_theta_caveat_table())
-    blocks.append(_emit_label_tables())
     blocks.append(_emit_pipeline_schema_words())
     blocks.append(_emit_display_metrics())
-    blocks.append(_emit_verify_strategy_labels())
     blocks.append(_emit_export_tiers())
     blocks.append(_emit_lens_labels())
     blocks.append(_emit_cell_term_meta())

@@ -1145,7 +1145,7 @@ async def _billed_acompletion(*args: Any, **kwargs: Any) -> Any:
         sent=messages,
         max_tokens=kwargs.get("max_tokens"),
     )
-    with admitted(label, bound, model=model, provider=provider) as admission:
+    with admitted(label, bound, model=model, provider=provider, paid_by="host") as admission:
         try:
             reply = await send(*args, **kwargs)
         except BaseException as exc:
@@ -1177,7 +1177,9 @@ async def _billed_run(trial: Trial, episode: _Episode) -> tuple[TrialResult, flo
             result = await trial.run()
         return result, reported.usd
     # An installed agent sends from its container: one send here, settled on Harbor's token read.
-    with admitted(_AGENT_SEND, reservation_left(), model=model, provider=provider) as admission:
+    with admitted(
+        _AGENT_SEND, reservation_left(), model=model, provider=provider, paid_by="host"
+    ) as admission:
         try:
             result = await trial.run()
         except Exception as exc:

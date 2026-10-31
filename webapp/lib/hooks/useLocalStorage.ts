@@ -14,12 +14,10 @@ export const STORAGE_KEYS = {
   chunkReloadAt: "promptpotter.chunk-reload-at",
 } as const;
 
-export const laneKey = (id: string) => `promptpotter.dash.lane.${id}` as const;
 export const sidePanelKey = (panelId: string) => `side-panel:${panelId}` as const;
 
 type StorageKey =
   | (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]
-  | ReturnType<typeof laneKey>
   | ReturnType<typeof sidePanelKey>;
 
 export const BOOL = {

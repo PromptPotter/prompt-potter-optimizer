@@ -105,8 +105,16 @@ def fmt_query_result(
     # An L4 outer sample never reaches the HIT threshold and its ground truth is a placeholder.
     if (inner := pd.inner) is not None:
         fit_col = f" fit {grade.fitness:.2f}" if grade.fitness is not None else ""
-        bench_col = "B—" if pd.mean_bench_lift is None else f"B{pd.mean_bench_lift:+.3f}"
-        delta_col = " Δ—" if inner.mean_round_delta is None else f" Δ{inner.mean_round_delta:+.3f}"
+        bench_col = (
+            "bench lift —"
+            if pd.mean_bench_lift is None
+            else f"bench lift {pd.mean_bench_lift * 100:+.1f} acc pts"
+        )
+        delta_col = (
+            " θ Δ —"
+            if inner.mean_round_delta is None
+            else f" θ Δ {inner.mean_round_delta:+.3f} logits"
+        )
         line = (
             f"{indent}{time_col} {sid_col} {bench_col}{delta_col}{fit_col}"
             f"{step_block}{tok_col} q:{q!r}"

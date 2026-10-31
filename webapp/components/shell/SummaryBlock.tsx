@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
+import { entryFigures, runWord } from "@/lib/derivations";
 import type { HierarchyEntry, UnstartedCampaign } from "@/lib/api";
 
 export function SummaryBlock({
@@ -15,7 +16,8 @@ export function SummaryBlock({
   lede?: ReactNode;
   actions?: ReactNode;
 }) {
-  const state = "state" in facts ? facts.state.status.label : null;
+  const state = "state" in facts ? runWord(facts.state.status) : null;
+  const figures = entryFigures(facts);
   return (
     <div className={cx("summary-block", dense && "is-dense")}>
       <header className="summary-block-head">
@@ -31,9 +33,9 @@ export function SummaryBlock({
         {actions}
       </header>
       {lede}
-      {facts.stats.length > 0 && (
+      {figures.length > 0 && (
         <dl className="summary-block-stats">
-          {facts.stats.map((s) => (
+          {figures.map((s) => (
             <div key={s.key} className="summary-block-stat">
               <dt>{s.label}</dt>
               <dd className="summary-block-stat-value">{s.value}</dd>

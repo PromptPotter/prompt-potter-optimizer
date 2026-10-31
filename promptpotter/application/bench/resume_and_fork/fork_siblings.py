@@ -106,15 +106,6 @@ def _next_diag_sibling_id(
     return f"{root_id}_diag_{max_n + 1:03d}"
 
 
-_REBASE_TRIGGERS = frozenset(
-    {
-        ForkTrigger.SCORING_DIVERGENCE,
-        ForkTrigger.OPTIMIZER_REBASE,
-        ForkTrigger.OPERATOR_REWIND,
-    }
-)
-
-
 def _fork_suffix(*parts: str) -> str:
     """The clock, at MICROSECOND resolution, is all that separates two forks of one parent: *parts* cannot."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
@@ -122,11 +113,10 @@ def _fork_suffix(*parts: str) -> str:
 
 
 def _sibling_id(campaign_store: CampaignStore, parent: CycleHop, payload: ForkSpec) -> str:
-    if payload.trigger in _REBASE_TRIGGERS:
-        return f"{parent.cycle_id}_fork_{_fork_suffix(parent.cycle_id)}"
+    """Fixed length at any depth: the line is the `CycleMintedRecord` chain, never the id."""
     if payload.trigger is ForkTrigger.OPERATOR_DIAG:
         return _next_diag_sibling_id(campaign_store, parent.campaign_id, parent.cycle_id)
-    return f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, 'operator')}"
+    return f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, payload.trigger)}"
 
 
 def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) -> RoundArm:
