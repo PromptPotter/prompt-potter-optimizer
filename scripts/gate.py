@@ -1279,7 +1279,7 @@ CHECKS: tuple[Check, ...] = (
             (
                 "docs/specs/openapi.generated.json",
                 "docs/specs/events-asyncapi.generated.json",
-                "docs/specs/survivors.generated.json",
+                "docs/specs/data-root.generated.json",
             ),
         ),
         on_commit=True,

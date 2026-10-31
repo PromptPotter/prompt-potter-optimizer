@@ -32,11 +32,12 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
 )
 from promptpotter.application.jobs.quota import land_job
-from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,

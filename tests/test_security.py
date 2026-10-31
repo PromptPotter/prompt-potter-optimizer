@@ -36,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from offline_world import Router
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from promptpotter.application import account, health, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -49,9 +49,9 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
-from promptpotter.application.jobs.registry import CampaignLaunch, JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
-from promptpotter.application.maintenance.reset import apply_reset, plan_reset
+from promptpotter.application.maintenance.reset import apply_reset, plan_reset, prove
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -75,6 +75,7 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
@@ -98,10 +99,16 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+from promptpotter.infrastructure.identity.blocklist import (
+    block_email,
+    check_blocklist,
+    unblock_email,
+)
 from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
 from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
+    list_grants,
     read_grant,
     resolve_effective_capabilities,
     revoke_principal,
@@ -109,16 +116,19 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.jwks import JWKSCache
 from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
 from promptpotter.infrastructure.identity.provider_config import (
+    OIDCConfigError,
     OIDCProviderConfig,
     ProviderConfigBundle,
     ProviderIdentity,
+    load_provider_config,
 )
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
-from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.data_root import Fate
+from promptpotter.infrastructure.store.io import write_json, write_jsonl
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     campaign_root_dir_for,
@@ -127,9 +137,10 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandbox_dir,
     inner_sandboxes_dir,
 )
+from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
 from promptpotter.infrastructure.store.site_records import SiteRecord, SiteRecordStore
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.store.user_store import count_accounts
+from promptpotter.infrastructure.store.user_store import User, UserStore, count_accounts
 from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
@@ -147,6 +158,7 @@ from promptpotter.shared.errors import (
     ServiceUnavailableError,
     UnauthorizedError,
 )
+from promptpotter.shared.hashing import ADDRESS_HEX
 from promptpotter.shared.identity import (
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
@@ -715,7 +727,19 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         require_capability(ident, starting.capability, subject=starting.value)  # lacks campaign.run
     assert acting_principal(ident).id == "sub-1", "audit must name the delegate, not the delegator"
     # A grant with no delegator is fail-secure: own tenant, ZERO caps — never owner.
-    write_json(grants, {"grants": {"sub-2": {"capabilities": ["campaign.run"]}}})
+    write_json(
+        grants,
+        {
+            "grants": {
+                "sub-2": {
+                    "delegated_by": "",
+                    "capabilities": ["campaign.run"],
+                    "spend_ceiling_usd": None,
+                    "note": "",
+                }
+            }
+        },
+    )
     denied = read_grant(grants, "sub-2")
     assert denied is not None and denied.is_denied
     denied_ident = identity_of_session(session_of("sub-2"), signed_in)
@@ -730,6 +754,44 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     grant("sub-boss", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
     with pytest.raises(ValueError):
         grant("sub-x", "sub-boss", frozenset({CAMPAIGN_STEP_CAP}))
+    # An invalid grants file promotes nobody, and no edit reads it as empty and overwrites it.
+    write_json(grants, {"grants": {"sub-boss": {"capabilities": ["campaign.run"]}}})
+    held = grants.read_bytes()
+    assert read_grant(grants, "sub-boss") is None, "an invalid grants file promoted a delegate"
+    assert str(identity_of_session(session_of("sub-boss"), signed_in).tenant_id) == "sub-boss"
+    with pytest.raises(ValidationError):
+        list_grants(grants)
+    with pytest.raises(ValidationError):
+        grant("sub-y", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
+    with pytest.raises(ValidationError):
+        revoke_principal(
+            grants, sub_principal_user_id="sub-boss", actor="owner-9", audit_path=audit
+        )
+    assert grants.read_bytes() == held, "an edit overwrote an invalid grants file"
+    grants.unlink()
+
+    # An invalid blocklist blocks everyone, and no edit reads it as empty and overwrites it.
+    blocks = grant_paths.blocklist
+    blocks.write_text('{"emails": "ada@x.com"}', encoding="utf-8")
+    assert check_blocklist(blocks, "anyone@x.com").blocked, "an invalid blocklist admitted"
+    for edit in (block_email, unblock_email):
+        with pytest.raises(ValidationError):
+            edit(blocks, "eve@x.com", actor="owner-9", audit_path=grant_paths.blocklist_audit)
+    assert blocks.read_text(encoding="utf-8") == '{"emails": "ada@x.com"}'
+    blocks.unlink()
+
+    # An invalid oidc.json refuses to load, and its refusal never carries the client secret.
+    write_json(
+        grant_paths.provider_config,
+        {"google": {"client_id": "c", "client_secret": ["the-secret"], "redirect_uri": "r"}},
+    )
+    with pytest.raises(OIDCConfigError) as refused:
+        load_provider_config(grant_paths.provider_config)
+    assert "the-secret" not in str(refused.value), "an oidc.json refusal leaked the secret"
+    write_json(grant_paths.provider_config, {"okta": {}})
+    with pytest.raises(OIDCConfigError):
+        load_provider_config(grant_paths.provider_config)
+    grant_paths.provider_config.unlink()
 
     # A delegate cannot withdraw its owner's queued launch, only its own.
     owner = built_stores
@@ -789,7 +851,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     google = OIDCProviderConfig(
         client_id="c", client_secret="the-old-secret", redirect_uri="https://r"
     )
-    write_json(paths.provider_config, {"google": dataclasses.asdict(google)})
+    write_json(paths.provider_config, {"google": google.model_dump(mode="json")})
     bundle = IdentityBundle(
         paths=paths,
         config=ProviderConfigBundle(google=google, github=None),
@@ -945,6 +1007,13 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     )
     assert sorted(paths.sessions_dir.iterdir()) == open_sessions, "a refused sign-in left a session"
 
+    # A session file that does not validate reads signed out and is deleted.
+    held_session = set_by_sign_in[SESSION_COOKIE_NAME]
+    session_file = paths.sessions_dir / f"{held_session}.json"
+    write_json(session_file, {"user_id": session.user_id})
+    assert sessions.read(held_session) is None, "an invalid session file signed someone in"
+    assert not session_file.exists(), "an invalid session file was kept"
+
 
 # 3. Unattended deletes
 
@@ -1059,8 +1128,32 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     # A reset takes every draft's claim before anything goes: one a Start holds refuses it whole.
     campaigns.create_campaign(minted_campaign(hop))
     built_stores.drafts.write_draft("held-draft", {})
+    data_root = built_stores.projects_root.parent
+    written = prove(data_root)
+    assert not written.unknown and not written.unloadable, (
+        f"a writer files what no data-root row names, or what its reader refuses: {written}"
+    )
     with built_stores.drafts.hold("held-draft"), pytest.raises(ConflictError):
         apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
     assert campaigns.iter_campaign_dirs(), "a refused reset dropped a campaign"
     apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
     assert not campaigns.iter_campaign_dirs() and not draft_dirs(campaigns.workspace)
+
+    # A landing names a cache row a reshape left behind and a file no row names; a reset drops
+    # both and keeps the account.
+    user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
+    UserStore(campaigns.workspace).save(user)
+    fold = built_stores.archive.path(ArchiveFile.SAMPLE_FOLD, "0" * ADDRESS_HEX)
+    write_jsonl(fold, [{"config_key": "c", "sp": "s", "sig": [], "graded": []}])
+    stray = data_root / "stray.json"
+    write_json(stray, {})
+    found = prove(data_root)
+    assert list(found.unknown) == [stray], "a file no row names was not named"
+    assert [(u.path, u.found.kind.fate) for u in found.unloadable] == [(fold, Fate.CACHE)], (
+        "a cache row this build cannot read was not named"
+    )
+    apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
+    assert not fold.exists() and not stray.exists(), "a reset kept what this build cannot read"
+    assert UserStore(campaigns.workspace).load() == user, "a reset dropped a survivor"
+    after = prove(data_root)
+    assert not after.unknown and not after.unloadable, "a reset left the data root unproven"

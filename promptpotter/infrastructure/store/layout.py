@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Annotated, Literal
+
+from pydantic import AfterValidator
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.dataset_name import validate_dataset_name
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     newest_mtime_ns,
-    read_json_optional,
+    read_bytes_optional,
     validate_path_component,
 )
 from promptpotter.shared.hashing import stable_hash
@@ -49,7 +50,7 @@ def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
 ArchiveHomeOwner = Literal["tenant", "install"]
 
 # Beside `projects/`, never in it: no tenant walk can take an install's home for an account.
-_ARCHIVE_HOMES_DIR = ".archives"
+ARCHIVE_HOMES_DIR = ".archives"
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ def archive_home(
         tenant = identity.tenant_id
         return ArchiveHome(tenant, tenant_workspace(shared_root, tenant), "tenant")
     named = validate_path_component(shared_archive)
-    return ArchiveHome(named, shared_root.parent / _ARCHIVE_HOMES_DIR / named, "install")
+    return ArchiveHome(named, shared_root.parent / ARCHIVE_HOMES_DIR / named, "install")
 
 
 def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
@@ -141,21 +142,22 @@ def sandbox_owner_path(sandbox_dir: Path) -> Path:
     return sandbox_dir / "owner.json"
 
 
-class SandboxOwner(NamedTuple):
-    tenant_id: str
-    campaign_id: str
-    cycle_id: str
+PathComponent = Annotated[str, AfterValidator(validate_path_component)]
+
+
+class SandboxOwner(FrozenModel):
+    tenant_id: PathComponent
+    campaign_id: PathComponent
+    cycle_id: PathComponent
 
 
 def read_sandbox_owner(sandbox_dir: Path) -> SandboxOwner | None:
     """``None`` = nothing names the owner of this hash-named dir: a caller KEEPS such a sandbox."""
-    record = read_json_optional(sandbox_owner_path(sandbox_dir))
-    if not isinstance(record, dict):
+    raw = read_bytes_optional(sandbox_owner_path(sandbox_dir))
+    if raw is None:
         return None
     try:
-        return SandboxOwner(
-            *(validate_path_component(str(record.get(name, ""))) for name in SandboxOwner._fields)
-        )
+        return SandboxOwner.model_validate_json(raw)
     except ValueError as exc:
         logger.warning("inner sandbox %s names an unusable owner: %s", sandbox_dir, exc)
         return None
@@ -266,10 +268,10 @@ class CampaignLayout:
         return self.campaign_dir / "log.md"
 
     def files(self) -> list[Path]:
-        return _declared_files(self, self.campaign_dir)
+        return declared_files(self, self.campaign_dir)
 
 
-def _declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Path]:
+def declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Path]:
     """Derived: a hand-copied list skips the next file declared, and ``delete --keep-results`` deletes it."""
     return [
         p
@@ -279,58 +281,6 @@ def _declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Pa
         and p.parent == root
         and p.suffix
     ]
-
-
-_PROBE = Path(".")
-
-_REPORT_NAMES = frozenset(
-    p.name
-    for layout in (CycleLayout(_PROBE), CampaignLayout(_PROBE))
-    for p in _declared_files(layout, _PROBE)
-)
-
-
-class FileKind(Enum):
-    leaf: str
-    keepsake: bool
-
-    DATASET_MIRROR = ("dataset", False)
-    CONNECTOR_CACHE = ("connector", False)
-    ROUND_PUBLIC = (
-        "state",
-        False,
-    )
-    LEDGER = ("history", False)
-    LOOP_TELEMETRY = ("trace", False)
-
-    LANGFUSE_TRACE = ("trace", True)
-    REPORT = ("reports", True)
-
-    def __init__(self, leaf: str, keepsake: bool) -> None:
-        self.leaf = leaf
-        self.keepsake = keepsake
-
-
-def classify(parts: Sequence[str]) -> FileKind:
-    """``ROUND_PUBLIC``'s bytes straddle two leaves: the rollup splits it rather than reading ``.leaf``."""
-    name = parts[-1]
-    if "langfuse" in parts:
-        i = parts.index("langfuse")
-        sub = parts[i + 1] if i + 1 < len(parts) else ""
-        return FileKind.DATASET_MIRROR if sub == "datasets" else FileKind.LANGFUSE_TRACE
-    if ".runtime" in parts:
-        j = parts.index(".runtime")
-        sub = parts[j + 1] if j + 1 < len(parts) else ""
-        if sub == "cache":
-            return FileKind.CONNECTOR_CACHE
-        if name == "ledger.jsonl":
-            return FileKind.LEDGER
-        return FileKind.LOOP_TELEMETRY
-    if name in _REPORT_NAMES:
-        return FileKind.REPORT
-    if "rounds" in parts and name.startswith("round_") and name.endswith(".json"):
-        return FileKind.ROUND_PUBLIC
-    return FileKind.LOOP_TELEMETRY
 
 
 def course_validator_ns(cycle_dir: Path) -> int | None:

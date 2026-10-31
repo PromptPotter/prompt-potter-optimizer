@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Unpack, get_args
 
 from pydantic import ValidationError
@@ -86,6 +86,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_resolved_run,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.data_root import CAMPAIGN_ROWS, classify_in_workspace
 from promptpotter.infrastructure.store.io import (
     iter_files,
     read_json_optional,
@@ -101,7 +102,6 @@ from promptpotter.infrastructure.store.layout import (
     campaign_cycles_dir,
     campaign_root_dir_for,
     campaigns_root_dir_for,
-    classify,
     cycle_dir_for,
     head_to_head_path,
     inner_sandbox_key,
@@ -132,6 +132,12 @@ def _prune_empty_dirs(root: Path) -> None:
             d.rmdir()
 
 
+def _keepsake(path: Path, workspace: Path) -> bool:
+    found = classify_in_workspace(PurePosixPath(path.relative_to(workspace).as_posix()))
+    row = None if found is None else CAMPAIGN_ROWS.get(found.kind)
+    return row is not None and row.keepsake
+
+
 def _strip_to_keepsake(campaign_dir: Path) -> None:
     cycles_dir = campaign_cycles_dir(campaign_dir)
     if cycles_dir.is_dir():
@@ -139,9 +145,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             if not cdir.is_dir():
                 continue
             for p in [
-                f
-                for f, _st in iter_files(cdir)
-                if not classify(f.relative_to(campaign_dir).parts).keepsake
+                f for f, _st in iter_files(cdir) if not _keepsake(f, campaign_dir.parent.parent)
             ]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)

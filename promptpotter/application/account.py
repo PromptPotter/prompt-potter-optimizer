@@ -16,6 +16,7 @@ from promptpotter.config.settings import LOCK_TIMEOUT, settings
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.infrastructure.identity import blocklist, default_claim
 from promptpotter.infrastructure.identity.grants import (
+    PrincipalGrant,
     grant_principal,
     list_grants,
     revoke_principal,
@@ -280,7 +281,7 @@ def unblock_email(email: str, *, actor: str) -> list[str]:
     )
 
 
-def grants() -> dict[str, dict[str, object]]:
+def grants() -> dict[str, PrincipalGrant]:
     return list_grants(default_identity_paths().grants)
 
 

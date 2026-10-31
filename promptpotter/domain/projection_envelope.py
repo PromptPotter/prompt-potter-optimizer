@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, get_args
+from typing import Any, Literal, TypeIs, get_args
 
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import Field
 
 from promptpotter.domain.activity import ActivityRecord, ActivityState
-from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.run_records import RECORD_KINDS, CycleRecord
 from promptpotter.domain.strict_model import FrozenModel
 
 # A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client reconnects.
@@ -64,37 +64,25 @@ ProjectionKind = Literal[
 ]
 
 _PROJECTION_ONLY = frozenset({"stream_snapshot"})
-_record_types = frozenset(
-    arm.model_fields["record_type"].default for arm in get_args(get_args(CycleRecord)[0])
-)
 _declared = frozenset(get_args(ProjectionKind)) - _PROJECTION_ONLY
-if _declared != _record_types:
+if _declared != RECORD_KINDS:
     raise RuntimeError(
         "ProjectionKind must cover the CycleRecord union exactly — "
-        f"missing {sorted(_record_types - _declared)}, "
-        f"unbacked {sorted(_declared - _record_types)}."
+        f"missing {sorted(RECORD_KINDS - _declared)}, "
+        f"unbacked {sorted(_declared - RECORD_KINDS)}."
     )
+del _declared
 
-RECORD_KINDS: frozenset[str] = _record_types
-
-#: The licence not to validate the record at all; a kind outside it may still yield no item.
-NON_ACTIVITY_KINDS: frozenset[str] = _record_types - frozenset(
-    arm.model_fields["record_type"].default for arm in get_args(ActivityRecord)
-)
-
-del _record_types, _declared
-
-_ACTIVITY_ADAPTER: TypeAdapter[ActivityRecord] = TypeAdapter(
-    Annotated[ActivityRecord, Field(discriminator="record_type")],
-    config=ConfigDict(defer_build=True),
-)
+_ACTIVITY_ARMS: tuple[type, ...] = get_args(ActivityRecord)
 
 
-def bearing_record(kind: str, rec: dict[str, Any]) -> ActivityRecord | None:
-    """``None`` for a kind that never renders; a line no arm accepts raises ``ValidationError``."""
-    if kind in NON_ACTIVITY_KINDS:
-        return None
-    return _ACTIVITY_ADAPTER.validate_python(rec)
+def _renders(record: CycleRecord) -> TypeIs[ActivityRecord]:
+    return isinstance(record, _ACTIVITY_ARMS)
+
+
+def bearing_record(record: CycleRecord) -> ActivityRecord | None:
+    """``None`` for a kind that never renders."""
+    return record if _renders(record) else None
 
 
 class ProjectionEnvelope(FrozenModel):

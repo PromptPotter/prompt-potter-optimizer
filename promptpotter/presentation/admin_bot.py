@@ -157,9 +157,8 @@ def _handle_grant_command(command: str, argument: str, actor: str) -> str:
             return "Delegations: (none)"
         lines: list[str] = []
         for sub, g in sorted(held.items()):
-            caps_val = g.get("capabilities")
-            caps_str = ", ".join(str(c) for c in caps_val) if isinstance(caps_val, list) else ""
-            lines.append(f"{sub} → by {g.get('delegated_by', '?')}: {caps_str or '(none)'}")
+            caps_str = ", ".join(sorted(g.capabilities))
+            lines.append(f"{sub} → by {g.delegated_by or '?'}: {caps_str or '(none)'}")
         return "Delegations:\n" + "\n".join(lines)
     if command == "revoke":
         if not argument:

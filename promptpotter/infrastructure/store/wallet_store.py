@@ -12,15 +12,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, TypeAdapter
 
 from promptpotter.domain.spend import Budget, KeySource
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     append_line,
+    read_bytes_optional,
     read_json_optional,
     take_lock,
     write_json,
+    write_lock_name,
 )
 from promptpotter.shared.clock import utcnow_iso
 
@@ -63,6 +65,9 @@ class HeldKey(FrozenModel):
         return self.secret.get_secret_value()[-4:]
 
 
+HELD_KEYS: TypeAdapter[dict[str, HeldKey]] = TypeAdapter(dict[str, HeldKey])
+
+
 class TenantApiKeyStore:
     """One key per provider; read on every send's resolution, so a removal binds the next send."""
 
@@ -71,8 +76,8 @@ class TenantApiKeyStore:
 
     def load(self) -> dict[str, HeldKey]:
         # Optional, not tolerant: a corrupt file read as "no keys" would bill the host's.
-        raw = read_json_optional(self.path) or {}
-        return {provider: HeldKey.model_validate(held) for provider, held in raw.items()}
+        raw = read_bytes_optional(self.path)
+        return {} if raw is None else HELD_KEYS.validate_json(raw)
 
     def put(self, provider: str, secret: SecretStr) -> HeldKey:
         held = HeldKey(secret=secret)
@@ -91,7 +96,9 @@ class TenantApiKeyStore:
         return removed
 
     def _rewrite(self, change: Callable[[dict[str, HeldKey]], dict[str, HeldKey]]) -> None:
-        lock = take_lock(self.path.with_name(self.path.name + ".lock"), wait_s=_KEYS_LOCK_WAIT_S)
+        lock = take_lock(
+            self.path.with_name(write_lock_name(self.path.name)), wait_s=_KEYS_LOCK_WAIT_S
+        )
         if lock is None:
             raise TimeoutError(f"{self.path} is held by another write")
         try:

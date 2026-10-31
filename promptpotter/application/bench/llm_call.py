@@ -116,10 +116,7 @@ async def _chat_under_deadline(
 
 def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None:
     try:
-        payload = cache.load(key)
-        if payload is None:
-            return None
-        return LLMResponse.model_validate(payload)
+        return cache.load(key)
     except (OSError, ValueError) as exc:
         logger.warning("optimizer_reuse entry for %s unusable, re-sampling — %s", label, exc)
         return None
@@ -390,7 +387,7 @@ async def llm_call(
     # Never cache an empty response: a TRANSIENT provider failure would replay forever, tenant-wide.
     usable = bool(response.content.strip()) or response.parsed is not None
     if replayed is None and context.cache is not None and cache_key is not None and usable:
-        context.cache.save(cache_key, response.model_dump())
+        context.cache.save(cache_key, response)
 
     if context.ledger is not None:
         context.ledger.append(

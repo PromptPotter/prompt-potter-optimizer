@@ -71,27 +71,15 @@ def _complete_lines(path: Path, start: int) -> Iterator[bytes]:
             yield raw
 
 
-def _record_of(raw: bytes) -> dict[str, Any] | None:
-    line = raw.strip()
-    if not line:
-        return None
-    try:
-        rec = json.loads(line)
-    except ValueError:
-        return None
-    return rec if isinstance(rec, dict) else None
-
-
-def fold_jsonl_from(path: Path, key: str, offset: int) -> tuple[dict[str, dict[str, Any]], int]:
-    out: dict[str, dict[str, Any]] = {}
+def read_jsonl_from[R](path: Path, read: Callable[[bytes], R], offset: int) -> tuple[list[R], int]:
+    out: list[R] = []
     try:
         for raw in _complete_lines(path, offset):
             offset += len(raw)
-            row = _record_of(raw)
-            if row is not None and isinstance(k := row.get(key), str):
-                out[k] = row
+            if raw.strip():
+                out.append(read(raw))
     except FileNotFoundError:
-        return {}, offset
+        return [], offset
     return out, offset
 
 
@@ -311,7 +299,7 @@ class _Feeder:
         }
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
         # By kind, so the folds that never take a refused line (run state, spend) still read whole:
-        # a reshape of one kind leaves the spend bank readable, so a reset can bank before it wipes.
+        # a reshape of one kind leaves the spend bank readable, so a delete can bank before it wipes.
         self.refused: dict[
             type[StrictModel], LedgerUnreadableError | UnregisteredStatePartError
         ] = {}

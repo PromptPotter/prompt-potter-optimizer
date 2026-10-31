@@ -9,8 +9,9 @@ from pydantic import BaseModel
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.task_context import CheckinOutput
-from promptpotter.application.optimizer_manifest import ManifestSwitch, authored_manifest
+from promptpotter.application.optimizer_manifest import authored_manifest
 from promptpotter.config.paths import checkin_assets_root
+from promptpotter.domain.pipeline_manifest import ManifestSwitch
 from promptpotter.infrastructure.store.io import read_yaml
 
 

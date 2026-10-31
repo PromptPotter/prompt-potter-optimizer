@@ -59,8 +59,12 @@ from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.io import write_json
-from promptpotter.infrastructure.store.layout import dataset_id_prefix, sandbox_owner_path
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.layout import (
+    SandboxOwner,
+    dataset_id_prefix,
+    sandbox_owner_path,
+)
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import (
@@ -307,14 +311,12 @@ def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
 
 def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
     """Inside a cell, never at `publish_inner_spawn_context`, which fires for EVERY cycle."""
-    write_json(
-        sandbox_owner_path(ctx.inner_sandbox_root),
-        {
-            "tenant_id": str(ctx.identity.tenant_id),
-            "campaign_id": ctx.spawn_campaign_id,
-            "cycle_id": ctx.spawn_cycle_id,
-        },
+    owner = SandboxOwner(
+        tenant_id=str(ctx.identity.tenant_id),
+        campaign_id=ctx.spawn_campaign_id,
+        cycle_id=ctx.spawn_cycle_id,
     )
+    write_text(sandbox_owner_path(ctx.inner_sandbox_root), owner.model_dump_json())
     return sandbox_stores(ctx)
 
 

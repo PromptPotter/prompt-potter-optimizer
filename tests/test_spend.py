@@ -104,12 +104,7 @@ from promptpotter.application.jobs.quota import (
     spends_the_hosts_own_key,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
-from promptpotter.application.jobs.registry import (
-    UNRESOLVED_HOP,
-    CampaignLaunch,
-    EmbeddedRun,
-    JobRegistry,
-)
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -162,6 +157,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
+from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE

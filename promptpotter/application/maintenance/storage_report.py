@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
@@ -12,8 +12,9 @@ from pydantic import Field
 from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.data_root import CAMPAIGN_ROWS, Leaf, classify_in_workspace
 from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
-from promptpotter.infrastructure.store.layout import ArchiveHomeOwner, FileKind, classify
+from promptpotter.infrastructure.store.layout import ArchiveHomeOwner
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 
 if TYPE_CHECKING:
@@ -29,7 +30,14 @@ _CONNECTOR_ROUND_KEYS = tuple(
     if field.annotation in (_SAMPLE_ROWS, dict[str, _SAMPLE_ROWS])
 )
 
-_LEAVES = tuple(dict.fromkeys(kind.leaf for kind in FileKind))
+_LEAVES = tuple(leaf.value for leaf in Leaf)
+
+
+def _leaf_of(path: Path, workspace: Path) -> Leaf:
+    """A file no campaign row names counts as loop trace."""
+    found = classify_in_workspace(PurePosixPath(path.relative_to(workspace).as_posix()))
+    row = None if found is None else CAMPAIGN_ROWS.get(found.kind)
+    return Leaf.TRACE if row is None else row.leaf
 
 
 @functools.lru_cache(maxsize=2048)
@@ -46,15 +54,14 @@ def _campaign_split(root: Path) -> dict[str, int]:
     if not root.is_dir():
         return acc
     # Walked per read, uncached: a directory's mtime stands still while a file below it grows.
-    below = len(root.parts)
     for path, st in iter_files(root):
-        kind = classify(path.parts[below:])
-        if kind is FileKind.ROUND_PUBLIC:
+        leaf = _leaf_of(path, root.parent.parent)
+        if leaf is Leaf.STATE:
             conn = min(_connector_bytes_of(str(path), st.st_mtime_ns, st.st_size), st.st_size)
-            acc["connector"] += conn
-            acc["state"] += st.st_size - conn
+            acc[Leaf.CONNECTOR.value] += conn
+            acc[Leaf.STATE.value] += st.st_size - conn
         else:
-            acc[kind.leaf] += st.st_size
+            acc[leaf.value] += st.st_size
     return acc
 
 

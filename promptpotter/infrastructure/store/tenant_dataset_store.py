@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable, Sequence
 from functools import partial
 from pathlib import Path
@@ -18,7 +19,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     render_framing_file,
 )
 from promptpotter.infrastructure.store.io import (
-    read_json_optional,
+    read_bytes_optional,
     read_yaml_optional,
     validate_path_component,
     write_bytes,
@@ -36,9 +37,9 @@ MATERIALIZED_DIR = "materialized"
 BANKS_DIR = "banks"
 # Every file uploaded, under its own content: an upload definition's `source:` reads it from here.
 UPLOADS_DIR = "uploads"
-_LABELS_FILE = "labels.jsonl"
+LABELS_FILE = "labels.jsonl"
 # Which bank each fetched `source:` recipe cut: a content fact, so an inner sandbox shares it.
-_CUTS_FILE = "cuts.jsonl"
+CUTS_FILE = "cuts.jsonl"
 
 
 class TenantDatasetStore:
@@ -81,7 +82,7 @@ class TenantDatasetStore:
             n += 1
 
     def _labels_path(self) -> Path:
-        return self._base_dir / BANKS_DIR / _LABELS_FILE
+        return self._base_dir / BANKS_DIR / LABELS_FILE
 
     def _bank_path(self, digest: str) -> Path:
         return self._base_dir / BANKS_DIR / f"{validate_path_component(digest)}.json"
@@ -113,8 +114,8 @@ class TenantDatasetStore:
         return self.labels().get(label)
 
     def _banked_rows(self, digest: str) -> list[dict[str, Any]] | None:
-        data = read_json_optional(self._bank_path(digest))
-        return None if data is None else list(data["items"])
+        raw = read_bytes_optional(self._bank_path(digest))
+        return None if raw is None else _bank_items(raw)
 
     def bank(self, digest: str) -> Bank | None:
         rows = self._banked_rows(digest)
@@ -132,7 +133,7 @@ class TenantDatasetStore:
             str(self._base_dir),
             file_sig(banks),
             file_sig(self._labels_path()),
-            file_sig(banks / _CUTS_FILE),
+            file_sig(banks / CUTS_FILE),
             file_sig(self.materialized_panel_dir(name) / MATERIALIZED_PANEL_FILE),
         )
 
@@ -143,12 +144,12 @@ class TenantDatasetStore:
     def record_cut(self, source: str, bank: Bank) -> None:
         self.put_bank(bank)
         append_row(
-            self._base_dir / BANKS_DIR / _CUTS_FILE,
+            self._base_dir / BANKS_DIR / CUTS_FILE,
             {"source": source, "dataset_hash": bank.dataset_hash},
         )
 
     def cut(self, source: str) -> Bank | None:
-        row = fold_jsonl(self._base_dir / BANKS_DIR / _CUTS_FILE, "source").get(source)
+        row = fold_jsonl(self._base_dir / BANKS_DIR / CUTS_FILE, "source").get(source)
         return None if row is None else self.bank(str(row["dataset_hash"]))
 
     def banks_sharing(self, keys: frozenset[str]) -> frozenset[str]:
@@ -217,8 +218,14 @@ class TenantDatasetStore:
         return path
 
 
+def _bank_items(raw: bytes) -> list[dict[str, Any]]:
+    return list(json.loads(raw)["items"])
+
+
+def read_bank(raw: bytes) -> Bank:
+    return Bank.read(_bank_items(raw))
+
+
 def _keys(path: Path) -> frozenset[str]:
-    rows = read_json_optional(path)
-    return (
-        frozenset() if rows is None else frozenset(s.key for s in Bank.read(rows["items"]).samples)
-    )
+    raw = read_bytes_optional(path)
+    return frozenset() if raw is None else frozenset(s.key for s in read_bank(raw).samples)

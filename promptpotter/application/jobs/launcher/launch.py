@@ -15,8 +15,9 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     hold_fresh_mint,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
-from promptpotter.application.jobs.registry import CampaignLaunch, Job, JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import CampaignLaunch, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 

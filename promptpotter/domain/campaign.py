@@ -281,6 +281,7 @@ type LifecycleFilter = Literal["active", "archived", "deleted", "all"]
 
 
 class CampaignEdit(TypedDict, total=False):
+    owner_user_id: str
     label: str
     dataset_name: str
     lifecycle_status: LifecycleStatus

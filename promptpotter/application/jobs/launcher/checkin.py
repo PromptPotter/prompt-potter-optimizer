@@ -34,12 +34,12 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
 )
 from promptpotter.application.jobs.quota import land_job, on_free_tier
-from promptpotter.application.jobs.registry import UNRESOLVED_HOP
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
@@ -48,8 +48,9 @@ from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.registry import Job, JobRegistry
+    from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.job import Job
 
 logger = logging.getLogger(__name__)
 

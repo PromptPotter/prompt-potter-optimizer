@@ -40,7 +40,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     FreshMint,
     OriginIncompleteError,
 )
-from promptpotter.application.jobs.registry import CampaignLaunch
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
@@ -48,6 +47,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode

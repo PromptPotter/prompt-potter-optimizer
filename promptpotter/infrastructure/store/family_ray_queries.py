@@ -15,8 +15,8 @@ from promptpotter.domain import activity
 from promptpotter.domain.activity import ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path, step_address
 from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
-from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
-from promptpotter.domain.run_records import LLMCallProgressRecord
+from promptpotter.domain.projection_envelope import bearing_record
+from promptpotter.domain.run_records import RECORD_ADAPTER, RECORD_KINDS, LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     course_validator_ns,
     cycle_dir_for,
@@ -72,11 +72,10 @@ class _RayTail:
         self._heard: float | None = None
 
     def feed(self, line: dict[str, Any]) -> None:
-        kind = line.get("record_type")
-        if not isinstance(kind, str) or kind not in RECORD_KINDS:
-            return
         offset = self.at_offset
-        record = bearing_record(kind, line)
+        whole = RECORD_ADAPTER.validate_python(line)
+        kind = whole.record_type
+        record = bearing_record(whole)
         item = None if record is None else self._feed.read(offset, record)
         own = epoch_seconds(line.get("timestamp"))
         if own is None or (self._last_epoch is not None and own < self._last_epoch):

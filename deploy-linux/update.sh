@@ -4,10 +4,15 @@
 # configured). Force-matches origin, so it never stalls on a diverged box —
 # tracked files mirror the remote; .env / runtime data are gitignored and survive.
 #
-#   ./update.sh            # the tracked branch's tip
-#   ./update.sh v0.8.17    # a tag, branch or commit on origin — a release deploy names its tag
+#   ./update.sh                    # the tracked branch's tip
+#   ./update.sh v0.8.17            # a tag, branch or commit on origin — a release deploy names its tag
+#   ./update.sh v0.8.17 --reset    # and drop the run data the landing code cannot load
 set -euo pipefail
-REF="${1:-}"
+REF=""
+RESET=""
+for arg in "$@"; do
+  if [[ "$arg" == --reset ]]; then RESET=1; else REF="$arg"; fi
+done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
@@ -108,18 +113,27 @@ fi
 # this box offers (DATASET_OFFER) have named the extras their fetch needs.
 ensure_uv
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
-# Before the restart, the landed code loads every file that outlives a release. One that will not load
-# puts back the commit the reset left in ORIG_HEAD, and admission reopens to the API still running it.
-if ! survivors_out="$(as_unit survivors)"; then
-  printf '%s\n' "$survivors_out"
+# Puts back the commit the checkout left in ORIG_HEAD; admission reopens to the API still running it.
+roll_back() {
   from="$(git -C "$INSTALL_DIR" rev-parse --verify ORIG_HEAD)"
   checkout "$INSTALL_DIR" "$from"
   ( cd "$INSTALL_DIR" && "$UV" sync --frozen --inexact --extra all )
   as_unit close-admission "$from" >/dev/null
-  bad "not landed: a survivor above does not load under the landing code — rewrite it on the box, then re-run"
+  bad "not landed: $1"
   exit 1
+}
+# Before the restart, the landed code loads every file under the data root. A survivor that will not
+# load is rewritten on the box by hand; run data or a cache that will not goes with `--reset`.
+if ! proof_out="$(as_unit prove-data)"; then
+  printf '%s\n' "$proof_out"
+  if grep -q '^unloadable SURVIVOR ' <<< "$proof_out"; then
+    roll_back "a survivor above does not load under the landing code — rewrite it on the box, then re-run"
+  fi
+  [[ -n "$RESET" ]] || roll_back "run data above does not load under the landing code — re-run with --reset to drop it"
+  as_unit reset --all-tenants --yes || roll_back "the reset above failed"
+  proof_out="$(as_unit prove-data)" || { printf '%s\n' "$proof_out"; roll_back "the data root still does not load after the reset"; }
 fi
-ok "$survivors_out"
+ok "$proof_out"
 # The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
 # shell does not load $ENV_FILE. The verb refuses a name naming no dataset, and `set -e` stops the
 # deploy there, before the exact sync drops what that name's extras were.

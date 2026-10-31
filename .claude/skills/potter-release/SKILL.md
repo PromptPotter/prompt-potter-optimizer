@@ -36,9 +36,9 @@ version exists.
 ## 4. Deploy `main` to the box and verify there (`/potter-box`)
 
 - [ ] Back up the data root first: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
-- [ ] `git diff <last tag> -- docs/specs/survivors.generated.json` names every survivor whose shape
+- [ ] `git diff <last tag> -- docs/specs/data-root.generated.json` names every survivor whose shape
       moved: rewrite those files on the box before the deploy, or `update.sh` refuses to land. A
-      BREAKING run-data shape is `reset --all-tenants --yes` after the landing; survivors stay.
+      BREAKING run-data or cache shape deploys as `update.sh <tag> --reset`; survivors stay.
 - [ ] Deploy `main` as `/potter-box` says, which owns the commands, the sudo and the TermNorm restart.
 - [ ] Verify on the box: health on 127.0.0.1 and on the public host, both units active,
       `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `held N survivor file(s)` line.

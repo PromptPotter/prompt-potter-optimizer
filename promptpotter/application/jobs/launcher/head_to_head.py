@@ -31,11 +31,12 @@ from promptpotter.application.jobs.mint import (
     standing_arms,
 )
 from promptpotter.application.jobs.quota import land_job
-from promptpotter.application.jobs.registry import CampaignLaunch, EmbeddedRun, Job, JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.campaign import ArmName
 from promptpotter.domain.campaign_config import CampaignConfig, effective_config
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import declared_backend_type

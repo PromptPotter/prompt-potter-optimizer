@@ -15,7 +15,6 @@ from typing import Any, Literal, get_args, get_origin
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
@@ -272,19 +271,17 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "reset",
         "reset:cmd_reset",
-        help="Drop campaigns/ + active_session.json for the "
-        "selected tenant; preserve its archive home's paid caches ("
-        + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
-        + "). The escape hatch for cycles "
-        "obsoleted by code changes — per-sample measurements survive so the "
-        "next `new` hits cache immediately.",
+        help="Drop the selected tenant's run data, every file no row of "
+        "`infrastructure/store/data_root.py` names, and every cache file that no longer loads; "
+        "keep survivors (who an account is, what it holds and was charged) and the caches that "
+        "load, so the next `new` hits cache. The escape hatch after a reshape of run data.",
         args=(
             Arg(
                 "--all-tenants",
                 dest="all_tenants",
                 action="store_true",
-                help="Reset every tenant under .promptpotter/projects/ "
-                "(default: only the tenant named by --tenant).",
+                help="Reset the whole data root: every tenant, every sandbox and the install's "
+                "own run data (default: only the tenant named by --tenant and its sandboxes).",
             ),
             Arg(
                 "--yes",
@@ -298,7 +295,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="List the paths that would be removed; touch nothing. Recommended first run.",
             ),
         ),
-        needs_registries=False,
     ),
     Verb(
         "verify",
@@ -678,12 +674,12 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         needs_registries=False,
     ),
     Verb(
-        "survivors",
-        "machine_status:cmd_survivors",
-        help="Load every file that outlives a release (`docs/specs/survivors.generated.json`) "
-        "under THIS code. Prints `held N`, or one `unloadable PATH: WHY` line each and exits 1 — "
-        "a landing's proof, before its restart. Read-only, zero spend.",
-        needs_registries=False,
+        "prove-data",
+        "machine_status:cmd_prove_data",
+        help="Load every file under the data root its row of `infrastructure/store/data_root.py` "
+        "shapes, under THIS code. Prints `held N`, or one `unknown PATH` or `unloadable FATE KIND "
+        "PATH: WHY` line each and exits 1 — a landing's proof, before its restart. Read-only, zero "
+        "spend.",
     ),
     Verb(
         "trail",

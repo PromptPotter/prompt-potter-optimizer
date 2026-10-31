@@ -5,11 +5,11 @@ from typing import Any, cast
 
 from promptpotter.domain.activity import ActivityFeed, ActivityRecord
 from promptpotter.domain.projection_envelope import (
-    RECORD_KINDS,
     ProjectionEnvelope,
     ProjectionKind,
     bearing_record,
 )
+from promptpotter.domain.run_records import RECORD_ADAPTER
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
@@ -19,14 +19,10 @@ from promptpotter.infrastructure.store.read_model import (
 )
 
 
-def _bearing_line(
-    raw: bytes,
-) -> tuple[ProjectionKind, dict[str, Any], ActivityRecord | None] | None:
+def _bearing_line(raw: bytes) -> tuple[ProjectionKind, dict[str, Any], ActivityRecord | None]:
     rec = line_dict(raw)
-    kind = rec.get("record_type")
-    if not isinstance(kind, str) or kind not in RECORD_KINDS:
-        return None
-    return cast(ProjectionKind, kind), rec, bearing_record(kind, rec)
+    record = RECORD_ADAPTER.validate_python(rec)
+    return cast(ProjectionKind, record.record_type), rec, bearing_record(record)
 
 
 class CycleLedgerTail:

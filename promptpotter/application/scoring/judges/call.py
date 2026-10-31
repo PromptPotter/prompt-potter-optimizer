@@ -93,7 +93,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         )
 
     if cached is None and cache is not None and key is not None and response.content.strip():
-        cache.save(key, response.model_dump())
+        cache.save(key, response)
 
     return response.content or "", ""
 
@@ -135,12 +135,11 @@ async def graded(
 
 def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResponse | None:
     try:
-        payload = cache.load(key)
-        if payload is None:
-            return None
-        response = LLMResponse.model_validate(payload)
+        response = cache.load(key)
     except (OSError, ValueError) as exc:
         logger.warning("judge_reuse entry for %s:%s unusable, re-sampling — %s", judge, role, exc)
+        return None
+    if response is None:
         return None
     logger.debug("judge_reuse hit for %s:%s (%s)", judge, role, key)
     return response

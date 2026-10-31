@@ -11,15 +11,15 @@ from pydantic import TypeAdapter
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from promptpotter.application.maintenance.survivors import survivor_schemas
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.run_records import CycleRecord
+from promptpotter.infrastructure.store.data_root import pinned_schemas
 from promptpotter.main import app
 
 _SPECS = _REPO / "docs" / "specs"
 _OPENAPI_PATH = _SPECS / "openapi.generated.json"
 _ASYNCAPI_PATH = _SPECS / "events-asyncapi.generated.json"
-_SURVIVORS_PATH = _SPECS / "survivors.generated.json"
+_DATA_ROOT_PATH = _SPECS / "data-root.generated.json"
 
 _REGENERATE = "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`."
 
@@ -41,16 +41,18 @@ is `docs/developer/event-stream.md`.
 """
 
 
-_SURVIVORS_DESCRIPTION = f"""\
+_DATA_ROOT_DESCRIPTION = f"""\
 {_REGENERATE}
 
-Every file that outlives a release, by its glob under the data root: a diff here is a box's
-survivor that must be rewritten before `deploy-linux/update.sh` lands the code that reads it.
+Every SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns
+under the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before
+`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by
+`update.sh <ref> --reset`.
 """
 
 
-def survivors() -> dict[str, Any]:
-    return {"description": _SURVIVORS_DESCRIPTION, "files": survivor_schemas()}
+def data_root() -> dict[str, Any]:
+    return {"description": _DATA_ROOT_DESCRIPTION, "kinds": pinned_schemas()}
 
 
 def openapi() -> dict[str, Any]:
@@ -107,7 +109,7 @@ def main() -> int:
     for path, document in (
         (_OPENAPI_PATH, contract),
         (_ASYNCAPI_PATH, asyncapi(contract["paths"])),
-        (_SURVIVORS_PATH, survivors()),
+        (_DATA_ROOT_PATH, data_root()),
     ):
         # `sort_keys` so a registration reorder is not a diff.
         content = json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True) + "\n"

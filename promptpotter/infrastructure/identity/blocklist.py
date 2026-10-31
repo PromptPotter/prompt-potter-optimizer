@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from pydantic import ValidationError
+
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
+
+
+class Blocklist(FrozenModel):
+    emails: list[str]
 
 
 @dataclass(frozen=True)
@@ -23,23 +29,24 @@ def _norm_email(email: str) -> str:
     return email.strip().lower()
 
 
+def _read(path: Path) -> list[str] | None:
+    """``None`` = absent; raises on a file that does not validate."""
+    raw = read_bytes_optional(path)
+    if raw is None:
+        return None
+    emails = Blocklist.model_validate_json(raw).emails
+    return sorted({_norm_email(e) for e in emails if e.strip()})
+
+
 def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
-    """Malformed blocks EVERYONE: absent and corrupt are opposite security answers, and corrupt is never the wider."""
-    if not path.is_file():
-        return BlocklistDecision(blocked=False, reason="blocklist_absent")
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return BlocklistDecision(blocked=False, reason="blocklist_absent")
+    """Invalid blocks EVERYONE: absent and invalid are opposite security answers, and invalid is never the wider."""
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("blocklist.json is not valid JSON; treating as block-all")
+        blocked = _read(path)
+    except ValidationError:
+        logger.warning("blocklist.json does not validate; treating as block-all")
         return BlocklistDecision(blocked=True, reason="blocklist_invalid")
-    emails_raw = data.get("emails") if isinstance(data, dict) else None
-    if not isinstance(emails_raw, list):
-        logger.warning("blocklist.json has no `emails` list; treating as block-all")
-        return BlocklistDecision(blocked=True, reason="blocklist_invalid")
-    blocked = {_norm_email(e) for e in emails_raw if isinstance(e, str)}
+    if blocked is None:
+        return BlocklistDecision(blocked=False, reason="blocklist_absent")
     if not blocked:
         return BlocklistDecision(blocked=False, reason="blocklist_empty")
     if not email:
@@ -50,26 +57,8 @@ def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
     return BlocklistDecision(blocked=False, reason="email_not_blocked")
 
 
-def _load_emails(path: Path) -> list[str]:
-    """Tolerant where `check_blocklist` is strict: a corrupt file reads empty and the next write overwrites it."""
-    if not path.is_file():
-        return []
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("blocklist.json is not valid JSON; treating as empty for edit")
-        return []
-    emails_raw = data.get("emails") if isinstance(data, dict) else None
-    if not isinstance(emails_raw, list):
-        return []
-    return sorted({_norm_email(e) for e in emails_raw if isinstance(e, str) and e.strip()})
-
-
 def _write_emails(path: Path, emails: list[str]) -> None:
-    write_json(path, {"emails": emails})
+    write_json(path, Blocklist(emails=emails).model_dump(mode="json"))
 
 
 def _append_audit(
@@ -96,12 +85,12 @@ def _normalize(email: str) -> str:
 
 
 def list_blocked(path: Path) -> list[str]:
-    return _load_emails(path)
+    return _read(path) or []
 
 
 def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
-    current = _load_emails(path)
+    current = list_blocked(path)
     before = len(current)
     if normalized not in current:
         current = sorted({*current, normalized})
@@ -114,7 +103,7 @@ def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list
 
 def unblock_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:
     normalized = _normalize(email)
-    current = _load_emails(path)
+    current = list_blocked(path)
     before = len(current)
     if normalized in current:
         current = [e for e in current if e != normalized]

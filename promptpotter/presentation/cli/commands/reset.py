@@ -2,56 +2,34 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 
 from promptpotter.application.account import registered_or_default_identity
-from promptpotter.application.maintenance.reset import (
-    ResetPlan,
-    apply_reset,
-    plan_reset,
-    size_tag,
-)
-from promptpotter.config.paths import SHARED_CACHE_DIRS, default_projects_root
+from promptpotter.application.maintenance.reset import ResetPlan, apply_reset, plan_reset
+from promptpotter.config.paths import default_projects_root
 from promptpotter.presentation.cli.commands.result import CommandResult
 
 
 def _render_summary(plan: ResetPlan) -> str:
-    lines: list[str] = []
-    for tenant in plan.tenants:
-        lines.append(f"tenant: {tenant.workspace}")
-        if not tenant.workspace.is_dir():
-            lines.append("  (tenant dir does not exist — nothing to reset)")
-            lines.append("")
-            continue
-        if tenant.drop:
-            lines.append("  drop:")
-            lines.extend(f"    - {p.name}{size_tag(p)}" for p in tenant.drop)
-        else:
-            lines.append("  drop: (nothing — already clean)")
-        if tenant.preserve:
-            lines.append("  preserve:")
-            lines.extend(f"    + {p.name}{size_tag(p)}" for p in tenant.preserve)
-        if tenant.unrecognized:
-            lines.append(
-                "  unrecognized (preserved by default — name them in maintenance/reset.py::_DROP_NAMES if you want them gone):"
-            )
-            lines.extend(f"    ? {p.name}" for p in tenant.unrecognized)
-        lines.append("")
-    summary = "\n".join(lines).rstrip()
-    sandbox_lines: list[str] = []
-    if plan.sandboxes:
-        sandbox_lines.append("inner sandboxes (off-tree, dropped with their owner's campaigns):")
-        sandbox_lines.extend(
-            f"    - {target.sandbox.name}  [{target.owner.campaign_id}]{size_tag(target.sandbox)}"
-            for target in plan.sandboxes
-        )
-    if plan.unattributable_sandboxes:
-        sandbox_lines.append(
-            "inner sandboxes KEPT (no usable owner record — cannot name the tenant they belong to):"
-        )
-        sandbox_lines.extend(f"    ? {sandbox.name}" for sandbox in plan.unattributable_sandboxes)
-    if sandbox_lines:
-        summary += "\n\n" + "\n".join(sandbox_lines)
-    return summary
+    lines = [f"reset under: {', '.join(str(root) for root in plan.roots)}"]
+    counts: Counter[str] = Counter()
+    sizes: Counter[str] = Counter()
+    for drop in plan.drops:
+        if drop.kind is not None and drop.unloadable is None:
+            counts[drop.kind.name] += 1
+            sizes[drop.kind.name] += drop.size
+    lines += [
+        f"  - {counts[name]:,} {name} file(s), {sizes[name] / 1_048_576:.1f} MiB"
+        for name in sorted(counts)
+    ]
+    lines += [f"  ? unknown {drop.path}" for drop in plan.drops if drop.kind is None]
+    lines += [
+        f"  ! unloadable {drop.kind.fate.value} {drop.kind.name} {drop.path}: {drop.unloadable}"
+        for drop in plan.drops
+        if drop.kind is not None and drop.unloadable is not None
+    ]
+    lines.append(f"  kept: {plan.kept:,} survivor, loading cache and machine file(s)")
+    return "\n".join(lines)
 
 
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
@@ -61,57 +39,35 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         if args.all_tenants
         else registered_or_default_identity(args.tenant).tenant_id,
     )
-    tenants = [str(tenant.workspace) for tenant in plan.tenants]
-    drops = plan.drops
+    roots = [str(root) for root in plan.roots]
+    drops = [str(drop.path) for drop in plan.drops]
     summary = _render_summary(plan)
 
     if args.dry_run:
-        if not drops:
-            return CommandResult(
-                data={"tenants": tenants, "dropped": [], "dry_run": True},
-                human="reset --dry-run:\n" + summary + "\n\n(nothing to drop)",
-            )
         return CommandResult(
-            data={"tenants": tenants, "would_drop": drops, "dry_run": True},
+            data={"roots": roots, "would_drop": drops, "kept": plan.kept, "dry_run": True},
             human="reset --dry-run:\n" + summary,
         )
-
     if not drops:
         return CommandResult(
-            data={"tenants": tenants, "dropped": []},
+            data={"roots": roots, "dropped": [], "kept": plan.kept},
             human=summary + "\n\nnothing to drop.",
         )
-
     if not args.yes:
         sys.stdout.write(summary + "\n\nproceed? [y/N]: ")
         sys.stdout.flush()
         reply = sys.stdin.readline().strip().lower()
         if reply not in ("y", "yes"):
             return CommandResult(
-                data={"tenants": tenants, "dropped": [], "aborted": True},
+                data={"roots": roots, "dropped": [], "aborted": True},
                 human="aborted.",
             )
 
     apply_reset(plan)
-
-    kept = plan.unattributable_sandboxes
-    kept_note = (
-        f"kept: {len(kept)} inner sandbox(es) with no usable owner record.\n" if kept else ""
-    )
     return CommandResult(
-        data={
-            "tenants": tenants,
-            "dropped": drops,
-            "kept_sandboxes": [str(p) for p in kept],
-        },
+        data={"roots": roots, "dropped": drops, "kept": plan.kept},
         human=(
-            f"reset: dropped {len(drops)} path(s), including {len(plan.sandboxes)} inner "
-            f"sandbox(es).\n"
-            f"{kept_note}"
-            f"preserved: the archive home's paid caches "
-            f"({', '.join(d + '/' for d in SHARED_CACHE_DIRS)}).\n"
-            "kept: each account's charges, written at every send — a reset drops the data, never "
-            "the money.\n"
+            f"{summary}\n\nreset: dropped {len(drops):,} file(s).\n"
             "next: `python -m promptpotter new <name>` (from datasets/<name>/)."
         ),
     )

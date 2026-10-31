@@ -1,0 +1,1692 @@
+{
+  "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns\nunder the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before\n`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by\n`update.sh <ref> --reset`.\n",
+  "kinds": {
+    "api keys": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/api_keys.json"
+      ],
+      "shape": {
+        "$defs": {
+          "HeldKey": {
+            "additionalProperties": false,
+            "properties": {
+              "added_at": {
+                "title": "Added At",
+                "type": "string"
+              },
+              "secret": {
+                "format": "password",
+                "title": "Secret",
+                "type": "string",
+                "writeOnly": true
+              }
+            },
+            "required": [
+              "secret"
+            ],
+            "title": "HeldKey",
+            "type": "object"
+          }
+        },
+        "additionalProperties": {
+          "$ref": "#/$defs/HeldKey"
+        },
+        "type": "object"
+      }
+    },
+    "archive cells": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/cells/*.jsonl",
+        ".archives/*/measurements/cells/*.jsonl"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.measurement_archive::answer_of"
+      }
+    },
+    "archive claim_lock": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/claims/*.lock",
+        ".archives/*/measurements/claims/*.lock"
+      ],
+      "shape": null
+    },
+    "archive claim_row": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/claims/*.json",
+        ".archives/*/measurements/claims/*.json"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.measurement_archive::claimed_row"
+      }
+    },
+    "archive cold": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/cold/*.jsonl.gz",
+        ".archives/*/measurements/cold/*.jsonl.gz"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.measurement_archive::decode_cold"
+      }
+    },
+    "archive config": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/configs/*.json",
+        ".archives/*/measurements/configs/*.json"
+      ],
+      "shape": {
+        "additionalProperties": false,
+        "description": "A configuration as its archive file holds it: nothing any dataset or answer says of it.",
+        "properties": {
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
+          "node_configs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Node Configs",
+            "type": "array"
+          },
+          "pipeline_params": {
+            "additionalProperties": true,
+            "title": "Pipeline Params",
+            "type": "object"
+          },
+          "prompt_fields_id": {
+            "title": "Prompt Fields Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "config_key",
+          "prompt_fields_id",
+          "node_configs",
+          "pipeline_params"
+        ],
+        "title": "ArchiveConfig",
+        "type": "object"
+      }
+    },
+    "archive index": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/index.jsonl",
+        ".archives/*/measurements/index.jsonl"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.measurement_archive::index_row"
+      }
+    },
+    "archive sample_fold": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/measurements/sample_folds/*.jsonl",
+        ".archives/*/measurements/sample_folds/*.jsonl"
+      ],
+      "shape": {
+        "reader": "pydantic.main::BaseModel.model_validate_json"
+      }
+    },
+    "bank": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/banks/*.json"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.tenant_dataset_store::read_bank"
+      }
+    },
+    "blocklist": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/blocklist.json"
+      ],
+      "shape": {
+        "additionalProperties": false,
+        "properties": {
+          "emails": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Emails",
+            "type": "array"
+          }
+        },
+        "required": [
+          "emails"
+        ],
+        "title": "Blocklist",
+        "type": "object"
+      }
+    },
+    "blocklist audit": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/blocklist_audit.jsonl"
+      ],
+      "shape": null
+    },
+    "charges": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/charges.jsonl"
+      ],
+      "shape": {
+        "$defs": {
+          "BilledCharge": {
+            "additionalProperties": false,
+            "description": "One answered part of a send, booked as it lands; both figures ``None`` is unpriced.",
+            "properties": {
+              "cost_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Cost Usd"
+              },
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "key_source": {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "title": "Key Source",
+                "type": "string"
+              },
+              "rate_priced_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Rate Priced Usd"
+              },
+              "record_type": {
+                "const": "billed",
+                "default": "billed",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              },
+              "tokens": {
+                "title": "Tokens",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "hold_id",
+              "key_source",
+              "cost_usd",
+              "rate_priced_usd",
+              "tokens"
+            ],
+            "title": "BilledCharge",
+            "type": "object"
+          },
+          "HeldCharge": {
+            "additionalProperties": false,
+            "description": "A send's hold, booked as it is placed: unclosed, it is what the send may have cost.",
+            "properties": {
+              "cost_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Cost Usd"
+              },
+              "hold_id": {
+                "title": "Hold Id",
+                "type": "string"
+              },
+              "input_tokens": {
+                "title": "Input Tokens",
+                "type": "integer"
+              },
+              "key_source": {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "title": "Key Source",
+                "type": "string"
+              },
+              "ledger": {
+                "title": "Ledger",
+                "type": "string"
+              },
+              "output_tokens": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Output Tokens"
+              },
+              "record_type": {
+                "const": "held",
+                "default": "held",
+                "title": "Record Type",
+                "type": "string"
+              },
+              "timestamp": {
+                "title": "Timestamp",
+                "type": "string"
+              }
+            },
+            "required": [
+              "hold_id",
+              "key_source",
+              "input_tokens",
+              "output_tokens",
+              "cost_usd",
+              "ledger"
+            ],
+            "title": "HeldCharge",
+            "type": "object"
+          }
+        },
+        "anyOf": [
+          {
+            "$ref": "#/$defs/HeldCharge"
+          },
+          {
+            "$ref": "#/$defs/BilledCharge"
+          }
+        ]
+      }
+    },
+    "check-in manifest": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "checkin/pipeline.yaml"
+      ],
+      "shape": {
+        "$defs": {
+          "ManifestNode": {
+            "additionalProperties": false,
+            "properties": {
+              "config": {
+                "additionalProperties": true,
+                "title": "Config",
+                "type": "object"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Description"
+              },
+              "makes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Makes"
+              },
+              "optimizer": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Optimizer"
+              },
+              "type": {
+                "$ref": "#/$defs/NodeKind"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ManifestNode",
+            "type": "object"
+          },
+          "NodeKind": {
+            "description": "Closed: an unlisted ``type:`` is refused at parse. A GATEWAY runs another pipeline and owns no config.",
+            "enum": [
+              "llm",
+              "agent",
+              "retriever",
+              "tool",
+              "cache",
+              "measurement",
+              "sampler",
+              "eliminator",
+              "selector",
+              "algorithm",
+              "controller"
+            ],
+            "title": "NodeKind",
+            "type": "string"
+          },
+          "OptimizerPromptTemplate": {
+            "additionalProperties": false,
+            "description": "A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces.",
+            "properties": {
+              "answer_format": {
+                "default": "",
+                "title": "Answer Format",
+                "type": "string"
+              },
+              "instruction": {
+                "default": "",
+                "title": "Instruction",
+                "type": "string"
+              },
+              "persona": {
+                "default": "",
+                "title": "Persona",
+                "type": "string"
+              },
+              "problem_description": {
+                "default": "",
+                "title": "Problem Description",
+                "type": "string"
+              },
+              "task_intent": {
+                "default": "",
+                "title": "Task Intent",
+                "type": "string"
+              },
+              "thinking_style": {
+                "default": "",
+                "title": "Thinking Style",
+                "type": "string"
+              }
+            },
+            "title": "OptimizerPromptTemplate",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "A `pipeline.yaml` typed at load — an optimizer's, or the bench's check-in.",
+        "properties": {
+          "available_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Models",
+            "type": "array"
+          },
+          "initial_population_walks": {
+            "anyOf": [
+              {
+                "enum": [
+                  "alone",
+                  "before_default"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Initial Population Walks"
+          },
+          "main": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Main",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nodes": {
+            "additionalProperties": {
+              "$ref": "#/$defs/ManifestNode"
+            },
+            "title": "Nodes",
+            "type": "object"
+          },
+          "paper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Paper"
+          },
+          "pipelines": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Pipelines",
+            "type": "object"
+          },
+          "resolved_prompts": {
+            "additionalProperties": {
+              "$ref": "#/$defs/OptimizerPromptTemplate"
+            },
+            "title": "Resolved Prompts",
+            "type": "object"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "available_models",
+          "nodes",
+          "pipelines",
+          "main"
+        ],
+        "title": "PipelineManifest",
+        "type": "object"
+      }
+    },
+    "environment": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        ".env"
+      ],
+      "shape": null
+    },
+    "free tier": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "free_tier.yaml"
+      ],
+      "shape": {
+        "$defs": {
+          "Ask": {
+            "additionalProperties": false,
+            "properties": {
+              "linkedin": {
+                "title": "Linkedin",
+                "type": "string"
+              }
+            },
+            "required": [
+              "linkedin"
+            ],
+            "title": "Ask",
+            "type": "object"
+          },
+          "Bounds": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "ask": {
+            "$ref": "#/$defs/Ask"
+          },
+          "campaign": {
+            "additionalProperties": true,
+            "title": "Campaign",
+            "type": "object"
+          },
+          "optimizer_models": {
+            "additionalProperties": {
+              "$ref": "#/$defs/Bounds"
+            },
+            "title": "Optimizer Models",
+            "type": "object"
+          },
+          "task_models": {
+            "additionalProperties": {
+              "$ref": "#/$defs/Bounds"
+            },
+            "title": "Task Models",
+            "type": "object"
+          },
+          "task_nodes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Task Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "task_nodes",
+          "task_models",
+          "optimizer_models",
+          "campaign",
+          "ask"
+        ],
+        "title": "FreeTier",
+        "type": "object"
+      }
+    },
+    "grant": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/grant.json"
+      ],
+      "shape": {
+        "$defs": {
+          "Budget": {
+            "additionalProperties": false,
+            "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+            "properties": {
+              "rounds": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
+                "title": "Rounds"
+              },
+              "tokens": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
+                "title": "Tokens"
+              },
+              "usd": {
+                "anyOf": [
+                  {
+                    "ge": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
+                "title": "Usd"
+              },
+              "wall_clock_s": {
+                "anyOf": [
+                  {
+                    "gt": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
+                "title": "Wall Clock S"
+              }
+            },
+            "title": "Budget",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "The host's hand-set coupon for one account, replacing the box's default face in both units.",
+        "properties": {
+          "face": {
+            "$ref": "#/$defs/Budget",
+            "description": "The coupon's face per unit; an axis left unset is unbounded on the box's keys."
+          },
+          "granted_at": {
+            "title": "Granted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "face"
+        ],
+        "title": "CouponGrant",
+        "type": "object"
+      }
+    },
+    "grants": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/grants.json"
+      ],
+      "shape": {
+        "$defs": {
+          "PrincipalGrant": {
+            "additionalProperties": false,
+            "description": "An empty ``delegated_by`` is a DENIED grant: own tenant, no command caps, never an owner.",
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Capabilities",
+                "type": "array",
+                "uniqueItems": true
+              },
+              "delegated_by": {
+                "title": "Delegated By",
+                "type": "string"
+              },
+              "note": {
+                "title": "Note",
+                "type": "string"
+              },
+              "spend_ceiling_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Spend Ceiling Usd"
+              }
+            },
+            "required": [
+              "delegated_by",
+              "capabilities",
+              "spend_ceiling_usd",
+              "note"
+            ],
+            "title": "PrincipalGrant",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "grants": {
+            "additionalProperties": {
+              "$ref": "#/$defs/PrincipalGrant"
+            },
+            "title": "Grants",
+            "type": "object"
+          }
+        },
+        "required": [
+          "grants"
+        ],
+        "title": "GrantsFile",
+        "type": "object"
+      }
+    },
+    "grants audit": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/grants_audit.jsonl"
+      ],
+      "shape": null
+    },
+    "host claim": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/default_claimed.json"
+      ],
+      "shape": {
+        "additionalProperties": false,
+        "description": "``default_claim_marker``: the host's account, written at its first sign-in; `renamed` is whether `default` became it.",
+        "properties": {
+          "claimed_at": {
+            "title": "Claimed At",
+            "type": "string"
+          },
+          "renamed": {
+            "title": "Renamed",
+            "type": "boolean"
+          },
+          "user_id": {
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "claimed_at",
+          "renamed"
+        ],
+        "title": "DefaultClaim",
+        "type": "object"
+      }
+    },
+    "install block packs": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "block_packs/**"
+      ],
+      "shape": null
+    },
+    "judge_reuse": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/judge_reuse/*.json",
+        ".archives/*/judge_reuse/*.json"
+      ],
+      "shape": {
+        "$defs": {
+          "TokenAccount": {
+            "additionalProperties": false,
+            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
+            "properties": {
+              "cache_read": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read"
+              },
+              "cache_write": {
+                "default": 0,
+                "title": "Cache Write",
+                "type": "integer"
+              },
+              "input": {
+                "default": 0,
+                "title": "Input",
+                "type": "integer"
+              },
+              "output": {
+                "default": 0,
+                "title": "Output",
+                "type": "integer"
+              },
+              "reasoning": {
+                "default": 0,
+                "title": "Reasoning",
+                "type": "integer"
+              }
+            },
+            "title": "TokenAccount",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Response content",
+            "title": "Content",
+            "type": "string"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the PROVIDER says the call cost, summed across a repair retry (both round-trips are billed). Its own field rather than a ``usage`` key because ``usage`` counts tokens and this is money. ``None`` means the provider reported nothing — the honest answer, never a zero nobody measured. The call is then priced at our rate in its own field (``telemetry.py::rate_priced_usd``), never in this one.",
+            "title": "Cost Usd"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none.",
+            "title": "Finish Reason"
+          },
+          "model": {
+            "description": "Model used",
+            "title": "Model",
+            "type": "string"
+          },
+          "parsed": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Parsed response. Typed Pydantic instance when ``chat`` was called with ``response_model``; plain dict when only ``response_schema`` was supplied; ``None`` for text-mode.",
+            "title": "Parsed"
+          },
+          "reasoning": {
+            "default": "",
+            "description": "The model's own thinking channel (``message.reasoning`` on the OpenAI-compat wire); empty for non-reasoning models. A CORE field: a model with nowhere to put its internal process answers without one, so the slot is part of the ask and capturing it is part of the contract. Strictly ANALYTICAL — it rides the ledger to the audit trail and the operator's node detail, and must NEVER feed a gate, metric, validator, scorer, or cache key. Having no code reader is by design; do not delete it as dead surface.",
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "schema_repair_errors": {
+            "description": "The schema rules each retried attempt broke, one entry per paid retry before the parsed response landed — empty on a clean first parse. Its length is the retry count: bad templates produce schema-noncompliant JSON and silently double-up the LLM spend, and the entries say which rule the prompt fails to teach.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Schema Repair Errors",
+            "type": "array"
+          },
+          "served_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "WHICH upstream host answered, where the provider is a gateway that routes onward; ``None`` where it is its own host. Distinct from the provider, which names who we called and so reads the same for every route through it. Analytical like ``reasoning`` — never a gate, metric or cache key.",
+            "title": "Served By"
+          },
+          "usage": {
+            "$ref": "#/$defs/TokenAccount",
+            "description": "What this call consumed. A provider's own spelling stops at the client that parses it: every client normalizes to this account, and no consumer converts."
+          }
+        },
+        "required": [
+          "content",
+          "model"
+        ],
+        "title": "LLMResponse",
+        "type": "object"
+      }
+    },
+    "model rates": {
+      "fate": "CACHE",
+      "patterns": [
+        "rates.json"
+      ],
+      "shape": null
+    },
+    "optimizer manifest": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "optimizers/*/pipeline.yaml"
+      ],
+      "shape": {
+        "$defs": {
+          "ManifestNode": {
+            "additionalProperties": false,
+            "properties": {
+              "config": {
+                "additionalProperties": true,
+                "title": "Config",
+                "type": "object"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Description"
+              },
+              "makes": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Makes"
+              },
+              "optimizer": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Optimizer"
+              },
+              "type": {
+                "$ref": "#/$defs/NodeKind"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "ManifestNode",
+            "type": "object"
+          },
+          "ManifestSwap": {
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "title": "Node",
+                "type": "string"
+              },
+              "of": {
+                "title": "Of",
+                "type": "string"
+              }
+            },
+            "required": [
+              "node",
+              "of"
+            ],
+            "title": "ManifestSwap",
+            "type": "object"
+          },
+          "ManifestSwitch": {
+            "additionalProperties": false,
+            "description": "A switch: the whole manifest ``extends`` names, each node ``swap`` names replaced by another manifest's node of its type.",
+            "properties": {
+              "extends": {
+                "title": "Extends",
+                "type": "string"
+              },
+              "main": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Main",
+                "type": "array"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "paper": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Paper"
+              },
+              "swap": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/ManifestSwap"
+                },
+                "title": "Swap",
+                "type": "object"
+              },
+              "version": {
+                "title": "Version",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "extends",
+              "swap",
+              "main"
+            ],
+            "title": "ManifestSwitch",
+            "type": "object"
+          },
+          "NodeKind": {
+            "description": "Closed: an unlisted ``type:`` is refused at parse. A GATEWAY runs another pipeline and owns no config.",
+            "enum": [
+              "llm",
+              "agent",
+              "retriever",
+              "tool",
+              "cache",
+              "measurement",
+              "sampler",
+              "eliminator",
+              "selector",
+              "algorithm",
+              "controller"
+            ],
+            "title": "NodeKind",
+            "type": "string"
+          },
+          "OptimizerPromptTemplate": {
+            "additionalProperties": false,
+            "description": "A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces.",
+            "properties": {
+              "answer_format": {
+                "default": "",
+                "title": "Answer Format",
+                "type": "string"
+              },
+              "instruction": {
+                "default": "",
+                "title": "Instruction",
+                "type": "string"
+              },
+              "persona": {
+                "default": "",
+                "title": "Persona",
+                "type": "string"
+              },
+              "problem_description": {
+                "default": "",
+                "title": "Problem Description",
+                "type": "string"
+              },
+              "task_intent": {
+                "default": "",
+                "title": "Task Intent",
+                "type": "string"
+              },
+              "thinking_style": {
+                "default": "",
+                "title": "Thinking Style",
+                "type": "string"
+              }
+            },
+            "title": "OptimizerPromptTemplate",
+            "type": "object"
+          },
+          "PipelineManifest": {
+            "additionalProperties": false,
+            "description": "A `pipeline.yaml` typed at load — an optimizer's, or the bench's check-in.",
+            "properties": {
+              "available_models": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Available Models",
+                "type": "array"
+              },
+              "initial_population_walks": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "alone",
+                      "before_default"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Initial Population Walks"
+              },
+              "main": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Main",
+                "type": "array"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "nodes": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/ManifestNode"
+                },
+                "title": "Nodes",
+                "type": "object"
+              },
+              "paper": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Paper"
+              },
+              "pipelines": {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "title": "Pipelines",
+                "type": "object"
+              },
+              "resolved_prompts": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/OptimizerPromptTemplate"
+                },
+                "title": "Resolved Prompts",
+                "type": "object"
+              },
+              "version": {
+                "title": "Version",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "available_models",
+              "nodes",
+              "pipelines",
+              "main"
+            ],
+            "title": "PipelineManifest",
+            "type": "object"
+          }
+        },
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PipelineManifest"
+          },
+          {
+            "$ref": "#/$defs/ManifestSwitch"
+          }
+        ]
+      }
+    },
+    "optimizer_reuse": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/optimizer_reuse/*.json",
+        ".archives/*/optimizer_reuse/*.json"
+      ],
+      "shape": {
+        "$defs": {
+          "TokenAccount": {
+            "additionalProperties": false,
+            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
+            "properties": {
+              "cache_read": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read"
+              },
+              "cache_write": {
+                "default": 0,
+                "title": "Cache Write",
+                "type": "integer"
+              },
+              "input": {
+                "default": 0,
+                "title": "Input",
+                "type": "integer"
+              },
+              "output": {
+                "default": 0,
+                "title": "Output",
+                "type": "integer"
+              },
+              "reasoning": {
+                "default": 0,
+                "title": "Reasoning",
+                "type": "integer"
+              }
+            },
+            "title": "TokenAccount",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Response content",
+            "title": "Content",
+            "type": "string"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the PROVIDER says the call cost, summed across a repair retry (both round-trips are billed). Its own field rather than a ``usage`` key because ``usage`` counts tokens and this is money. ``None`` means the provider reported nothing — the honest answer, never a zero nobody measured. The call is then priced at our rate in its own field (``telemetry.py::rate_priced_usd``), never in this one.",
+            "title": "Cost Usd"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none.",
+            "title": "Finish Reason"
+          },
+          "model": {
+            "description": "Model used",
+            "title": "Model",
+            "type": "string"
+          },
+          "parsed": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Parsed response. Typed Pydantic instance when ``chat`` was called with ``response_model``; plain dict when only ``response_schema`` was supplied; ``None`` for text-mode.",
+            "title": "Parsed"
+          },
+          "reasoning": {
+            "default": "",
+            "description": "The model's own thinking channel (``message.reasoning`` on the OpenAI-compat wire); empty for non-reasoning models. A CORE field: a model with nowhere to put its internal process answers without one, so the slot is part of the ask and capturing it is part of the contract. Strictly ANALYTICAL — it rides the ledger to the audit trail and the operator's node detail, and must NEVER feed a gate, metric, validator, scorer, or cache key. Having no code reader is by design; do not delete it as dead surface.",
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "schema_repair_errors": {
+            "description": "The schema rules each retried attempt broke, one entry per paid retry before the parsed response landed — empty on a clean first parse. Its length is the retry count: bad templates produce schema-noncompliant JSON and silently double-up the LLM spend, and the entries say which rule the prompt fails to teach.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Schema Repair Errors",
+            "type": "array"
+          },
+          "served_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "WHICH upstream host answered, where the provider is a gateway that routes onward; ``None`` where it is its own host. Distinct from the provider, which names who we called and so reads the same for every route through it. Analytical like ``reasoning`` — never a gate, metric or cache key.",
+            "title": "Served By"
+          },
+          "usage": {
+            "$ref": "#/$defs/TokenAccount",
+            "description": "What this call consumed. A provider's own spelling stops at the client that parses it: every client normalizes to this account, and no consumer converts."
+          }
+        },
+        "required": [
+          "content",
+          "model"
+        ],
+        "title": "LLMResponse",
+        "type": "object"
+      }
+    },
+    "session": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/sessions/*.json"
+      ],
+      "shape": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "tenant_id",
+          "issuer",
+          "subject",
+          "email",
+          "provider",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "SessionData",
+        "type": "object"
+      }
+    },
+    "sign-in providers": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "identity/oidc.json"
+      ],
+      "shape": {
+        "$defs": {
+          "OIDCProviderConfig": {
+            "additionalProperties": false,
+            "properties": {
+              "authorize_url": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorize Url"
+              },
+              "client_id": {
+                "minLength": 1,
+                "title": "Client Id",
+                "type": "string"
+              },
+              "client_secret": {
+                "minLength": 1,
+                "title": "Client Secret",
+                "type": "string"
+              },
+              "issuer": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Issuer"
+              },
+              "jwks_url": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Jwks Url"
+              },
+              "redirect_uri": {
+                "minLength": 1,
+                "title": "Redirect Uri",
+                "type": "string"
+              },
+              "token_url": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Token Url"
+              }
+            },
+            "required": [
+              "client_id",
+              "client_secret",
+              "redirect_uri"
+            ],
+            "title": "OIDCProviderConfig",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "github": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OIDCProviderConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "google": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OIDCProviderConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "ProviderConfigBundle",
+        "type": "object"
+      }
+    },
+    "site records": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "site_records/*.jsonl"
+      ],
+      "shape": {
+        "reader": "promptpotter.infrastructure.store.site_records::site_record"
+      }
+    },
+    "upload": {
+      "fate": "CACHE",
+      "patterns": [
+        "projects/*/uploads/**"
+      ],
+      "shape": null
+    },
+    "user": {
+      "fate": "SURVIVOR",
+      "patterns": [
+        "projects/*/user.json"
+      ],
+      "shape": {
+        "$defs": {
+          "ConsentRecord": {
+            "additionalProperties": false,
+            "description": "``accepted_at`` is SERVER-stamped, never client-supplied: its legal weight rests on that clock.",
+            "properties": {
+              "accepted_at": {
+                "title": "Accepted At",
+                "type": "string"
+              },
+              "version": {
+                "title": "Version",
+                "type": "string"
+              }
+            },
+            "required": [
+              "version",
+              "accepted_at"
+            ],
+            "title": "ConsentRecord",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "demo_mode_enabled": {
+            "default": true,
+            "description": "Surface the built-in try-and-learn demo dataset in the collection. On by default for new users; toggled in Account → Preferences.",
+            "title": "Demo Mode Enabled",
+            "type": "boolean"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "max_campaigns_per_day": {
+            "default": 1000,
+            "minimum": 1,
+            "title": "Max Campaigns Per Day",
+            "type": "integer"
+          },
+          "max_concurrent_cycles": {
+            "default": 2,
+            "minimum": 1,
+            "title": "Max Concurrent Cycles",
+            "type": "integer"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "terms_accepted": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ConsentRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Provable Terms-acceptance record (version + server-stamped timestamp). None until the consent gate is cleared."
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "tenant_id",
+          "created_at"
+        ],
+        "title": "User",
+        "type": "object"
+      }
+    }
+  }
+}

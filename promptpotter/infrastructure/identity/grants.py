@@ -2,83 +2,53 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from pydantic import ValidationError, field_serializer
+
+from promptpotter.domain.strict_model import FrozenModel, WireFloat
+from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class PrincipalGrant:
+class PrincipalGrant(FrozenModel):
     """An empty ``delegated_by`` is a DENIED grant: own tenant, no command caps, never an owner."""
 
-    sub_principal: str
     delegated_by: str
     capabilities: frozenset[str]
-    spend_ceiling_usd: float | None
+    spend_ceiling_usd: WireFloat | None
     note: str
 
     @property
     def is_denied(self) -> bool:
         return not self.delegated_by
 
-
-def _denied(sub_principal: str) -> PrincipalGrant:
-    return PrincipalGrant(
-        sub_principal=sub_principal,
-        delegated_by="",
-        capabilities=frozenset(),
-        spend_ceiling_usd=None,
-        note="",
-    )
+    @field_serializer("capabilities")
+    def serialize_capabilities(self, capabilities: frozenset[str]) -> list[str]:
+        return sorted(capabilities)
 
 
-def _load_grants_raw(path: Path) -> dict[str, object] | None:
-    """``None`` = absent, nobody is a delegate; malformed is ``{}``, deny-all, so no lookup promotes."""
-    if not path.is_file():
-        return None
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("grants.json is not valid JSON; treating as deny-all")
-        return {}
-    grants = data.get("grants") if isinstance(data, dict) else None
-    return grants if isinstance(grants, dict) else {}
+class GrantsFile(FrozenModel):
+    grants: dict[str, PrincipalGrant]
+
+
+def _read(path: Path) -> GrantsFile:
+    """Raises on a file that does not validate; absent is no grants."""
+    raw = read_bytes_optional(path)
+    return GrantsFile(grants={}) if raw is None else GrantsFile.model_validate_json(raw)
 
 
 def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
-    grants = _load_grants_raw(path)
-    if not grants or sub_principal_user_id not in grants:
+    try:
+        grants = _read(path).grants
+    except ValidationError:
+        # Deny-all: an invalid file promotes nobody to a delegate.
+        logger.warning("grants.json does not validate; no grant is read")
         return None
-    entry = grants.get(sub_principal_user_id)
-    if not isinstance(entry, dict):
-        return _denied(sub_principal_user_id)
-    delegated_by = entry.get("delegated_by")
-    if not isinstance(delegated_by, str) or not delegated_by:
-        logger.warning("grant for %s names no delegator; denying", sub_principal_user_id)
-        return _denied(sub_principal_user_id)
-    caps_raw = entry.get("capabilities")
-    caps = (
-        frozenset(c for c in caps_raw if isinstance(c, str))
-        if isinstance(caps_raw, list)
-        else frozenset()
-    )
-    ceiling = entry.get("spend_ceiling_usd")
-    return PrincipalGrant(
-        sub_principal=sub_principal_user_id,
-        delegated_by=delegated_by,
-        capabilities=caps,
-        spend_ceiling_usd=float(ceiling) if isinstance(ceiling, int | float) else None,
-        note=str(entry.get("note", "")),
-    )
+    return grants.get(sub_principal_user_id)
 
 
 def resolve_effective_capabilities(
@@ -88,15 +58,8 @@ def resolve_effective_capabilities(
     return grant.capabilities & delegator_capabilities
 
 
-def _load_grants_for_edit(path: Path) -> dict[str, dict[str, object]]:
-    grants = _load_grants_raw(path)
-    if not grants:
-        return {}
-    return {k: v for k, v in grants.items() if isinstance(v, dict)}
-
-
-def list_grants(path: Path) -> dict[str, dict[str, object]]:
-    return _load_grants_for_edit(path)
+def list_grants(path: Path) -> dict[str, PrincipalGrant]:
+    return _read(path).grants
 
 
 def _append_audit(
@@ -114,6 +77,10 @@ def _append_audit(
     )
 
 
+def _write(path: Path, grants: dict[str, PrincipalGrant]) -> None:
+    write_json(path, GrantsFile(grants=grants).model_dump(mode="json"))
+
+
 def grant_principal(
     path: Path,
     *,
@@ -126,19 +93,24 @@ def grant_principal(
     audit_path: Path,
 ) -> None:
     """Refuses a sub-principal AS delegator: the read-time ceiling walks one level only."""
-    if read_grant(path, delegated_by_user_id) is not None:
+    grants = _read(path).grants
+    if delegated_by_user_id in grants:
         raise ValueError(
             f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
             "(one-level delegation only)"
         )
-    grants = _load_grants_for_edit(path)
-    grants[sub_principal_user_id] = {
-        "delegated_by": delegated_by_user_id,
-        "capabilities": sorted(capabilities),
-        "spend_ceiling_usd": spend_ceiling_usd,
-        "note": note,
-    }
-    write_json(path, {"grants": grants})
+    _write(
+        path,
+        {
+            **grants,
+            sub_principal_user_id: PrincipalGrant(
+                delegated_by=delegated_by_user_id,
+                capabilities=capabilities,
+                spend_ceiling_usd=spend_ceiling_usd,
+                note=note,
+            ),
+        },
+    )
     _append_audit(
         audit_path,
         action="grant",
@@ -151,10 +123,10 @@ def grant_principal(
 def revoke_principal(
     path: Path, *, sub_principal_user_id: str, actor: str, audit_path: Path
 ) -> bool:
-    grants = _load_grants_for_edit(path)
-    removed = grants.pop(sub_principal_user_id, None) is not None
+    grants = _read(path).grants
+    removed = sub_principal_user_id in grants
     if removed:
-        write_json(path, {"grants": grants})
+        _write(path, {k: v for k, v in grants.items() if k != sub_principal_user_id})
     _append_audit(
         audit_path,
         action="revoke",

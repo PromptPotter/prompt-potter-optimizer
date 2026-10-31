@@ -47,7 +47,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
   projects/{tenant_id}/
     user.json  grant.json  api_keys.json
     charges.jsonl                       # the account's bill, one line per hold and billed send
-    .workspace/                         # run data: `reset` drops it with the campaigns it names
+    .workspace/                         # run data: `reset` drops it with the campaigns
       active_session.json
       events.jsonl                      # workspace ledger — commands with no cycle, the account's events
     head_to_heads/{id}.json             # `domain/campaign.py::HeadToHeadRecord`
@@ -74,7 +74,12 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
     uploads/{sha256[:16]}.{ext}         # every ingested file, kept before parsing; never served
 ```
 
-**Why this shape.** Telemetry is temporal (each cycle owns its `dashboard.json`), audit is structural (frozen records keyed by the producing cycle), and cycles sit flat because a fork tree keyed by `parent` scales where nested directories don't. `measurements/` is a cross-cycle peer of `campaigns/`, so a fresh `new` cache-hits every origin sample under its own `campaign_id`. **`config/paths.py::SHARED_CACHE_DIRS` is the whole of the paid tier** — what `build_stores` roots at the archive home, what `reset` preserves and what the storage report counts — so a cache missing from it is destroyed by the first `reset`. No recycle bin: an archived campaign stays in `campaigns/`, hidden by `lifecycle_status`.
+**Every file here is named by exactly one row of `infrastructure/store/data_root.py::KINDS`**: its fate
+(SURVIVOR, CACHE, RUN, MACHINE) and the shape its own reader loads. `prove-data` loads the whole tree
+and names every file no row names; `reset` drops RUN files, unnamed files and caches that no longer
+load — owned by [`decisions.md`](../decisions.md) § 0011.
+
+**Why this shape.** Telemetry is temporal (each cycle owns its `dashboard.json`), audit is structural (frozen records keyed by the producing cycle), and cycles sit flat because a fork tree keyed by `parent` scales where nested directories don't. `measurements/` is a cross-cycle peer of `campaigns/`, so a fresh `new` cache-hits every origin sample under its own `campaign_id`. **`config/paths.py::SHARED_CACHE_DIRS` is the whole of the paid tier** — what `build_stores` roots at the archive home and what the storage report counts; `data_root.py` names each as a CACHE row, so a cache with no row is dropped by the first `reset`. No recycle bin: an archived campaign stays in `campaigns/`, hidden by `lifecycle_status`.
 
 ## File reference
 
@@ -191,6 +196,6 @@ The scorer compiles once at run init (`initialization/loop_start.py::populate_se
 
 ## The storage taxonomy — Connector / Loop / Dataset
 
-Every byte lands in exactly one leaf — Dataset, Connector, and Loop's State / Trace / History / Reports — classified by `store/layout.py::classify` and reported by `application/maintenance/storage_report.py`. Reports derive from `store/layout.py::_REPORT_NAMES`, never hand-listed: a surface missing from it is deleted by `--keep-results`. The keepsake is a cross-cutting subset, never a summed figure.
+Every byte lands in exactly one leaf — Dataset, Connector, and Loop's State / Trace / History / Reports — by its row's `store/data_root.py::Leaf` in `CAMPAIGN_ROWS`, and reported by `application/maintenance/storage_report.py`. Report rows derive from `store/layout.py::declared_files`, never hand-listed: a surface missing from it is deleted by `--keep-results`. The keepsake is a cross-cutting subset, never a summed figure.
 
-**Jobs (`.promptpotter/jobs/{job_id}.json`)** record ADMISSION only (`jobs/registry.py::JobStage`, caps, a refusal, `released_at`); how a cycle ended is its ledger's.
+**Jobs (`.promptpotter/jobs/{job_id}.json`)** record ADMISSION only (`domain/job.py::JobStage`, caps, a refusal, `released_at`); how a cycle ended is its ledger's.

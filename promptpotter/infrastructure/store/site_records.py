@@ -28,11 +28,15 @@ class SiteRecord(NamedTuple):
     row: dict[str, Any]
 
 
+def site_record(line: str | bytes) -> SiteRecord:
+    return SiteRecord(**json.loads(line))
+
+
 def _latest(lines: list[str]) -> list[SiteRecord]:
     latest: dict[str | int, SiteRecord] = {}
     for number, line in enumerate(lines):
         try:
-            record = SiteRecord(**json.loads(line))
+            record = site_record(line)
         except (ValueError, TypeError):
             # A line torn by a crash costs itself and no other.
             continue
@@ -71,5 +75,8 @@ class SiteRecordStore:
         return rewrite_lines(self._path(table), dropped)
 
 
+SITE_RECORDS_DIR = "site_records"
+
+
 def default_site_record_store() -> SiteRecordStore:
-    return SiteRecordStore(user_data_root() / "site_records")
+    return SiteRecordStore(user_data_root() / SITE_RECORDS_DIR)

@@ -205,16 +205,29 @@ import-graph script before and after; close each wave with `gate.py --only layer
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
-- **The identity files outlive releases with no model**: `identity/grants.json`, `blocklist.json`,
-  `oidc.json` and `sessions/*.json` are hand-parsed with `.get` defaults
-  (`infrastructure/identity/{grants,blocklist,provider_config,session}.py`), so no shape is pinned and
-  a reshape is read around, never refused; a session missing `user_id` reads as user `""`. Action: a
-  model each whose `ValidationError` keeps today's fail-closed answer (deny-all, block-all, refuse,
-  signed out), then a row in `application/maintenance/survivors.py::SURVIVORS`. **Re-test:** a
-  landing over a `grants.json` with a renamed field.
 - **`reset` guards no live producer**: `maintenance/reset.py::apply_reset` never takes the guard
-  `delete` takes (`_guard_and_release`), so it removes a running cycle's directory under it.
+  `delete` takes (`_guard_and_release`), so it removes a running cycle's files under it.
   Action: take the delete's guard per cycle. **Re-test:** a reset while a run holds its producer lock.
+- **Run files read as dicts have no shape row**: `data_root.py::KINDS` proves `draft.json`,
+  `checkin.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
+  `diagnostics/`, `banks/labels.jsonl` and `cuts.jsonl`, `rates.json` and the langfuse mirror by
+  presence alone, because their readers walk `dict`s (`read_json_optional`, `read_json_tolerant`,
+  `fold_jsonl`). A reshape there passes `prove-data` and is read around. Action: a model per file,
+  its reader's, then its row's shape. **Re-test:** `git grep -n ", None)" -- promptpotter/infrastructure/store/data_root.py`.
+- **Data-root names spelled at the writer and again in `data_root.py`**: `jobs/.landing`,
+  `.admission.lock`, `producers/`, `machine/`, `logs/`, `projects/.accounts.lock`, `diagnostics/`,
+  `task-context/`, `head_to_heads/`, `.workspace/` and `.cache/` are literals in both, since
+  `application/jobs/interlock.py` and its peers sit above `infrastructure/`. A renamed one reads as
+  unknown and is dropped by `reset`. Action: one constant per name in `config/paths.py` or `layout.py`,
+  read by both. **Re-test:** rename `_LANDING` and run `prove-data` on a box with a landing open.
+- **`site_records/*.jsonl` reads around a torn line** (`store/site_records.py::_latest`), while
+  `prove-data` refuses it, so a landing over a crash-torn row refuses while the site still serves.
+  Action: decide one policy for a torn append-only line. **Re-test:** a site table with a half line.
+- **`CampaignOwner` reads `campaign.json` beside `Campaign`** (`campaign_store/store.py::campaign_owner`),
+  a second, tolerant model of one file. Action: one model. **Re-test:** `git grep -n "CampaignOwner" -- promptpotter`.
+- **Writers with no reader**: `dashboard.json` and `index.json` (checkouts nothing reads back), and
+  `identity/blocklist_audit.jsonl` and `grants_audit.jsonl`. Action: decide whether each earns a
+  reader or goes. **Re-test:** `git grep -n "blocklist_audit" -- promptpotter`.
 - **One act on an arm writes two records**: `runner/arm_gate.py` and `scoring/query_loop.py` append
   an `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both
   reads derive from. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
@@ -751,8 +764,6 @@ word's `git grep -c` for that sense is 0.
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
 - **Seen removing the migrations** (2026-10-30):
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
-  - `identity/default_claim.py::_rewrite_campaign_ownership` writes `campaign.json` beside
-    `CampaignStore.update_campaign`, and logs an unreadable manifest instead of refusing.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
   - `family_ray_queries.py::_RayTail` gets a line no activity arm accepts as a `feed_fold` log, not a
     `LedgerUnreadableError`: `LineIndex` validates JSON only. Both tails skip an unknown

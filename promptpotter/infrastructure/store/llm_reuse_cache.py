@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from promptpotter.infrastructure.store.io import read_json_optional, write_json
+from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.store.io import read_bytes_optional, write_text
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
 logger = logging.getLogger(__name__)
@@ -51,9 +52,10 @@ class LLMReuseCache:
     def _path(self, key: str) -> Path:
         return self._dir / f"{key}.json"
 
-    def load(self, key: str) -> dict[str, Any] | None:
-        return read_json_optional(self._path(key))
+    def load(self, key: str) -> LLMResponse | None:
+        raw = read_bytes_optional(self._path(key))
+        return None if raw is None else LLMResponse.model_validate_json(raw)
 
-    def save(self, key: str, value: dict[str, Any]) -> None:
-        write_json(self._path(key), value)
+    def save(self, key: str, response: LLMResponse) -> None:
+        write_text(self._path(key), response.model_dump_json(indent=2))
         logger.debug("LLMReuseCache[%s]: saved %s", self._namespace, key)

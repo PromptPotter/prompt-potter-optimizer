@@ -317,13 +317,21 @@ if yaml.load(_yaml_text(_hazards), Loader=_YAML_LOADER) != _hazards:
 del _hazards
 
 
-def read_yaml(path: Path) -> Any:
+def parse_yaml(text: str | bytes) -> Any:
     """`yaml.YAMLError` is no `ValueError`, which every guard in this tree catches, so it is wrapped here."""
     try:
-        with open(_long_path(path), encoding="utf-8") as f:
-            return yaml.load(f, Loader=_YAML_LOADER)
+        return yaml.load(text, Loader=_YAML_LOADER)
     except yaml.YAMLError as exc:
-        raise ValueError(f"{path} is not valid YAML — {exc}") from exc
+        raise ValueError(f"not valid YAML — {exc}") from exc
+
+
+def read_yaml(path: Path) -> Any:
+    with open(_long_path(path), encoding="utf-8") as f:
+        text = f.read()
+    try:
+        return parse_yaml(text)
+    except ValueError as exc:
+        raise ValueError(f"{path} is {exc}") from exc
 
 
 def read_yaml_optional(path: Path) -> Any | None:

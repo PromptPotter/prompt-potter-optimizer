@@ -3,16 +3,10 @@ from __future__ import annotations
 from pydantic import Field
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity, throttle_hold
-from promptpotter.application.jobs.registry import (
-    UNRESOLVED_HOP,
-    EmbeddedRun,
-    InnerRun,
-    Job,
-    JobRegistry,
-    SlotHolder,
-)
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.job import UNRESOLVED_HOP, EmbeddedRun, InnerRun, Job, SlotHolder
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host

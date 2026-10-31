@@ -7,7 +7,7 @@ from promptpotter.application import health
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.maintenance.survivors import check_survivors
+from promptpotter.application.maintenance.reset import prove
 from promptpotter.config.paths import user_data_root
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.admin_bot import check_health_and_tell
@@ -61,18 +61,32 @@ async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_survivors(_args: argparse.Namespace) -> CommandResult:
-    checked = check_survivors(user_data_root())
+async def cmd_prove_data(_args: argparse.Namespace) -> CommandResult:
+    proof = prove(user_data_root())
+    # The first two words are what `deploy-linux/update.sh` reads.
+    lines = [
+        *(f"unknown {path}" for path in proof.unknown),
+        *(
+            f"unloadable {one.found.kind.fate.value} {one.found.kind.name} {one.path}: {one.why}"
+            for one in proof.unloadable
+        ),
+    ]
     return CommandResult(
         data={
-            "held": checked.held,
-            "unloadable": {str(one.path): one.why for one in checked.unloadable},
+            "held": proof.held,
+            "unknown": [str(path) for path in proof.unknown],
+            "unloadable": [
+                {
+                    "path": str(one.path),
+                    "fate": one.found.kind.fate.value,
+                    "kind": one.found.kind.name,
+                    "why": one.why,
+                }
+                for one in proof.unloadable
+            ],
         },
-        human="\n".join(
-            [f"unloadable {one.path}: {one.why}" for one in checked.unloadable]
-            or [f"held {checked.held} survivor file(s)"]
-        ),
-        outcome=StopOutcome.FAILED if checked.unloadable else StopOutcome.SUCCESS,
+        human="\n".join(lines or [f"held {proof.held} file(s)"]),
+        outcome=StopOutcome.FAILED if lines else StopOutcome.SUCCESS,
     )
 
 

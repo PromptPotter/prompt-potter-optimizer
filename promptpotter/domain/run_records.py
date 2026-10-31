@@ -5,7 +5,7 @@ import os
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, NamedTuple, Self
+from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -1346,6 +1346,10 @@ CycleRecord = Annotated[
 
 RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(
     CycleRecord, config=ConfigDict(defer_build=True)
+)
+
+RECORD_KINDS: frozenset[str] = frozenset(
+    arm.model_fields["record_type"].default for arm in get_args(get_args(CycleRecord)[0])
 )
 
 

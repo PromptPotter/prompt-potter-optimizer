@@ -10,6 +10,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
+from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
@@ -39,7 +40,6 @@ from promptpotter.infrastructure.llm.telemetry import (
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.runtime_flags import standing_budget
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_share
-from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
@@ -192,7 +192,7 @@ class LiveHold:
         stat = self.job_file.stat()
         stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
         if stamp != self._stamp:
-            self._reserve = Budget.model_validate(read_json(self.job_file)["reserve"])
+            self._reserve = JOB_ADAPTER.validate_json(self.job_file.read_bytes()).reserve
             self._stamp = stamp
         return Hold(share.allotment, self._reserve)
 

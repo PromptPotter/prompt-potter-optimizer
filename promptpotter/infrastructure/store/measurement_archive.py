@@ -8,7 +8,7 @@ import re
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
@@ -34,11 +34,10 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.read_model import (
     append_row,
     file_sig,
-    fold_jsonl_from,
+    read_jsonl_from,
 )
 from promptpotter.shared.hashing import ADDRESS_HEX, CANONICAL_PIN, stable_hash
 
-ANSWER_KEY = "answer"
 _INDEX_FOLD_KEY = "k"
 _FILES_MAX_BYTES = 32 << 20
 
@@ -147,8 +146,10 @@ def _matches_subset(
     return True
 
 
-def indexed_entry(row: Mapping[str, Any]) -> ArchiveEntry:
-    return ArchiveEntry.model_validate({k: v for k, v in row.items() if k != _INDEX_FOLD_KEY})
+def index_row(line: str | bytes) -> tuple[str, ArchiveEntry]:
+    row: dict[str, Any] = json.loads(line)
+    entry = ArchiveEntry.model_validate({k: v for k, v in row.items() if k != _INDEX_FOLD_KEY})
+    return row[_INDEX_FOLD_KEY], entry
 
 
 def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
@@ -159,13 +160,15 @@ def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
     return offset if st.st_ino == inode and st.st_size >= offset else 0
 
 
-def answer_of(line: str) -> FiledAnswer | None:
-    """``None`` is a line holding no JSON object; an object that is no answer raises."""
-    try:
-        row = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return FiledAnswer.from_wire(row) if isinstance(row, dict) else None
+def answer_of(line: str | bytes) -> FiledAnswer:
+    row = json.loads(line)
+    if not isinstance(row, dict):
+        raise ValueError(f"a cell line holds an answer, not a {type(row).__name__}")
+    return FiledAnswer.from_wire(row)
+
+
+def claimed_row(raw: bytes) -> MeasuredCell:
+    return MeasuredCell.from_wire(json.loads(raw))
 
 
 def answer_line(answer: FiledAnswer) -> str:
@@ -217,9 +220,7 @@ def _encode_cold(moved: list[MovedFields]) -> bytes | None:
     return gzip.compress(blob.encode("utf-8"), 6)
 
 
-def _decode_cold(raw: bytes | None) -> list[MovedFields]:
-    if raw is None:
-        return []
+def decode_cold(raw: bytes) -> list[MovedFields]:
     text = gzip.decompress(raw).decode("utf-8")
     held = [json.loads(line) for line in text.splitlines() if line.strip()]
     return [MovedFields(e["k"], PipelineData.from_wire(e["pd"])) for e in held]
@@ -255,9 +256,9 @@ class _CellFile:
         if sig == self._stat:
             return
         start = _tail_from(st, self._cursor)
-        # The fold returns the newline-aligned offset, so a torn trailing line stays pending.
-        folded, offset = fold_jsonl_from(path, ANSWER_KEY, start)
-        fresh = {ref: FiledAnswer.from_wire(row) for ref, row in folded.items()}
+        # The read returns the newline-aligned offset, so a torn trailing line stays pending.
+        read, offset = read_jsonl_from(path, answer_of, start)
+        fresh = {answer.answer: answer for answer in read}
         if start == 0:
             self._empty()
         self.rows.extend(fresh.values())
@@ -367,8 +368,8 @@ class MeasurementArchive:
             if self._rows is not None and sig == self._stat:
                 return self._rows
             start = 0 if self._rows is None else _tail_from(st, self._cursor)
-            folded, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
-            fresh = {fold_key: indexed_entry(row) for fold_key, row in folded.items()}
+            read, offset = read_jsonl_from(path, index_row, start)
+            fresh = dict(read)
             # A NEW dict per change: a reader still iterating the shared one must not see it grow.
             self._rows = {**self._rows, **fresh} if start and self._rows is not None else fresh
             self._cursor = (st.st_ino, offset)
@@ -531,7 +532,7 @@ class MeasurementArchive:
         shrinks after, so every moved field is in one file or the other at every instant."""
 
         def paired(lines: list[str], held: bytes | None) -> tuple[PairWrite | None, T]:
-            cold = _decode_cold(held)
+            cold = [] if held is None else decode_cold(held)
             rewrite, result = transform(lines, cold)
             if rewrite is None:
                 return None, result
@@ -550,7 +551,8 @@ class MeasurementArchive:
             return 0
 
     def read_cold(self, file_key: str) -> list[MovedFields]:
-        return _decode_cold(read_bytes_optional(self.cold_path(file_key)))
+        held = read_bytes_optional(self.cold_path(file_key))
+        return [] if held is None else decode_cold(held)
 
     def reindex(self) -> dict[str, int]:
         counts = replace_lines(self._index_path(), self._built_index)
@@ -683,8 +685,8 @@ class ReplayFeed:
     def claimed_cell(self, sample_key: str) -> MeasuredCell | None:
         path = self._archive.path(ArchiveFile.CLAIM_ROW, self.cell_key(sample_key))
         try:
-            row = read_json_optional(path)
+            raw = read_bytes_optional(path)
         except PermissionError:
             # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None
-        return None if row is None else MeasuredCell.from_wire(row)
+        return None if raw is None else claimed_row(raw)
