@@ -21,7 +21,7 @@ from promptpotter.domain.bench import BenchScore, OwnLevel
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.round_health import DegradationHealth
@@ -131,6 +131,9 @@ class RoundOutcome(FrozenModel):
     round: int
     # Its panel arms in slot order, then each reference the round re-read: one key, one state.
     arms: dict[ArmKey, ArmState] = Field(default_factory=dict)
+    # The candidate its line stood on entering it, which the election reads every arm against
+    # (`line_reference`); none at round 0 and on a diag round, which read nothing against one.
+    reference: RoundArm | None
     # Each arm's fold of the cells the round files for it, taken once as the round is measured
     # (`MeasuredRound.folds`); none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
@@ -185,12 +188,6 @@ class RoundOutcome(FrozenModel):
     def panel(self) -> dict[ArmKey, ArmState]:
         """The arms the round PROPOSED, in slot order: no reference it re-read."""
         return {key: arm for key, arm in self.arms.items() if arm.role != MeasurementRole.PARENT}
-
-    @property
-    def reference(self) -> ArmKey | None:
-        """The candidate the round's arms were read against: the arm it re-read, announced as the
-        round enters; none at round 0, which re-reads nothing."""
-        return next((k for k, arm in self.arms.items() if arm.role == MeasurementRole.PARENT), None)
 
     @property
     def candidates_scored(self) -> int:

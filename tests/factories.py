@@ -87,6 +87,7 @@ from promptpotter.domain.paired_reading import (
     MemberAddress,
     PairedReading,
     ReadingState,
+    RoundArm,
 )
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
@@ -793,6 +794,7 @@ def round_result(
     base: dict[str, Any] = {
         "round": rnd,
         "arms": arms,
+        "reference": RoundArm(round=rnd - 1, arm=PARENT) if rnd else None,
         "folds": {
             key: score_summary(total=arm.expected_samples)
             for key, arm in arms.items()

@@ -145,15 +145,15 @@ def _round_result(
     cells = {key: read.rows for key, read in measured.filed.items()}
     # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
     ended_on = winner or measured.parent.key
-    assert line_reference(cycle.rounds).arm == measured.parent.key, (
-        "a round re-reads the candidate its line stands on"
-    )
+    reference = line_reference(cycle.rounds)
+    assert reference.arm == measured.parent.key, "a round re-reads the candidate its line stands on"
     head, head_rows = arms[ended_on], cells[ended_on]
     assert isinstance(head, Concluded)
     not_attempted = max(0, head.expected_samples - len(head_rows)) if winner else 0
     elected_round = RoundResult(
         round=ctx.round_num,
         arms=arms,
+        reference=reference,
         folds=measured.folds,
         cells=cells,
         overlap_results=measured.on_panel,

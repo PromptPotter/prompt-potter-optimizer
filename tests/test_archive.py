@@ -569,6 +569,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
 def _round(**kw: Any) -> RoundResult:
     return RoundResult(
         **{
+            "reference": None,
             "folds": {},
             "election": None,
             "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, False),
@@ -1232,6 +1233,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             _round(
                 round=n,
                 arms=arms,
+                reference=None if row_reference is None else line_reference(line),
                 election=election(
                     None if row_crown is None else ident(row_crown),
                     ended_on=ident(row_ended),

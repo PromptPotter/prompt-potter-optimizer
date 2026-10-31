@@ -92,6 +92,7 @@ def _origin_round(
     origin = RoundResult(
         round=0,
         arms={key: arm},
+        reference=None,
         cells={key: results},
         folds=arm_folds({key: arm}, {key: results}, schema),
         election=Election(

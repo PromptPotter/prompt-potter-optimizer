@@ -6941,6 +6941,16 @@
             "title": "Record Type",
             "type": "string"
           },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundArm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -6955,6 +6965,7 @@
         },
         "required": [
           "round",
+          "reference",
           "folds",
           "election",
           "overlap",
@@ -7305,6 +7316,16 @@
             "title": "Record Type",
             "type": "string"
           },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundArm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -7319,6 +7340,7 @@
         },
         "required": [
           "round",
+          "reference",
           "folds",
           "election",
           "overlap",
