@@ -93,8 +93,8 @@ arm is graded on one bench set under one budget. What controlled switches, one s
 search is the prompt's own fields (`application/jobs/mint.py::_prompt_axes_only`); memory is the
 arm's own line (`infrastructure/store/archive_queries.py::ArmOf`) and the frozen ruler
 (`promptpotter/application/bench/difficulty.py::judging_ruler`), while the cache still replays; the bench pass
-is the launch's own (`application/jobs/mint.py::declare`); every act on an arm is admitted and leaves
-the comparison as its event (`domain/run_records.py::LeftComparisonRecord`); the
+is the launch's own (`application/jobs/mint.py::declare`); every act on an arm is admitted and takes
+its campaign out of the comparison as its event (`domain/run_records.py::LeftComparisonRecord`); the
 ceiling meters search beside bench (`domain/spend.py::CeilingMeter`). Each pair is labelled by one
 served guard (`application/evidence/head_to_head.py::pair_guard`), which refuses no pair.
 

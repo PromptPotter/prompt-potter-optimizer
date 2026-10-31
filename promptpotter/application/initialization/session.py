@@ -25,7 +25,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 if TYPE_CHECKING:
     from promptpotter.application.scoring.evaluators import Evaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.run_records import BackendRevision, ComparisonExit
+    from promptpotter.domain.run_records import BackendRevision
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -135,9 +135,6 @@ class Session:
             experiment=self.backend_client.workload.experiment,
             model_capabilities=self.pipeline_schema.model_capabilities,
         )
-
-    def leave_comparison(self, act: ComparisonExit, *, on: CycleHop) -> None:
-        self.store.campaigns.leave_comparison(on, act, purpose=self.purpose)
 
     def record_intervention(self, kind: str) -> None:
         """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""

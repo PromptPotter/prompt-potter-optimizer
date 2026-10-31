@@ -47,6 +47,7 @@ from processes import REPO, end_children_with_this_process, queue_behind_sibling
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.draft_campaign import split_overlay
 from promptpotter.application.datasets.loaders import definition_source
@@ -56,9 +57,11 @@ from promptpotter.application.embedded_run import (
     run_campaign,
     run_head_to_head,
 )
+from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     manifest_directories,
@@ -76,7 +79,7 @@ from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
 )
-from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
+from promptpotter.domain.command_kinds import ArmRequest, ForkCyclePayload, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
@@ -942,6 +945,22 @@ async def run_controlled(
         f"{[(c.a.optimizer, c.b.optimizer, c.guard.state.value) for c in table.contrasts]}, "
         f"guard {[(r.optimizer, r.guard.state.value) for r in table.rows]}"
     )
+    # An act on an arm is admitted, and takes its campaign out (decisions.md § 0009).
+    name, (cycle, cid) = next(iter(arms.items()))
+    forked = await CommandDispatcher(stores, inline=Inline()).dispatch(
+        CommandCall(
+            ForkCyclePayload(campaign_id=cid, cycle_id=cycle.name, round=1, keep_rounds=True)
+        )
+    )
+    launched = forked.result
+    assert isinstance(launched, Launched) and launched.held is not None
+    await launched.held.run_inline(mode=RunMode(), readout_sink=print)
+    after = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects]).head_to_head
+    assert after is not None
+    row = next(r for r in after.rows if r.campaign_id == cid)
+    if row.guard.state is not GuardState.UNCONTROLLED:
+        raise SystemExit(f"offline run: arm {name} forked and still reads {row.guard.state}")
+    print(f"arm {name}: forked, and left its comparison: {row.guard.sentence}")
 
 
 def _graded(bench: dict[str, Any] | None) -> bool:

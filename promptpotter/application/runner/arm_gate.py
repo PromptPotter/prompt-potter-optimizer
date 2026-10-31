@@ -71,7 +71,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
         session.record_intervention("submit-arms")
-        session.leave_comparison(ComparisonExit.SUBMIT_ARMS, on=session.hop)
+        session.store.campaigns.leave_comparison(session.hop, ComparisonExit.SUBMIT_ARMS)
         bank_proposals(ctx, arms, submitted=True)
         session.state.control.take_submission(command_id, arms=len(arms))
         return arms

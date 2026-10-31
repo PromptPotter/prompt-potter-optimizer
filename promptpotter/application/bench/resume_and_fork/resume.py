@@ -175,9 +175,9 @@ async def _replay_line(
             )
             if not self_inflicted:
                 # The operator's flag ran the line past a divergence it halts on.
-                session.leave_comparison(
+                campaign_store.leave_comparison(
+                    CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
                     ComparisonExit.FORK_ON_DIVERGENCE,
-                    on=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
                 )
             if div.round_num == 0:
                 cycle.reopen_origin()

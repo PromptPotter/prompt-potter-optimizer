@@ -132,8 +132,9 @@ derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.m
   measured, with the loci holding its value verbatim (`donor`, `donated_loci`), a fact, never a guess; each
   other locus it moved off the main links to the earlier candidates closer to its value than the main's —
   most similar first, then latest measured (`gene_sources`, `application/hierarchy_subtree.py::_descent`).
-- **Steer**: mix, access and active subset are fork-seed knobs; a pool write is the command above. A
-  controlled arm refuses both.
+- **Steer**: mix, access and active subset are fork-seed knobs; a pool write is the command above. On a
+  controlled arm a fork is admitted and its campaign leaves the comparison
+  ([`../decisions.md`](../decisions.md) § 0009).
 - **Terminal**: `--set nodes.<node>.<knob>=<yaml>`; REST and the embedded launch carry the same overlay, an
   L4 panel carries it as `inner_nodes` — root [`CLAUDE.md`](../../CLAUDE.md) `<entry-point-parity>`.
 

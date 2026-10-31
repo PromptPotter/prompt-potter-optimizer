@@ -776,7 +776,7 @@ class _ScoringPhase[K: Hashable]:
             if session.state.control.spend_skip():
                 # Stamped where a searchpoint is actually cut, never at the press.
                 session.record_intervention("skip")
-                session.leave_comparison(ComparisonExit.SKIP, on=session.hop)
+                session.store.campaigns.leave_comparison(session.hop, ComparisonExit.SKIP)
             logger.info(
                 "Operator skip after query %d/%d; accepting partial searchpoint.",
                 len(walk.results),

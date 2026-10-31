@@ -562,11 +562,9 @@ word's `git grep -c` for that sense is 0.
   `--push` again and list `%TEMP%\pp-push-*`.
 - **`scripts/offline_run.py --controlled` crashes on main** (fd51d06 and after): the potter arm's
   `_variant_edit` asserts `no framing to cite`, since the controlled leg's prompt holds no
-  `task_context`. Action: the leg declares the framing its fake proposer cites. **Re-test:**
+  `task_context`, so its arm-exit check (`run_controlled`: a fork takes its arm out) never runs.
+  Action: the leg declares the framing its fake proposer cites. **Re-test:**
   `PROMPTPOTTER_HOME=<dir> python scripts/offline_run.py --controlled` exits 0.
-- **The controlled leg exercises no act on an arm**: its skip-refused probe went with the refusal
-  (`decisions.md` § 0009). Action: the leg skips on one arm and reads its `LeftComparisonRecord` and
-  the pair guard's `left_comparison`. **Rides with:** the crash above. **Re-test:** the leg prints an arm leaving.
 - **Seen bounding the perimeter** (2026-10-29):
   - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
     `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against

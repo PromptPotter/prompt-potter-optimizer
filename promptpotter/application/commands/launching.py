@@ -195,10 +195,8 @@ def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[objec
             reason=payload.reason,
         )
         fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id)
-        # On the fork, before it runs: the line it cut from stays the arm it was.
-        stores.campaigns.leave_comparison(
-            fork, ComparisonExit.FORK, purpose=campaign.declaration.purpose
-        )
+        # Before it runs: it spends the arm's ceiling and pauses its parent, so the campaign leaves.
+        stores.campaigns.leave_comparison(fork, ComparisonExit.FORK)
         try:
             # Declares no budget: the seed's governs, admitted from what the parent leaves.
             launched = await launch(
