@@ -146,24 +146,44 @@ def rmtree_robust(path: Path) -> None:
 def iter_files(
     root: Path, *, skip: frozenset[str] = frozenset()
 ) -> Iterator[tuple[Path, os.stat_result]]:
+    """Every file under *root*, past `MAX_PATH` too; one removed mid-walk is passed over."""
     stack = [root]
     first = True
     while stack:
         current = stack.pop()
         try:
-            with os.scandir(current) as it:
+            with os.scandir(_long_path(current)) as it:
                 for entry in it:
+                    path = current / entry.name
                     try:
                         if entry.is_dir(follow_symlinks=False):
                             if not (first and entry.name in skip):
-                                stack.append(Path(entry.path))
+                                stack.append(path)
                         elif entry.is_file(follow_symlinks=False):
-                            yield Path(entry.path), entry.stat(follow_symlinks=False)
-                    except OSError:
+                            yield path, entry.stat(follow_symlinks=False)
+                    except FileNotFoundError:
                         continue
-        except OSError:
+        except FileNotFoundError:
             continue
         first = False
+
+
+def prune_empty_dirs(root: Path) -> None:
+    """Every empty directory under *root*, deepest first and past `MAX_PATH` too; *root* stays."""
+    top = _long_path(root)
+    for current, _dirs, _files in os.walk(top, topdown=False):
+        if current != top:
+            with contextlib.suppress(OSError):
+                os.rmdir(current)
+
+
+def stat_optional(path: Path) -> os.stat_result | None:
+    """A file's stat past `MAX_PATH` too; ``None`` where no file is."""
+    try:
+        held = os.stat(_long_path(path))
+    except FileNotFoundError:
+        return None
+    return held if stat.S_ISREG(held.st_mode) else None
 
 
 def _atomic_replace(tmp: str, path: Path) -> None:
