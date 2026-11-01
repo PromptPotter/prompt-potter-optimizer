@@ -23,7 +23,7 @@ from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
     PauseCyclePayload,
 )
-from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO, BackendUnreachableError
+from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.phases import GateDecision, stop_reason_outcome
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.shared.errors import PotterError
@@ -77,19 +77,6 @@ def backend_reach_line(backend_type: str, backend_url: str) -> str:
     if connectors.CONNECTORS.get(backend_type).execution == "in_process":
         return f"{reached} in-process ({backend_type}) — no wire"
     return f"{reached} at {backend_url}"
-
-
-def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
-    """The error's own sentence IS the message: it leads with the connector's diagnosis where one was made."""
-    return CommandResult(
-        data={
-            "error": "backend_unreachable",
-            "backend_url": exc.backend_url,
-            "backend_type": exc.backend_type,
-            "detail": exc.detail,
-        },
-        human=str(exc),
-    )
 
 
 def inline_launch(args: argparse.Namespace) -> Inline:

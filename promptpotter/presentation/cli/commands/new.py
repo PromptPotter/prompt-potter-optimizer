@@ -35,12 +35,10 @@ from promptpotter.domain.command_kinds import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
-    backend_unreachable_result,
     ctrl_c_pauses,
     cycle_result_command,
     held_run,
@@ -275,24 +273,25 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     draft_id = await _ingest_checkin(args, stores)
     try:
         held = await _hold_checkin(args, stores, draft_id, patch)
-    except BackendUnreachableError as exc:
-        logger.info(_draft_kept(draft_id))
-        return backend_unreachable_result(exc)
     except PotterError as exc:
         raise SystemExit(f"ERROR: {exc}\n\n{_draft_kept(draft_id)}") from None
     return await _run_origin(held, diag=args.diag)
 
 
-async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
+async def _dispatch_mint(
+    dispatcher: CommandDispatcher, mint: MintCampaignPayload | MintHeadToHeadPayload
+) -> Any:
     try:
-        outcome = await CommandDispatcher(stores, inline=inline).dispatch(CommandCall(mint))
-    except BackendUnreachableError as exc:
-        return backend_unreachable_result(exc)
+        return (await dispatcher.dispatch(CommandCall(mint))).result
     except DatasetAccessError:
         raise SystemExit(
-            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint(stores)
+            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n"
+            + no_dataset_hint(dispatcher.stores)
         ) from None
-    held = held_run(outcome.result)
+
+
+async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
+    held = held_run(await _dispatch_mint(CommandDispatcher(stores, inline=inline), mint))
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)
 
@@ -378,17 +377,7 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
-    try:
-        outcome = await dispatcher.dispatch(CommandCall(payload))
-    except BackendUnreachableError as exc:
-        return backend_unreachable_result(exc)
-    except DatasetAccessError:
-        raise SystemExit(
-            f"ERROR: no dataset named {payload.dataset_name!r}.\n\n" + no_dataset_hint(stores)
-        ) from None
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
-    launched: HeadToHeadLaunched = outcome.result
+    launched: HeadToHeadLaunched = await _dispatch_mint(dispatcher, payload)
     started = launched.started
     for arm in started.arms:
         cycle_dir = stores.campaigns.cycle_dir(arm.hop).absolute()
