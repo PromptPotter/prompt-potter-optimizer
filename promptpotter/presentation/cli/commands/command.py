@@ -14,11 +14,7 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import (
-    cycle_target,
-    open_stores,
-    refused_by,
-)
+from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -38,19 +34,15 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
     if "budget" in model.model_fields:
         fields["budget"] = budget_from_args(args)
     if issubclass(model, CyclePayload):
-        target = cycle_target(stores, args, kind.cli_verb or kind.value)
-        if isinstance(target, CommandResult):
-            return target
-        fields["campaign_id"], fields["cycle_id"] = target
+        hop = resolve_target(args, stores)
+        fields["campaign_id"], fields["cycle_id"] = hop.campaign_id, hop.cycle_id
     elif issubclass(model, CampaignPayload):
         fields["campaign_id"] = resolve_campaign_id_hint(stores, args.campaign_id)
     payload = PayloadInvalidError.validating(model, fields)
     # The address, else the one field a workspace command names its subject by.
     named = [name for name in _ADDRESS if name in model.model_fields] or [next(iter(fields))]
     ids = {name: str(fields[name]) for name in named}
-    sent = await refused_by(CommandDispatcher(stores).dispatch(CommandCall(payload)), ids)
-    if isinstance(sent, CommandResult):
-        return sent
+    sent = await CommandDispatcher(stores).dispatch(CommandCall(payload))
     return CommandResult(
         data={
             **payload.model_dump(mode="json"),

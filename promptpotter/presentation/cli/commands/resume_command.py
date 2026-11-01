@@ -8,7 +8,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
@@ -19,7 +18,6 @@ from promptpotter.domain.command_kinds import (
     MintCampaignPayload,
     StartRunPayload,
 )
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_from_narrowing,
@@ -28,7 +26,6 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.presentation.cli.commands.launch import (
-    backend_unreachable_result,
     confirm_tty,
     cycle_result_command,
     divergence_hint,
@@ -288,13 +285,7 @@ def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 async def _resume(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    campaign_id, cycle_id = resolve_target(args, stores)
-    if not campaign_id or not cycle_id:
-        raise SystemExit(
-            "ERROR: No active session.\n\n"
-            "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint(stores)
-        )
-    ctx = load_session(stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
+    ctx = load_session(stores, resolve_target(args, stores))
 
     resume_from_round: int | None = args.resume_from_round
     if resume_from_round is not None and resume_from_round < 0:
@@ -313,8 +304,6 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
             held = await _dispatch_held(
                 args, ctx, _start_run(args, ctx.hop, fork_on_divergence=args.fork_on_divergence)
             )
-    except BackendUnreachableError as exc:
-        return backend_unreachable_result(exc)
     except ConfigDriftError as drift:
         return await _pivot_to_fresh(args, ctx, drift)
 

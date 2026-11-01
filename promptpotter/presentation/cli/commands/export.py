@@ -4,25 +4,15 @@ import argparse
 from pathlib import Path
 
 from promptpotter.application.cycle_reads import export_cycle
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import cycle_target, open_stores
-from promptpotter.shared.errors import ConflictError, NotFoundError
+from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
 
 
 async def cmd_export(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
-    target = cycle_target(stores, args, "export")
-    if isinstance(target, CommandResult):
-        return target
-    campaign_id, cycle_id = target
-    ids = {"campaign_id": campaign_id, "cycle_id": cycle_id, "tier": args.tier}
-    try:
-        files = export_cycle(
-            stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),), args.tier
-        )
-    except (NotFoundError, ConflictError) as exc:
-        return CommandResult(data={**ids, "status": "refused"}, human=str(exc))
+    hop = resolve_target(args, stores)
+    ids = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, "tier": args.tier}
+    files = export_cycle(stores, (hop,), args.tier)
     single = files.single
     if single is not None and args.out is None:
         return CommandResult(data={**ids, "text": single}, human=single.rstrip("\n"))
