@@ -451,7 +451,8 @@ The dashboard becomes a workspace of panels the operator arranges: resize, colla
 back — Claude Code's cloud workspace for the mechanism, Prime Intellect Lab's run page for the card
 look, the operator's Stitch prototype of a draggable heading. On a phone panels stack, resize is
 height alone, and a popped panel is a full-screen sheet. Landed: no canvas paints detail over its
-marks (the canvas rule in `webapp/components/CLAUDE.md`). Owed, in order:
+marks (the canvas rule in `webapp/components/CLAUDE.md`); Grade sits on the Leader
+(`shell/searchpoint/BenchGradeAction`), the masthead's figures read-only. Owed, in order:
 
 1. **One view, one panel.** Each family in `components/dashboard/layout/panes.tsx` renders one frame;
    Candidates hosts three today (chart, forest, inspector), which become regions of one panel.
@@ -462,8 +463,6 @@ marks (the canvas rule in `webapp/components/CLAUDE.md`). Owed, in order:
    drag surface § Prompt-field order needs.
 4. **The tapped candidate's before/after** — its diff and flips against the origin in the inspector:
    `SubjectBox` splits into the leader's picker and the subject reading the inspector hosts.
-5. **Grade leaves the masthead** for the Leader's action row (Compare with origin, Verify, Steer
-   fork); the masthead's BENCH figure stays read-only.
 
 Closes when the operator arranges the dashboard on a phone and a desktop, the arrangement survives a
 reload, and a popped panel docks back.

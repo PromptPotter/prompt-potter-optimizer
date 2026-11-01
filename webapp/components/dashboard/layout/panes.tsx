@@ -20,6 +20,7 @@ import { OptimizerCard } from "@/components/dashboard/pipeline/OptimizerCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
+import { BenchGradeAction } from "@/components/shell/searchpoint/BenchGradeAction";
 import { SubjectBox } from "@/components/shell/searchpoint/SubjectBox";
 
 export function TimelinePane() {
@@ -58,7 +59,7 @@ export function LeaderPane() {
   const rootSelfOpt = hasTag(useEntry(campaignId), "self_optimization");
   return (
     <>
-      <CardFrame title="Leader" headingTag="h2">
+      <CardFrame title="Leader" headingTag="h2" actions={<BenchGradeAction />}>
         <SubjectBox />
       </CardFrame>
       {viewedPath?.length === 1 && rootSelfOpt && <OuterSignalPanel />}

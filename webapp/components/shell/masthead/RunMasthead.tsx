@@ -1,19 +1,16 @@
 "use client";
 import type { ReactNode } from "react";
-import { Badge, Button, CopyButton, FailureLine, Icon, Said, Term, VendorLogo } from "@/components/ui";
+import { Badge, Button, CopyButton, Icon, Said, VendorLogo } from "@/components/ui";
 import { Figure, FigureRow } from "@/components/shell/FigureRow";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import type { HierarchyCampaign } from "@/lib/api";
-import { postCommand } from "@/lib/api/commands";
-import { BENCH_REFUSAL_INFO, type BenchStatus } from "@/lib/api/types.generated";
 import { BRAND } from "@/lib/brand";
 import { cx } from "@/lib/cx";
 import { readSpend, tagValue, type FigureKey } from "@/lib/derivations";
 import { fmtAgo } from "@/lib/format";
-import { useCommand } from "@/lib/hooks/useCommand";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
-import { encodeCyclePath, pathLeaf, pathRoot, type CyclePath } from "@/lib/ids";
+import { pathLeaf, type CyclePath } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useRegistry } from "@/lib/state/registry";
@@ -74,13 +71,11 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
   const course = useViewedCourse();
   const served = useServedCriterion();
   const innerLeaf = path.length > 1 ? pathLeaf(path) : null;
-  const bench = course?.facts.bench?.status ?? null;
   const spend = readSpend(dash);
-  // What the masthead hangs on a served figure, by its key.
-  const extras: Partial<Record<FigureKey, { detail?: ReactNode; action?: ReactNode }>> = {
-    lift: { detail: TERMS.masthead_best },
-    bench: { action: bench?.offered ? <BenchGrade status={bench} path={path} /> : null },
-    spend: { detail: spend.metered && <SpendBuckets view={spend} /> },
+  // What the masthead adds to a served figure's Term, by its key; a figure is never a control.
+  const details: Partial<Record<FigureKey, ReactNode>> = {
+    lift: TERMS.masthead_best,
+    spend: spend.metered && <SpendBuckets view={spend} />,
   };
 
   return (
@@ -113,42 +108,9 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
       </div>
       <FigureRow>
         {course?.figures.map((row) => (
-          <Figure
-            key={row.key}
-            row={row}
-            detail={extras[row.key]?.detail}
-            action={extras[row.key]?.action}
-          />
+          <Figure key={row.key} row={row} detail={details[row.key]} />
         ))}
       </FigureRow>
-    </>
-  );
-}
-
-// The bench's one control, on its figure: a refusal is the served reason, read on its Term.
-function BenchGrade({ status, path }: { status: BenchStatus; path: CyclePath }) {
-  const cmd = useCommand<"grade-bench">("grade-bench", { scope: encodeCyclePath(path) });
-  const grading = cmd.pending !== null || status.refusal === "in_flight";
-  const campaignId = pathRoot(path).campaignId;
-  const button = (
-    <Button
-      className="figure-btn"
-      disabled={grading || !status.can_grade}
-      onClick={() =>
-        void cmd.run("grade-bench", () => postCommand("grade-bench", { campaign_id: campaignId }))
-      }
-    >
-      {grading ? "Grading…" : "Grade"}
-    </Button>
-  );
-  return (
-    <>
-      {status.refusal === null ? (
-        button
-      ) : (
-        <Term content={BENCH_REFUSAL_INFO[status.refusal]}>{button}</Term>
-      )}
-      <FailureLine failure={cmd.failure} />
     </>
   );
 }

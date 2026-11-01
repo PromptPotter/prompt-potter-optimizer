@@ -145,7 +145,6 @@
 .figure-value{font-size:var(--text-lg);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--color-text-primary)}
 .figure-value .phase-dot{display:inline-block;margin-inline-end:var(--space-6);vertical-align:middle}
 .figure .figure-sub{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:var(--text-xs);line-height:1.35;color:var(--color-text-secondary);overflow-wrap:anywhere}
-.figure-action{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);margin-top:2px}
 .summary-block.is-dense{gap:var(--space-6)}
 .summary-block.is-dense .figure-row{grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:var(--space-6) var(--space-10);padding-block:var(--space-6);border-bottom:0}
 .summary-block.is-dense .figure-value{font-size:var(--text-sm)}

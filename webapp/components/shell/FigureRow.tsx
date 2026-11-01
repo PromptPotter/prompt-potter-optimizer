@@ -10,17 +10,9 @@ export function FigureRow({ children }: { children: ReactNode }) {
   return <dl className="figure-row">{children}</dl>;
 }
 
-// A served figure row; the cell is never a control: `detail` joins its value's Term, `action` a control on its own line.
+// A served figure row, never a control: `detail` joins its value's Term.
 // A row louder than quiet leads its value with its tone's dot.
-export function Figure({
-  row,
-  detail,
-  action,
-}: {
-  row: Said;
-  detail?: ReactNode;
-  action?: ReactNode;
-}) {
+export function Figure({ row, detail }: { row: Said; detail?: ReactNode }) {
   const { label, value, sub, tone } = row;
   const marked = tone !== "quiet";
   const hover = row.detail ? <>{row.detail}{detail && <>. {detail}</>}</> : detail;
@@ -37,7 +29,6 @@ export function Figure({
           {sub}
         </dd>
       )}
-      {action && <dd className="figure-action">{action}</dd>}
     </div>
   );
 }
