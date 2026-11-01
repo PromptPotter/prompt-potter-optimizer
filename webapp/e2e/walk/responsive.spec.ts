@@ -1,4 +1,4 @@
-import { test, expect, open, ready, noSidewaysScroll } from "../harness";
+import { test, expect, open, ready, noSidewaysScroll, DASHBOARD_VIEWS } from "../harness";
 
 const WIDTHS = [
   { name: "phone-375", width: 375, height: 812 },
@@ -19,27 +19,20 @@ for (const vp of WIDTHS) {
     });
 
     test("every view fits its viewport", async ({ page, rich }) => {
-      for (const tab of ["", "/dashboard", "/compare", "/files"]) {
-        await open(page, `${rich.addr}${tab}`);
+      for (const views of ["", DASHBOARD_VIEWS, "/compare", "/samples/files", "/samples/spend"]) {
+        await open(page, `${rich.addr}${views}`);
         await noSidewaysScroll(page);
       }
     });
 
-    test("the account modal fits its viewport", async ({ page }) => {
-      await open(page, "#/account/storage");
+    test("the account view fits its viewport", async ({ page }) => {
+      await open(page, "#/account=storage");
       await ready(page);
       await noSidewaysScroll(page);
     });
 
-    test("the outer-signal panel and the lineage forest fit their viewport", async ({
-      page,
-      rich,
-    }) => {
-      // `OuterSignalPanel` mounts on every Dashboard, so its CARD's fit needs no L4 campaign.
-      await open(page, `${rich.addr}/dashboard`);
-      await expect(page.getByRole("heading", { name: "Outer signal" })).toBeVisible();
-      await noSidewaysScroll(page);
-
+    test("the lineage forest fits its viewport", async ({ page, rich }) => {
+      await open(page, `${rich.addr}/candidates`);
       await page.getByRole("button", { name: /the lineage forest/i }).click();
       const cladogram = page.getByRole("img", { name: "Session lineage cladogram" });
       await expect(cladogram).toBeVisible();

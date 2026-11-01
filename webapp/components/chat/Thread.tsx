@@ -37,14 +37,14 @@ function FileChip({ name, detail }: { name: string; detail: string | null }) {
 
 function Message({ item }: { item: MessageItem }) {
   if (item.role === "user") return <div className="chat-msg user">{item.text}</div>;
-  if (item.tone === "warning") {
+  if (item.tone === "warn") {
     return (
       <div className="chat-msg ai chat-msg-warn" role="status">
         {item.text}
       </div>
     );
   }
-  if (item.tone === "error") {
+  if (item.tone === "danger") {
     return (
       <div className="chat-msg ai chat-msg-error" role="alert">
         {item.text}

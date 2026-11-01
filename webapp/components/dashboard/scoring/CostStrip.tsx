@@ -2,24 +2,18 @@
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";
-import { Badge, CardFrame } from "@/components/ui";
-import {
-  costSeries,
-  readSpend,
-  roundCosts,
-  spendHeadline,
-  spendLines,
-} from "@/lib/derivations";
+import { CardFrame } from "@/components/ui";
+import { costSeries, roundCosts, spendLines } from "@/lib/derivations";
 import { useCycleStream } from "@/lib/poll";
 
 ensureChartRegistered();
 
+// How the bill splits by round; the bill itself is the masthead's SPEND.
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useCycleStream();
   useThemeVersion();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rounds = useMemo(() => roundCosts(dash), [dash?.spend_metered_by_round]);
-  const { metered } = readSpend(dash);
 
   const labels = rounds.map((r) => String(r.round));
   const datasets = costSeries(rounds).map((s) => ({
@@ -51,10 +45,7 @@ export const CostStrip = memo(function CostStrip() {
   });
 
   return (
-    <CardFrame
-      title={<span>Cost by round</span>}
-      actions={metered === null ? null : <Badge>{spendHeadline(metered)}</Badge>}
-    >
+    <CardFrame title={<span>Spend by round</span>}>
       <div style={{ position: "relative", height: 140 }}>
         {rounds.length === 0 ? (
           <div

@@ -23,9 +23,10 @@ import {
   permittedModels as permittedModelsOf,
   searchPoint,
 } from "@/lib/derivations";
+import { STEER_OUTSIDE_INFO } from "@/lib/api/types.generated";
 import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { FailureLine } from "@/components/ui";
+import { Empty, FailureLine, ReadState, Said } from "@/components/ui";
 import { LimitReconcile } from "./LimitReconcile";
 
 export function SteerForkPanel({
@@ -61,11 +62,8 @@ export function SteerForkPanel({
   > | null>(null);
   const steerOverlay = pickedOverlay ?? overlay;
   const preview = useRead(forkPreviewRead(root.campaignId, steerOverlay));
-  const verdict = readyData(preview);
   const checking = preview.status === "loading";
-  const permittedList = [
-    ...new Set(Object.values(verdict?.permitted_models ?? {}).flat()),
-  ];
+  const refused = readyData(preview)?.steer === "refused";
 
   // Refs, not state: a blur firing just before the Confirm click is already reflected.
   const editedPrompts = useRef<Record<string, NodePrompt> | null>(null);
@@ -106,37 +104,19 @@ export function SteerForkPanel({
       </p>
 
       {!seed && (
-        <p className="steer-fork-note" role="note">
+        <Empty>
           This searchpoint isn&apos;t loaded yet — its prompt appears here once it is, and
           seeds the fork&apos;s origin.
-        </p>
+        </Empty>
       )}
 
-      {preview.status === "failed" && canBabysit ? (
-        <p className="steer-fork-note" role="alert">
-          Couldn&apos;t check this steer against what the campaign permits. Confirming may mark
-          the branch operator-babysat (grade C).
-        </p>
-      ) : null}
-
-      {checking ? (
-        <p className="steer-fork-note" role="status">
-          Checking this steer against what the campaign permits…
-        </p>
-      ) : null}
-
-      {verdict?.steers_disallowed_model && canBabysit ? (
-        <div className="steer-fork-babysit">
-          <p className="steer-fork-babysit-warn" role="note">
-            This model isn&apos;t one this node permits
-            {permittedList.length > 0 ? ` (${permittedList.join(", ")})` : ""}. Steering to
-            it marks this branch — and every round after it — operator-babysat (grade C):
-            excluded from clean comparison, origin reuse, and the L4 rollup. The
-            measurement is still recorded; it just isn&apos;t a clean one. Pick a permitted
-            model to keep a clean branch.
-          </p>
-        </div>
-      ) : null}
+      <ReadState read={preview} subject="what the campaign permits for this steer">
+        {(verdict) => {
+          if (verdict.steer === "clean") return null;
+          const { title, detail, tone } = STEER_OUTSIDE_INFO[verdict.steer];
+          return <Said tone={tone} label={title} detail={detail} />;
+        }}
+      </ReadState>
 
       <NodeSurface
         node={null}
@@ -177,7 +157,7 @@ export function SteerForkPanel({
           type="button"
           className="steer-fork-confirm"
           onClick={confirm}
-          disabled={pending || checking}
+          disabled={pending || checking || refused}
           title="Mint a fork rooted at this searchpoint, carrying your edits. Tagged operator_steered in lineage."
         >
           {pending ? "Forking…" : isLive ? "Stop & steer-fork" : "Confirm steered fork"}

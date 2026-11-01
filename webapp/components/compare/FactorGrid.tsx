@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
+import { CardFrame, DataTable, Empty, Said, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
 import { fmtInterval, fmtUnit } from "@/lib/format";
 
@@ -110,21 +110,20 @@ export function FactorGrid({
       </div>
 
       {sameAxis && (
-        <p className="note-warn">
-          The same factor is on both axes, so only the diagonal could hold a subject. Pick a second
-          one.
-        </p>
+        <Said
+          tone="warn"
+          label="The same factor is on both axes, so only the diagonal could hold a subject. Pick a second one."
+        />
       )}
 
       {(row?.confounded_with.length ?? 0) > 0 || (col?.confounded_with.length ?? 0) > 0 ? (
-        <p className="note-warn">
-          {[row, col]
+        <Said
+          tone="warn"
+          label={`${[row, col]
             .filter((f) => f && f.confounded_with.length > 0)
             .map((f) => `${f?.key} is aliased by ${f?.confounded_with.join(", ")}`)
-            .join("; ")}
-          . Those factors cut this selection into the identical groups, so no evidence here can tell
-          them apart — this grid shows one contrast under several names.
-        </p>
+            .join("; ")}. Those factors cut this selection into the identical groups, so no evidence here can tell them apart — this grid shows one contrast under several names.`}
+        />
       ) : null}
 
       {!served ? (
@@ -134,7 +133,7 @@ export function FactorGrid({
         </p>
       ) : (
         <>
-          {served.note && <p className="note-warn">{served.note}</p>}
+          {served.note && <Said tone="warn" label={served.note} />}
           <DataTable
             ariaLabel={`${served.row_key} by ${served.col_key}`}
             className="l4-factor-grid"

@@ -28,6 +28,17 @@ acting.
     failure line said live is not draft state and is not retold.
   **Re-test:** `git grep -n "ThreadProvider" -- webapp/components/chat/README.md`;
   `git grep -n "queued_drafts" -- promptpotter` serves a stage.
+- **A backend wire skew is discovered as a 100% degraded origin, not refused at launch** — the box's
+  TermNorm read `answer_field` while PromptPotter sent `answer_fields` (2026-10-31); the origin paid
+  for every cell to learn it. Action: the connector's health/probe serves the wire contract it
+  speaks, and `new` refuses a node config that contract rejects before any cell. **Rides with:**
+  the connector probe. **Re-test:** a launch against a backend one wire rename behind fails at
+  the probe, naming the key.
+- **TermNorm words a warning's step into its message** (`research_pipeline.py` `f"{step_name} failed: {exc}"`
+  over a step that raises `"llm_only: …"`), though `StepWarning` carries the step as a field: a served
+  health sentence still reads `llm_only failed: llm_only: …`. Action: the message is the fault alone.
+  **Rides with:** the next TermNorm change. **Re-test:** `git grep -n "failed: {" -- backend-api/api`
+  in the TermNorm checkout.
 
 ## NEXT ARC
 
@@ -138,26 +149,23 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **Failures dropped to booleans before `FailureLine` can render them**: `useConnector` folds its read
   failure into `schema.status: "error"`, `useTimeRay` serves `failed`, ChannelMap's tree `failed`/`loaded`,
   `OriginChanges` flattens to `message`. `useCommand` `describe` tables (ArchiveCompactionControl,
-  AccountUsageTab, AccountProfileTab) and `AuthCore::AUTH_ERROR_COPY[code] ?? FALLBACK` sit beside
-  `operatorMessage`. The protected run card and `chat.css` (`.hsp-note`, `.chat-tools-err`,
+  AccountUsageTab, AccountProfileTab) sit beside `operatorMessage`. The protected run card and `chat.css` (`.hsp-note`, `.chat-tools-err`,
   `.chat-decision-err`) are still on the old form. **Re-test:** every hook carries a failure object.
-- **Wording authored in the browser**: label tables still client-side (`NODE_KINDS`,
-  `lib/prompt-fields.ts::PROMPT_FIELD`, `lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`,
-  `WINDOW_LABEL`, `TAB_TITLES`, …) and the tone vocabularies (`BadgeTone`, `MessageTone`, the time ray's
-  served tone, `l4-eff-*`, `verdictTone`, HardSamplesPreview's, PipelineFlow's). Canonical: served label
-  constants, one tone. **Re-test:** each table served or deleted.
+- **Wording authored in the browser**: label tables still client-side (`lib/prompt-fields.ts::PROMPT_FIELD`, `lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`,
+  `WINDOW_LABEL`, `AccountView::SECTIONS`, …) and the tone vocabularies off `domain/said.py::Tone` (`l4-eff-*`,
+  `verdictTone`, PipelineFlow's). Canonical: served label constants, one tone. **Re-test:** each table
+  served or deleted.
 - **Size literals and the seed-once latch**: chart `height: 140`
   (`git grep -n "height: 140" -- webapp/components`) beside `--chart-h`, which is a `clamp()`, so the
   two disagree on purpose or by accident; the seed-once latch hand-built at each
   `git grep -n -i "seeded" -- webapp/components webapp/lib` site; `STORAGE_KEYS` mixes hook and
-  non-hook keys and `side-panel:*` has no `promptpotter.` prefix. Waiting on the run-card session's
-  unlanded `lib/run-card-prefs.ts`: it keeps a second `BOOL` and a literal key.
-  **Re-test:** one latch, one `BOOL`.
+  non-hook keys and `side-panel:*` has no `promptpotter.` prefix.
+  **Re-test:** one latch.
 - **Modules still off the `lib/CLAUDE.md` § Where a module lives rule**, blocked by the run-card
   session's files and the ingest rebuild, which import them: to `state/` — `hard-samples`, `lineage`,
   `poll`, `workspace`, `ingest-flow`, `scoring-mask`, `chat/thread`, `SelectionContext` (as
   `selection.tsx`), `hooks/useConnector`'s provider; to `derivations/` — `cell-means`,
-  `prompt-fields`, `origin-readiness`; to `prefs/` — `run-card-prefs`, once that unlanded file lands.
+  `prompt-fields`.
   Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
   `shell/node-surface/`, root `PairedLift` / `SummaryBlock`; a surface holding chrome:
   `dashboard/pipeline/` (`git grep -n "dashboard/pipeline" -- webapp/components/ingest`). Hard samples and compare each spread over
@@ -166,10 +174,35 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
   `.facts.` opened at `git grep -c "\.facts\." -- webapp/components webapp/lib`; liveness
   re-derived at each `git grep -n "phaseWalks(" -- webapp/components` site.
+- **A view family that is chrome**: `components/shell/families.tsx::FAMILIES` holds a family with a
+  null pane (the phone's campaign list is the sidebar), so naming it on a wide screen opens a chip
+  that draws nothing. **Re-test:** every family has a pane.
+- **The `walk` tier rots unseen**: the gate runs only `cold`, so a walk assertion outlives the control
+  it names. Action: the gate walks a world built by `scripts/offline_run.py`, which needs none of the
+  operator's campaigns. **Re-test:** `gate.py` lists a walk check.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
-  `setSelectionForSampleSet` from several surfaces, `TrendChart.onOpen` exists so a caller can
-  `openView`, `FileTree::onSelect` drilled through its parents.
+  `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
+- **The wide masthead wraps to about 110px** at 1280px (setup line plus seven figures).
+
+### The phone pass (2026-10-31)
+
+The launch verdict (`quota.py::launch_refusal`) landed. The rest of the 390px pass is open: re-walk the phone screens and audit the surfaces against
+`webapp/CLAUDE.md` and `lib/CLAUDE.md`. Shapes the first pass kept finding, each still present
+somewhere:
+
+- a client word table or literal beside a served enum, or a served sentence where an enum belongs;
+- a second door or control into one state, and client-minted state beside a served one;
+- a refusal spoken only after the tap, where a served verdict could gate the control;
+- `??` / `||` defaults on facts the server always sends;
+- a served field whose last reader was deleted;
+- a whole-object replace where a per-key merge is meant;
+- two placement or layout engines for one job, and fixed geometry beside wrapping text;
+- chrome that stays pinned on a phone, and figure cells that truncate sentences;
+- a hand-copied fixture.
+
+The frame, the run card, origin pairing, pipeline CSS and money format wait on the run-card session's
+files.
 
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
@@ -178,14 +211,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
   (a digest table), so it asks the operator first. **Re-test:** `git grep -c "BENCH_STATE_INFO" -- promptpotter`.
 - **`DISPLAY_METRIC_INFO` is hand-emitted three ways** (`DISPLAY_METRICS`, `_LABELS`, `_UNITS` in
   `scripts/build_ts_types.py`). Action: one `_WORD_TABLES` row. **Re-test:** grep the three names in the script.
-- **One wording kept in two languages**: `selection_line` (Python `markdown.py` / `activity.py`, TS
-  `hierarchy.ts::selectionLine`), and likewise the rounds (`primitives.py::rounds_readout` /
-  `roundsText`) and lives (`LivesReading.label` / `lives.ts`) phrasings. The words are one table; the
-  sentence frame is still written twice. Action: none until a third surface; then the frame is a table row.
-- **`lib/derivations/time-ray.ts::rayHead` stitches `dash.run_phase` with the course's
-  `state.status`** (two sources for one run). Action: one served head. **Rides with:** one owner per fact across `/hierarchy` and `/dashboard`.
-- **A candidate's `caveat` restates the θ caveat** `THETA_CAVEAT_INFO` already words. Action: serve the enum.
-- **`RunErrorBanner` splits `err.message` on `\n`** — prose read as structure. **Rides with:** warnings narrowed to self-heals.
 - **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and passes it through `model_validate`**,
   so the `StatusMark` literal is checked at runtime only. Action: map phase/outcome → `StatusMark` typed.
 - **`application/config_map.py::ConfigKnob.source` is an untyped `str`**, and its only reader is
@@ -621,10 +646,16 @@ word's `git grep -c` for that sense is 0.
 **Rides with:** any change to the file named. **Re-test:** the `file::symbol` still holding it.
 
 - **Seen in the `lib/` regroup**: `lib/state/registry.tsx` and `lib/workspace.tsx` import `derivations/hierarchy` past the barrel
-  to dodge a cycle (barrel → search-point → poll → workspace); `shell/Modal.tsx` beside the `ui/` modal
-  rule; `lib/theme.ts` mixes chart setup with the theme preference; `RemotePanel` keeps a "not available
-  now" fallback beside the served `lookahead.auto_refusal`.
+  to dodge a cycle (barrel → search-point → poll → workspace); `lib/theme.ts` mixes chart setup with
+  the theme preference.
 
+- **The origin gate holds forever** (seen on the box, 2026-11-01): a justlogic cycle launched from the
+  webapp failed every origin cell (`llm_only`: `output_schema` set, `answer_field` not) and then held at
+  `origin_gate_r0` for 20 h, alive after every window closed, appending a "still waiting" line every
+  10 s (ledger 1.7 MB), and blocking `update.sh`. An origin with no scored cell has nothing to gate.
+  `campaign_config.py::origin_gate` says it HALTS and a plain `resume` overrides; `runner/origin_gate.py`
+  HOLDS a live process instead, and its three answers repeat run verbs (`abort` ≈ leave it ended,
+  `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh). Decide: halt, or keep the hold.
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
 - **Four seams owed a re-read:** `webapp/lib/poll.tsx::CycleStreamState` fields nothing reads;
@@ -672,11 +703,11 @@ word's `git grep -c` for that sense is 0.
 - **The check-in's optimizer graph ignores the draft's overlay**: `resolve_pipeline_for_optimizer`
   resolves the manifest with `{}`.
 - **Rename candidates, not yet picked** (one word, two senses each):
-  `evidence/head_to_head.py::HeadToHead.swapped` / `swapped_in` beside the manifest `swap`;
+  `evidence/head_to_head.py::HeadToHeadRow.swapped_in` beside the manifest `swap`;
   `application/library.py::library` beside `candidate_library` (rides the `candidate_library` →
   `answer_terms` rename); `domain/pool.py::PoolOffer` / `offered` beside
   `datasets/startability.py::offered`.
-- **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and `KnobRow` serves neither
+- **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and a knob's `NodeConfigParam` serves neither
   scope nor estimand.
 - **Seen building the setup screen**:
   - One app-wide `SelectionContext.node` serves the target and the optimizer graphs, and
@@ -756,9 +787,6 @@ word's `git grep -c` for that sense is 0.
     **Re-test:** open `/docs` in a browser and read the console.
   - `auth.py::callback` warns "HOST_ADMIN_EMAIL is unset" also when it is set and that admin has not
     signed in yet. **Re-test:** set it, sign in as someone else, read the log line.
-  - The sign-in redirect codes are a closed set declared only in TypeScript
-    (`AuthCore.tsx::AUTH_ERROR_COPY`); the server mints them as bare strings
-    (`auth.py::_redirect_with_error(code: str)`). **Re-test:** `git grep -n "_redirect_with_error(\"" -- promptpotter`.
   - `POST /campaigns/{id}/fork-preview` is a read on a write verb, so it spends the write bucket
     (`quota.py::refuse_write_rate`), not the read one. **Re-test:** `git grep -n "fork-preview" -- promptpotter/presentation`.
   - `quota.py::refuse_read_rate` takes a principal id and meters the host, while the launch, verb and
@@ -784,8 +812,6 @@ word's `git grep -c` for that sense is 0.
     **Re-test:** time one send on an account with 100 cycles.
   - Restamp drops `User.spend_budget_usd_total` / `token_budget_total`: a hand-raised account must be
     re-granted as `grant.json`. **Re-test:** `ls .promptpotter/projects/*/grant.json` after a restamp.
-  - `CouponStatus.exhausted` is true both used up and `void`, so each reader guards `void` first (three
-    webapp sites). **Re-test:** `git grep -n "\.void" -- webapp/components`.
   - The refusals in `coupon.py` / `errors.py` name a webapp pane ("Account → API keys"): renaming the
     pane means editing Python strings. **Re-test:** `git grep -n "API keys" -- promptpotter`.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.

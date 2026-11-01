@@ -82,6 +82,8 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
   const genRef = useRef(gen);
   const onGoneRef = useRef(onGone);
   const missesRef = useRef({ stamp: gen, n: 0 });
+  // Only the newest ask lands: an older answer still in the air describes a superseded moment.
+  const askedRef = useRef(0);
   useEffect(() => {
     issueRef.current = readId !== null ? read : null;
     genRef.current = gen;
@@ -93,9 +95,11 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
       const issue = issueRef.current;
       if (!issue) return;
       const misses = missesRef.current.stamp === stamp ? missesRef.current.n : 0;
+      const asked = ++askedRef.current;
+      const stale = () => signal.aborted || genRef.current !== stamp || askedRef.current !== asked;
       try {
         const data = await readThrough(issue.id, issue.load, signal);
-        if (signal.aborted || genRef.current !== stamp) return;
+        if (stale()) return;
         missesRef.current = { stamp, n: 0 };
         // A 304 hands back the body already held, and must re-render no one.
         setHeld((prev) =>
@@ -104,7 +108,7 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
             : landed(stamp, data),
         );
       } catch (e) {
-        if (signal.aborted || genRef.current !== stamp) return;
+        if (stale()) return;
         if (auth) onAuthError(e);
         const kind = failureKind(e);
         if (kind !== expects) reportIncident(e, { surface: readName(issue.id), address: issue.id });

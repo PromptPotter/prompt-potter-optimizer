@@ -169,7 +169,7 @@ def _derive_node_kind(node: PipelineNode) -> ViewKind:
     if kind in THINKING_KINDS:
         return "llm"
     if kind in MEMBER_KINDS:
-        return "tool"
+        return "member"
     match kind:
         case NodeKind.GATEWAY:
             return "measurement"
@@ -219,19 +219,18 @@ def derive_pipeline_view(
             )
         introduced.append((fresh, seq))
 
-    view_nodes = [PipelineViewNode(id="input", label="Input", kind="io", rank=-1)]
+    view_nodes = [PipelineViewNode(id="input", kind="io", rank=-1)]
     for name, (tier, rank) in placed.items():
         view_nodes.append(
             PipelineViewNode(
                 id=name,
-                label=name,
                 description=descriptions[name],
                 kind=_derive_node_kind(nodes[name]),
                 tier=tier,
                 rank=rank,
             )
         )
-    view_nodes.append(PipelineViewNode(id="output", label="Output", kind="io", rank=len(spine)))
+    view_nodes.append(PipelineViewNode(id="output", kind="io", rank=len(spine)))
 
     edges: list[PipelineViewEdge] = []
 
@@ -242,8 +241,9 @@ def derive_pipeline_view(
     for i in range(len(sequence) - 1):
         _edge(sequence[i], sequence[i + 1], "forward")
     repeats = bool(introduced) or any(n.kind in MEMBER_KINDS for n in nodes.values())
-    if repeats and chain:
-        _edge(chain[-1], chain[0], "loop")
+    cycle = chain if repeats else []
+    if cycle:
+        _edge(cycle[-1], cycle[0], "loop")
     for fresh, seq in introduced:
         for step in fresh:
             if chain:
@@ -252,7 +252,7 @@ def derive_pipeline_view(
             if after:
                 _edge(step, after[0], "directive")
 
-    return PipelineView(nodes=view_nodes, edges=edges)
+    return PipelineView(nodes=view_nodes, edges=edges, cycle=cycle)
 
 
 def parse_resolved_schema(resolved: Mapping[str, Any]) -> NodeOutputSchema:

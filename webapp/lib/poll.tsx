@@ -16,13 +16,19 @@ import { dashboardRead, isWarming, stepsRead } from "./api";
 import { encodeCyclePath, type CyclePath } from "./ids";
 import { useAuthGate } from "./state/auth";
 import type { HierarchyStep, LiveCandidate, ServedDashboard } from "./api/types";
-import { shownData, useRead } from "./hooks/useRead";
+import { shownData, useRead, type ReadFailure } from "./hooks/useRead";
 import { invalidateReads, readThrough } from "./read-cache";
 import { useWorkspace } from "./workspace";
 
-// The CONNECTION's state, never the run's — that is the served `dash.producer`.
-export type StatusKind = "connected" | "loading" | "idle" | "offline" | "gone";
+// The CONNECTION's state, never the run's — that is the served `dash.producer`. `offline`: the
+// server could not be reached; `failed`: it answered, refusing the read.
+export type StatusKind = "connected" | "loading" | "idle" | "offline" | "failed" | "gone";
 
+export interface ConnectionState {
+  status: StatusKind;
+  statusText: string;
+  statusHint: string;
+}
 
 // Stable reference: a fresh `[]` per poll drives the candidates card into a setState loop.
 const NO_ROWS: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
@@ -39,11 +45,8 @@ export function liveCandidate(
   return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
 }
 
-interface CycleStreamState {
+interface CycleStreamState extends ConnectionState {
   dash: ServedDashboard | null;
-  status: StatusKind;
-  statusText: string;
-  statusHint: string;
   isLive: boolean;
 }
 
@@ -63,6 +66,14 @@ export const GONE = {
   statusText: "This campaign no longer exists",
   statusHint: "It was deleted, or its store was reset. Returning to the active run.",
 } as const;
+
+// The one reading of a failed read as a connection state: only a transient failure is the server
+// unreachable; an answered refusal says its own sentence. `gone` is the address's, never this.
+export function failureState(failure: ReadFailure): ConnectionState {
+  return failure.kind === "transient"
+    ? OFFLINE
+    : { status: "failed", statusText: failure.message, statusHint: "" };
+}
 
 // Neither is a fault: no unit is a steady state, and a unit's first read is merely in flight.
 const IDLE = { dash: null, status: "idle", statusText: "", statusHint: "" } as const;
@@ -137,7 +148,10 @@ function useDashboard(path: CyclePath | null, unit: string | null, intervalMs: n
     if (read.status === "failed") {
       if (read.failure.kind === "gone") return GONE;
       // `dash` stays, so a client blip cannot read an in-flight cycle as gone.
-      return { dash: landed ?? (shown.unit === unit ? shown.dash : null), ...OFFLINE };
+      return {
+        dash: landed ?? (shown.unit === unit ? shown.dash : null),
+        ...failureState(read.failure),
+      };
     }
     const kept = shown.unit === unit ? shown.dash : null;
     return kept ? { dash: kept, ...CONNECTED } : unit !== null ? LOADING : IDLE;
@@ -206,7 +220,7 @@ export function CycleStreamProvider({
   const intervalMs = slow ? DASHBOARD_RECONNECT_POLL_MS : DASHBOARD_LIVE_POLL_MS;
   const { state, replaying } = useDashboard(path, unit, intervalMs);
   // A replayed moment polls on the slow beat too: a fold at a past offset is immutable.
-  const wantSlow = state.status === "offline" || replaying;
+  const wantSlow = state.status === "offline" || state.status === "failed" || replaying;
   if (wantSlow !== slow) setSlow(wantSlow);
   const ray = useRay(path, unit, intervalMs);
 

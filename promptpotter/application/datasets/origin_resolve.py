@@ -13,9 +13,12 @@ from promptpotter.application.bench.task_context import (
 )
 from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import (
+    ChecklistField,
     OriginLastResolution,
     OriginResolution,
     RaisedCommand,
+    checkin_questions,
+    checklist_field,
     field_values,
     origin_readiness,
     resolution_block,
@@ -30,19 +33,14 @@ from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 
-# Each value is both the ``EditDraftPatch`` key and the ``DraftCampaign`` attribute name.
-FINDING_PATCH_KEYS: dict[str, str] = {
-    "column.query": "column_query",
-    "column.ground_truth": "column_ground_truth",
-    "task_description": "raw_task_description",
-}
-
 _PREVIEW_ROWS = 10
 
 
 @dataclass(frozen=True, slots=True)
 class OriginProposal:
     field: str
+    row: ChecklistField
+    # Both the ``EditDraftPatch`` key and the ``DraftCampaign`` attribute name.
     patch_key: str
     value: Any
     confidence: str
@@ -52,6 +50,7 @@ class OriginProposal:
         patch = EditDraftPatch.model_validate({self.patch_key: self.value})
         return RaisedCommand(
             payload=EditDraftCampaignPayload(draft_id=draft_id, patch=patch),
+            label=self.row.proposal.format(self.value),
             evidence=self.evidence,
         )
 
@@ -75,7 +74,8 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
         "sample_rows": preview,
         "current_values": values,
         "provenance": provenance,
-        "open_gaps": [gap.model_dump() for gap in readiness.gaps],
+        # The step is the screen's: the prompt names the gap, never the fold that closes it.
+        "open_gaps": [gap.model_dump(exclude={"step"}) for gap in readiness.gaps],
     }
     answer_space = draft.answer_space()
     if answer_space is not None:
@@ -146,7 +146,9 @@ async def resolve_origin_turn(
     block = resolution_block(updated).model_copy(
         update={
             "last_resolution": OriginLastResolution(
-                assessment=raw.assessment, next_action=raw.next_action, recap=raw.recap
+                assessment=raw.assessment,
+                questions=checkin_questions(updated, raw.next_action.questions),
+                recap=raw.recap,
             ),
             "raised": [
                 proposal.command(updated.draft_id)
@@ -183,24 +185,25 @@ def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: in
 def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[OriginProposal]:
     raised: list[OriginProposal] = []
     for finding in output.findings:
-        patch_key = FINDING_PATCH_KEYS.get(finding.field)
-        if patch_key is None or not finding.evidence.strip():
+        row = checklist_field(finding.field)
+        if row is None or row.patch_key is None or not finding.evidence.strip():
             continue
         # Drop the finding whole: skipping only its tag strands CONFIRMED on an unvouched value.
         settled = draft.field_provenance.get(finding.field) is Provenance.CONFIRMED
         if settled and finding.confidence != "high":
             continue
-        coerced = _coerce(finding.field, finding.proposed_value, draft)
+        coerced = _coerce(row, finding.proposed_value, draft)
         if coerced is None:
             continue
         try:
-            EditDraftPatch.model_validate({patch_key: coerced})
+            EditDraftPatch.model_validate({row.patch_key: coerced})
         except ValidationError:
             continue
         raised.append(
             OriginProposal(
                 field=finding.field,
-                patch_key=patch_key,
+                row=row,
+                patch_key=row.patch_key,
                 value=coerced,
                 confidence=finding.confidence,
                 evidence=finding.evidence,
@@ -244,10 +247,8 @@ def _apply_findings(
     return draft.apply_resolution(values=values, provenance=provenance)
 
 
-def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
+def _coerce(row: ChecklistField, proposed: str, draft: DraftCampaign) -> Any | None:
     proposed = proposed.strip()
-    if not proposed:
+    if not proposed or (row.of_headers and proposed not in draft.headers):
         return None
-    if field_key in ("column.query", "column.ground_truth"):
-        return proposed if proposed in draft.headers else None
     return proposed

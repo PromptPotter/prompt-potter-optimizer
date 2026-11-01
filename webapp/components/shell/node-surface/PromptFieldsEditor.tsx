@@ -10,7 +10,7 @@ import { invalidateReads } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/workspace";
 import { PromptSegments } from "./PromptSegments";
 import { promptField, promptFieldsPatch, withSnippet } from "@/lib/prompt-fields";
-import type { NodeScope } from "@/lib/SelectionContext";
+import type { NodeScope } from "@/lib/address";
 import { endSnippetDrag, useDraggedSnippet } from "@/lib/state/snippet-drag";
 import { FailureLine, Term } from "@/components/ui";
 import { LockButton } from "./NodeConfigEditor";

@@ -15,7 +15,7 @@ from promptpotter.application.evidence.head_to_head import (
 )
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
 from promptpotter.application.evidence.read import Evidence, select_evidence
-from promptpotter.application.evidence.subjects import parse_subject
+from promptpotter.application.evidence.subjects import SCENARIO_WORDS, parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import (
@@ -490,23 +490,28 @@ def _clip(value: str | None, width: int, start: int = 0) -> str:
 
 
 def _scenario_lines(ev: Evidence) -> list[str]:
+    w = SCENARIO_WORDS
     lines: list[str] = []
     for r in ev.subjects:
         s = r.scenario
         if s is None:
             continue
         verdict = (
-            f"parts at round {s.first_divergent_round}, where it would have crowned "
-            f"{(s.scenario_winner_key or '-')[:8]} instead of {(s.recorded_winner_key or '-')[:8]}"
+            f"{w['parted']} {s.first_divergent_round}, {w['crowned']} "
+            f"{(s.scenario_winner_key or '-')[:8]} {w['instead_of']} "
+            f"{(s.recorded_winner_key or '-')[:8]}"
             if s.winner_changed
-            else "never parts from the record"
+            else w["held"]
         )
+        rounds = w["round"] if s.total_rounds == 1 else w["rounds"]
+        samples = w["sample"] if s.n_samples_scored == 1 else w["samples"]
         lines.append(
             f"\n{r.label} under {r.mask.lens if r.mask else '-'}: {verdict}. "
-            f"{s.invariant_rounds} of {s.total_rounds} round(s) unchanged; the head reads over "
-            f"{s.n_samples_scored} sample(s)."
+            f"{s.invariant_rounds} of {s.total_rounds} {rounds} {w['unchanged']}; "
+            f"{w['reads_over']} {s.n_samples_scored} {samples}."
         )
-        lines.append(f"  {s.note}")
+    if lines:
+        lines.append(f"  {w['caveat']}")
     return lines
 
 

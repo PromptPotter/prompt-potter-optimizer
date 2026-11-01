@@ -1,5 +1,7 @@
 "use client";
-import { FailureLine } from "@/components/ui";
+import { Said } from "@/components/ui";
+import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types.generated";
+import type { SignInRefusal } from "@/lib/state/auth";
 
 function GoogleMark() {
   return (
@@ -24,30 +26,10 @@ function GoogleMark() {
   );
 }
 
-const AUTH_ERROR_FALLBACK = "Something went wrong during sign-in. Try again.";
-
-const AUTH_ERROR_COPY: Record<string, string> = {
-  state_invalid_or_expired:
-    "That sign-in took too long and expired. Try Continue with Google again.",
-  code_exchange_failed: "We couldn't verify your sign-in with Google. Try again.",
-  provider_returned_error: "Google sign-in was cancelled. Try again when you're ready.",
-  callback_missing_params: "That sign-in link was incomplete. Try again.",
-  signin_unavailable: "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.",
-  accounts_full:
-    "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.",
-};
-
-interface Props {
-  // `?auth_error=` from the /auth/callback/{provider} 303, forwarded by the modal.
-  errorCode?: string | null;
-}
-
-export function AuthCore({ errorCode }: Props) {
+export function AuthCore({ refusal = null }: { refusal?: SignInRefusal | null }) {
   return (
     <div className="auth-core">
-      {errorCode ? (
-        <FailureLine failure={{ message: AUTH_ERROR_COPY[errorCode] ?? AUTH_ERROR_FALLBACK }} />
-      ) : null}
+      {refusal ? <Said {...SIGN_IN_REFUSAL_INFO[refusal]} /> : null}
 
       <p className="auth-note">
         Create your account with Google. Signing up is the grant: 10 optimization runs on your

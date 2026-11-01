@@ -176,7 +176,7 @@ surface; model and provider are optimizer-locked.
 - **Run mode** — the same node raises `pause-cycle` / `change-run-limits` / `fork-cycle` over
   `application/datasets/origin_resolve.py`'s `RaisedCommand`. Lands with L4.
 - **The whole setup proposed from the operator's text** — every node's model and effort, rounds and
-  cap — priced against the served menu and `application/jobs/quota.py::launch_usd_bound`; the host's
+  cap — priced against the served menu and `application/jobs/quota.py::AccountWallet.launch_bound`; the host's
   bound outranks the operator's words; an off-menu proposal is dropped at `_coerce`.
 
 ## Embedding (M15)
@@ -444,8 +444,7 @@ announcement), commit on drop, the handle the touch target.
 
 ## Run card
 
-Collapsed, the run card is the compact card (round axis, trend glyph, heatmap, subject, hardest
-samples); `more` swaps in before/after against the origin, the evolution chart with the lineage, and
-the two-row sample heatmap. Rendered from the served hierarchy (`domain/hierarchy.py`), a fork drawn as
-an event at its spawn point. Owed: the round that changed each key, served ("changed in C7.3").
-Rejected: the round rail of hollow/filled bars and the ring readout.
+The run card is the chat's sample walk alone: the leader, the trend and the heatmap are the
+dashboard's, the target pipeline the chat hero's — no block renders in both views. Owed: the round
+that changed each key, served ("changed in C7.3"), on the leader's diff. Rejected: the round rail of
+hollow/filled bars, the ring readout, and a second card mirroring the dashboard behind `more`.

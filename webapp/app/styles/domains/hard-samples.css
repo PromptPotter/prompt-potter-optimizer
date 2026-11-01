@@ -1,14 +1,5 @@
 .hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;margin-top:24px;padding:0 var(--space-8)}
 .hs-controls-row{display:flex;align-items:center;justify-content:center;gap:var(--space-8);width:100%}
-.run-ctl{display:inline-flex;align-items:center;gap:var(--space-4);margin-left:2px}
-.run-ctl-primary{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
-.run-ctl-primary.is-play{color:var(--color-success)}
-.run-ctl-primary.is-pause{color:var(--color-warn)}
-.run-ctl-primary:hover:not(:disabled){border-color:var(--color-accent)}
-.run-ctl-primary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.run-ctl-primary:disabled{opacity:0.5;cursor:not-allowed}
-.run-ctl-err{max-width:160px}
-.run-ctl-pausing{color:var(--color-warn);font-size:var(--text-xs);max-width:220px}
 .hs-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;width:57px;height:22px;transition:border-color .12s,box-shadow .12s,background .12s}
 .hs-mini-btn:hover{border-color:var(--color-accent)}
 .hs-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
@@ -64,6 +55,3 @@
 @media (pointer:coarse){
   .hs-mini-btn.resizable{resize:none}
 }
-
-
-.hs-expand-wrap{align-self:stretch;width:100%;min-width:0}

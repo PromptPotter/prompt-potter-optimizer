@@ -5,7 +5,7 @@ import { cx } from "@/lib/cx";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import { fmtAgo } from "@/lib/format";
 import { STATUS_MARK_INFO } from "@/lib/api/types.generated";
-import { runWord, statusTone } from "@/lib/derivations";
+import { figureOf } from "@/lib/derivations";
 import { readyData } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import type { HierarchyCourse, MachineSlot } from "@/lib/api";
@@ -25,7 +25,7 @@ function passLabel(s: MachineSlot): string {
 
 export function JobsDock() {
   const { running, byAddress } = useRegistry();
-  const { campaignId, cycleId, navigate, openAccount } = useWorkspace();
+  const { campaignId, cycleId, navigate, open } = useWorkspace();
   const viewed = campaignId && cycleId ? encodeCyclePath([{ campaignId, cycleId }]) : null;
   const machine = readyData(useMachineStatus());
   // A slot holding a cycle is that cycle, already listed above; only a cycleless pass is the
@@ -39,9 +39,9 @@ export function JobsDock() {
 
   const pick = (c: HierarchyCourse) => {
     const path = decodeCyclePath(c.address);
-    if (path) navigate(path, { view: "dashboard" });
+    if (path) navigate({ path });
   };
-  const openUsage = () => openAccount("usage");
+  const openUsage = () => open("account", "usage");
 
   // Served words only: the campaign the job belongs to, then which course of it — none for its root.
   const wordsOf = (c: HierarchyCourse): [string, string | null] => {
@@ -57,13 +57,14 @@ export function JobsDock() {
       const label = wordsOf(c)
         .filter((w) => w !== null)
         .join(", ");
+      const state = figureOf(c, "state");
       return (
         <div className="jobs-dock">
           <button
             type="button"
-            className={cx("jobs-dock-btn", statusTone(c.state.status))}
-            aria-label={`1 active job — ${label} (${runWord(c.state.status)}). Go to it.`}
-            title={`${runWord(c.state.status)}: ${label}`}
+            className={cx("jobs-dock-btn", state && `tone-${state.tone}`)}
+            aria-label={`1 active job — ${label} (${state?.value}). Go to it.`}
+            title={`${state?.value}: ${label}`}
             onClick={() => pick(c)}
           >
             {POTTER_GLYPH}
@@ -121,10 +122,7 @@ export function JobsDock() {
                 }}
               >
                 <span className="jobs-dock-row">
-                  <span className={cx("phase-chip", statusTone(r.state.status))}>
-                    <span className="phase-dot" aria-hidden="true" />
-                    {runWord(r.state.status)}
-                  </span>
+                  <StateChip course={r} />
                   <span className="jobs-dock-item-label">{wordsOf(r)[0]}</span>
                   {wordsOf(r)[1] !== null && (
                     <span className="jobs-dock-item-course">{wordsOf(r)[1]}</span>
@@ -153,5 +151,15 @@ export function JobsDock() {
         )}
       </Menu>
     </div>
+  );
+}
+
+function StateChip({ course }: { course: HierarchyCourse }) {
+  const state = figureOf(course, "state");
+  return (
+    <span className={cx("phase-chip", state && `tone-${state.tone}`)}>
+      <span className="phase-dot" aria-hidden="true" />
+      {state?.value}
+    </span>
   );
 }

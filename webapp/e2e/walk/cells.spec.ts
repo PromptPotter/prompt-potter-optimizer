@@ -1,7 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 import type { HierarchyCourse, SubtreeEntry } from "@/lib/api";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
-import { test, expect, open, campaigns } from "../harness";
+import { test, expect, open, campaigns, DASHBOARD_VIEWS } from "../harness";
 
 const API = "/api/v1";
 
@@ -40,7 +40,7 @@ test("a seat cell drills into the inner run that measured it", async ({ page, re
   const found = await outerServing(request);
   test.skip(!found, "no campaign in this workspace serves a seat cell");
   const { outer, named } = found!;
-  await open(page, `${hashOf(outer)}/dashboard`);
+  await open(page, `${hashOf(outer)}${DASHBOARD_VIEWS}`);
 
   const name = rowName(named[0]!);
   const row = page.getByRole("button", { name: new RegExp(`^${escape(name)}(\\s|$)`) }).first();

@@ -1,5 +1,4 @@
 import { AccessGate } from "@/components/onboarding/AccessGate";
-import { AllowanceExhausted } from "@/components/onboarding/AllowanceExhausted";
 import { AppShell } from "@/components/shell/AppShell";
 import { ConsentGate } from "@/components/onboarding/ConsentGate";
 import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
@@ -18,7 +17,6 @@ export default function Home() {
             <AppShell />
             <AccessGate />
             <ConsentGate />
-            <AllowanceExhausted />
             <WelcomeLockoutModal />
           </WorkspaceProvider>
         </ViewMemoryProvider>

@@ -1,11 +1,13 @@
 "use client";
 import { useRead } from "@/lib/hooks/useRead";
 import { workspaceStorageRead, type WorkspaceStorageResponse } from "@/lib/api";
+import { LIFECYCLE_STATUS_LABELS } from "@/lib/api/types.generated";
 import { cssPct, fmtBytes } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { Empty, ReadState } from "@/components/ui";
 import { AccountSection } from "./AccountSection";
 import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
+import { LeafSplit } from "./LeafSplit";
 
 export function WorkspaceStoragePanel() {
   const read = useRead(workspaceStorageRead());
@@ -17,14 +19,14 @@ export function WorkspaceStoragePanel() {
 }
 
 function WorkspaceStorage({ data }: { data: WorkspaceStorageResponse }) {
-  const max = data.campaigns.reduce((m, c) => Math.max(m, c.on_disk_bytes), 0) || 1;
+  const max = data.campaigns.reduce((m, c) => Math.max(m, c.on_disk.total), 0) || 1;
   const n = data.campaigns.length;
 
   return (
     <>
       <AccountSection
         title="On disk"
-        lede="Campaign trees, fattest first, then the archive home and everything else. The parts you own sum to the total."
+        lede="Campaign trees, fattest first — open one for where its bytes went — then the archive home and everything else. The parts you own sum to the total."
         aside={
           <span className="account-figure">
             {fmtBytes(data.total_bytes)}
@@ -43,24 +45,29 @@ function WorkspaceStorage({ data }: { data: WorkspaceStorageResponse }) {
         ) : null}
         <ul className="wstorage-list">
           {data.campaigns.map((c) => (
-            <li key={c.campaign_id} className="wstorage-item">
-              <div className="wstorage-item-head">
-                <span className="wstorage-name" title={c.campaign_id}>
-                  {c.dataset_name}
-                  {c.lifecycle_status !== "active" && (
-                    <span className={cx("wstorage-tag", c.lifecycle_status)}>
-                      {c.lifecycle_status}
+            <li key={c.campaign_id}>
+              <details className="wstorage-fold">
+                <summary className="wstorage-item">
+                  <span className="wstorage-item-head">
+                    <span className="wstorage-name" title={c.campaign_id}>
+                      {c.dataset_name}
+                      {c.lifecycle_status !== "active" && (
+                        <span className={cx("wstorage-tag", c.lifecycle_status)}>
+                          {LIFECYCLE_STATUS_LABELS[c.lifecycle_status]}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-                <span className="wstorage-bytes">{fmtBytes(c.on_disk_bytes)}</span>
-              </div>
-              <div className="wstorage-bar" aria-hidden="true">
-                <div
-                  className="wstorage-bar-fill"
-                  style={{ width: cssPct(Math.max(0.02, c.on_disk_bytes / max)) }}
-                />
-              </div>
+                    <span className="wstorage-bytes">{fmtBytes(c.on_disk.total)}</span>
+                  </span>
+                  <span className="wstorage-bar" aria-hidden="true">
+                    <span
+                      className="wstorage-bar-fill"
+                      style={{ width: cssPct(Math.max(0.02, c.on_disk.total / max)) }}
+                    />
+                  </span>
+                </summary>
+                <LeafSplit bytes={c.on_disk} />
+              </details>
             </li>
           ))}
           <li className="wstorage-item wstorage-aux">

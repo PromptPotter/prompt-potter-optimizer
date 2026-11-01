@@ -1,25 +1,22 @@
 import type {
   DashboardState,
+  LookaheadDepth,
   PauseReading,
-  ProducerReading,
   RunPhase,
   RunPhaseInfo,
   RunStatus,
-  StatusMarkInfo,
+  SampleLookahead,
   StopReason,
   WaitingOn,
 } from "@/lib/api/types.generated";
 import {
   DASHBOARD_STATE_PAUSE_WORDS,
-  LIFECYCLE_STATUS_LABELS,
   LOOKAHEAD_WORDS,
-  PRODUCER_STATE_INFO,
-  RAY_HEAD_WORDS,
   RUN_PHASE_INFO,
-  STATUS_MARK_INFO,
   STOP_REASON_INFO,
+  WAITING_ON_WORDS,
 } from "@/lib/api/types.generated";
-import { fmtDuration } from "@/lib/format";
+import { filled } from "@/lib/format";
 
 // served: `RUN_PHASE_INFO` is `domain/phases.py`
 type PhaseFact = "settled" | "awaits_operator";
@@ -45,15 +42,6 @@ export function isStopReason(v: unknown): v is StopReason {
   return typeof v === "string" && v in STOP_REASON_INFO;
 }
 
-export type RunPhaseTone = StatusMarkInfo["tone"];
-
-/** A run's one word: `domain/cycle_index.py::RunStatus.label`, the same lookup. */
-export function runWord(status: RunStatus): string {
-  if (status.mark === "archived") return LIFECYCLE_STATUS_LABELS.archived;
-  if (status.run_phase !== "terminal") return RUN_PHASE_INFO[status.run_phase].label;
-  return status.stop_reason === null ? "—" : STOP_REASON_INFO[status.stop_reason].label;
-}
-
 /** What the operator does now, as the run's stop reason states it; empty where it owes nothing. */
 export function runNextStep(status: RunStatus): string {
   return status.stop_reason === null ? "" : STOP_REASON_INFO[status.stop_reason].next_step;
@@ -66,16 +54,9 @@ export function pauseNextStep(pause: PauseReading): string {
     : STOP_REASON_INFO[pause.stop_reason].next_step;
 }
 
-/** A walking run's head word: its producer's state, or the measuring word on an open cell. */
-export function producerWord(producer: ProducerReading): string {
-  return producer.state === "idle" && producer.open_for_s !== null
-    ? RAY_HEAD_WORDS.measuring
-    : PRODUCER_STATE_INFO[producer.state].label;
-}
-
 /** The cell an open call holds: its arm, or a pass no arm owns, and its sample. */
 export function waitingText(waiting: WaitingOn): string {
-  return `${waiting.label ?? RAY_HEAD_WORDS.pass} · ${RAY_HEAD_WORDS.sample} ${waiting.position}`;
+  return `${waiting.label ?? WAITING_ON_WORDS.pass} · ${WAITING_ON_WORDS.sample} ${waiting.position}`;
 }
 
 /** How many more cells the spend limits admit, where money holds the walk. */
@@ -85,19 +66,15 @@ export function affordableText(affordable: number): string {
     : `${affordable} ${LOOKAHEAD_WORDS.more_affordable}`;
 }
 
-/** What a producer's state raises on its own (`silent`, `wedged`); null where nothing is wrong. */
-export function producerAlert(producer: ProducerReading): { title: string; detail: string } | null {
-  const info = PRODUCER_STATE_INFO[producer.state];
-  if (!info.alert) return null;
-  const clocked =
-    producer.state === "wedged" && producer.silent_for_s !== null
-      ? ` for ${fmtDuration(producer.silent_for_s)}`
-      : "";
-  return { title: info.alert, detail: info.alert_detail + clocked };
+/** What the armed look-ahead depth does: the mode in force, its bound and the calls cut so far. */
+export function lookaheadExplained(la: SampleLookahead): string {
+  if (la.auto_refusal === "one_at_a_time") return LOOKAHEAD_WORDS.one_at_a_time;
+  const held = filled(la.auto ? LOOKAHEAD_WORDS.holds_every_round : LOOKAHEAD_WORDS.holds_this_round, la);
+  return la.discards > 0 ? `${held} ${filled(LOOKAHEAD_WORDS.discarded, la)}` : held;
 }
 
-export function statusTone(status: RunStatus): `tone-${RunPhaseTone}` {
-  return `tone-${STATUS_MARK_INFO[status.mark].tone}`;
+export function lookaheadDepthLabel(d: LookaheadDepth): string {
+  return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : filled(LOOKAHEAD_WORDS.depth_many, d);
 }
 
 export function phasePauseLabel(

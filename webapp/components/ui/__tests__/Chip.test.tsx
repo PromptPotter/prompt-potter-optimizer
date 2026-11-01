@@ -14,6 +14,22 @@ describe("Chip", () => {
     expect(screen.getByRole("button", { name: "Comp" }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("a menu's trigger says expanded, never pressed, and an action says neither", () => {
+    render(
+      <>
+        <Chip on expanded={false} onClick={() => {}}>Menu</Chip>
+        <Chip onClick={() => {}}>Act</Chip>
+      </>,
+    );
+    const menu = screen.getByRole("button", { name: "Menu" });
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    expect(menu.getAttribute("aria-haspopup")).toBe("menu");
+    expect(menu.hasAttribute("aria-pressed")).toBe(false);
+    const act = screen.getByRole("button", { name: "Act" });
+    expect(act.hasAttribute("aria-pressed")).toBe(false);
+    expect(act.hasAttribute("aria-expanded")).toBe(false);
+  });
+
   it("fires on click, and is inert when disabled", () => {
     const onClick = vi.fn();
     const { rerender } = render(

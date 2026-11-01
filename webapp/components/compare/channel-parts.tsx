@@ -2,13 +2,16 @@ import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
-import { BENCH_STATE_INFO, CEILING_METER_LABELS } from "@/lib/api/types.generated";
+import {
+  BENCH_STATE_INFO,
+  CEILING_METER_LABELS,
+  STOP_REASON_INFO,
+} from "@/lib/api/types.generated";
 import {
   liftOf,
   meteredBucketsLine,
   ratePricedText,
   readPaired,
-  runWord,
   spendHeadline,
   type LineStep,
 } from "@/lib/derivations";
@@ -22,7 +25,7 @@ import {
   fmtUsd,
   PLACEHOLDER,
 } from "@/lib/format";
-import { Badge } from "@/components/ui";
+import { Badge, Term } from "@/components/ui";
 
 interface MetricFigure {
   value: string;
@@ -154,9 +157,43 @@ export function CellMeans({ means }: { means: Record<string, number> | undefined
   );
 }
 
-export function CostFacts({ row }: { row: HeadToHeadRow }) {
+function ElectedOn({ election }: { election: HeadToHeadRow["election"] }) {
+  if (!election) return PLACEHOLDER;
+  const ability = election.ability;
+  if (election.reads_on === "ability" && ability) {
+    return `θ ${fmtSigned(ability.theta, 3)}`;
+  }
+  if (election.reads_on === election.elects_on) return election.reads_on;
+  return `${election.reads_on} · θ ${ability?.caveat ?? "unread"}`;
+}
+
+export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
   return (
-    <dl className="cmp-channel-facts cmp-channel-cost">
+    <dl className="cmp-channel-facts cmp-channel-headline">
+      <div>
+        <dt>
+          <Term
+            content={
+              <p className="cmp-line-key">
+                The column the pick&rsquo;s round elected it on, and the one to quote it on: a pick
+                won on ability is quoted on θ unless its θ carries a caveat — there θ is not
+                ability, and the election reads on accuracy.
+              </p>
+            }
+          >
+            elected on
+          </Term>
+        </dt>
+        <dd>
+          <ElectedOn election={row.election} />
+        </dd>
+      </div>
+      {row.swapped_in.length > 0 && (
+        <div>
+          <dt>swapped in</dt>
+          <dd>{row.swapped_in.join(", ")}</dd>
+        </div>
+      )}
       <div>
         <dt>lift / USD</dt>
         <dd>{fmtSigned(row.bench.cost.lift_per_usd, 2)}</dd>
@@ -188,7 +225,9 @@ export function HeadlineBadges({ row }: { row: HeadToHeadRow }) {
     <span className="cmp-channel-badges">
       <GuardBadge guard={row.guard} />
       {row.bench_set === null && <Badge>no headline</Badge>}
-      {row.status.mark === "failed" && <Badge tone="danger">{runWord(row.status)}</Badge>}
+      {row.status.mark === "failed" && row.status.stop_reason !== null && (
+        <Badge tone="danger">{STOP_REASON_INFO[row.status.stop_reason].label}</Badge>
+      )}
     </span>
   );
 }

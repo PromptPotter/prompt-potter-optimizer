@@ -1091,7 +1091,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
     election = d.get("election") or {}
     out["election"] = {k: election.get(k) for k in ELECTION_KEYS}
     health = d.get("health") or {}
-    out["health"] = {k: health.get(k) for k in ("grade", "cause", "suggested_action")}
+    out["health"] = {k: health.get(k) for k in ("grade", "cause")}
     readings = [r["reading"] for r in d.get("scoreboard") or []]
     out["arms"] = {
         ids.get(key, key): {

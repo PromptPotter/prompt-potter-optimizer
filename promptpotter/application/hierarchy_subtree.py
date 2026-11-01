@@ -24,6 +24,9 @@ from promptpotter.application.hierarchy import (
     CourseReads,
     campaign_courses,
     campaign_entry,
+    candidate_figures,
+    candidate_lines,
+    caveat_row,
     entries_version,
     superseded_tag,
 )
@@ -66,8 +69,8 @@ from promptpotter.domain.hierarchy import (
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.run_records import ForkDirection, SpawnedBy
+from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.lineage_queries import (
     MAX_COURSE_DEPTH,
@@ -479,13 +482,11 @@ class _Build:
                 host.inner.append(nested.model_copy(update={"parent": host.address}))
                 continue
             under = asker or course
-            caveat = " ".join(
-                text
-                for text in (nested.caveat, _unplaced(spawned, asker_listed=asker is not None))
-                if text
-            )
+            unplaced = caveat_row("unplaced", _unplaced(spawned, asker_listed=asker is not None))
             under.unplaced.append(
-                nested.model_copy(update={"parent": under.address, "caveat": caveat})
+                nested.model_copy(
+                    update={"parent": under.address, "lines": [*nested.lines, unplaced]}
+                )
             )
 
     def _course(self, course: _Course, siblings: list[_Course]) -> SubtreeCourse:
@@ -569,13 +570,13 @@ class _Build:
         if retired:
             by = c.status.by if isinstance(c.status, _Retired) else course.address
             tags.append(superseded_tag(by))
-        caveat = None if reading.ability is None else reading.ability.caveat
         lineage = c.arm.state.individual.lineage
+        standing = _standing(c, stood_on=stood_on)
         facts = CandidateFacts(
             individual=c.arm.state.individual.id,
             parent_ids=list(lineage.parent_ids),
             variations=list(lineage.variations),
-            standing=_standing(c, stood_on=stood_on),
+            standing=standing,
             reading=reading,
             stands=c.address == stands,
             course_latest=c.address == latest,
@@ -596,10 +597,9 @@ class _Build:
             address=c.address,
             parent=round_address(course.address, c.round),
             label=reading.arm.label,
-            caveat=None
-            if caveat is None
-            else f"{THETA_CAVEAT_INFO[caveat].head}. {THETA_CAVEAT_INFO[caveat].body}",
             tags=tags,
+            figures=candidate_figures(reading),
+            lines=candidate_lines(reading, standing),
             children=list(c.inner),
             facts=facts,
         )
@@ -668,14 +668,12 @@ def _read_under(
     ]
     if not under:
         return root
-    said = f"Read under {' and '.join(under)}."
+    read_under = Said(
+        key="read_under", tone="attention", label=f"Read under {' and '.join(under)}."
+    )
     return _restamped(
         root,
-        lambda e: (
-            {"caveat": " ".join(t for t in (e.caveat, said) if t)}
-            if isinstance(e, SubtreeCourse)
-            else {}
-        ),
+        lambda e: {"lines": [*e.lines, read_under]} if isinstance(e, SubtreeCourse) else {},
     )
 
 

@@ -1,49 +1,23 @@
 "use client";
 import { useState } from "react";
-import type { ServedDashboard } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
-import { StorageCakes } from "./StorageCakes";
-import { useCycleStream } from "@/lib/poll";
 
-interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
-}
-
-function RawJsonCard({ dash }: { dash: ServedDashboard | null }) {
-  return (
-    <div className="card raw-card">
-      <details>
-        <summary>Raw dashboard.json</summary>
-        <pre>
-          {dash ? JSON.stringify(dash, null, 2) : "Waiting for first poll…"}
-        </pre>
-      </details>
-    </div>
-  );
-}
-
-export function FilesPane({ campaignId, cycleId }: Props) {
+export function FilesPane() {
+  const { campaignId, cycleId } = useWorkspace();
   const [selected, setSelected] = useState<{ scope: string; path: string } | null>(null);
-  const { dash } = useCycleStream();
   return (
-    <div className="content files-content" id="content-files">
-      <StorageCakes />
-      <div className="files-pane">
-        <div className="tree-pane" role="navigation" aria-label="Files">
-          <FileTree
-            campaignId={campaignId}
-            cycleId={cycleId}
-            selected={selected}
-            onSelect={(scope, path) => setSelected({ scope, path })}
-          />
-        </div>
-        <FileViewer campaignId={campaignId} cycleId={cycleId} selected={selected} />
+    <div className="files-pane box-full">
+      <div className="tree-pane" role="navigation" aria-label="Files">
+        <FileTree
+          campaignId={campaignId}
+          cycleId={cycleId}
+          selected={selected}
+          onSelect={(scope, path) => setSelected({ scope, path })}
+        />
       </div>
-      <div className="files-pane-footer">
-        <RawJsonCard dash={dash} />
-      </div>
+      <FileViewer campaignId={campaignId} cycleId={cycleId} selected={selected} />
     </div>
   );
 }

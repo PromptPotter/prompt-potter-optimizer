@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 
-export function RoundAxis({ trailing }: { trailing?: ReactNode }) {
+export function RoundAxis() {
   const { dash } = useCycleStream();
   const { round: selectedRound, setSelectionForRound } = useSelection();
   const completed = dash?.round_axis.completed ?? [];
@@ -60,7 +60,6 @@ export function RoundAxis({ trailing }: { trailing?: ReactNode }) {
           </button>
         )}
       </div>
-      {trailing}
     </div>
   );
 }

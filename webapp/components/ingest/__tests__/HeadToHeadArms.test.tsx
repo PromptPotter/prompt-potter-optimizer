@@ -1,34 +1,24 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { KnobRow, OptimizerSetup, StartCheckinOptions } from "@/lib/api";
+import type { NodeConfigParam, OptimizerSetup, StartCheckinOptions } from "@/lib/api";
+import { configParam } from "@/lib/test-fixtures";
 import { HeadToHeadArms, startOptions, type HeadToHeadDraft } from "../HeadToHeadArms";
 
-function knob(key: string, value: number): KnobRow {
-  return {
-    key,
-    description: `${key} of the arm`,
-    summary: `${key} of the arm`,
-    type: "integer",
-    options: null,
-    nullable: false,
-    minimum: null,
-    exclusive_minimum: null,
-    maximum: null,
-    exclusive_maximum: null,
-    declared: value,
-    value,
-    movable_by: [],
-  };
+function knob(key: string, value: number): NodeConfigParam {
+  const description = `${key} of the arm`;
+  return configParam({ key, integer: true, description, summary: description, declared: value, value });
 }
 
 const SETUP: OptimizerSetup = {
   main: [{ node: "blocks", knob: "max_blocks" }],
-  knobs: [{ node: "blocks", kind: "proposer", knobs: [knob("max_blocks", 8)] }],
+  knobs: [{ node: "blocks", kind: "proposer", keys: ["max_blocks"] }],
   prompts: {},
   arms_per_round: 4,
   proposers: [],
   pools: [],
+  node_config_schema: { blocks: [knob("max_blocks", 8)] },
+  reach: {},
 };
 
 function Harness({ onStart }: { onStart: (sent: StartCheckinOptions) => void }) {

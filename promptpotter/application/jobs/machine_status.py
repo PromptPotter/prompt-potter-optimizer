@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from enum import StrEnum
+from typing import NamedTuple
+
 from pydantic import Field
 
-from promptpotter.application.jobs.capacity import resolve_run_capacity, throttle_hold
+from promptpotter.application.jobs.capacity import SlotBound, resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, EmbeddedRun, InnerRun, Job, SlotHolder
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
+from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.shared.identity import IdentityContext, acting_principal
@@ -75,44 +79,80 @@ class MachineRefusal(StrictModel):
     reason: str = Field(description="The refusal, in the words the launch's own error carried")
 
 
-class MachineNotice(StrictModel):
-    """What the machine's occupancy means for the CALLER, in words: a landing refusing every launch,
-    their own launch waiting, or a full machine a launch would wait on. Built by :meth:`of` alone."""
+class MachineNoticeKind(StrEnum):
+    """What the machine's occupancy means for the caller's next launch: the `key` of its notice."""
 
+    LANDING = "landing"
+    QUEUED_NEXT = "queued_next"
+    QUEUED = "queued"
+    FULL_YOURS = "full_yours"
+    FULL = "full"
+    FULL_UNSEEN = "full_unseen"
+
+
+class MachineNoticeInfo(NamedTuple):
+    # `{name}` stands for the `machine_notice` fact of that name.
     title: str
     detail: str
+    tone: Tone
 
-    @classmethod
-    def of(
-        cls,
-        *,
-        landing: str | None,
-        busy: bool,
-        oldest: MachineSlot | None,
-        queue: list[MachineQueueEntry],
-    ) -> MachineNotice | None:
-        if landing is not None:
-            return cls(
-                title="Landing new code",
-                detail=f"a launch is refused until the box restarts on {landing[:12]}",
-            )
-        if queue:
-            # Ordered and scoped to the caller: the first entry IS their place.
-            position = queue[0].position
-            return cls(
-                title="Queued — next in line" if position == 1 else f"Queued — position {position}",
-                detail=QUEUE_STARTS_ITSELF,
-            )
-        if not busy:
-            return None
-        since = oldest.started_at if oldest is not None else None
-        return cls(
-            title="Machine full — "
-            + (f"{oldest.user} is running {oldest.what}" if oldest else "another run is running"),
-            detail=f"a launch will queue · oldest run since {since}"
-            if since
-            else "a launch will queue",
-        )
+
+_QUEUES = "a launch will queue"
+
+MACHINE_NOTICE_INFO: dict[MachineNoticeKind, MachineNoticeInfo] = {
+    MachineNoticeKind.LANDING: MachineNoticeInfo(
+        "Landing new code", "a launch is refused until the box restarts on {commit}", "warn"
+    ),
+    MachineNoticeKind.QUEUED_NEXT: MachineNoticeInfo(
+        "Queued — {what}, next in line", QUEUE_STARTS_ITSELF, "attention"
+    ),
+    MachineNoticeKind.QUEUED: MachineNoticeInfo(
+        "Queued — {what}, position {position}", QUEUE_STARTS_ITSELF, "attention"
+    ),
+    MachineNoticeKind.FULL_YOURS: MachineNoticeInfo(
+        "Machine full — your run {what} is running", _QUEUES, "warn"
+    ),
+    MachineNoticeKind.FULL: MachineNoticeInfo("Machine full — {what} is running", _QUEUES, "warn"),
+    MachineNoticeKind.FULL_UNSEEN: MachineNoticeInfo(
+        "Machine full — another run is running", _QUEUES, "warn"
+    ),
+}
+assert MACHINE_NOTICE_INFO.keys() == set(MachineNoticeKind)
+
+
+def _said(kind: MachineNoticeKind, **fields: object) -> Said:
+    words = MACHINE_NOTICE_INFO[kind]
+    return Said(
+        key=kind.value,
+        tone=words.tone,
+        label=words.title.format(**fields),
+        detail=words.detail.format(**fields),
+    )
+
+
+def machine_notice(
+    *,
+    landing: str | None,
+    busy: bool,
+    oldest: MachineSlot | None,
+    queue: list[MachineQueueEntry],
+) -> Said | None:
+    """What the machine's occupancy means for the CALLER: a landing refusing every launch, their own
+    launch waiting, or a full machine a launch would wait on."""
+    if landing is not None:
+        return _said(MachineNoticeKind.LANDING, commit=landing[:12])
+    if queue:
+        # Ordered and scoped to the caller: the first entry IS their place.
+        first = queue[0]
+        kind = MachineNoticeKind.QUEUED_NEXT if first.position == 1 else MachineNoticeKind.QUEUED
+        return _said(kind, what=first.what, position=first.position)
+    if not busy:
+        return None
+    # True of the caller's own slot too: their next launch queues behind it.
+    if oldest is None:
+        return _said(MachineNoticeKind.FULL_UNSEEN)
+    kind = MachineNoticeKind.FULL_YOURS if oldest.mine else MachineNoticeKind.FULL
+    return _said(kind, what=oldest.what)
 
 
 class MachineStatusResponse(StrictModel):
@@ -125,9 +165,9 @@ class MachineStatusResponse(StrictModel):
         description="The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and "
         "writable nowhere else. `capacity` never exceeds it, and neither may an account's limit."
     )
-    held_back: str | None = Field(
-        description="`capacity` below `ceiling`, worded once for the terminal and the usage tab; "
-        "null where the machine admits its whole ceiling."
+    bound: SlotBound | None = Field(
+        description="`throttle` while `capacity` is below `ceiling`; null where the machine "
+        "admits its whole ceiling."
     )
     occupied: int = Field(
         description="Slots held machine-wide, whoever holds them — the occupancy figure, which "
@@ -159,9 +199,10 @@ class MachineStatusResponse(StrictModel):
         description="The CALLER's own launches refused today, newest first. A launch that queued "
         "was answered before it was refused, so this is where its refusal is read.",
     )
-    notice: MachineNotice | None = Field(
-        description="A landing in progress, `busy` and the caller's place in `queue`, worded once "
-        "for the terminal and the alert bar; null where a slot is free and nothing of theirs waits."
+    notice: Said | None = Field(
+        description="A landing in progress, `busy` and the caller's place in `queue` — a fact about "
+        "the NEXT launch, never about a run in view; null where a slot is free and nothing of "
+        "theirs waits."
     )
 
 
@@ -190,14 +231,14 @@ def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineSt
     return MachineStatusResponse(
         capacity=capacity,
         ceiling=ceiling,
-        held_back=throttle_hold(capacity, ceiling),
+        bound=SlotBound.THROTTLE if capacity < ceiling else None,
         occupied=len(held),
         running=running,
         queued=len(order),
         busy=busy,
         queue=queue,
         # Named only where the caller may see the machine's oldest slot.
-        notice=MachineNotice.of(
+        notice=machine_notice(
             landing=jobs.landing(),
             busy=busy,
             oldest=held[0] if held and held[0] in running else None,

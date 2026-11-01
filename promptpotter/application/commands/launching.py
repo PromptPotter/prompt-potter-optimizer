@@ -44,22 +44,18 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
     resolve_pipeline_for_campaign,
+    steer_verdict,
 )
 from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch
-from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ComparisonExit, CycleSeed, OriginSource
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
-from promptpotter.shared.identity import (
-    CAMPAIGN_BABYSIT_CAP,
-    acting_principal,
-    has_capability,
-)
+from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
@@ -174,9 +170,8 @@ def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[objec
     stores = dispatcher.stores
     campaign_config = resolve_campaign_config(stores, campaign, None)
     seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
-    # The babysit act (decisions.md § 0005): a steer outside what the node permits; `fork-preview` asks the same call.
-    disallowed = steers_disallowed_model(campaign_config.optimizer_narrowing, seed.pipeline_overlay)
-    if disallowed and not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP):
+    overlay = seed.pipeline_overlay
+    if steer_verdict(stores, campaign_config.optimizer_narrowing, overlay) == "refused":
         logger.warning(
             "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
             acting_principal(stores.identity).id,

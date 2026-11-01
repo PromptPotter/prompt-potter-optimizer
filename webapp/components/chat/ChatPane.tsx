@@ -10,9 +10,7 @@ import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
 import type { HierarchyCourse } from "@/lib/api";
-import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
-import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
 import {
   checkinThreadKey,
@@ -64,7 +62,6 @@ export function ChatPane() {
           status={live.status}
           listening={live.connected && liveCourse !== null}
           decision={live.decision}
-          lives={course?.facts.standing?.lives ?? null}
         />
       ),
     });
@@ -82,7 +79,6 @@ export function ChatPane() {
       ? [...stored, ...mounted]
       : [...ingestItems.head, ...stored, ...ingestItems.tail];
 
-  const { node: selectedNode, setSelectionForNode } = useSelection();
   // The remote floats above the composer, so its height is published to the shell the remote hangs off.
   const paneRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -101,14 +97,12 @@ export function ChatPane() {
 
   return (
     <div className="content chat-content" id="content-chat" ref={paneRef}>
-      <div className="wf-hero">
-        <PipelineStack datasetName={datasetName} />
-        {selectedNode && (
-          <div className="wf-hero-detail">
-            <NodeDetail node={selectedNode} onClose={() => setSelectionForNode(null)} />
-          </div>
-        )}
-      </div>
+      {/* A run's alone: over a check-in its steps draw the draft's pipeline. */}
+      {subject === null && viewedPath && (
+        <div className="wf-hero">
+          <PipelineStack datasetName={datasetName} />
+        </div>
+      )}
 
       <div className="chat-grid">
         <div className="chat-panel">

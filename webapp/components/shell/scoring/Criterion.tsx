@@ -3,6 +3,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import {
   CommitInput,
+  FailureLine,
   IconBolt,
   IconCirclePlus,
   IconClose,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui";
 import type { CellTermMeta } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
+import type { ReadFailure } from "@/lib/hooks/useRead";
 import { DIAL_TERMS, NO_DIALS, type ScoringMask } from "@/lib/scoring-mask";
 import { TERMS } from "@/lib/terms";
 
@@ -89,7 +91,7 @@ export function Criterion({
   formula,
   samples,
   onSamples,
-  invalid,
+  invalid = null,
   summary,
   note,
   startRung = 0,
@@ -104,7 +106,7 @@ export function Criterion({
   formula?: string | null;
   samples?: string;
   onSamples?: (raw: string) => void;
-  invalid?: string | null;
+  invalid?: ReadFailure | null;
   summary?: ReactNode;
   note?: ReactNode;
   startRung?: CriterionRung;
@@ -228,7 +230,7 @@ export function Criterion({
             </Menu>
           )}
 
-          {invalid ? <p className="note-warn">{invalid}</p> : null}
+          <FailureLine failure={invalid} />
           {summary ? <div className="criterion-summary">{summary}</div> : null}
 
           {rung === 2 && (

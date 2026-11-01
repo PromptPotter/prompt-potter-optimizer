@@ -25,15 +25,16 @@ export function ConnectorInspector({ view }: Props) {
   // No resolved connector is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
   const noBackend = connector == null && !selfOpt;
   const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
+  // The head names the state once; the foot says only what the label cannot.
   const footText = selfOpt
     ? "L4 self-optimization — backend is PromptPotter itself; the per-node backend lives in the inner run"
     : noBackend
       ? "no backend selected"
       : !health
-        ? "probe pending…"
+        ? null
         : reachable
-          ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
-          : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
+          ? `checked ${new Date(health.checked_at).toLocaleTimeString()}`
+          : health.detail;
   const interior = interiorNodes(pipelineView);
 
   // A div host, not a span: the popover below is flow content, which no inline element may hold.
@@ -111,7 +112,7 @@ export function ConnectorInspector({ view }: Props) {
             </ul>
           </div>
         )}
-        <div className="connector-pop-foot">{footText}</div>
+        {footText ? <div className="connector-pop-foot">{footText}</div> : null}
       </div>
     </div>
   );

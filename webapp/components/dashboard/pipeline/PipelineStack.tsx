@@ -1,6 +1,5 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { pipelineReadStatus } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useCycleStream } from "@/lib/poll";
 import { CAMPAIGN_LAYER, useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
@@ -41,9 +40,7 @@ export function PipelineStack({ datasetName }: Props) {
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
   // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
   const nested = useNestedPipelines(cv.nests, cv.schema.status === "ok");
-  const { doc: optimizer, loading: optimizerLoading } = useOptimizerPipeline(
-    outermost === 0 ? cv.optimizer : null,
-  );
+  const { doc: optimizer, status: optimizerStatus } = useOptimizerPipeline(outermost === 0);
   const activeNode = dash?.current_round.active_node ?? null;
 
   const layers: Layer[] = [
@@ -53,13 +50,9 @@ export function PipelineStack({ datasetName }: Props) {
       level: 0,
       label: cv.optimizer ? `the ${cv.optimizer} optimization loop` : "the optimization loop",
       view: optimizer?.view ?? null,
-      status: pipelineReadStatus({
-        bound: cv.schema.status !== "unbound",
-        loading: optimizerLoading || cv.schema.status === "loading",
-        failed: !optimizer,
-      }),
+      status: optimizerStatus,
       connector: "PromptPotter",
-      reach: optimizer?.reach ?? null,
+      reach: cv.optimizerSetup?.reach ?? null,
       scope: "optimizer",
       nestsNode: optimizer?.measurement_node ?? null,
       activeNode,

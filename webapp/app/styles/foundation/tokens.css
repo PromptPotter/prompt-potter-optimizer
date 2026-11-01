@@ -33,7 +33,6 @@
 
   /* @media cannot read custom properties: these name the only allowed breakpoints, repeated as literals. */
   --bp-sm:640px;
-  --bp-rotate:768px;
   --bp-md:880px;
 
   --touch-target-min:44px;

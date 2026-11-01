@@ -1,33 +1,14 @@
 "use client";
 
 import { CommitInput } from "@/components/ui";
-
-// The JSON Schema subset `DraftCampaignWire.setup_schema` speaks.
-export interface FieldSchema {
-  type?: "object" | "string" | "integer" | "number";
-  title?: string;
-  description?: string;
-  enum?: string[];
-  minimum?: number;
-  exclusiveMinimum?: number;
-  maximum?: number;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: string;
-  writeOnly?: boolean;
-  default?: unknown;
-  required?: string[];
-  properties?: Record<string, FieldSchema>;
-}
+import { childOf as child, type FieldSchema } from "@/lib/derivations";
+import { CAP_AXIS_INFO } from "@/lib/api/types.generated";
+import { isCapAxis, parseCapIn } from "@/lib/run-limits";
 
 // `writeOnly`: the value rides Start and is stored nowhere; otherwise it is the draft patch at `path`.
 export type Commit = (path: string[], value: unknown, writeOnly: boolean) => void;
 
 type Json = Record<string, unknown>;
-
-function child(values: unknown, key: string): unknown {
-  return typeof values === "object" && values !== null ? (values as Json)[key] : undefined;
-}
 
 // Null clears the key: a blank field is the absent value.
 export function setIn<T extends object>(target: T, path: string[], value: unknown): T {
@@ -55,14 +36,19 @@ export function writeOnlyDefaults(schema: FieldSchema, writeOnly = false): Json 
 
 const INVALID = Symbol("invalid");
 
-function parse(field: FieldSchema, text: string, required: boolean): unknown {
+// A refused number stays INVALID, so the typed text stays on screen uncommitted.
+function parse(field: FieldSchema, text: string, required: boolean, scale: number): unknown {
   const s = text.trim();
   if (s === "") return required ? INVALID : null;
   if (field.type === "integer" || field.type === "number") {
-    const n = Number(s);
-    if (!Number.isFinite(n) || (field.type === "integer" && !Number.isInteger(n))) return INVALID;
-    if (field.exclusiveMinimum !== undefined && n <= field.exclusiveMinimum) return INVALID;
-    return n;
+    const cap = parseCapIn(s, {
+      integer: field.type === "integer",
+      minimum: field.minimum,
+      maximum: field.maximum,
+      exclusive_minimum: field.exclusiveMinimum,
+      scale,
+    });
+    return "value" in cap ? cap.value : INVALID;
   }
   return field.pattern && !new RegExp(`^(?:${field.pattern})$`).test(s) ? INVALID : s;
 }
@@ -81,6 +67,7 @@ export function SchemaFields({
   return Object.entries(schema.properties ?? {}).map(([key, field]) => (
     <SchemaField
       key={key}
+      name={key}
       field={field}
       value={child(values, key)}
       required={schema.required?.includes(key) ?? false}
@@ -91,12 +78,14 @@ export function SchemaFields({
 }
 
 function SchemaField({
+  name,
   field,
   value,
   required,
   writeOnly,
   onCommit,
 }: {
+  name: string;
   field: FieldSchema;
   value: unknown;
   required: boolean;
@@ -145,23 +134,27 @@ function SchemaField({
 
   const integer = field.type === "integer";
   const numeric = integer || field.type === "number";
+  // A run cap is typed in its served unit; the wire carries `scale` times it.
+  const cap = isCapAxis(name) ? CAP_AXIS_INFO[name] : null;
+  const scale = cap ? cap.scale : 1;
   return (
     <p>
       <label>
         {field.title}
+        {cap ? ` (${cap.unit})` : null}
         {note}{" "}
         <CommitInput
-          value={text}
+          value={typeof value === "number" ? String(value / scale) : text}
           type={numeric ? "number" : "text"}
           inputMode={integer ? "numeric" : numeric ? "decimal" : undefined}
-          step={integer ? 1 : numeric ? "any" : undefined}
-          min={field.minimum}
-          max={field.maximum}
+          step={cap ? cap.step : integer ? 1 : numeric ? "any" : undefined}
+          min={field.minimum === undefined ? undefined : field.minimum / scale}
+          max={field.maximum === undefined ? undefined : field.maximum / scale}
           minLength={field.minLength}
           maxLength={field.maxLength}
           required={required}
-          validate={(draft) => parse(field, draft, required) !== INVALID}
-          onCommit={(draft) => onCommit([], parse(field, draft, required), writeOnly)}
+          validate={(draft) => parse(field, draft, required, scale) !== INVALID}
+          onCommit={(draft) => onCommit([], parse(field, draft, required, scale), writeOnly)}
         />
       </label>
     </p>

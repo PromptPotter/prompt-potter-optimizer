@@ -4,18 +4,16 @@ import argparse
 
 from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
 from promptpotter.application.hierarchy import list_hierarchy
-from promptpotter.application.views.render.primitives import rounds_readout
 from promptpotter.domain.cycle_paths import hierarchy_address
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
-from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.result import CommandResult, said_text
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
 
 def _line(course: HierarchyCourse, *, active: bool) -> str:
-    state, facts = course.state, course.facts
+    state = course.state
     return (
-        f"{course.address}  {state.status.run_phase.value}  {state.status.label}"
-        + f"  {rounds_readout(facts.rounds_closed, facts.rounds_cap)}"
+        course.address
         + (
             f"  paused by {state.pause.cause.value}"
             + (f": {state.pause.detail}" if state.pause.detail else "")
@@ -52,12 +50,16 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
         if pointer.campaign_id and pointer.cycle_id
         else None
     )
-    lines = [
-        _line(course, active=course.address == active)
-        for campaign in listing.entries
-        if isinstance(campaign, HierarchyCampaign)
-        for course in campaign.children
-    ]
+    lines: list[str] = []
+    for campaign in listing.entries:
+        if not isinstance(campaign, HierarchyCampaign):
+            continue
+        for course in campaign.children:
+            lines.append(_line(course, active=course.address == active))
+            lines.append("    " + " · ".join(said_text(r) for r in course.figures))
+            lines.extend(f"    {said_text(r)}" for r in course.lines)
+            if (said := course.said) is not None:
+                lines.append(f"    {said.tone}: {said_text(said)}")
     # Each arm campaign's `<h2h>:<key>`: the head-to-head ids already taken.
     arms = [
         f"  {tag.value}  {campaign.address}"

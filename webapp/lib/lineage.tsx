@@ -11,7 +11,7 @@ import { encodeCyclePath } from "@/lib/ids";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
 import { useDebounced } from "@/lib/hooks/useDebounced";
-import { shownData, useRead } from "@/lib/hooks/useRead";
+import { shownData, useRead, type ReadFailure } from "@/lib/hooks/useRead";
 import { useRegistry } from "@/lib/state/registry";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
@@ -21,10 +21,10 @@ const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LEN
 export interface CampaignTree {
   root: SubtreeCampaign | null;
   loaded: boolean;
-  failed: boolean;
+  failure: ReadFailure | null;
 }
 
-const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
+const EMPTY: CampaignTree = { root: null, loaded: false, failure: null };
 
 interface ViewedLineage {
   tree: SubtreeCampaign | null;
@@ -63,10 +63,10 @@ function useTree(
   });
   const served = shownData(read);
   const root = served?.level === "campaign" ? served : null;
-  const failed = read.status === "failed" && root === null;
+  const failure = read.status === "failed" && root === null ? read.failure : null;
   return useMemo(
-    () => (root === null && !failed ? EMPTY : { root, loaded: root !== null, failed }),
-    [root, failed],
+    () => (root === null && failure === null ? EMPTY : { root, loaded: root !== null, failure }),
+    [root, failure],
   );
 }
 

@@ -8,6 +8,7 @@ import type {
 import type { ServedDashboard } from "@/lib/api";
 import {
   CEILING_METER_LABELS,
+  COUPON_STATE_INFO,
   RATE_PRICED_LABEL,
   SPEND_KINDS,
   type SpendKind,
@@ -43,51 +44,30 @@ export function ratePricedText(usd: number, callsRatePriced: boolean): string | 
   return callsRatePriced ? `${fmtUsd(usd)} ${RATE_PRICED_LABEL}` : null;
 }
 
-function joinAxes(usd: string | null, tokens: string | null): string | null {
-  const axes = [usd, tokens].filter((a): a is string => a !== null);
-  return axes.length > 0 ? axes.join(" · ") : null;
+// What the allowance drew on its binding unit, of its face; a face bounding no unit has the state's word.
+export function allowanceText(c: CouponStatus): string {
+  const drawn = c.binding === null ? null : budgetAxis(c.drawn, c.binding);
+  const face = c.binding === null ? null : budgetAxis(c.face, c.binding);
+  if (drawn === null || face === null) return COUPON_STATE_INFO[c.state].left_word;
+  const fmt = c.binding === "usd" ? fmtUsd : fmtTokens;
+  return `${fmt(drawn)} of ${fmt(face)}`;
 }
 
-// The coupon's face per unit, read beside what the box's keys paid; the box's operator is never metered.
-export function couponFaceText(c: CouponStatus): string {
-  if (c.host) return "unmetered";
-  const face = joinAxes(
-    c.face_usd === null ? null : fmtUsd(c.face_usd),
-    c.face_tokens === null ? null : fmtTokens(c.face_tokens),
-  );
-  return face === null ? "no bound" : `of ${face}`;
-}
-
-// What the coupon still sends, read off the served flags: `void` and `exhausted` both serve `left` as 0.
-export function couponLeftText(c: CouponStatus): string {
-  if (c.host) return "unmetered";
-  if (c.void) return "retired";
-  if (c.exhausted) return "used up";
-  return (
-    joinAxes(
-      c.left_usd === null ? null : `${fmtUsd(c.left_usd)} left`,
-      c.left_tokens === null ? null : `${fmtTokens(c.left_tokens)} left`,
-    ) ?? "no bound"
-  );
-}
-
-// What the box's keys' bill does not count, worded once for every surface that reads `CouponStatus`.
+// What the allowance draws beyond the box's keys' bill, worded once for every surface that reads `CouponStatus`.
 export function allowanceCaveats(l: LifetimeSpend): string[] {
   const lines: string[] = [];
   if (l.bill_is_floor) {
     lines.push(
-      `${fmtTokens(l.unpriced_tokens)} were billed by a model with no known price, so the dollar figure undercounts and the token allowance is the one holding.`,
+      `${fmtTokens(l.unpriced_tokens)} billed by a model with no known price: the dollar figure undercounts, so the token unit binds.`,
     );
   }
   const priced = ratePricedText(l.rate_priced_usd, l.calls_rate_priced);
   if (priced) {
-    lines.push(
-      `${priced} beside it — calls no provider reported a bill for. Not spent; the allowance counts it anyway.`,
-    );
+    lines.push(`${priced}: calls no provider reported a bill for, drawn at our rate.`);
   }
   if (l.sends_unreported) {
     lines.push(
-      `Up to ${fmtUsd(l.unreported_usd)} more is unreported — sends that ended with no bill (cancelled, timed out, killed). Not spent, unknown; the allowance holds it anyway.`,
+      `Up to ${fmtUsd(l.unreported_usd)} unreported: sends that ended with no bill (cancelled, timed out, killed), drawn at the most they may have cost.`,
     );
   }
   return lines;

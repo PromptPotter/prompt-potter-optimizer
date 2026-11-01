@@ -4,27 +4,30 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import Field
-
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import PayloadInvalidError
 
 
 class StartBlock(StrEnum):
+    """Why a check-in cannot open a dataset here, as `START_BLOCK_WORDS` words it."""
+
     VERIFIER_GRADED = "verifier_graded"
     EMPTY = "empty"
     MISSING_EXTRA = "missing_extra"
     UNREADABLE = "unreadable"
 
 
-class DatasetStartBlock(StrictModel):
-    reason: StartBlock = Field(description="Why a check-in cannot open this dataset here.")
-    explanation: str = Field(description="The reason, as a sentence for the person choosing.")
+START_BLOCK_WORDS: dict[StartBlock, str] = {
+    StartBlock.VERIFIER_GRADED: "Each sample is graded by running a verifier rather than by a "
+    "labelled answer, so it is launched from the command line, not from here.",
+    StartBlock.EMPTY: "It holds no row with both a query and an answer.",
+    StartBlock.MISSING_EXTRA: "It runs through a Python extra this install lacks.",
+    StartBlock.UNREADABLE: "Its samples could not be read on this install.",
+}
+assert START_BLOCK_WORDS.keys() == set(StartBlock)
 
 
 class DatasetUnstartableError(PayloadInvalidError):
     code = "dataset_unstartable"
 
-    def __init__(self, name: str, block: DatasetStartBlock) -> None:
-        super().__init__(f"{name}: {block.explanation}", details={"reason": block.reason.value})
-        self.block = block
+    def __init__(self, name: str, block: StartBlock) -> None:
+        super().__init__(f"{name}: {START_BLOCK_WORDS[block]}", details={"reason": block.value})

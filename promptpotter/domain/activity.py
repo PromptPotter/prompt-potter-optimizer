@@ -17,13 +17,12 @@ from promptpotter.domain.phases import (
     GateKind,
     RunPhase,
 )
-from promptpotter.domain.round_health import DegradationHealth, HealthCause
+from promptpotter.domain.results_health import health_finding, health_reading
+from promptpotter.domain.round_health import HEALTH_CAUSE_INFO, DegradationHealth
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
     CommandAckRecord,
-    CommandRecord,
-    CycleSeedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -37,6 +36,7 @@ from promptpotter.domain.run_records import (
     RunPhaseRecord,
     SampleScoredRecord,
 )
+from promptpotter.domain.said import Tone
 from promptpotter.domain.spend import prefix_reading
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import duration_words
@@ -56,9 +56,7 @@ ActivityRecord = (
     | ErrorRecord
     | ProviderHoldRecord
     | ProviderEasedRecord
-    | CommandRecord
     | CommandAckRecord
-    | CycleSeedRecord
 )
 
 ActivityKind = Literal[
@@ -68,10 +66,8 @@ ActivityKind = Literal[
     "round",
     "warning",
     "error",
-    "merge",
     "progress",
 ]
-ActivityTone = Literal["good", "warn", "bad", "muted"]
 
 # `status` lasts to the next status or run-phase declaration, `round` to the next round, `run` to the next launch.
 Lifetime = Literal["status", "round", "run"]
@@ -82,7 +78,6 @@ LIFETIME: dict[ActivityKind, Lifetime] = {
     "round": "status",
     "progress": "status",
     "warning": "round",
-    "merge": "round",
     "error": "run",
 }
 
@@ -95,7 +90,7 @@ class ActivityItem(FrozenModel):
     icon: str
     label: str
     detail: str | None = Field(default=None, description="The quieter half of the line.")
-    tone: ActivityTone = "muted"
+    tone: Tone = "quiet"
     round: int | None = Field(default=None, description="The round the record names.")
     arm: ArmKey | None = Field(
         default=None, description="The arm the record is about, by its key; `label` renders it."
@@ -126,7 +121,7 @@ class DecisionFact(FrozenModel):
 
     label: str
     value: str
-    tone: ActivityTone = "muted"
+    tone: Tone = "quiet"
 
 
 class DecisionAction(FrozenModel):
@@ -153,25 +148,12 @@ _GATE_ACTIONS: dict[GateDecision, tuple[str, Literal["primary", "ghost", "danger
     "proceed": ("Proceed anyway", "ghost"),
     "abort": ("Abort", "danger"),
 }
-_CAUSE_LINE: dict[HealthCause, str] = {
-    "origin_unmeasured": "the origin was not measured",
-    "origin_incomplete": "the origin is missing cells",
-    "structural": "a node failed structurally",
-    "unscoreable": "no extractable answer",
-    "holed": "cells returned no measurement",
-    "evidence_starved": "an enricher produced no evidence",
-    "structural_untested": "a structural failure with no clean prior",
-    "persistent": "degraded for several rounds running",
-    "degraded": "degraded on a share of samples",
-}
-if set(_GATE_ACTIONS) != set(get_args(GateDecision)) or set(_CAUSE_LINE) != set(
-    get_args(HealthCause)
-):
-    raise RuntimeError("the origin gate's buttons or cause lines are out of step with their type")
+if set(_GATE_ACTIONS) != set(get_args(GateDecision)):
+    raise RuntimeError("the origin gate's buttons are out of step with their type")
 
 
 def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
-    """COVERAGE LEADS: the degraded rate and the advice are computed over disjoint rows."""
+    """COVERAGE LEADS: the degraded rate and the reading are computed over disjoint rows."""
     panel = health.samples + health.not_attempted
     measured = f"{health.samples} of {panel}"
     if health.not_attempted > 0:
@@ -192,24 +174,25 @@ def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
         facts.append(
             DecisionFact(label="Ran to the output ceiling", value=str(health.output_ceiling_count))
         )
-    if health.dominant_node:
-        facts.append(DecisionFact(label="Worst node", value=health.dominant_node))
     if health.last_error:
-        facts.append(DecisionFact(label="Last error", value=health.last_error, tone="bad"))
-    if health.suggested_action:
-        facts.append(DecisionFact(label="Suggested fix", value=health.suggested_action))
+        facts.append(DecisionFact(label="Last error", value=health.last_error, tone="danger"))
     return facts
 
 
 def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
-    grade = "unknown" if health is None else health.grade
+    held = "The run holds before round 1: the origin is not healthy enough to optimize against."
+    title, lead, reasons, facts = "Origin gate", held, list[str](), list[DecisionFact]()
+    # The cause's row words the hold; with no graded close read yet, the hold alone is said.
+    if health is not None and (reading := health_reading(0, health)) is not None:
+        title = reading.title
+        lead = f"{held} {HEALTH_CAUSE_INFO[reading.cause].remedy}"
+        reasons = [health_finding(health, reading.cause)]
+        facts = _gate_facts(health)
     return ActivityDecision(
-        title=f"Origin gate — verdict: {grade}",
-        lead=f"The origin (round 0) scored {grade} — not healthy enough to optimize against. "
-        "The run is holding before round 1. Fix the connector and re-score to re-check, proceed "
-        "to optimize anyway, or abort.",
-        facts=[] if health is None else _gate_facts(health),
-        reasons=[] if health is None or health.cause is None else [_CAUSE_LINE[health.cause]],
+        title=title,
+        lead=lead,
+        facts=facts,
+        reasons=reasons,
         actions=[
             DecisionAction(
                 label=label,
@@ -369,7 +352,7 @@ class ActivityFeed:
                     detail=standing.selection_line
                     if climb is None
                     else f"{standing.selection_line} · {climb}",
-                    tone="good",
+                    tone="success",
                     round=record.round,
                 )
             case RoundWarningRecord():
@@ -379,7 +362,7 @@ class ActivityFeed:
                     kind="warning",
                     icon="✗" if error else "⚠",
                     label=record.message or "round degraded",
-                    tone="bad" if error else "warn",
+                    tone="danger" if error else "warn",
                     round=record.round,
                     healed=record.kind,
                 )
@@ -390,21 +373,19 @@ class ActivityFeed:
                     icon="✗",
                     label=record.message or "run error",
                     detail=STOP_REASON_INFO[record.stop_reason].label,
-                    tone="bad",
+                    tone="danger",
                     round=record.round,
                 )
             case ProviderHoldRecord():
                 return self._hold(item_id, record)
             case ProviderEasedRecord():
                 return self._eased(item_id, record)
-            case CommandRecord():
-                return ActivityItem(id=item_id, kind="merge", icon="⚡", label=record.kind)
             case CommandAckRecord():
                 if record.status != "rejected":
                     return None
                 return ActivityItem(
                     id=item_id,
-                    kind="merge",
+                    kind="warning",
                     icon="⚠",
                     label="control rejected",
                     detail=record.detail or None,
@@ -423,14 +404,6 @@ class ActivityFeed:
                     label=waiting,
                     detail=duration_words(record.elapsed_s),
                     round=record.round,
-                )
-            case CycleSeedRecord():
-                return ActivityItem(
-                    id=item_id,
-                    kind="merge",
-                    icon="⚡",
-                    label="cycle seeded",
-                    detail=record.seed.origin_source or None,
                 )
             case _:
                 assert_never(record)
@@ -473,7 +446,7 @@ class ActivityFeed:
             icon="✓",
             label=f"{record.sender} answers again",
             detail=f"after {duration_words(record.held_s)}",
-            tone="good",
+            tone="success",
         )
 
     def _hold(self, item_id: str, record: ProviderHoldRecord) -> ActivityItem | None:
@@ -508,7 +481,7 @@ class ActivityFeed:
             detail=_pct(fold.composite_fitness)
             if isinstance(arm, Cut | Measured) and fold is not None
             else None,
-            tone="good",
+            tone="success",
             round=record.round,
             arm=record.arm,
         )

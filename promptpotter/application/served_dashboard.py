@@ -12,18 +12,23 @@ from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
+from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits, ServedRound, served_rounds
+from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
+    PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
+    ErrorRecord,
     PauseReading,
     ProducerReading,
     RunAdmission,
     RunPhase,
     RunState,
 )
+from promptpotter.domain.round_health import HEALTH_GRADE_INFO
 from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
+from promptpotter.domain.said import Said, pinned
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
@@ -45,6 +50,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.clock import duration_words
 
 
 class WarmingDashboard(StrictModel):
@@ -78,11 +84,40 @@ class SampleWalk(StrictModel):
     key: str = Field(description="Changes when the walk does — a new arm is a new axis.")
 
 
+LookaheadShut = Literal["one_at_a_time", "settled"]
+# `SampleLookahead` worded; `{name}` is the field of that name.
+LookaheadWord = Literal[
+    LookaheadShut,
+    "no_further_cell",
+    "more_affordable",
+    "holds_every_round",
+    "holds_this_round",
+    "discarded",
+    "depth_one",
+    "depth_many",
+]
+LOOKAHEAD_WORDS: dict[LookaheadWord, str] = {
+    "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to "
+    "overlap.",
+    "settled": "not available now",
+    "no_further_cell": "holds no further cell",
+    "more_affordable": "more affordable",
+    "holds_every_round": "Every round, scoring holds as many calls as the stop rules allow, up to "
+    "{ceiling}. A cut discards at most one call. The measurement is unchanged and the cycle is "
+    "NOT marked babysat.",
+    "holds_this_round": "Runs this round's scoring with this many calls in flight, up to "
+    "{pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged "
+    "and the cycle is NOT marked babysat.",
+    "discarded": "{discards} discarded so far.",
+    "depth_one": "One at a time",
+    "depth_many": "Hold {cells} in flight",
+}
+
+
 class LookaheadDepth(StrictModel):
     """One depth the look-ahead control offers: that many calls held in flight."""
 
     cells: int
-    label: str
     fill: Literal["full", "part"] | None = Field(
         description="`full` where that many calls are out now, `part` where the gauge allows that "
         "many; null past both."
@@ -124,17 +159,11 @@ class SampleLookahead(StrictModel):
     cell_reserve_usd: float | None = Field(
         description="What each call out holds of the ceiling; null where no book binds."
     )
-    unavailable: str = Field(
-        description="Why holding calls ahead does not apply to this backend at all (`ceiling` of "
-        "1); empty where it applies."
-    )
-    explained: str = Field(
-        description="What the armed depth does, as the control explains itself: the mode in "
-        "force, its bound and the calls discarded so far — or `unavailable`."
-    )
-    auto_refusal: str = Field(
-        description="Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A "
-        "mode, not a press, so a paused run takes it for its relaunch; empty where offered."
+    discards: int = Field(description="Calls a cut has discarded so far.")
+    auto_refusal: LookaheadShut | None = Field(
+        description="Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead "
+        "does not apply to this backend at all, `settled` once the cycle has. A mode, not a "
+        "press, so a paused run takes it for its relaunch; null where offered."
     )
     depths: list[LookaheadDepth] = Field(
         description="Each depth the control draws, 1 to `ceiling`."
@@ -280,6 +309,51 @@ class ServedDashboard(DashboardFacts):
         "replay."
     )
     round_axis: RoundAxis
+    said: Said | None = Field(
+        description="The run's pinned line (`run_said`), its producer among the rows; null where "
+        "nothing needs the operator."
+    )
+
+
+def producer_row(producer: ProducerReading) -> Said:
+    """Read against the clock, so only the dashboard, never the listing, carries it."""
+    info, silent = PRODUCER_STATE_INFO[producer.state], producer.silent_for_s
+    clocked = "" if silent is None else f" for {duration_words(silent)}"
+    return Said(
+        key=f"producer_{producer.state.value}",
+        tone=info.tone,
+        label=info.label,
+        detail=None if info.detail is None else info.detail + clocked,
+    )
+
+
+def run_said(
+    error: ErrorRecord | None,
+    run_phase: RunPhase,
+    health: RoundHealth | None,
+    *clocked: Said,
+) -> Said | None:
+    """The loudest of the run's fault, its last round's critical health and the *clocked* rows a
+    read with a clock adds, where loud enough: the one line each medium pins for this run."""
+    rows = list(clocked)
+    if error is not None:
+        rows.append(Said(key="run_fault", tone="danger", label=error.message, detail=error.detail))
+    # A run holding for the operator says why on its own card.
+    if (
+        health is not None
+        and health.grade == "critical"
+        and health.reading is not None
+        and not RUN_PHASE_INFO[run_phase].awaits_operator
+    ):
+        rows.append(
+            Said(
+                key="round_critical",
+                tone=HEALTH_GRADE_INFO["critical"].tone,
+                label=health.reading.title,
+                detail=health.reading.advice,
+            )
+        )
+    return pinned(rows)
 
 
 class _Standing(NamedTuple):
@@ -340,31 +414,6 @@ def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     return _remainder(stores, hop, binding_run_limits(stores, hop, config, run))
 
 
-_ONE_AT_A_TIME = "This backend runs one sample at a time — a single call has no latency to overlap."
-
-
-# `SampleLookahead.affordable` worded: none left, or how many more.
-type LookaheadWord = Literal["no_further_cell", "more_affordable"]
-LOOKAHEAD_WORDS: dict[LookaheadWord, str] = {
-    "no_further_cell": "holds no further cell",
-    "more_affordable": "more affordable",
-}
-
-
-def _lookahead_explained(*, auto: bool, ceiling: int, pick_max: int, discards: int) -> str:
-    held = (
-        f"Every round, scoring holds as many calls as the stop rules allow, up to {ceiling}"
-        if auto
-        else f"Runs this round's scoring with this many calls in flight, up to {pick_max}, "
-        "then resets to 1"
-    )
-    discarded = f" ({discards} discarded)" if discards else ""
-    return (
-        f"{held}. A cut discards at most one call. The measurement is unchanged and the cycle "
-        f"is NOT marked babysat{discarded}."
-    )
-
-
 def _lookahead(
     state: LiveDashboardState,
     *,
@@ -386,8 +435,7 @@ def _lookahead(
     )
     pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
     auto = standing is not None and standing.lookahead_auto
-    unavailable = _ONE_AT_A_TIME if ceiling <= 1 else ""
-    pressable = unavailable == "" and run.admission.lookahead_refusal == ""
+    pressable = ceiling > 1 and run.admission.lookahead_refusal == ""
     return SampleLookahead(
         depth=depth,
         auto=auto,
@@ -399,20 +447,15 @@ def _lookahead(
         pick_max=pick_max,
         affordable=held_by_money,
         cell_reserve_usd=state.cell_reserve_usd,
-        unavailable=unavailable,
-        explained=unavailable
-        or _lookahead_explained(
-            auto=auto,
-            ceiling=ceiling,
-            pick_max=pick_max,
-            discards=state.sample_lookahead_discards,
-        ),
-        auto_refusal=unavailable
-        or ("not available now" if RUN_PHASE_INFO[run.run_phase].settled else ""),
+        discards=state.sample_lookahead_discards,
+        auto_refusal="one_at_a_time"
+        if ceiling <= 1
+        else "settled"
+        if RUN_PHASE_INFO[run.run_phase].settled
+        else None,
         depths=[
             LookaheadDepth(
                 cells=n,
-                label="One at a time" if n == 1 else f"Hold {n} in flight",
                 fill="full" if n <= in_flight else "part" if n <= allowed else None,
                 pickable=pressable and n <= pick_max,
             )
@@ -455,8 +498,9 @@ def _serve(
     formula = state.composite_fitness_formula
     dials = None if formula is None else anchored_criterion_dials(formula)
     live = standing is not None and run.producer.appending
-    line_round = next((r for r in reversed(rounds) if r.overlap_line), None)
+    line_round = next((r for r in reversed(rounds) if overlap_line(r.overlap)), None)
     campaign_metered = None if standing is None else standing.campaign_metered
+    axis = _round_axis(state, live=live)
     return ServedDashboard(
         **banked | {"rounds": rounds},
         campaign_id=hop.campaign_id,
@@ -489,7 +533,13 @@ def _serve(
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
         walk=_walk(state, hop, live=live),
-        round_axis=_round_axis(state, live=live),
+        round_axis=axis,
+        said=run_said(
+            state.error,
+            run.run_phase,
+            rounds[-1].health if rounds else None,
+            producer_row(run.producer),
+        ),
     )
 
 

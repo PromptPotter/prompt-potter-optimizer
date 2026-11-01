@@ -8,11 +8,14 @@ import type {
   SubtreeCourse,
 } from "@/lib/api";
 import {
+  DENSE,
   ROOMY,
   LANE_H,
   TOP_PAD,
+  densityFor,
   extentKeys,
   expandedLaneSpan,
+  forestWidth,
   layout,
   placeNodes,
 } from "../forest-layout";
@@ -137,6 +140,15 @@ function hangOffWinner(
 }
 
 const ids = (cs: readonly HierarchyCandidate[]) => cs.map((c) => c.facts.individual);
+
+describe("densityFor", () => {
+  it("labels the drawing where it fits the box, and drops the labels where it would not", () => {
+    const fits = forestWidth(ROOMY, 3);
+    expect(densityFor(3, fits)).toBe(ROOMY);
+    expect(densityFor(3, fits - 1)).toBe(DENSE);
+    expect(densityFor(3, null)).toBe(DENSE);
+  });
+});
 
 describe("expandedLaneSpan", () => {
   it("is the widest round's candidate count, floored at 1", () => {

@@ -332,17 +332,13 @@ def emit_command_ack(
 
 
 def emit_error_record(
-    *,
-    kind: str,
-    message: str,
-    stop_reason: StopReason,
-    traceback: str | None = None,
+    exc: BaseException, *, stop_reason: StopReason, traceback: str | None
 ) -> ErrorRecord:
-    record = ErrorRecord(
-        kind=kind,
-        message=message,
-        traceback=traceback,
+    record = ErrorRecord.raised(
+        exc,
+        kind=type(exc).__name__,
         stop_reason=stop_reason,
+        traceback=traceback,
         round=current_round(),
     )
     _append_record(record)

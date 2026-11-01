@@ -27,6 +27,7 @@ from promptpotter.domain.spend import (
     TokenUsageKind,
     bill_or_rate_usd,
     metered,
+    usd_text,
 )
 from promptpotter.infrastructure.llm.telemetry import (
     billing_ledger,
@@ -506,7 +507,7 @@ class SpendBook(Projection):
 
     def _refusal(self, category: ErrorCategory, reserve: bool, each: SendBound, what: str) -> str:
         limit = (
-            "host's allowance for this account, beside sends on its own keys,"
+            "this run's reserve of the host's allowance, beside sends on the account's own keys,"
             if reserve
             else "cycle's share of the campaign ceiling"
         )
@@ -525,12 +526,12 @@ class SpendBook(Projection):
                 (self.set_aside_usd, "set aside for the bench"),
             ]
             left = cap - sum(usd for usd, _ in owed)
-            said = ", ".join(f"${usd:.4f} {name}" for usd, name in owed if usd)
+            said = ", ".join(f"{usd_text(usd)} {name}" for usd, name in owed if usd)
             if left <= 0 or each.usd is None:
-                return f"{what} was not sent: the ${cap:.2f} {limit} is used up ({said})"
+                return f"{what} was not sent: the {usd_text(cap)} {limit} is used up ({said})"
             return (
-                f"{what} was not sent: it may cost up to ${each.usd:.4f} and the "
-                f"${cap:.2f} {limit} has ${left:.4f} left ({said})"
+                f"{what} was not sent: it may cost up to {usd_text(each.usd)} and the "
+                f"{usd_text(cap)} {limit} has {usd_text(left)} left ({said})"
             )
         if each.tokens is None:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"

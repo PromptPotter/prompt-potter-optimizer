@@ -2,56 +2,45 @@
 
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/state/auth";
-import { Button, Dialog, IconClose } from "@/components/ui";
+import { Dialog } from "@/components/ui";
 import { AuthCore } from "@/components/login/AuthCore";
 
 // Mounted ONCE (app/page.tsx): every trigger calls `openAuthPrompt()`, never an `open` prop.
 export function WelcomeLockoutModal() {
   const { authPrompt, closeAuthPrompt } = useAuth();
-  const { open, code: errorCode } = authPrompt;
+  const { open, refusal } = authPrompt;
 
   if (!open) return null;
 
   return (
-    <Dialog open onClose={closeAuthPrompt} labelledBy="auth-prompt-title" bare>
-      <div className="account-modal account-modal-auth">
-        <header className="account-pane-head">
-          <h3 id="auth-prompt-title">Log in or sign up</h3>
-          <Button variant="ghost" aria-label="Close" onClick={closeAuthPrompt}>
-            <IconClose />
-          </Button>
-        </header>
+    <Dialog open title="Log in or sign up" onClose={closeAuthPrompt}>
+      <div className="auth-prompt">
+        <p className="auth-headline">
+          Sign up to evolve your prompts with real data &mdash; not guesses.
+        </p>
+        <p className="auth-note">
+          By continuing, you agree to our{" "}
+          <a className="auth-link" href={BRAND.legal.privacy}>
+            Privacy Policy
+          </a>
+          .
+        </p>
 
-        <div className="account-pane-body account-pane-body-auth">
-          <p className="auth-headline">
-            Sign up to evolve your prompts with real data &mdash; not guesses.
-          </p>
-          <p className="auth-note">
-            By continuing, you agree to our{" "}
-            <a className="auth-link" href={BRAND.legal.privacy}>
-              Privacy Policy
-            </a>
-            .
-          </p>
+        <AuthCore refusal={refusal} />
 
-          <AuthCore errorCode={errorCode} />
-
-          <div style={{ flex: 1 }} />
-
-          <nav className="auth-legal-row" aria-label="Legal">
-            <a className="auth-link" href={BRAND.legal.terms}>
-              Terms
-            </a>
-            <span aria-hidden="true">&middot;</span>
-            <a className="auth-link" href={BRAND.legal.privacy}>
-              Privacy
-            </a>
-            <span aria-hidden="true">&middot;</span>
-            <a className="auth-link" href={BRAND.legal.imprint}>
-              Imprint
-            </a>
-          </nav>
-        </div>
+        <nav className="auth-legal-row" aria-label="Legal">
+          <a className="auth-link" href={BRAND.legal.terms}>
+            Terms
+          </a>
+          <span aria-hidden="true">&middot;</span>
+          <a className="auth-link" href={BRAND.legal.privacy}>
+            Privacy
+          </a>
+          <span aria-hidden="true">&middot;</span>
+          <a className="auth-link" href={BRAND.legal.imprint}>
+            Imprint
+          </a>
+        </nav>
       </div>
     </Dialog>
   );

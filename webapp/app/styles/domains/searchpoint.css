@@ -15,16 +15,11 @@
 .subject-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 
 .subject-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary)}
-.subject-headline strong{font-family:var(--font-mono);font-size:var(--text-md);font-weight:600;color:var(--color-text-primary)}
-.subject-headline-unit{font-size:var(--text-xs);color:var(--color-text-secondary)}
-.subject-headline-sep{color:var(--color-border)}
-.subject-headline-lift,.subject-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}
-.subject-headline-was{color:var(--color-text-secondary)}
+.subject-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}
 .subject-headline-cut{font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-headline-acc,.subject-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
 .subject-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
 .subject-lift-card{max-width:280px}
-.subject-lift-bench{margin:0 0 3px;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
 .subject-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
 .subject-lift-note+.subject-lift-note{margin-top:4px}
 

@@ -14,7 +14,7 @@ import httpx
 from promptpotter import connectors
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import HealthRecord, HealthState
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
@@ -41,10 +41,11 @@ class Probe(NamedTuple):
 
 def _backend(name: str) -> Probe:
     async def check() -> Reading:
+        # Any refusal a launch would get is broken: a missing extra refuses it as surely.
         refused = await probe_backend(name)
-        if isinstance(refused, BackendUnreachableError):
-            return Reading("broken", str(refused))
-        return Reading("held", "reachable")
+        if refused is None:
+            return Reading("held", BACKEND_REACHABILITY_INFO["live"].label)
+        return Reading("broken", str(refused))
 
     return Probe(
         f"backend:{name}", check, f"bring {name} up at {connectors.CONNECTORS.get(name).base_url()}"

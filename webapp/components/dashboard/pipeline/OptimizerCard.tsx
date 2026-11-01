@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import { cx } from "@/lib/cx";
-import { phaseWalks, runWord } from "@/lib/derivations";
+import { figureOf, phaseWalks } from "@/lib/derivations";
 import { useViewedCourse } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
   Button,
@@ -18,29 +19,19 @@ import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { KnobClashes, useKnobClashes } from "./KnobClashes";
 import { RaceCatchUp } from "./RaceCatchUp";
 import { RoundAxis } from "./RoundAxis";
-import type { PipelineDoc } from "@/lib/types";
+import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 
-interface Props {
-  pipeline: PipelineDoc | null;
-}
-
-export function OptimizerCard({ pipeline }: Props) {
+export function OptimizerCard() {
+  const { doc: pipeline, status: pipelineStatus } = useOptimizerPipeline();
   const [knobsOpen, setKnobsOpen] = useState(false);
   const clashes = useKnobClashes();
   const { dash, isLive } = useCycleStream();
-  const runState = useViewedCourse()?.state ?? null;
+  const runState = figureOf(useViewedCourse(), "state");
   const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
-  const {
-    nodes: roundNodes,
-    showsCurrent: viewingLive,
-    loading: nodesLoading,
-  } = useRoundNodes();
+  const { nodes: roundNodes, showsCurrent: viewingLive } = useRoundNodes();
+  const { optimizerSetup } = useConnector();
 
-  const nodeLabel: Record<string, string> = Object.fromEntries(
-    (view?.nodes ?? []).map((n) => [n.id, n.label]),
-  );
-  const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
   const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
   // What the round axis beside it does not already say: the node firing, else the SERVER's phase
   // (never a local "idle": that word covers paused, held and dead alike).
@@ -48,18 +39,8 @@ export function OptimizerCard({ pipeline }: Props) {
     !dash || !viewingLive
       ? null
       : isLive
-        ? activeLabel
-        : runState
-          ? runWord(runState.status)
-          : null;
-
-  // Off the audit twin: a node can be configured for a model and not have fired at all.
-  const models = {
-    by: Object.fromEntries(
-      (view?.nodes ?? []).map((n) => [n.id, roundNodes[n.id]?.model ?? null]),
-    ),
-    loading: nodesLoading,
-  };
+        ? activeId
+        : (runState?.value ?? null);
 
   return (
     <div className={cx("workflow-card", runIsRunning && "running")}>
@@ -101,16 +82,15 @@ export function OptimizerCard({ pipeline }: Props) {
           bare
           layer={{
             view,
-            status: pipeline ? "ok" : "loading",
+            status: pipelineStatus,
             connector: null,
-            reach: pipeline?.reach ?? null,
+            reach: optimizerSetup?.reach ?? null,
             scope: "optimizer",
             nestsNode: pipeline?.measurement_node ?? null,
             activeNode: isLive && viewingLive ? activeId : null,
             isLive,
           }}
           tone="neutral"
-          models={models}
         />
       </div>
       <RaceCatchUp />

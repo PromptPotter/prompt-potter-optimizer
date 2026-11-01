@@ -332,7 +332,6 @@
               "round",
               "warning",
               "error",
-              "merge",
               "progress"
             ],
             "title": "Kind",
@@ -355,15 +354,8 @@
             "title": "Round"
           },
           "tone": {
-            "default": "muted",
-            "enum": [
-              "good",
-              "warn",
-              "bad",
-              "muted"
-            ],
-            "title": "Tone",
-            "type": "string"
+            "$ref": "#/components/schemas/Tone",
+            "default": "quiet"
           }
         },
         "required": [
@@ -1457,11 +1449,11 @@
             "title": "Detail"
           },
           "status": {
-            "description": "Reachability: 'live', 'unreachable', or 'error'",
+            "description": "Reachability, worded by `BACKEND_REACHABILITY_INFO`",
             "enum": [
               "live",
               "unreachable",
-              "error"
+              "missing_extra"
             ],
             "title": "Status",
             "type": "string"
@@ -1793,6 +1785,7 @@
           "no_manifest",
           "held_elsewhere",
           "not_held",
+          "in_flight",
           "selecting",
           "origin_unscored",
           "graded",
@@ -2227,7 +2220,7 @@
           "usd": {
             "anyOf": [
               {
-                "ge": 0.0,
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -2240,7 +2233,7 @@
           "wall_clock_s": {
             "anyOf": [
               {
-                "gt": 0.0,
+                "exclusiveMinimum": 0.0,
                 "type": "number"
               },
               {
@@ -2417,17 +2410,6 @@
             "title": "Line",
             "type": "string"
           },
-          "line_course": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CourseFacts"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The facts of the course holding the line, which the campaign's row reads as its own; null where that course has no mint record."
-          },
           "root": {
             "description": "The root course's address.",
             "title": "Root",
@@ -2455,8 +2437,7 @@
           "line",
           "lifecycle",
           "spend_lifetime",
-          "runs_with",
-          "line_course"
+          "runs_with"
         ],
         "title": "CampaignFacts",
         "type": "object"
@@ -2668,69 +2649,6 @@
           "budget_rounds"
         ],
         "title": "CampaignRunsWith",
-        "type": "object"
-      },
-      "CampaignStorageResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "campaign_id": {
-            "description": "The campaign measured",
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "connector_bytes": {
-            "description": "Backend-produced: node-I/O cache + per-sample arrays",
-            "title": "Connector Bytes",
-            "type": "integer"
-          },
-          "dataset_bytes": {
-            "description": "langfuse ground-truth mirror (the input-data copy)",
-            "title": "Dataset Bytes",
-            "type": "integer"
-          },
-          "history_bytes": {
-            "description": "Loop event spine: ledger.jsonl",
-            "title": "History Bytes",
-            "type": "integer"
-          },
-          "loop_bytes": {
-            "description": "What the loop wrote: the state, trace, history and reports leaves together",
-            "title": "Loop Bytes",
-            "type": "integer"
-          },
-          "on_disk_bytes": {
-            "description": "Whole campaign-dir footprint — sum of the six leaves",
-            "title": "On Disk Bytes",
-            "type": "integer"
-          },
-          "reports_bytes": {
-            "description": "Readable output: manifest + reports + hard_samples",
-            "title": "Reports Bytes",
-            "type": "integer"
-          },
-          "state_bytes": {
-            "description": "Round checkouts less their per-sample rows",
-            "title": "State Bytes",
-            "type": "integer"
-          },
-          "trace_bytes": {
-            "description": "Loop telemetry: streams, prompts, langfuse loop trace",
-            "title": "Trace Bytes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "on_disk_bytes",
-          "dataset_bytes",
-          "connector_bytes",
-          "state_bytes",
-          "trace_bytes",
-          "history_bytes",
-          "reports_bytes",
-          "loop_bytes"
-        ],
-        "title": "CampaignStorageResponse",
         "type": "object"
       },
       "CancelQueuedRunPayload": {
@@ -2997,6 +2915,12 @@
           "answer": {
             "title": "Answer",
             "type": "string"
+          },
+          "cached": {
+            "default": false,
+            "description": "Replayed: the archive answered, so no provider was reached.",
+            "title": "Cached",
+            "type": "boolean"
           },
           "created_at": {
             "anyOf": [
@@ -3286,28 +3210,6 @@
             "description": "The graded per-cell score. Null on an ungraded row.",
             "title": "Fitness"
           },
-          "input_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Input Tokens"
-          },
-          "output_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Tokens"
-          },
           "position": {
             "title": "Position",
             "type": "integer"
@@ -3317,18 +3219,6 @@
             "description": "Trimmed for display.",
             "title": "Predicted",
             "type": "string"
-          },
-          "seconds": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What producing the cell cost (`MeasuredCell.cost_s`) — the half that survives a cache replay. Null where no timing was recorded.",
-            "title": "Seconds"
           },
           "status": {
             "enum": [
@@ -3703,6 +3593,55 @@
           "budget"
         ],
         "title": "ChangeRunLimitsPayload",
+        "type": "object"
+      },
+      "CheckinQuestion": {
+        "additionalProperties": false,
+        "description": "A resolver question one answer closes, projected through `CHECKLIST_FIELDS`.",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "options": {
+            "description": "The answers it takes; empty is free text.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "path": {
+            "description": "The `EditDraftPatch` path the answer is written at.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "field",
+          "path",
+          "step",
+          "prompt",
+          "options"
+        ],
+        "title": "CheckinQuestion",
         "type": "object"
       },
       "CleanupEmptyCyclesPayload": {
@@ -4162,42 +4101,49 @@
         "title": "CostAbsence",
         "type": "string"
       },
+      "CouponState": {
+        "description": "What the host's allowance does for this account's next launch: one closed set, each surface\nreading its words off `COUPON_STATE_INFO`.",
+        "enum": [
+          "unmetered",
+          "retired",
+          "used_up",
+          "held",
+          "open"
+        ],
+        "title": "CouponState",
+        "type": "string"
+      },
       "CouponStatus": {
         "additionalProperties": false,
         "description": "The host's allowance for this account, and the keys it sends on past it.",
         "properties": {
-          "exhausted": {
-            "description": "Nothing more is sent on the box's keys; a provider this account holds a key for still sends on it.",
-            "title": "Exhausted",
-            "type": "boolean"
-          },
-          "face_tokens": {
+          "binding": {
             "anyOf": [
               {
-                "type": "integer"
+                "enum": [
+                  "usd",
+                  "tokens"
+                ],
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Face Tokens"
+            "description": "The unit drawn nearest its face; null where no unit is bounded.",
+            "title": "Binding"
           },
-          "face_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the box's keys may pay for this account over its life; null is unbounded.",
-            "title": "Face Usd"
+          "drawn": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "What the face is compared against: what the box's keys paid, unreported sends counted at the most they may have cost."
           },
-          "host": {
-            "description": "This account is the box's operator: its sends on the box's keys are unmetered.",
-            "title": "Host",
-            "type": "boolean"
+          "face": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "What the box's keys may pay for this account over its life; an unnamed or null unit is unbounded."
+          },
+          "held": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "What this account's running campaigns reserve of the face."
           },
           "host_key_spend": {
             "$ref": "#/components/schemas/LifetimeSpend",
@@ -4210,28 +4156,9 @@
             "title": "Keys",
             "type": "array"
           },
-          "left_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Left Tokens"
-          },
-          "left_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The face less what the box's keys paid, unreported sends counted; null where the face is unbounded.",
-            "title": "Left Usd"
+          "left": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "What a new launch may still hold: the face less `drawn` and `held`, at most the unpriced grace while a bill is a floor."
           },
           "own_key_spend": {
             "$ref": "#/components/schemas/LifetimeSpend",
@@ -4245,6 +4172,9 @@
             "title": "Providers",
             "type": "array"
           },
+          "state": {
+            "$ref": "#/components/schemas/CouponState"
+          },
           "used_share": {
             "anyOf": [
               {
@@ -4254,24 +4184,18 @@
                 "type": "null"
               }
             ],
-            "description": "How full the allowance draws in the unit nearest its face, at most 1; null where no unit is bounded.",
+            "description": "`drawn` over `face` on the `binding` unit, at most 1.",
             "title": "Used Share"
-          },
-          "void": {
-            "description": "Retired because this account holds a key of its own (`HOST_COUPON.void_on_byo`).",
-            "title": "Void",
-            "type": "boolean"
           }
         },
         "required": [
-          "host",
-          "face_usd",
-          "face_tokens",
-          "left_usd",
-          "left_tokens",
+          "state",
+          "face",
+          "drawn",
+          "held",
+          "left",
+          "binding",
           "used_share",
-          "exhausted",
-          "void",
           "host_key_spend",
           "own_key_spend",
           "keys",
@@ -4315,18 +4239,6 @@
           "mint": {
             "$ref": "#/components/schemas/CourseKind",
             "description": "How the course was minted; the `mint` tag renders it."
-          },
-          "rounds_cap": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The rounds cap that binds it: its wiring's, before its first launch its campaign's. 0 runs the origin only; null where it has no rounds axis.",
-            "title": "Rounds Cap"
           },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin.",
@@ -4378,7 +4290,6 @@
           "task",
           "standing",
           "rounds_closed",
-          "rounds_cap",
           "elects_on",
           "spend",
           "bench"
@@ -4695,30 +4606,6 @@
         "title": "DashboardCandidate",
         "type": "object"
       },
-      "DashboardError": {
-        "additionalProperties": false,
-        "description": "The structured failure of a stop whose ``STOP_REASON_INFO`` row is FAILED, else absent.",
-        "properties": {
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "stop_reason": {
-            "$ref": "#/components/schemas/StopReason"
-          }
-        },
-        "required": [
-          "kind",
-          "message",
-          "stop_reason"
-        ],
-        "title": "DashboardError",
-        "type": "object"
-      },
       "DashboardSample": {
         "additionalProperties": false,
         "description": "One scored sample as `dashboard.json` serves it, display-trimmed and one shape in any state.",
@@ -4893,13 +4780,13 @@
           "start_block": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DatasetStartBlock"
+                "$ref": "#/components/schemas/StartBlock"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "``null`` = a check-in can open it here. Otherwise why not: the same reading ``POST /datasets/{name}/draft`` refuses with."
+            "description": "``null`` = a check-in can open it here. Otherwise why not: the same reading ``POST /datasets/{name}/draft`` refuses with, worded by `START_BLOCK_WORDS`."
           },
           "summary": {
             "anyOf": [
@@ -5170,131 +5057,6 @@
         "title": "DatasetSplit",
         "type": "object"
       },
-      "DatasetStartBlock": {
-        "additionalProperties": false,
-        "properties": {
-          "explanation": {
-            "description": "The reason, as a sentence for the person choosing.",
-            "title": "Explanation",
-            "type": "string"
-          },
-          "reason": {
-            "$ref": "#/components/schemas/StartBlock",
-            "description": "Why a check-in cannot open this dataset here."
-          }
-        },
-        "required": [
-          "reason",
-          "explanation"
-        ],
-        "title": "DatasetStartBlock",
-        "type": "object"
-      },
-      "DatasetStorageEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "connector_bytes": {
-            "title": "Connector Bytes",
-            "type": "integer"
-          },
-          "dataset_bytes": {
-            "title": "Dataset Bytes",
-            "type": "integer"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "history_bytes": {
-            "title": "History Bytes",
-            "type": "integer"
-          },
-          "reports_bytes": {
-            "title": "Reports Bytes",
-            "type": "integer"
-          },
-          "state_bytes": {
-            "title": "State Bytes",
-            "type": "integer"
-          },
-          "total_bytes": {
-            "description": "On disk — the sum of the six leaves",
-            "title": "Total Bytes",
-            "type": "integer"
-          },
-          "trace_bytes": {
-            "title": "Trace Bytes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "dataset_name",
-          "total_bytes",
-          "dataset_bytes",
-          "connector_bytes",
-          "state_bytes",
-          "trace_bytes",
-          "history_bytes",
-          "reports_bytes"
-        ],
-        "title": "DatasetStorageEntry",
-        "type": "object"
-      },
-      "DatasetStorageResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "connector_bytes": {
-            "title": "Connector Bytes",
-            "type": "integer"
-          },
-          "dataset_bytes": {
-            "description": "Each leaf below: that leaf summed over `datasets`",
-            "title": "Dataset Bytes",
-            "type": "integer"
-          },
-          "datasets": {
-            "description": "Fattest-first per-dataset leaf splits",
-            "items": {
-              "$ref": "#/components/schemas/DatasetStorageEntry"
-            },
-            "title": "Datasets",
-            "type": "array"
-          },
-          "history_bytes": {
-            "title": "History Bytes",
-            "type": "integer"
-          },
-          "reports_bytes": {
-            "title": "Reports Bytes",
-            "type": "integer"
-          },
-          "state_bytes": {
-            "title": "State Bytes",
-            "type": "integer"
-          },
-          "total_bytes": {
-            "description": "Grand total across the caller's datasets",
-            "title": "Total Bytes",
-            "type": "integer"
-          },
-          "trace_bytes": {
-            "title": "Trace Bytes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total_bytes",
-          "dataset_bytes",
-          "connector_bytes",
-          "state_bytes",
-          "trace_bytes",
-          "history_bytes",
-          "reports_bytes",
-          "datasets"
-        ],
-        "title": "DatasetStorageResponse",
-        "type": "object"
-      },
       "DecisionAction": {
         "additionalProperties": false,
         "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
@@ -5345,15 +5107,8 @@
             "type": "string"
           },
           "tone": {
-            "default": "muted",
-            "enum": [
-              "good",
-              "warn",
-              "bad",
-              "muted"
-            ],
-            "title": "Tone",
-            "type": "string"
+            "$ref": "#/components/schemas/Tone",
+            "default": "quiet"
           },
           "value": {
             "title": "Value",
@@ -5642,6 +5397,17 @@
             "title": "Is Single Node",
             "type": "boolean"
           },
+          "launch_refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaunchRefusal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`admit_launch`'s refusal of Start at the declared budget; null where it admits."
+          },
           "model_capabilities": {
             "additionalProperties": {
               "additionalProperties": {
@@ -5682,7 +5448,8 @@
             "type": "object"
           },
           "optimization_overrides": {
-            "$ref": "#/components/schemas/OptimizationOverrides"
+            "$ref": "#/components/schemas/OptimizationOverrides",
+            "description": "The draft's overrides, its `budget` the one Start declares: `pipeline_resolve.draft_config`'s, a free account's tier laid last."
           },
           "optimizer_setup": {
             "$ref": "#/components/schemas/OptimizerSetup",
@@ -5814,6 +5581,7 @@
           "model_capabilities",
           "dependencies",
           "readiness",
+          "launch_refusal",
           "recap",
           "setup_schema"
         ],
@@ -7003,15 +6771,102 @@
             ],
             "title": "Reason",
             "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupStep"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The step whose fold closes it; null where the chat answers it."
           }
         },
         "required": [
           "field",
           "reason",
-          "hint"
+          "hint",
+          "step"
         ],
         "title": "FieldGap",
         "type": "object"
+      },
+      "Figure": {
+        "additionalProperties": false,
+        "description": "An entry's figure: a `Said` row keyed by the closed set code looks a figure up by.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The longer reading, a tap away.",
+            "title": "Detail"
+          },
+          "key": {
+            "$ref": "#/components/schemas/FigureKey",
+            "description": "Which figure, for code to look up; never shown."
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub"
+          },
+          "tone": {
+            "$ref": "#/components/schemas/Tone"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "tone",
+          "label"
+        ],
+        "title": "Figure",
+        "type": "object"
+      },
+      "FigureKey": {
+        "enum": [
+          "state",
+          "optimizer",
+          "spend",
+          "spend_lifetime",
+          "bench",
+          "rounds",
+          "candidates",
+          "selection",
+          "lift",
+          "lives",
+          "accuracy",
+          "ability"
+        ],
+        "type": "string"
       },
       "FileContentResponse": {
         "additionalProperties": false,
@@ -7283,26 +7138,19 @@
         "additionalProperties": false,
         "description": "What `POST /commands/fork-cycle` would decide about this steer, asked without forking.",
         "properties": {
-          "permitted_models": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "description": "What the verdict above was compared AGAINST, per node — this campaign's declared `optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so a surface naming the permitted models cannot name a different set than the one that decided. A node absent from it sanctions nothing, which is why any model steer there counts.",
-            "title": "Permitted Models",
-            "type": "object"
-          },
-          "steers_disallowed_model": {
-            "description": "The overlay picks a responder the campaign's declared `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the babysit act (decisions.md § 0005): it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
-            "title": "Steers Disallowed Model",
-            "type": "boolean"
+          "steer": {
+            "description": "`clean` where the overlay stays inside the campaign's declared `optimizer_narrowing`. Outside it — a responder never sanctioned, or a cost lever no permitted set can sanction — the fork is the babysit act: `babysat` for a caller holding `campaign.babysit` (the branch is graded C), `refused` for any other.",
+            "enum": [
+              "clean",
+              "babysat",
+              "refused"
+            ],
+            "title": "Steer",
+            "type": "string"
           }
         },
         "required": [
-          "steers_disallowed_model",
-          "permitted_models"
+          "steer"
         ],
         "title": "ForkPreviewResponse",
         "type": "object"
@@ -7522,14 +7370,6 @@
             "title": "Rows",
             "type": "array"
           },
-          "swapped": {
-            "description": "The members some arm's optimizer walks and another's does not: what the arms' optimizers differ by. Empty where every arm walks one roster, whatever its knobs.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Swapped",
-            "type": "array"
-          },
           "verdict": {
             "anyOf": [
               {
@@ -7559,7 +7399,6 @@
         "required": [
           "rows",
           "covers_selection",
-          "swapped",
           "guard",
           "headline",
           "verdict",
@@ -8045,6 +7884,45 @@
         "title": "HeadToHeadStarted",
         "type": "object"
       },
+      "HealthReading": {
+        "additionalProperties": false,
+        "description": "A graded cause in words, read off the facts its round stamped (`results_health.py::health_reading`).",
+        "properties": {
+          "advice": {
+            "description": "What the counts say, then the cause's remedy.",
+            "title": "Advice",
+            "type": "string"
+          },
+          "cause": {
+            "enum": [
+              "origin_unmeasured",
+              "origin_incomplete",
+              "structural",
+              "unscoreable",
+              "holed",
+              "evidence_starved",
+              "structural_untested",
+              "persistent",
+              "degraded",
+              "transient"
+            ],
+            "title": "Cause",
+            "type": "string"
+          },
+          "title": {
+            "description": "The round and its cause in one line.",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cause",
+          "title",
+          "advice"
+        ],
+        "title": "HealthReading",
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -8084,18 +7962,6 @@
             "title": "Address",
             "type": "string"
           },
-          "caveat": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What could not be read; null where all was.",
-            "title": "Caveat"
-          },
           "children": {
             "description": "Its courses to `?depth=`, root first; none at depth 0.",
             "items": {
@@ -8107,6 +7973,14 @@
           "facts": {
             "$ref": "#/components/schemas/CampaignFacts"
           },
+          "figures": {
+            "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
+            "items": {
+              "$ref": "#/components/schemas/Figure"
+            },
+            "title": "Figures",
+            "type": "array"
+          },
           "label": {
             "description": "The display name.",
             "title": "Label",
@@ -8117,6 +7991,14 @@
             "default": "campaign",
             "title": "Level",
             "type": "string"
+          },
+          "lines": {
+            "description": "Its sentences under the figures, without a value; what could not be read is among them.",
+            "items": {
+              "$ref": "#/components/schemas/Said"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "parent": {
             "anyOf": [
@@ -8148,8 +8030,9 @@
           "address",
           "parent",
           "label",
-          "caveat",
           "tags",
+          "figures",
+          "lines",
           "state",
           "span",
           "facts",
@@ -8167,18 +8050,6 @@
             "title": "Address",
             "type": "string"
           },
-          "caveat": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What could not be read; null where all was.",
-            "title": "Caveat"
-          },
           "children": {
             "items": {
               "$ref": "#/components/schemas/SubtreeCampaign"
@@ -8188,6 +8059,14 @@
           },
           "facts": {
             "$ref": "#/components/schemas/CandidateFacts"
+          },
+          "figures": {
+            "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
+            "items": {
+              "$ref": "#/components/schemas/Figure"
+            },
+            "title": "Figures",
+            "type": "array"
           },
           "label": {
             "description": "The display name.",
@@ -8199,6 +8078,14 @@
             "default": "candidate",
             "title": "Level",
             "type": "string"
+          },
+          "lines": {
+            "description": "Its sentences under the figures, without a value; what could not be read is among them.",
+            "items": {
+              "$ref": "#/components/schemas/Said"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "parent": {
             "anyOf": [
@@ -8224,8 +8111,9 @@
           "address",
           "parent",
           "label",
-          "caveat",
           "tags",
+          "figures",
+          "lines",
           "facts",
           "children"
         ],
@@ -8241,20 +8129,16 @@
             "title": "Address",
             "type": "string"
           },
-          "caveat": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What could not be read; null where all was.",
-            "title": "Caveat"
-          },
           "facts": {
             "$ref": "#/components/schemas/CourseFacts"
+          },
+          "figures": {
+            "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
+            "items": {
+              "$ref": "#/components/schemas/Figure"
+            },
+            "title": "Figures",
+            "type": "array"
           },
           "label": {
             "description": "The display name.",
@@ -8267,6 +8151,14 @@
             "title": "Level",
             "type": "string"
           },
+          "lines": {
+            "description": "Its sentences under the figures, without a value; what could not be read is among them.",
+            "items": {
+              "$ref": "#/components/schemas/Said"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
           "parent": {
             "anyOf": [
               {
@@ -8278,6 +8170,17 @@
             ],
             "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
             "title": "Parent"
+          },
+          "said": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run's pinned line from what no clock reads (`run_said`): a producer's row is its dashboard's alone. Null where nothing needs the operator."
           },
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
@@ -8297,11 +8200,13 @@
           "address",
           "parent",
           "label",
-          "caveat",
           "tags",
+          "figures",
+          "lines",
           "state",
           "span",
-          "facts"
+          "facts",
+          "said"
         ],
         "title": "HierarchyCourse",
         "type": "object"
@@ -8728,139 +8633,88 @@
         "title": "KnobRef",
         "type": "object"
       },
-      "KnobRow": {
+      "LaunchRefusal": {
         "additionalProperties": false,
-        "description": "One knob of one optimizer node, as every surface offers it: its only served row.",
+        "description": "The allowance refusing a launch whole, as ``admit_launch`` raises it.",
         "properties": {
-          "declared": {
-            "description": "The value the manifest declares — a campaign's floor",
-            "title": "Declared"
-          },
-          "description": {
-            "description": "What the knob does — its field description, as plain text (RST literals unmarked)",
-            "title": "Description",
+          "reason": {
+            "description": "What binds and the remedy, in the refusal's own words.",
+            "title": "Reason",
             "type": "string"
           },
-          "exclusive_maximum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A bound every legal value lies strictly below; null when none",
-            "title": "Exclusive Maximum"
-          },
-          "exclusive_minimum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A bound every legal value lies strictly above; null when none",
-            "title": "Exclusive Minimum"
-          },
-          "key": {
-            "description": "The knob's name under `nodes.{node}.config`",
-            "title": "Key",
-            "type": "string"
-          },
-          "maximum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The greatest legal value, itself legal; null when none",
-            "title": "Maximum"
-          },
-          "minimum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The least legal value, itself legal; null when none",
-            "title": "Minimum"
-          },
-          "movable_by": {
-            "description": "The agents that may move it within a run, as a config row's `movable_by` reads; `optimizer` where another member steers it, empty where only the operator does",
-            "items": {
-              "$ref": "#/components/schemas/MovableAgent"
-            },
-            "title": "Movable By",
-            "type": "array"
-          },
-          "nullable": {
-            "description": "Whether null is a legal value (an opt-in knob, off)",
-            "title": "Nullable",
-            "type": "boolean"
-          },
-          "options": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The closed set a string knob takes, in declared order; null when open",
-            "title": "Options"
-          },
-          "summary": {
-            "description": "The description's first sentence, cut at its first clause where that runs long: the one line a setup surface shows before the whole text",
-            "title": "Summary",
-            "type": "string"
-          },
-          "type": {
-            "description": "JSON Schema type the value takes",
-            "enum": [
-              "boolean",
-              "integer",
-              "number",
-              "string",
-              "array",
-              "object"
-            ],
-            "title": "Type",
-            "type": "string"
-          },
-          "value": {
-            "description": "The value this config runs, the manifest's under its overlays",
-            "title": "Value"
+          "state": {
+            "$ref": "#/components/schemas/CouponState",
+            "description": "Its headline, worded by `COUPON_STATE_INFO`."
           }
         },
         "required": [
-          "key",
-          "description",
-          "summary",
-          "type",
-          "options",
-          "nullable",
-          "minimum",
-          "exclusive_minimum",
-          "maximum",
-          "exclusive_maximum",
-          "declared",
-          "value",
-          "movable_by"
+          "state",
+          "reason"
         ],
-        "title": "KnobRow",
+        "title": "LaunchRefusal",
+        "type": "object"
+      },
+      "Leaf": {
+        "description": "Where a campaign file's bytes count in the storage report.",
+        "enum": [
+          "dataset",
+          "connector",
+          "state",
+          "trace",
+          "history",
+          "reports"
+        ],
+        "title": "Leaf",
+        "type": "string"
+      },
+      "LeafBytes": {
+        "additionalProperties": false,
+        "description": "One campaign tree on disk, every byte in exactly one leaf; `data_root.py::LEAF_INFO` words them.",
+        "properties": {
+          "leaves": {
+            "description": "Every leaf once, in `Leaf` order, an empty one at 0.",
+            "items": {
+              "$ref": "#/components/schemas/LeafShare"
+            },
+            "title": "Leaves",
+            "type": "array"
+          },
+          "loop": {
+            "description": "What the loop wrote: the leaves `LEAF_INFO` marks `loop`.",
+            "title": "Loop",
+            "type": "integer"
+          },
+          "total": {
+            "description": "The whole campaign dir: the sum of `leaves`.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "loop",
+          "leaves"
+        ],
+        "title": "LeafBytes",
+        "type": "object"
+      },
+      "LeafShare": {
+        "additionalProperties": false,
+        "description": "One leaf's bytes in a campaign tree.",
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "leaf": {
+            "$ref": "#/components/schemas/Leaf"
+          }
+        },
+        "required": [
+          "leaf",
+          "bytes"
+        ],
+        "title": "LeafShare",
         "type": "object"
       },
       "LensShift": {
@@ -9453,7 +9307,7 @@
       },
       "LivesReading": {
         "additionalProperties": false,
-        "description": "A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,\nread off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`).",
+        "description": "A run's life bank: what is left of it, and its cap.",
         "properties": {
           "cap": {
             "anyOf": [
@@ -9503,10 +9357,6 @@
             "description": "`full` where that many calls are out now, `part` where the gauge allows that many; null past both.",
             "title": "Fill"
           },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
           "pickable": {
             "description": "Whether a press of this depth is admitted now: the control applies, the run admits `set-sample-lookahead` and the next walk can take that many.",
             "title": "Pickable",
@@ -9515,7 +9365,6 @@
         },
         "required": [
           "cells",
-          "label",
           "fill",
           "pickable"
         ],
@@ -9575,26 +9424,6 @@
           "message"
         ],
         "title": "LoopWarning",
-        "type": "object"
-      },
-      "MachineNotice": {
-        "additionalProperties": false,
-        "description": "What the machine's occupancy means for the CALLER, in words: a landing refusing every launch,\ntheir own launch waiting, or a full machine a launch would wait on. Built by :meth:`of` alone.",
-        "properties": {
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "detail"
-        ],
-        "title": "MachineNotice",
         "type": "object"
       },
       "MachineQueueEntry": {
@@ -9742,6 +9571,17 @@
       "MachineStatusResponse": {
         "additionalProperties": false,
         "properties": {
+          "bound": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlotBound"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`throttle` while `capacity` is below `ceiling`; null where the machine admits its whole ceiling."
+          },
           "busy": {
             "description": "True iff `occupied` reaches `capacity` — no slot free for anyone, the caller included. A launch is then QUEUED rather than refused, so this reads as 'you will wait', not 'you cannot start'.",
             "title": "Busy",
@@ -9757,28 +9597,16 @@
             "title": "Ceiling",
             "type": "integer"
           },
-          "held_back": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`capacity` below `ceiling`, worded once for the terminal and the usage tab; null where the machine admits its whole ceiling.",
-            "title": "Held Back"
-          },
           "notice": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/MachineNotice"
+                "$ref": "#/components/schemas/Said"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "A landing in progress, `busy` and the caller's place in `queue`, worded once for the terminal and the alert bar; null where a slot is free and nothing of theirs waits."
+            "description": "A landing in progress, `busy` and the caller's place in `queue` — a fact about the NEXT launch, never about a run in view; null where a slot is free and nothing of theirs waits."
           },
           "occupied": {
             "description": "Slots held machine-wide, whoever holds them — the occupancy figure, which `running` may list fewer of.",
@@ -9818,7 +9646,7 @@
         "required": [
           "capacity",
           "ceiling",
-          "held_back",
+          "bound",
           "occupied",
           "running",
           "queued",
@@ -10933,14 +10761,48 @@
         "additionalProperties": false,
         "description": "One param a node carries, in the COMPLETE per-node list a reader sums `movable_by` over.\n\n`kind` names the surface that owns it: `model`/`enum` a select, `number`/`bool`/`string` a typed\ninput, `prompt` the prompt editor's, `description` one output-schema field's prose, `nested`\nstructured text that is still renderable.\n`movable_by` names the agents that may move it now; the empty list is the only true lock, and\nchanging it costs a fork.\n`never_axis` says it could never be an axis (`cost_lever`: a billing key; `schema_owned`: the\nstructured-output contract); `held` says this campaign closed an axis the dataset offered,\nreversibly. `model` is in neither: an ordinary axis.",
         "properties": {
+          "declared": {
+            "description": "The value the manifest declares — a campaign's floor",
+            "title": "Declared"
+          },
           "description": {
             "default": "",
             "title": "Description",
             "type": "string"
           },
+          "exclusive_maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly below; null when none",
+            "title": "Exclusive Maximum"
+          },
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly above; null when none",
+            "title": "Exclusive Minimum"
+          },
           "held": {
             "default": false,
             "title": "Held",
+            "type": "boolean"
+          },
+          "integer": {
+            "default": false,
+            "description": "A `number` row takes whole numbers only",
+            "title": "Integer",
             "type": "boolean"
           },
           "key": {
@@ -10961,6 +10823,30 @@
             "title": "Kind",
             "type": "string"
           },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The greatest legal value, itself legal; null when none",
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The least legal value, itself legal; null when none",
+            "title": "Minimum"
+          },
           "movable_by": {
             "items": {
               "$ref": "#/components/schemas/MovableAgent"
@@ -10977,6 +10863,12 @@
             ],
             "title": "Never Axis",
             "type": "string"
+          },
+          "nullable": {
+            "default": false,
+            "description": "Whether null is a legal value (an opt-in knob, off)",
+            "title": "Nullable",
+            "type": "boolean"
           },
           "options": {
             "items": {
@@ -11010,6 +10902,12 @@
               "unset"
             ],
             "title": "Source",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "description": "The description's first sentence, cut at its first clause where that runs long: the one line a setup surface shows before the whole text",
+            "title": "Summary",
             "type": "string"
           },
           "value": {
@@ -11063,18 +10961,18 @@
       "NodeKnobs": {
         "additionalProperties": false,
         "properties": {
+          "keys": {
+            "description": "Its knobs' keys, in declared order, each a row of `node_config_schema[node]`",
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
           "kind": {
             "description": "The node's type: sampler | eliminator | selector | …",
             "title": "Kind",
             "type": "string"
-          },
-          "knobs": {
-            "description": "Its knobs, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/KnobRow"
-            },
-            "title": "Knobs",
-            "type": "array"
           },
           "node": {
             "description": "The manifest node that owns these knobs",
@@ -11085,7 +10983,7 @@
         "required": [
           "node",
           "kind",
-          "knobs"
+          "keys"
         ],
         "title": "NodeKnobs",
         "type": "object"
@@ -11714,7 +11612,7 @@
       },
       "OptimizerPipelineResponse": {
         "additionalProperties": false,
-        "description": "An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`.",
+        "description": "An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs, prompts and node rows included, is `OptimizerSetup`.",
         "properties": {
           "measurement_node": {
             "anyOf": [
@@ -11739,17 +11637,6 @@
             "title": "Model Capabilities",
             "type": "object"
           },
-          "node_config_schema": {
-            "additionalProperties": {
-              "items": {
-                "$ref": "#/components/schemas/NodeConfigParam"
-              },
-              "type": "array"
-            },
-            "description": "Per-node typed config rows of what is no member's knob — an llm node's call config and prompt fields; a knob's one row is `OptimizerSetup.knobs`",
-            "title": "Node Config Schema",
-            "type": "object"
-          },
           "node_output_schema": {
             "additionalProperties": {
               "anyOf": [
@@ -11762,14 +11649,6 @@
               ]
             },
             "title": "Node Output Schema",
-            "type": "object"
-          },
-          "reach": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeReach"
-            },
-            "description": "Where the search reaches per node, summed off every param it carries — the rows above and its knobs — rather than in the browser, the same reading a campaign pipeline serves",
-            "title": "Reach",
             "type": "object"
           },
           "view": {
@@ -11787,10 +11666,8 @@
         "required": [
           "view",
           "measurement_node",
-          "node_config_schema",
           "node_output_schema",
-          "model_capabilities",
-          "reach"
+          "model_capabilities"
         ],
         "title": "OptimizerPipelineResponse",
         "type": "object"
@@ -11879,6 +11756,17 @@
             "title": "Main",
             "type": "array"
           },
+          "node_config_schema": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/NodeConfigParam"
+              },
+              "type": "array"
+            },
+            "description": "Per optimizer node, its typed config rows at this config — an llm node's call config and prompt fields, a member's knobs: what its pipeline graph and node detail draw",
+            "title": "Node Config Schema",
+            "type": "object"
+          },
           "pools": {
             "description": "What the members draw from",
             "items": {
@@ -11902,6 +11790,14 @@
             },
             "title": "Proposers",
             "type": "array"
+          },
+          "reach": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeReach"
+            },
+            "description": "Where the search reaches per optimizer node at this config, summed off `node_config_schema`",
+            "title": "Reach",
+            "type": "object"
           }
         },
         "required": [
@@ -11910,7 +11806,9 @@
           "prompts",
           "arms_per_round",
           "proposers",
-          "pools"
+          "pools",
+          "node_config_schema",
+          "reach"
         ],
         "title": "OptimizerSetup",
         "type": "object"
@@ -12079,8 +11977,12 @@
             "title": "Assessment",
             "type": "string"
           },
-          "next_action": {
-            "$ref": "#/components/schemas/OriginNextAction"
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/CheckinQuestion"
+            },
+            "title": "Questions",
+            "type": "array"
           },
           "recap": {
             "description": "Set only on a `ready` turn.",
@@ -12090,7 +11992,7 @@
         },
         "required": [
           "assessment",
-          "next_action",
+          "questions",
           "recap"
         ],
         "title": "OriginLastResolution",
@@ -12120,60 +12022,13 @@
         "title": "OriginListResponse",
         "type": "object"
       },
-      "OriginNextAction": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "default": "propose",
-            "description": "'ask' (need operator input), 'propose' (findings applied), or 'ready' (resolver believes origin complete — re-checked).",
-            "title": "Kind",
-            "type": "string"
-          },
-          "questions": {
-            "description": "For kind='ask': operator-facing questions, each naming the field it resolves so the answer applies directly.",
-            "items": {
-              "$ref": "#/components/schemas/OriginQuestion"
-            },
-            "title": "Questions",
-            "type": "array"
-          }
-        },
-        "title": "OriginNextAction",
-        "type": "object"
-      },
-      "OriginQuestion": {
-        "additionalProperties": false,
-        "properties": {
-          "field": {
-            "default": "",
-            "description": "Checklist field id the answer resolves, e.g. 'column.query'.",
-            "title": "Field",
-            "type": "string"
-          },
-          "options": {
-            "description": "Optional closed set of acceptable answers; empty = free text.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Options",
-            "type": "array"
-          },
-          "prompt": {
-            "default": "",
-            "description": "Short operator-facing question.",
-            "title": "Prompt",
-            "type": "string"
-          }
-        },
-        "title": "OriginQuestion",
-        "type": "object"
-      },
       "OriginReadiness": {
         "additionalProperties": false,
         "description": "The mint gate's verdict; a surface gates Start on it and never re-derives it.",
         "properties": {
           "complete": {
             "description": "True iff no field still blocks mint.",
+            "readOnly": true,
             "title": "Complete",
             "type": "boolean"
           },
@@ -12186,8 +12041,8 @@
           }
         },
         "required": [
-          "complete",
-          "gaps"
+          "gaps",
+          "complete"
         ],
         "title": "OriginReadiness",
         "type": "object"
@@ -12834,6 +12689,13 @@
         "additionalProperties": false,
         "description": "The graph projection derived from a manifest's nodes and pipelines; no manifest declares one.",
         "properties": {
+          "cycle": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cycle",
+            "type": "array"
+          },
           "edges": {
             "items": {
               "$ref": "#/components/schemas/PipelineViewEdge"
@@ -12902,13 +12764,10 @@
               "tool",
               "retriever",
               "cache",
-              "measurement"
+              "measurement",
+              "member"
             ],
             "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
             "type": "string"
           },
           "rank": {
@@ -12924,7 +12783,6 @@
         },
         "required": [
           "id",
-          "label",
           "kind"
         ],
         "title": "PipelineViewNode",
@@ -13169,7 +13027,7 @@
       },
       "ProducerReading": {
         "additionalProperties": false,
-        "description": "One cycle's producer as served: its state and its two server-measured clocks. Its words are\n`PRODUCER_STATE_INFO[state]` (the alert it raises, whether it is stepping) and `RAY_HEAD_WORDS`.",
+        "description": "One cycle's producer as served: its state and its two server-measured clocks. Its words are\n`PRODUCER_STATE_INFO[state]`, pinned where its tone is loud enough (`producer_row`).",
         "properties": {
           "appending": {
             "description": "That process is walking the loop, so the transient indicators are live.",
@@ -13433,8 +13291,24 @@
         "additionalProperties": false,
         "description": "Usage against the next launch's machine gates; the money is `/auth/coupon`'s.",
         "properties": {
+          "bound": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlotBound"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`machine` while `max_concurrent_cycles` is above `ceiling`; null where the account's own limit is the one that binds."
+          },
           "campaigns_today": {
             "title": "Campaigns Today",
+            "type": "integer"
+          },
+          "ceiling": {
+            "description": "The machine's `MACHINE_RUN_CAPACITY`.",
+            "title": "Ceiling",
             "type": "integer"
           },
           "concurrent_queued": {
@@ -13445,18 +13319,6 @@
           "concurrent_running": {
             "title": "Concurrent Running",
             "type": "integer"
-          },
-          "machine_binds": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`max_concurrent_cycles` above the machine's `MACHINE_RUN_CAPACITY`, in words; null where the account's own limit is the one that binds.",
-            "title": "Machine Binds"
           },
           "max_campaigns_per_day": {
             "title": "Max Campaigns Per Day",
@@ -13477,7 +13339,8 @@
           "concurrent_queued",
           "max_concurrent_cycles",
           "max_concurrent_cycles_writable",
-          "machine_binds",
+          "ceiling",
+          "bound",
           "campaigns_today",
           "max_campaigns_per_day"
         ],
@@ -13533,12 +13396,18 @@
             "title": "Kind",
             "type": "string"
           },
+          "label": {
+            "description": "What the proposal does, in `CHECKLIST_FIELDS`' words.",
+            "title": "Label",
+            "type": "string"
+          },
           "payload": {
             "$ref": "#/components/schemas/EditDraftCampaignPayload"
           }
         },
         "required": [
           "payload",
+          "label",
           "evidence"
         ],
         "title": "RaisedCommand",
@@ -13870,7 +13739,7 @@
       },
       "RoundHealth": {
         "additionalProperties": false,
-        "description": "A round's degradation grade as a surface reads it; the whole verdict stays on its close.",
+        "description": "A round's degradation grade as a surface reads it, worded now off the facts its close stamped.",
         "properties": {
           "grade": {
             "enum": [
@@ -13882,21 +13751,21 @@
             "title": "Grade",
             "type": "string"
           },
-          "suggested_action": {
+          "reading": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/HealthReading"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Suggested Action"
+            "description": "Why the grade is not healthy, in words; null on `healthy` and on `unmeasured`."
           }
         },
         "required": [
           "grade",
-          "suggested_action"
+          "reading"
         ],
         "title": "RoundHealth",
         "type": "object"
@@ -14353,7 +14222,7 @@
       },
       "RunStatus": {
         "additionalProperties": false,
-        "description": "How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. Its word\nis `label`, a lookup every surface makes the same way (`lib/derivations/run-phase.ts::runWord`).",
+        "description": "How a run stands on a row: its phase, why it stopped, and the mark drawn beside it.",
         "properties": {
           "mark": {
             "$ref": "#/components/schemas/StatusMark"
@@ -14498,6 +14367,65 @@
         "title": "RuntimeFailure",
         "type": "object"
       },
+      "Said": {
+        "additionalProperties": false,
+        "description": "One line composed once for a person: every medium renders it as served, none rewords it.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The longer reading, a tap away.",
+            "title": "Detail"
+          },
+          "key": {
+            "description": "What the line is about, for code to branch on; never shown.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub"
+          },
+          "tone": {
+            "$ref": "#/components/schemas/Tone"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "tone",
+          "label"
+        ],
+        "title": "Said",
+        "type": "object"
+      },
       "SampleLookahead": {
         "additionalProperties": false,
         "description": "The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its\ncontrol offers. A replay takes no armed control, so it reads depth 1 and nothing armed.",
@@ -14525,9 +14453,20 @@
             "type": "boolean"
           },
           "auto_refusal": {
-            "description": "Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A mode, not a press, so a paused run takes it for its relaunch; empty where offered.",
-            "title": "Auto Refusal",
-            "type": "string"
+            "anyOf": [
+              {
+                "enum": [
+                  "one_at_a_time",
+                  "settled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead does not apply to this backend at all, `settled` once the cycle has. A mode, not a press, so a paused run takes it for its relaunch; null where offered.",
+            "title": "Auto Refusal"
           },
           "ceiling": {
             "description": "The backend's `max_cells_in_flight`; 1 says the control does not apply.",
@@ -14559,10 +14498,10 @@
             "title": "Depths",
             "type": "array"
           },
-          "explained": {
-            "description": "What the armed depth does, as the control explains itself: the mode in force, its bound and the calls discarded so far — or `unavailable`.",
-            "title": "Explained",
-            "type": "string"
+          "discards": {
+            "description": "Calls a cut has discarded so far.",
+            "title": "Discards",
+            "type": "integer"
           },
           "in_flight": {
             "description": "Calls out now; 0 once no producer is appending.",
@@ -14583,11 +14522,6 @@
             "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
             "title": "Scoring Now",
             "type": "boolean"
-          },
-          "unavailable": {
-            "description": "Why holding calls ahead does not apply to this backend at all (`ceiling` of 1); empty where it applies.",
-            "title": "Unavailable",
-            "type": "string"
           }
         },
         "required": [
@@ -14601,8 +14535,7 @@
           "pick_max",
           "affordable",
           "cell_reserve_usd",
-          "unavailable",
-          "explained",
+          "discards",
           "auto_refusal",
           "depths"
         ],
@@ -14642,7 +14575,7 @@
       },
       "ScenarioReading": {
         "additionalProperties": false,
-        "description": "What the mask did to this branch: how far it agrees with the record, and the round it stops.\n\nThe chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is\none round's disagreement — both read at ``first_divergent_round``, or at the branch's last round\nwhere there is none. Reading a mid-chain counterfactual against the branch's final crown instead\nwould compare two different rounds and report the gap between them as a change.\n\n``note`` carries the caveat as a SERVED FACT, the way ``Comparability.note`` does — because the\nhonest limit of a lens is not something a surface can be trusted to remember.",
+        "description": "What the mask did to this branch: how far it agrees with the record, and the round it stops.\n\nThe chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is\none round's disagreement — both read at ``first_divergent_round``, or at the branch's last round\nwhere there is none. Reading a mid-chain counterfactual against the branch's final crown instead\nwould compare two different rounds and report the gap between them as a change.\n\nWorded by ``SCENARIO_WORDS`` on every surface, its ``caveat`` with it: the honest limit of a\nlens is not something a surface can be trusted to remember.",
         "properties": {
           "first_divergent_round": {
             "anyOf": [
@@ -14662,10 +14595,6 @@
           "n_samples_scored": {
             "title": "N Samples Scored",
             "type": "integer"
-          },
-          "note": {
-            "title": "Note",
-            "type": "string"
           },
           "recorded_winner_key": {
             "anyOf": [
@@ -14705,8 +14634,7 @@
           "first_divergent_round",
           "invariant_rounds",
           "total_rounds",
-          "n_samples_scored",
-          "note"
+          "n_samples_scored"
         ],
         "title": "ScenarioReading",
         "type": "object"
@@ -15044,16 +14972,6 @@
             "title": "Display Metric",
             "type": "string"
           },
-          "error": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DashboardError"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "error_count": {
             "default": 0,
             "title": "Error Count",
@@ -15080,17 +14998,6 @@
               }
             ],
             "title": "Langfuse Trace Url"
-          },
-          "last_query_elapsed_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Query Elapsed S"
           },
           "lookahead": {
             "$ref": "#/components/schemas/SampleLookahead"
@@ -15188,13 +15095,6 @@
             "title": "Recent Backend Warnings",
             "type": "array"
           },
-          "recent_loop_warnings": {
-            "items": {
-              "$ref": "#/components/schemas/LoopWarning"
-            },
-            "title": "Recent Loop Warnings",
-            "type": "array"
-          },
           "round": {
             "default": 0,
             "title": "Round",
@@ -15220,6 +15120,17 @@
           "run_phase": {
             "$ref": "#/components/schemas/RunPhase",
             "description": "The cycle's phase, derived at the read (`derive_run_state`) — never the runner's own `declared_phase`, which says `running` forever after a kill."
+          },
+          "said": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run's pinned line (`run_said`), its producer among the rows; null where nothing needs the operator."
           },
           "spend_metered": {
             "anyOf": [
@@ -15334,7 +15245,8 @@
           "fork_remainder",
           "observed",
           "walk",
-          "round_axis"
+          "round_axis",
+          "said"
         ],
         "title": "ServedDashboard",
         "type": "object"
@@ -15385,18 +15297,6 @@
           "health": {
             "$ref": "#/components/schemas/RoundHealth"
           },
-          "health_alert": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The alert a `critical` `health` raises, worded (`results_health.py::critical_health_title`); null on every other grade.",
-            "title": "Health Alert"
-          },
           "improved": {
             "anyOf": [
               {
@@ -15439,14 +15339,6 @@
           },
           "overlap": {
             "$ref": "#/components/schemas/OverlapReading"
-          },
-          "overlap_line": {
-            "description": "`overlap` as its members and rates, C0 first; empty where the lead was not read.",
-            "items": {
-              "$ref": "#/components/schemas/LineRate"
-            },
-            "title": "Overlap Line",
-            "type": "array"
           },
           "panel_precision": {
             "anyOf": [
@@ -15547,7 +15439,6 @@
           "total",
           "health",
           "overlap",
-          "overlap_line",
           "panel_precision_verdict",
           "selection_movement",
           "level",
@@ -15646,6 +15537,19 @@
         ],
         "title": "SetSampleLookaheadPayload",
         "type": "object"
+      },
+      "SetupStep": {
+        "description": "The check-in's steps, in the order a check-in shows them: each a fold that sets one part of\nthe campaign, keyed as `setup_schema` keys the steps it serves.",
+        "enum": [
+          "optimizer",
+          "data",
+          "scoring",
+          "pipeline",
+          "head_to_head",
+          "run"
+        ],
+        "title": "SetupStep",
+        "type": "string"
       },
       "SiteRecordBody": {
         "additionalProperties": false,
@@ -15785,6 +15689,15 @@
         "title": "Skipped",
         "type": "object"
       },
+      "SlotBound": {
+        "description": "What holds a launch below the slots it is offered, as `SLOT_BOUND_WORDS` words it.",
+        "enum": [
+          "throttle",
+          "machine"
+        ],
+        "title": "SlotBound",
+        "type": "string"
+      },
       "SpendBucket": {
         "additionalProperties": false,
         "description": "One spend sub-bucket: a spend kind's, or one node's.\n\n``used_usd`` is the BILL providers reported, ``rate_priced_usd`` our rate table's price of the\ncalls none billed, and ``incurred_usd`` counts both and prices cache hits too.",
@@ -15898,6 +15811,7 @@
         "type": "object"
       },
       "StartBlock": {
+        "description": "Why a check-in cannot open a dataset here, as `START_BLOCK_WORDS` words it.",
         "enum": [
           "verifier_graded",
           "empty",
@@ -16672,18 +16586,6 @@
             "title": "Address",
             "type": "string"
           },
-          "caveat": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What could not be read; null where all was.",
-            "title": "Caveat"
-          },
           "children": {
             "description": "Its courses, root first.",
             "items": {
@@ -16695,6 +16597,14 @@
           "facts": {
             "$ref": "#/components/schemas/SubtreeCampaignFacts"
           },
+          "figures": {
+            "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
+            "items": {
+              "$ref": "#/components/schemas/Figure"
+            },
+            "title": "Figures",
+            "type": "array"
+          },
           "label": {
             "description": "The display name.",
             "title": "Label",
@@ -16705,6 +16615,14 @@
             "default": "campaign",
             "title": "Level",
             "type": "string"
+          },
+          "lines": {
+            "description": "Its sentences under the figures, without a value; what could not be read is among them.",
+            "items": {
+              "$ref": "#/components/schemas/Said"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "parent": {
             "anyOf": [
@@ -16736,8 +16654,9 @@
           "address",
           "parent",
           "label",
-          "caveat",
           "tags",
+          "figures",
+          "lines",
           "state",
           "span",
           "facts",
@@ -16775,17 +16694,6 @@
             "title": "Line",
             "type": "string"
           },
-          "line_course": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CourseFacts"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The facts of the course holding the line, which the campaign's row reads as its own; null where that course has no mint record."
-          },
           "root": {
             "description": "The root course's address.",
             "title": "Root",
@@ -16814,7 +16722,6 @@
           "lifecycle",
           "spend_lifetime",
           "runs_with",
-          "line_course",
           "deletable_stubs"
         ],
         "title": "SubtreeCampaignFacts",
@@ -16829,20 +16736,8 @@
             "title": "Address",
             "type": "string"
           },
-          "caveat": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What could not be read; null where all was.",
-            "title": "Caveat"
-          },
           "children": {
-            "description": "Its rounds in round order, then any inner campaign its sandbox holds that no candidate's spawn stamp names — that one says so in its `caveat`.",
+            "description": "Its rounds in round order, then any inner campaign its sandbox holds that no candidate's spawn stamp names — that one says so among its `lines`.",
             "items": {
               "discriminator": {
                 "mapping": {
@@ -16866,6 +16761,14 @@
           "facts": {
             "$ref": "#/components/schemas/SubtreeCourseFacts"
           },
+          "figures": {
+            "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
+            "items": {
+              "$ref": "#/components/schemas/Figure"
+            },
+            "title": "Figures",
+            "type": "array"
+          },
           "label": {
             "description": "The display name.",
             "title": "Label",
@@ -16876,6 +16779,14 @@
             "default": "course",
             "title": "Level",
             "type": "string"
+          },
+          "lines": {
+            "description": "Its sentences under the figures, without a value; what could not be read is among them.",
+            "items": {
+              "$ref": "#/components/schemas/Said"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "parent": {
             "anyOf": [
@@ -16888,6 +16799,17 @@
             ],
             "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
             "title": "Parent"
+          },
+          "said": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run's pinned line from what no clock reads (`run_said`): a producer's row is its dashboard's alone. Null where nothing needs the operator."
           },
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
@@ -16907,11 +16829,13 @@
           "address",
           "parent",
           "label",
-          "caveat",
           "tags",
+          "figures",
+          "lines",
           "state",
           "span",
           "facts",
+          "said",
           "children"
         ],
         "title": "SubtreeCourse",
@@ -17000,18 +16924,6 @@
             "description": "The address of the arm the course's standing is paired against: the round-0 pick its line holds, whichever course ran it. Null on a branch cut at round 0 before it measured its own.",
             "title": "Origin"
           },
-          "rounds_cap": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The rounds cap that binds it: its wiring's, before its first launch its campaign's. 0 runs the origin only; null where it has no rounds axis.",
-            "title": "Rounds Cap"
-          },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin.",
             "title": "Rounds Closed",
@@ -17062,7 +16974,6 @@
           "task",
           "standing",
           "rounds_closed",
-          "rounds_cap",
           "elects_on",
           "spend",
           "bench",
@@ -17199,6 +17110,17 @@
         "title": "TokenAccount",
         "type": "object"
       },
+      "Tone": {
+        "enum": [
+          "quiet",
+          "success",
+          "live",
+          "attention",
+          "warn",
+          "danger"
+        ],
+        "type": "string"
+      },
       "Treatment": {
         "additionalProperties": false,
         "description": "Two runs are one treatment only where ``digest`` agrees; no measurement key reads it.",
@@ -17290,20 +17212,16 @@
             "title": "Address",
             "type": "string"
           },
-          "caveat": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What could not be read; null where all was.",
-            "title": "Caveat"
-          },
           "facts": {
             "$ref": "#/components/schemas/UnstartedFacts"
+          },
+          "figures": {
+            "description": "Its figures for a person, each composed once with a value, in the order a row shows them.",
+            "items": {
+              "$ref": "#/components/schemas/Figure"
+            },
+            "title": "Figures",
+            "type": "array"
           },
           "label": {
             "description": "The display name.",
@@ -17315,6 +17233,14 @@
             "default": "unstarted",
             "title": "Level",
             "type": "string"
+          },
+          "lines": {
+            "description": "Its sentences under the figures, without a value; what could not be read is among them.",
+            "items": {
+              "$ref": "#/components/schemas/Said"
+            },
+            "title": "Lines",
+            "type": "array"
           },
           "parent": {
             "anyOf": [
@@ -17343,8 +17269,9 @@
           "address",
           "parent",
           "label",
-          "caveat",
           "tags",
+          "figures",
+          "lines",
           "span",
           "facts"
         ],
@@ -17728,7 +17655,7 @@
       },
       "WaitingOn": {
         "additionalProperties": false,
-        "description": "The cell the producer's open call holds — worded `RAY_HEAD_WORDS` on every surface.",
+        "description": "The cell the producer's open call holds — worded `WAITING_ON_WORDS` on every surface.",
         "properties": {
           "label": {
             "anyOf": [
@@ -17889,55 +17816,22 @@
             "title": "Campaign Id",
             "type": "string"
           },
-          "connector_bytes": {
-            "title": "Connector Bytes",
-            "type": "integer"
-          },
-          "dataset_bytes": {
-            "title": "Dataset Bytes",
-            "type": "integer"
-          },
           "dataset_name": {
             "title": "Dataset Name",
             "type": "string"
           },
-          "history_bytes": {
-            "title": "History Bytes",
-            "type": "integer"
-          },
           "lifecycle_status": {
-            "title": "Lifecycle Status",
-            "type": "string"
+            "$ref": "#/components/schemas/LifecycleStatus"
           },
-          "on_disk_bytes": {
-            "description": "Whole campaign-dir footprint",
-            "title": "On Disk Bytes",
-            "type": "integer"
-          },
-          "reports_bytes": {
-            "title": "Reports Bytes",
-            "type": "integer"
-          },
-          "state_bytes": {
-            "title": "State Bytes",
-            "type": "integer"
-          },
-          "trace_bytes": {
-            "title": "Trace Bytes",
-            "type": "integer"
+          "on_disk": {
+            "$ref": "#/components/schemas/LeafBytes"
           }
         },
         "required": [
           "campaign_id",
           "dataset_name",
           "lifecycle_status",
-          "on_disk_bytes",
-          "dataset_bytes",
-          "connector_bytes",
-          "state_bytes",
-          "trace_bytes",
-          "history_bytes",
-          "reports_bytes"
+          "on_disk"
         ],
         "title": "WorkspaceStorageEntry",
         "type": "object"
@@ -19318,7 +19212,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/storage": {
       "get": {
-        "description": "On-disk size of the campaign tree, split into the six MECE leaves. 404 on cross-user.",
+        "description": "On-disk size of the campaign tree, split into its MECE leaves. 404 on cross-user.",
         "operationId": "get_campaign_storage_api_v1_campaigns__campaign_id__storage_get",
         "parameters": [
           {
@@ -19336,7 +19230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CampaignStorageResponse"
+                  "$ref": "#/components/schemas/LeafBytes"
                 }
               }
             },
@@ -21617,13 +21511,13 @@
         "operationId": "get_evidence_api_v1_evidence_get",
         "parameters": [
           {
-            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, caveat included.",
+            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded by `SCENARIO_WORDS`, its caveat included.",
             "in": "query",
             "name": "subject",
             "required": false,
             "schema": {
               "default": [],
-              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, caveat included.",
+              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded by `SCENARIO_WORDS`, its caveat included.",
               "items": {
                 "type": "string"
               },
@@ -22560,38 +22454,6 @@
           }
         },
         "summary": "Get Workspace Storage",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
-    "/api/v1/workspace/storage-by-dataset": {
-      "get": {
-        "description": "On-disk size per dataset, every campaign of it pooled and split into the six MECE leaves.\n\nArchived campaigns are included; the shared measurement store is excluded.",
-        "operationId": "get_storage_by_dataset_api_v1_workspace_storage_by_dataset_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetStorageResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Get Storage By Dataset",
         "tags": [
           "Campaigns"
         ]

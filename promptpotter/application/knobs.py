@@ -13,6 +13,7 @@ from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
+from promptpotter.domain.said import Tone
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
@@ -166,13 +167,13 @@ CouplingSeverity = Literal["collision", "inert", "info"]
 
 class CouplingSeverityInfo(NamedTuple):
     # The badge an ACTIVE coupling wears; an inactive one wears none.
-    tone: Literal["danger", "accent", "default"]
+    tone: Tone
 
 
 COUPLING_SEVERITY_INFO: dict[CouplingSeverity, CouplingSeverityInfo] = {
     "collision": CouplingSeverityInfo("danger"),
-    "inert": CouplingSeverityInfo("accent"),
-    "info": CouplingSeverityInfo("default"),
+    "inert": CouplingSeverityInfo("attention"),
+    "info": CouplingSeverityInfo("quiet"),
 }
 
 

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError, failureKind, operatorMessage } from "@/lib/api";
+import { ApiError, commandMessage, failureKind, operatorMessage } from "@/lib/api";
 import { toApiError } from "@/lib/api/client";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
+import { failureState, OFFLINE } from "@/lib/poll";
 
 describe("failureKind", () => {
   it("maps the statuses whose reactions differ", () => {
@@ -10,6 +11,12 @@ describe("failureKind", () => {
     expect(failureKind(new ApiError(404, "/api/v1/x"))).toBe("gone");
     expect(failureKind(new ApiError(400, "/api/v1/x"))).toBe("invalid");
     expect(failureKind(new ApiError(422, "/api/v1/x"))).toBe("invalid");
+    // An answered refusal is the read failing, never the server unreachable.
+    const auth = new ApiError(401, "/api/v1/x");
+    const kind = failureKind(auth);
+    const read = failureState({ kind, message: operatorMessage(auth, kind) });
+    expect(read.status).toBe("failed");
+    expect(read.statusText).not.toBe(OFFLINE.statusText);
   });
 
   it("treats every server-side failure as transient", () => {
@@ -37,14 +44,16 @@ describe("failureKind", () => {
 
   it("words a write failure as the server's sentence, else one per kind — never the raw failure", () => {
     const said = new ApiError(409, "/api/v1/commands/fork-cycle", null, null, null, "Already forked.");
-    expect(operatorMessage(said, failureKind(said))).toBe("Already forked.");
-    // No envelope (a proxy 502) and no response at all: neither may claim the write did not land.
+    expect(commandMessage(said, failureKind(said))).toBe("Already forked.");
+    // No envelope (a proxy 502) and no response at all: neither may claim the write did not land,
+    // and a read that failed the same way claims nothing about writes.
     const bare = new ApiError(502, "/api/v1/commands/fork-cycle");
     const offline = new TypeError("Failed to fetch");
     for (const e of [bare, offline]) {
-      const text = operatorMessage(e, failureKind(e));
+      const text = commandMessage(e, failureKind(e));
       expect(text).not.toMatch(/502|fetch/i);
       expect(text).toMatch(/may not have been applied/);
+      expect(operatorMessage(e, failureKind(e))).not.toMatch(/applied/);
     }
   });
 
@@ -102,7 +111,7 @@ describe("incident ring", () => {
     expect(only?.code).toBe("internal_error");
     expect(only?.status).toBe(500);
     expect(only?.path).toBeNull();
-    expect(operatorMessage(e, failureKind(e))).toMatch(/may not have been applied/);
+    expect(commandMessage(e, failureKind(e))).toMatch(/may not have been applied/);
   });
 
   it("ignores aborts — a cancelled in-flight request is the app working correctly", () => {

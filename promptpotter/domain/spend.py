@@ -17,7 +17,13 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema
 
-from promptpotter.domain.strict_model import FrozenModel, StrictModel, WireFloat, WireInt
+from promptpotter.domain.strict_model import (
+    FrozenModel,
+    NonNegativeWireFloat,
+    PositiveWireFloat,
+    StrictModel,
+    WireInt,
+)
 from promptpotter.domain.wire_record import ALWAYS, WireRecord
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -202,9 +208,8 @@ NESTED_NODE_PREFIX = "inner:"
 class Budget(FrozenModel):
     """What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits."""
 
-    usd: WireFloat | None = Field(
+    usd: NonNegativeWireFloat | None = Field(
         default=None,
-        ge=0.0,
         description="The campaign's USD, in its ceiling meter: one book its live cycles share.",
     )
     tokens: WireInt | None = Field(
@@ -219,9 +224,8 @@ class Budget(FrozenModel):
         description="Closed rounds after the origin, per cycle, read at each round boundary; "
         "0 measures the origin only.",
     )
-    wall_clock_s: WireFloat | None = Field(
+    wall_clock_s: PositiveWireFloat | None = Field(
         default=None,
-        gt=0.0,
         description="Seconds ONE launch runs, its clock afresh at every launch; a remote cell "
         "still open at the edge is cut and the run stops `wall_clock`.",
     )
@@ -289,6 +293,59 @@ class Budget(FrozenModel):
 NOTHING_METERED = Budget.amount(0.0, 0)
 
 
+class CapAxisInfo(NamedTuple):
+    title: str
+    # What an operator types the axis in; the wire carries `scale` times it.
+    unit: str
+    scale: float
+    # The input's step, in `unit`.
+    step: float
+    integer: bool
+    # Where 0 is legal, a cap of 0 admits nothing more: the run halts after its current round.
+    minimum: float | None
+    exclusive_minimum: float | None
+
+
+def _cap_axis(axis: str, title: str, unit: str, scale: float, step: float) -> CapAxisInfo:
+    """Integrality and floor are the axis's `Budget` field's, read off it."""
+    field = Budget.model_fields[axis]
+    ge = [float(m.ge) for m in field.metadata if hasattr(m, "ge")]
+    gt = [float(m.gt) for m in field.metadata if hasattr(m, "gt")]
+    number = get_args(get_args(field.annotation)[0])[0]
+    return CapAxisInfo(
+        title, unit, scale, step, number is int, ge[0] if ge else None, gt[0] if gt else None
+    )
+
+
+#: THE run cap axes, on every surface that sets or shows one.
+CAP_AXIS_INFO: dict[str, CapAxisInfo] = {
+    "usd": _cap_axis("usd", "Spend cap", "USD", 1, 0.01),
+    "tokens": _cap_axis("tokens", "Token cap", "tokens", 1, 1000),
+    "rounds": _cap_axis("rounds", "Round cap", "rounds", 1, 1),
+    "wall_clock_s": _cap_axis("wall_clock_s", "Wall-clock cap", "minutes", 60, 5),
+}
+assert list(CAP_AXIS_INFO) == list(Budget.model_fields)
+
+
+def usd_text(usd: float) -> str:
+    """THE money wording, `webapp/lib/format.ts::fmtUsd`'s: four places under a dollar, else two."""
+    return f"${usd:.4f}" if usd < 1 else f"${usd:.2f}"
+
+
+def money_text(budget: Budget, *, on: Budget | None = None) -> str:
+    """A budget's money axes in words, only those the face *on* bounds (its own by default)."""
+    face = budget if on is None else on
+    said = [
+        *([usd_text(budget.usd)] if budget.usd is not None and face.usd is not None else []),
+        *(
+            [f"{budget.tokens:,} tokens"]
+            if budget.tokens is not None and face.tokens is not None
+            else []
+        ),
+    ]
+    return " / ".join(said) or "unbounded"
+
+
 class CellPrice(FrozenModel):
     """What one cell of a bank cost on its models, as the archive measured it."""
 
@@ -303,7 +360,8 @@ class CellPrice(FrozenModel):
 
 
 # The campaign's: one book its live cycles share. The rest bind one cycle (`rounds`) or launch.
-MONEY_AXES = frozenset({"usd", "tokens"})
+MoneyAxis = Literal["usd", "tokens"]
+MONEY_AXES = frozenset(get_args(MoneyAxis))
 CYCLE_AXES = frozenset({"rounds", "wall_clock_s"})
 
 

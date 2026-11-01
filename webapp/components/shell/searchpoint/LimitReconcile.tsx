@@ -3,18 +3,25 @@
 import { useState } from "react";
 import type { Budget, OptimizerLimit, RunLimitOverrides } from "@/lib/api";
 import { budgetAxis, capLines, readSpend } from "@/lib/derivations";
-import { fmtDuration } from "@/lib/format";
-import { parseCap } from "@/lib/run-limits";
+import { CAP_AXIS_INFO } from "@/lib/api/types.generated";
+import { capInput, capText, parseCap, parseCapIn, type CapBounds } from "@/lib/run-limits";
 import type { CyclePath } from "@/lib/ids";
 import { useDashboardAt } from "@/lib/poll";
 
 interface Fields {
   rounds: string;
-  wallClockMin: string;
+  wallClock: string;
   optimizer: Record<string, string>;
 }
 
 const limitKey = (l: OptimizerLimit) => `${l.node}.${l.knob}`;
+const limitBounds = (l: OptimizerLimit): CapBounds => (l.integer ? { integer: true } : { maximum: 1 });
+const ROUNDS = CAP_AXIS_INFO.rounds;
+const WALL_CLOCK = CAP_AXIS_INFO.wall_clock_s;
+
+// A refused entry is named on its field, never dropped as if blank: blank inherits the parent's.
+const refused = (typed: string | undefined, bounds: CapBounds) =>
+  typed !== undefined && "refused" in parseCap(typed, bounds);
 
 export function LimitReconcile({
   path,
@@ -27,7 +34,7 @@ export function LimitReconcile({
   const left = dash?.fork_remainder ?? null;
   const rl = dash?.run_limits ?? null;
   const declared = rl?.optimizer ?? [];
-  const [f, setF] = useState<Fields>({ rounds: "", wallClockMin: "", optimizer: {} });
+  const [f, setF] = useState<Fields>({ rounds: "", wallClock: "", optimizer: {} });
   const spend = readSpend(dash);
   const { budgetUsd: usdCap, budgetTokens: tokenCap } = spend;
   const caps = capLines(spend);
@@ -35,22 +42,19 @@ export function LimitReconcile({
 
   const set = (next: Fields) => {
     setF(next);
-    // The floor is 0, not 1: `budget.rounds: 0` means "measure the origin and stop".
-    const count = { int: true } as const;
     const nodes: Record<string, { config: Record<string, number> }> = {};
     for (const l of declared) {
       const typed = next.optimizer[limitKey(l)];
       if (typed === undefined) continue;
-      const value = parseCap(typed, l.integer ? count : { max: 1 });
-      if (value == null) continue;
-      (nodes[l.node] ??= { config: {} }).config[l.knob] = value;
+      const cap = parseCap(typed, limitBounds(l));
+      if ("value" in cap) (nodes[l.node] ??= { config: {} }).config[l.knob] = cap.value;
     }
     // Blank names nothing, so the axis inherits the parent's.
     const budget: Budget = {};
-    const rounds = parseCap(next.rounds, count);
-    if (rounds != null) budget.rounds = rounds;
-    const minutes = parseCap(next.wallClockMin, { min: Number.MIN_VALUE });
-    if (minutes != null) budget.wall_clock_s = minutes * 60;
+    const rounds = parseCap(next.rounds, ROUNDS);
+    if ("value" in rounds) budget.rounds = rounds.value;
+    const wallClock = parseCapIn(next.wallClock, WALL_CLOCK);
+    if ("value" in wallClock) budget.wall_clock_s = wallClock.value;
     onChange({
       ...(Object.keys(budget).length ? { budget } : {}),
       ...(Object.keys(nodes).length ? { nodes } : {}),
@@ -65,16 +69,14 @@ export function LimitReconcile({
       <span className="limit-reconcile-title">Reconcile run limits</span>
 
       <label className="limit-row">
-        <span className="limit-label">Rounds</span>
+        <span className="limit-label">{ROUNDS.title}</span>
         <input
-          type="number"
-          min={1}
-          step={1}
-          inputMode="numeric"
+          {...capInput(ROUNDS)}
           className="limit-input"
           value={f.rounds}
+          aria-invalid={refused(f.rounds, ROUNDS) || undefined}
           placeholder={ph(left?.rounds, "inherit")}
-          aria-label="Fork round cap"
+          aria-label={`Fork ${ROUNDS.title.toLowerCase()}`}
           onChange={(e) => set({ ...f, rounds: e.target.value })}
         />
         <small className="limit-note">
@@ -85,27 +87,25 @@ export function LimitReconcile({
       </label>
 
       <label className="limit-row">
-        <span className="limit-label">Wall-clock cap</span>
+        <span className="limit-label">{WALL_CLOCK.title}</span>
         <input
-          type="number"
-          min={0}
-          step={5}
-          inputMode="decimal"
+          {...capInput(WALL_CLOCK)}
           className="limit-input"
-          value={f.wallClockMin}
-          placeholder={parentWallClock != null ? String(parentWallClock / 60) : "inherit"}
-          aria-label="Fork wall-clock cap in minutes"
-          onChange={(e) => set({ ...f, wallClockMin: e.target.value })}
+          value={f.wallClock}
+          aria-invalid={"refused" in parseCapIn(f.wallClock, WALL_CLOCK) || undefined}
+          placeholder={parentWallClock != null ? String(parentWallClock / WALL_CLOCK.scale) : "inherit"}
+          aria-label={`Fork ${WALL_CLOCK.title.toLowerCase()} in ${WALL_CLOCK.unit}`}
+          onChange={(e) => set({ ...f, wallClock: e.target.value })}
         />
         <small className="limit-note">
           {parentWallClock != null
-            ? `parent cap ${fmtDuration(parentWallClock)} per launch — minutes; blank inherits`
-            : "minutes per launch; a remote cell still open at the edge is cut — blank inherits"}
+            ? `parent cap ${capText(WALL_CLOCK, parentWallClock)} per launch; blank inherits`
+            : `${WALL_CLOCK.unit} per launch; a remote cell still open at the edge is cut — blank inherits`}
         </small>
       </label>
 
       <div className="limit-row">
-        <span className="limit-label">Spend cap</span>
+        <span className="limit-label">{CAP_AXIS_INFO.usd.title}</span>
         <small className="limit-note">
           {usdCap == null && tokenCap == null
             ? "the campaign is uncapped — set its cap on the run's controls"
@@ -122,11 +122,12 @@ export function LimitReconcile({
                 <span className="limit-label">{l.label}</span>
                 <input
                   type="number"
-                  min={l.integer ? 1 : 0}
+                  min={0}
                   max={l.integer ? undefined : 1}
                   step={l.integer ? 1 : 0.01}
                   className="limit-input"
                   value={f.optimizer[limitKey(l)] ?? ""}
+                  aria-invalid={refused(f.optimizer[limitKey(l)], limitBounds(l)) || undefined}
                   placeholder={ph(l.value, "inherit")}
                   aria-label={`Fork ${l.label}`}
                   onChange={(e) =>

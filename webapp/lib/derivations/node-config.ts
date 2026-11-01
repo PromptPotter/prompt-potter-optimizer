@@ -1,9 +1,9 @@
 import type {
   CapabilityMenu,
   DraftPatch,
-  KnobRow,
   ModelCapability,
   NodeConfigParam,
+  OptimizerSetup,
 } from "@/lib/api";
 import type { ParamIntent } from "@/lib/api/types";
 import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
@@ -271,12 +271,30 @@ export function seedOverlayFromRows(
   return overlay;
 }
 
+export interface KnobGroup {
+  node: string;
+  kind: string;
+  knobs: NodeConfigParam[];
+}
+
+// Each member's knobs as its `node_config_schema` rows, in the member's declared order.
+export function knobGroups(setup: OptimizerSetup): KnobGroup[] {
+  return setup.knobs.map(({ node, kind, keys }) => {
+    const rows = setup.node_config_schema[node];
+    const knobs = keys.flatMap((key) => {
+      const row = rows?.find((r) => r.key === key);
+      return row ? [row] : [];
+    });
+    return { node, kind, knobs };
+  });
+}
+
 export function knobText(value: unknown): string {
   if (value === null || value === undefined) return "";
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function withinBounds(knob: KnobRow, n: number): boolean {
+function withinBounds(knob: NodeConfigParam, n: number): boolean {
   return (
     (knob.minimum === null || n >= knob.minimum) &&
     (knob.exclusive_minimum === null || n > knob.exclusive_minimum) &&
@@ -285,7 +303,7 @@ function withinBounds(knob: KnobRow, n: number): boolean {
   );
 }
 
-export function knobRange(knob: KnobRow): string | null {
+export function knobRange(knob: NodeConfigParam): string | null {
   const low = knob.exclusive_minimum ?? knob.minimum;
   const high = knob.exclusive_maximum ?? knob.maximum;
   if (low === null && high === null) return null;
@@ -294,14 +312,14 @@ export function knobRange(knob: KnobRow): string | null {
   return `${open}${low ?? "−∞"}, ${high ?? "∞"}${close}`;
 }
 
-export function parseKnob(knob: KnobRow, text: string): unknown {
+export function parseKnob(knob: NodeConfigParam, text: string): unknown {
   const t = text.trim();
-  if (knob.type === "string") return t === "" && knob.nullable ? null : text;
+  if (knob.kind === "string") return t === "" && knob.nullable ? null : text;
   if (t === "") return knob.nullable ? null : undefined;
-  if (knob.type === "integer" || knob.type === "number") {
+  if (knob.kind === "number") {
     const n = Number(t);
     if (!Number.isFinite(n)) return undefined;
-    if (knob.type === "integer" && !Number.isInteger(n)) return undefined;
+    if (knob.integer && !Number.isInteger(n)) return undefined;
     return withinBounds(knob, n) ? n : undefined;
   }
   const parsed = parseNested(t);

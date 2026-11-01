@@ -10,16 +10,11 @@ from promptpotter.domain.arms import arm_name
 from promptpotter.domain.bench import BandedValue, BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
-from promptpotter.domain.origin_panel import (
-    LineRate,
-    OverlapReading,
-    line_by_individual,
-    overlap_line,
-)
+from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.results_health import critical_health_title
-from promptpotter.domain.round_health import HealthGrade
+from promptpotter.domain.results_health import health_reading
+from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
 from promptpotter.domain.ruler import AbilityReading, LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
@@ -225,10 +220,16 @@ class VerificationMark(FrozenModel):
 
 
 class RoundHealth(FrozenModel):
-    """A round's degradation grade as a surface reads it; the whole verdict stays on its close."""
+    """A round's degradation grade as a surface reads it, worded now off the facts its close stamped."""
 
     grade: HealthGrade
-    suggested_action: str | None
+    reading: HealthReading | None = Field(
+        description="Why the grade is not healthy, in words; null on `healthy` and on `unmeasured`."
+    )
+
+    @classmethod
+    def of(cls, round_num: int, health: DegradationHealth) -> RoundHealth:
+        return cls(grade=health.grade, reading=health_reading(round_num, health))
 
 
 class RoundSummary(FrozenModel):
@@ -259,13 +260,7 @@ class RoundSummary(FrozenModel):
     candidates: list[DashboardCandidate] = Field(default_factory=list)
     # Measurement order, off the longest candidate sequence: PoBB truncates losers.
     selection: list[int] = Field(default_factory=list)
-    # Rendered, never recomputed.
     health: RoundHealth
-    health_alert: str | None = Field(
-        default=None,
-        description="The alert a `critical` `health` raises, worded "
-        "(`results_health.py::critical_health_title`); null on every other grade.",
-    )
     # C0 and each new best since on ONE shared set of cells: the only basis two rounds can be differenced on.
     overlap: OverlapReading
     # ``None`` on a non-L4 round. The VERDICT rides `candidates[].reading.vs_reference`.
@@ -304,8 +299,7 @@ class RoundSummary(FrozenModel):
                 if reading.role != MeasurementRole.PARENT
             ],
             selection=list(dict.fromkeys(closed.positions[key] for key, _, _ in longest)),
-            health=RoundHealth(grade=health.grade, suggested_action=health.suggested_action),
-            health_alert=critical_health_title(closed.round, health),
+            health=RoundHealth.of(closed.round, health),
             overlap=closed.overlap,
             panel_precision=closed.panel_precision,
             optimizer_facts=closed.optimizer_facts,
@@ -315,10 +309,6 @@ class RoundSummary(FrozenModel):
 class ServedRound(RoundSummary):
     """A closed round as a dashboard serves it: the banked summary plus every reading derived from it."""
 
-    overlap_line: list[LineRate] = Field(
-        description="`overlap` as its members and rates, C0 first; empty where the lead was not "
-        "read."
-    )
     panel_precision_verdict: PrecisionVerdict | None = Field(
         description="Which lever `panel_precision` calls for, null where it is. Beside the "
         "reading and not on it: `PanelPrecision` is hashed into the L4 estimator's identity."
@@ -386,7 +376,6 @@ def served_rounds(
                     for row in closed.candidates
                 ]
             },
-            overlap_line=overlap_line(closed.overlap),
             panel_precision_verdict=None
             if closed.panel_precision is None
             else precision_verdict(closed.panel_precision),

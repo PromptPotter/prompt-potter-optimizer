@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
-import { CardFrame, DataTable, Empty, Loading, type Column } from "@/components/ui";
+import { CardFrame, DataTable, Empty, FailureLine, Loading, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { indexLineage } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
@@ -176,13 +176,15 @@ function CampaignSpines({
   subjects: readonly SubjectReading[];
   evidence: Evidence;
 }) {
-  const { root, loaded, failed } = useLineageTree(campaignId, true);
+  const { root, loaded, failure } = useLineageTree(campaignId, true);
   const index = useMemo(() => indexLineage(root), [root]);
 
   const spines = useMemo(() => buildSpines(index, subjects), [index, subjects]);
 
-  if (failed) {
-    return <p className="note-warn">Could not read {shortId(campaignId)}&rsquo;s lineage.</p>;
+  if (failure) {
+    return (
+      <FailureLine failure={failure} lead={`Could not read ${shortId(campaignId)}’s lineage.`} />
+    );
   }
   if (!loaded) return <Loading>Reading {shortId(campaignId)}&rsquo;s lineage…</Loading>;
   if (spines.length === 0) {

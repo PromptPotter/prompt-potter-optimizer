@@ -334,8 +334,7 @@ BENCH_STATE_INFO: dict[ReadingState, BenchStateInfo] = {
     ),
     ReadingState.NOT_ASKED: BenchStateInfo(
         "not asked",
-        "Rows are held out and nobody has asked for the selection's pass: "
-        "`python -m promptpotter bench` sends it.",
+        "Rows are held out, and nobody has asked for the selection's pass on them yet.",
         False,
     ),
     ReadingState.PENDING: BenchStateInfo(
@@ -379,6 +378,8 @@ class PassOutcome(NamedTuple):
 
 class LineRun(NamedTuple):
     selecting: bool
+    # A bench pass's bracket stands open on the cycle, and a process still holds it.
+    pass_open: bool
     ending: StopReason | None
     # ``RunStanding.selection``: the origin until a round selects, ``None`` until round 0 closes.
     selection: ArmName | None
@@ -392,6 +393,7 @@ class BenchRefusal(StrEnum):
     NO_MANIFEST = "no_manifest"
     HELD_ELSEWHERE = "held_elsewhere"
     NOT_HELD = "not_held"
+    IN_FLIGHT = "in_flight"
     SELECTING = "selecting"
     ORIGIN_UNSCORED = "origin_unscored"
     GRADED = "graded"
@@ -406,6 +408,7 @@ BENCH_REFUSAL_INFO: dict[BenchRefusal, str] = {
         "campaign's result. Ask for that cycle."
     ),
     BenchRefusal.NOT_HELD: "The campaign's dataset_split holds no bench rows out.",
+    BenchRefusal.IN_FLIGHT: "A bench pass is grading now; its reading lands when it ends.",
     BenchRefusal.SELECTING: "The run is still selecting. Pause it or let it end first.",
     BenchRefusal.ORIGIN_UNSCORED: (
         "The origin has not been scored, so there is no reference to grade against."
@@ -498,6 +501,8 @@ def bench_status(
         refusal = BenchRefusal.NO_MANIFEST if held_by is None else BenchRefusal.HELD_ELSEWHERE
     elif not bench_size:
         refusal = BenchRefusal.NOT_HELD
+    elif run.pass_open:
+        refusal = BenchRefusal.IN_FLIGHT
     elif run.selecting:
         refusal = BenchRefusal.SELECTING
     elif run.selection is None:

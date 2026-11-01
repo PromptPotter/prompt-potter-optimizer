@@ -143,14 +143,34 @@ describe("read clock", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("unnamed, re-asks polled reads and only the one-shots a validator makes free", async () => {
+  it("unnamed, re-asks every mounted read, a one-shot with no validator included", async () => {
     await readThrough("held\x1fu", body(1, 'W/"a"'), live());
     await readThrough("bare\x1fu", body(1), live());
     const polled = watch("polled\x1fu", 5 * READ_BEAT_MS);
     const held = watch("held\x1fu", null);
     const bare = watch("bare\x1fu", null);
     invalidateReads();
-    expect([polled.fired, held.fired, bare.fired]).toEqual([1, 1, 0]);
+    expect([polled.fired, held.fired, bare.fired]).toEqual([1, 1, 1]);
+  });
+
+  it("re-asks an invalidated read in a fresh flight, never the one asked before the change", async () => {
+    const lands: ((n: number) => void)[] = [];
+    const load: ReadLoad<number> = () =>
+      new Promise((resolve) => lands.push((data) => resolve({ kind: "ok", data, validator: null })));
+    const asked = [readThrough("draft\x1fu", load, live())];
+    mounted.push(
+      watchRead({
+        id: "draft\x1fu",
+        intervalMs: null,
+        fire: () => void asked.push(readThrough("draft\x1fu", load, live())),
+      }),
+    );
+    invalidateReads("draft");
+    expect(lands).toHaveLength(2);
+    lands[1]!(2);
+    lands[0]!(1);
+    expect(await Promise.all(asked)).toEqual([1, 2]);
+    expect(cachedRead("draft\x1fu")?.data).toBe(2);
   });
 
   it("named, re-asks every read of that endpoint and no other", () => {
@@ -161,7 +181,7 @@ describe("read clock", () => {
     expect([bare.fired, sibling.fired, other.fired]).toEqual([1, 1, 0]);
   });
 
-  it("stops the beat under a hidden tab, ignores invalidation there, and re-asks on return", () => {
+  it("stops the beat under a hidden tab, and re-asks on return what a poll or validator makes free", async () => {
     const page = { hidden: false, onVisibility: () => {} };
     vi.stubGlobal("document", {
       get hidden() {
@@ -170,20 +190,20 @@ describe("read clock", () => {
       addEventListener: (_: string, handler: () => void) => (page.onVisibility = handler),
     });
     vi.stubGlobal("window", { addEventListener: () => {} });
+    await readThrough("held\x1fu", body(1, 'W/"a"'), live());
     const polled = watch("a\x1fu", READ_BEAT_MS);
+    const held = watch("held\x1fu", null);
+    const bare = watch("bare\x1fu", null);
     vi.advanceTimersByTime(READ_BEAT_MS);
     expect(polled.fired).toBe(1);
 
     page.hidden = true;
     page.onVisibility();
     expect(vi.getTimerCount()).toBe(0);
-    invalidateReads();
     vi.advanceTimersByTime(5 * READ_BEAT_MS);
-    expect(polled.fired).toBe(1);
-
     page.hidden = false;
     page.onVisibility();
-    expect(polled.fired).toBe(2);
+    expect([polled.fired, held.fired, bare.fired]).toEqual([2, 1, 0]);
     vi.advanceTimersByTime(READ_BEAT_MS);
     expect(polled.fired).toBe(3);
   });

@@ -29,7 +29,7 @@ from promptpotter.application.jobs.quota import spends_the_hosts_own_key
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.dataset_start import DatasetStartBlock, DatasetUnstartableError, StartBlock
+from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
@@ -65,11 +65,6 @@ def offered_dataset(stores: Stores, name: str) -> ResolvedDataset:
     return resolve_dataset(stores, name)
 
 
-_EMPTY = DatasetStartBlock(
-    reason=StartBlock.EMPTY, explanation="It holds no row with both a query and an answer."
-)
-
-
 def labelled_rows(samples: Sequence[Sample]) -> list[dict[str, str]]:
     return [
         {"query": s.query, "ground_truth": truth}
@@ -78,17 +73,11 @@ def labelled_rows(samples: Sequence[Sample]) -> list[dict[str, str]]:
     ]
 
 
-def rows_block(samples: Sequence[Sample]) -> DatasetStartBlock | None:
+def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
     """The one reading of whether a check-in can hold these rows."""
     if all_verifier_graded(s.ground_truth for s in samples):
-        return DatasetStartBlock(
-            reason=StartBlock.VERIFIER_GRADED,
-            explanation=(
-                "Each sample is graded by running a verifier rather than by a labelled answer, so "
-                "it is launched from the command line, not from here."
-            ),
-        )
-    return None if labelled_rows(samples) else _EMPTY
+        return StartBlock.VERIFIER_GRADED
+    return None if labelled_rows(samples) else StartBlock.EMPTY
 
 
 def dataset_extra(dataset_dir: Path) -> Extra | None:
@@ -108,24 +97,11 @@ def missing_extra(dataset_dir: Path) -> Extra | None:
     return extra if extra is not None and not installed(extra) else None
 
 
-def _extra_block(dataset_dir: Path) -> DatasetStartBlock | None:
-    """Asked before any row is read: reading one may import the very extra that is absent."""
-    if (extra := missing_extra(dataset_dir)) is None:
-        return None
-    return DatasetStartBlock(
-        reason=StartBlock.MISSING_EXTRA,
-        explanation=(
-            f"It runs through the `{extra}` extra, which this install lacks: "
-            f"`{install_hint(extra)}`."
-        ),
-    )
-
-
-def _held_block(dataset_dir: Path, held: Bank | None) -> DatasetStartBlock | None:
+def _held_block(dataset_dir: Path, held: Bank | None) -> StartBlock | None:
     """Over the rows the account HOLDS; one not held opens on a fetch, which needs a source."""
     if held is not None:
         return rows_block(held.samples)
-    return None if has_source(dataset_dir) else _EMPTY
+    return None if has_source(dataset_dir) else StartBlock.EMPTY
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,38 +109,29 @@ class DatasetReading:
     """What the listing serves of one dataset: never its rows, which stay with the draft."""
 
     n_held: int | None
-    block: DatasetStartBlock | None
+    block: StartBlock | None
 
 
 def dataset_reading(stores: Stores, name: str) -> DatasetReading:
     """A SURVEY: one unreadable dataset lists as blocked by that, never as startable or absent."""
     dataset = resolve_dataset(stores, name)
-    dataset_dir = dataset.directory
-    if (block := _extra_block(dataset_dir)) is not None:
-        return DatasetReading(None, block)
+    # Asked before any row is read: reading one may import the very extra that is absent.
+    if missing_extra(dataset.directory) is not None:
+        return DatasetReading(None, StartBlock.MISSING_EXTRA)
     try:
         held = held_bank(stores, dataset)
-    except DatasetUnstartableError as exc:
-        # A state of THIS install, not a fault: the same refusal opening it answers with.
-        return DatasetReading(None, exc.block)
     except (ValueError, OSError, BackendUnreachableError):
         logger.exception("datasets: %s could not be read for the listing", name)
-        return DatasetReading(
-            None,
-            DatasetStartBlock(
-                reason=StartBlock.UNREADABLE,
-                explanation="Its samples could not be read on this install.",
-            ),
-        )
+        return DatasetReading(None, StartBlock.UNREADABLE)
     n_held = None if held is None else len(held.samples)
-    return DatasetReading(n_held, _held_block(dataset_dir, held))
+    return DatasetReading(n_held, _held_block(dataset.directory, held))
 
 
 def checkin_bank(stores: Stores, name: str) -> Bank:
     """The bank a check-in opens on, refused with the reason the listing serves."""
     dataset = resolve_dataset(stores, name)
-    if (block := _extra_block(dataset.directory)) is not None:
-        raise DatasetUnstartableError(name, block)
+    if missing_extra(dataset.directory) is not None:
+        raise DatasetUnstartableError(name, StartBlock.MISSING_EXTRA)
     held = held_bank(stores, dataset)
     if (block := _held_block(dataset.directory, held)) is not None:
         raise DatasetUnstartableError(name, block)

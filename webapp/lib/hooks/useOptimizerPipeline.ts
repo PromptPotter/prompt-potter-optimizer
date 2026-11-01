@@ -1,20 +1,22 @@
 "use client";
 
 import { optimizerPipelineRead } from "@/lib/api";
-import type { PipelineDoc } from "@/lib/types";
-import { readyData, useRead, type ReadFailure } from "./useRead";
+import { pipelineReadStatus } from "@/lib/derivations";
+import type { PipelineDoc, PipelineStatus } from "@/lib/types";
+import { useConnector } from "./useConnector";
+import { readyData, useRead } from "./useRead";
 
 interface OptimizerPipeline {
   doc: PipelineDoc | null;
-  loading: boolean;
-  failure: ReadFailure | null;
+  status: PipelineStatus;
 }
 
-export function useOptimizerPipeline(optimizer: string | null): OptimizerPipeline {
-  const read = useRead(optimizer ? optimizerPipelineRead(optimizer) : null);
+// The campaign's pipeline names the optimizer, so until it reads, the manifest's status is the campaign's.
+export function useOptimizerPipeline(enabled = true): OptimizerPipeline {
+  const { optimizer, schema } = useConnector();
+  const read = useRead(enabled && optimizer ? optimizerPipelineRead(optimizer) : null);
   return {
     doc: readyData(read),
-    loading: read.status === "loading",
-    failure: read.status === "failed" ? read.failure : null,
+    status: schema.status === "ok" ? pipelineReadStatus(read) : schema.status,
   };
 }

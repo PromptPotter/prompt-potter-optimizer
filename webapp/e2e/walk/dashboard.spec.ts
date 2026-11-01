@@ -1,7 +1,7 @@
-import { test, expect, open, ready } from "../harness";
+import { test, expect, open, ready, DASHBOARD_VIEWS } from "../harness";
 
 test.beforeEach(async ({ page, rich }) => {
-  await open(page, `${rich.addr}/dashboard`);
+  await open(page, `${rich.addr}${DASHBOARD_VIEWS}`);
 });
 
 test.describe("dashboard", () => {
@@ -24,12 +24,12 @@ test.describe("dashboard", () => {
   });
 
   test("a served object in scope can be copied", async ({ page }) => {
-    await expect(page.getByRole("button", { name: /Copy all candidates/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Copy this run's candidates/ })).toBeVisible();
   });
 
   test("the round charts draw, and survive a poll", async ({ page }) => {
     // Sit through a poll: the spend map arrives on the wire, not at mount.
-    await expect(page.getByText(/Cost by round/)).toBeVisible();
+    await expect(page.getByText(/Spend by round/)).toBeVisible();
     await page.waitForTimeout(6000);
     await ready(page);
   });

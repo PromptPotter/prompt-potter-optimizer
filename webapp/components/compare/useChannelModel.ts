@@ -79,10 +79,9 @@ function useChannelHead(
 }
 
 export function useChannelModel(
-  { channel, reading }: CompareItem,
+  { channel, reading, headline }: CompareItem,
   run: HierarchyCampaign | null,
   unit: MetricUnit,
-  seedOn: "winner" | "own",
 ) {
   const { edits } = useScenarioEdits();
   const subject = channel.subject;
@@ -93,16 +92,17 @@ export function useChannelModel(
     [rootAddress],
   );
 
-  const { root, loaded, failed } = useLineageTree(run?.address ?? "", rootPath.length > 0);
+  const { root, loaded, failure } = useLineageTree(run?.address ?? "", rootPath.length > 0);
   const index = useMemo(() => indexLineage(root), [root]);
   const tree = useMemo(
-    () => ({ root, index, loaded, failed, rootPath }),
-    [root, index, loaded, failed, rootPath],
+    () => ({ root, index, loaded, failure, rootPath }),
+    [root, index, loaded, failure, rootPath],
   );
   const [selected, setSelected] = useState<HierarchyCandidate | null>(null);
   const head = useChannelHead(index, reading, selected);
   const [seededFor, setSeededFor] = useState<string | null>(null);
-  const seed = seedOn === "winner" ? head.nodeFor("winner") : head.own;
+  // A bench headline leads the card with the campaign's pick, so the highlight starts on it.
+  const seed = headline ? head.nodeFor("winner") : head.own;
   if (seed && seededFor !== subject) {
     setSeededFor(subject);
     setSelected(seed);
@@ -127,11 +127,7 @@ export function useChannelModel(
   const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
   const pipelineRead = useCampaignPipeline(folds.detail && at ? pickedCampaign || null : null, at);
   const pipeline = readyData(pipelineRead);
-  const pipelineStatus = pipelineReadStatus({
-    bound: pipelineRead.status !== "idle",
-    loading: pipelineRead.status === "loading",
-    failed: pipelineRead.status === "failed",
-  });
+  const pipelineStatus = pipelineReadStatus(pipelineRead);
   const schema = useMemo<NodeSchemaReading>(
     () => ({
       status: pipelineStatus,

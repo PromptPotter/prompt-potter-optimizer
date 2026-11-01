@@ -23,8 +23,3 @@ export function useMediaQuery(query: string): boolean {
   const getServerSnapshot = useCallback(() => false, []);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
-
-// Mirrors `--bp-rotate`; a media query cannot read a custom property.
-export function useIsPortraitPhone(): boolean {
-  return useMediaQuery("(orientation: portrait) and (max-width: 767px)");
-}

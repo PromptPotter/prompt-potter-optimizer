@@ -70,8 +70,7 @@ LIVES_WORDS: dict[LivesWord, str] = {
 
 
 class LivesReading(FrozenModel):
-    """A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,
-    read off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`)."""
+    """A run's life bank: what is left of it, and its cap."""
 
     left: int
     cap: int | None = Field(description="Null where the bank has no cap.")
@@ -178,10 +177,16 @@ def declared_selection[R: RoundOutcome](rounds: Sequence[R]) -> R:
     )
 
 
+def _selection_name(selection: ArmName | None) -> str:
+    return (
+        "nothing selected" if selection is None else f"{selection.label} (round {selection.round})"
+    )
+
+
 def _selection_line(selection: ArmName | None, pair: PairedReading) -> str:
+    name = _selection_name(selection)
     if selection is None:
-        return "nothing selected"
-    name = f"{selection.label} (round {selection.round})"
+        return name
     if pair.headline is None or pair.coverage is None:
         return f"{name} — {READING_STATE_INFO[pair.state].sentence}"
     return (
@@ -264,16 +269,20 @@ class RunStanding(FrozenModel):
         return LineOutlay(search_usd=self.search_usd, elapsed_s=self.elapsed_s)
 
     @property
+    def selection_name(self) -> str:
+        """Who the selection is, without its rates: a figure beside the lift that carries them."""
+        return _selection_name(self.selection)
+
+    @property
     def selection_line(self) -> str:
         """The ONE text reading of the selection: who, and both rates on the origin panel — or
-        the reason there is no pair. Never the selection's rate alone; derived, never served."""
+        the reason there is no pair. Never the selection's rate alone."""
         return _selection_line(self.selection, self.vs_origin)
 
     @property
     def climb_line(self) -> str | None:
         """`vs_origin`'s lift in points — a bare point estimate — per minute, per candidate and
-        per search dollar the line paid for it; ``None`` where there is no pair. Derived, never
-        served."""
+        per search dollar the line paid for it; ``None`` where there is no pair."""
         return _climb_line(self.vs_origin, self.candidates, self.outlay)
 
     @classmethod

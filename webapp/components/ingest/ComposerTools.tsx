@@ -1,7 +1,5 @@
 "use client";
-import { cx } from "@/lib/cx";
-import { FailureLine, Popover, Switch } from "@/components/ui";
-import { useRunControl } from "@/lib/hooks/useRunControl";
+import { Popover, Switch } from "@/components/ui";
 
 const THINK_ICON = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -25,14 +23,6 @@ const CODE_ICON = (
   </svg>
 );
 
-const WAND_ICON = (
-  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M2.5 13.5 10 6" />
-    <path d="m12 1.5.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" fill="currentColor" />
-    <path d="m5 2.4.4 1.1 1.1.4-1.1.4L5 5.4l-.4-1.1-1.1-.4 1.1-.4Z" fill="currentColor" opacity=".7" />
-  </svg>
-);
-
 const TOOLS_ICON = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
     <path d="M2 4.5h5M11 4.5h3M2 11.5h3M9 11.5h5" />
@@ -42,14 +32,6 @@ const TOOLS_ICON = (
 );
 
 export function ComposerTools() {
-  const run = useRunControl();
-  const optimizeNote = !run
-    ? "Starts once a campaign is running."
-    : (run.noneReason ?? (run.pausing ? run.pausingNote : null));
-  const optimizeLocked = !run || run.noneReason != null || run.pending;
-  // ON until a real run says otherwise: before one exists the default shows, never an OFF.
-  const optimizeOn = !run || run.noneReason != null ? true : run.running;
-
   return (
     <Popover
       align="right"
@@ -72,67 +54,29 @@ export function ComposerTools() {
     >
       {() => (
         <div className="chat-tools-panel">
-          <ToolRow icon={THINK_ICON} name="Extended thinking" soon />
-          <ToolRow icon={SEARCH_ICON} name="Web search" soon />
-          <ToolRow icon={CODE_ICON} name="Code execution" soon />
-          <div className="row-separator" />
-          <ToolRow
-            icon={WAND_ICON}
-            wand
-            name="Optimize prompt while using"
-            desc={optimizeNote ?? "Quietly evolves parameters across your project"}
-            checked={optimizeOn}
-            onChange={run?.toggle}
-            locked={optimizeLocked}
-            lockedNote={optimizeNote ?? "unavailable"}
-          />
-          {run ? <FailureLine failure={run.failure} /> : null}
+          <ToolRow icon={THINK_ICON} name="Extended thinking" />
+          <ToolRow icon={SEARCH_ICON} name="Web search" />
+          <ToolRow icon={CODE_ICON} name="Code execution" />
         </div>
       )}
     </Popover>
   );
 }
 
-function ToolRow({
-  icon,
-  name,
-  desc,
-  soon = false,
-  wand,
-  checked = false,
-  onChange,
-  locked = false,
-  lockedNote,
-}: {
-  icon: React.ReactNode;
-  name: string;
-  desc?: string;
-  soon?: boolean;
-  wand?: boolean;
-  checked?: boolean;
-  onChange?: (() => void) | undefined;
-  locked?: boolean;
-  lockedNote?: string;
-}) {
+// Every row is a tool still to come: shown, locked off.
+function ToolRow({ icon, name }: { icon: React.ReactNode; name: string }) {
   return (
-    <div className={cx("toggle-row", wand && "wand-row")}>
+    <div className="toggle-row">
       <div className="row-text">
         <span className="row-icon">{icon}</span>
         <div className="row-body">
           <div className="name">
             {name}
-            {soon ? <span className="soon-tag">Soon</span> : null}
+            <span className="soon-tag">Soon</span>
           </div>
-          {desc ? <div className="desc">{desc}</div> : null}
         </div>
       </div>
-      <Switch
-        checked={checked}
-        onChange={onChange}
-        label={name}
-        locked={soon || locked}
-        lockedNote={soon ? undefined : lockedNote}
-      />
+      <Switch checked={false} label={name} locked />
     </div>
   );
 }

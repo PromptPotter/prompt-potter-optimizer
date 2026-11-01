@@ -38,7 +38,9 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
         folds={},
         election=None,
         health=compute_round_health(
-            results=[], prior_healths=assemble_prior_healths(cycle.rounds, round_num)
+            results=[],
+            prior_healths=assemble_prior_healths(cycle.rounds, round_num),
+            not_attempted=0,
         ),
         overlap=OverlapReading.unpaired(ReadingState.NOT_ASKED, round_num, False),
     )

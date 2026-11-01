@@ -14,10 +14,12 @@ import {
   campaignPipelineRead,
   type BackendResponse,
   type CampaignPipelineResponse,
+  type DraftCampaignWire,
 } from "@/lib/api";
 import { CONNECTOR_HEALTH_POLL_MS } from "@/lib/cadence";
+import { pipelineReadStatus } from "@/lib/derivations";
 import { readyData, shownData, useRead, type ReadResult } from "@/lib/hooks/useRead";
-import type { ConnectorView, PipelineStatus } from "@/lib/types";
+import type { ConnectorView } from "@/lib/types";
 
 const EMPTY: ConnectorView = {
   connector: null,
@@ -50,17 +52,9 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   // Gated on the session: an anon preview must never fire the protected read (I5).
   const backends = shownData(useRead(backendsRead(), { auth: true })) ?? NO_BACKENDS;
 
-  // A failed revalidation keeps the body it painted over, so `error` is a read with nothing to show.
   const read = useCampaignPipeline(campaignId, at);
   const resp = shownData(read);
-  const pipelineStatus: PipelineStatus =
-    read.status === "idle"
-      ? "unbound"
-      : resp
-        ? "ok"
-        : read.status === "loading"
-          ? "loading"
-          : "error";
+  const pipelineStatus = pipelineReadStatus(read);
 
   const backendType = resp?.backend_type ?? null;
   const activeId = useMemo(
@@ -78,7 +72,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
 
   return useMemo<ConnectorView>(() => {
     if (!resp) {
-      const others = pipelineStatus === "error" ? backends : [];
+      const others = typeof pipelineStatus === "object" ? backends : [];
       return { ...EMPTY, schema: { ...EMPTY.schema, status: pipelineStatus }, others };
     }
     const active = backends.find((b) => b.id === resp.backend_type) ?? null;
@@ -111,29 +105,40 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
 
 const ConnectorContext = createContext<ConnectorView | null>(null);
 
+// A viewed check-in's draft (`resolve_pipeline_for_draft`) is a second transport of the same answer, never a second source.
+function draftConnector(draft: DraftCampaignWire): ConnectorView {
+  return {
+    ...EMPTY,
+    connector: draft.connector,
+    optimizer: draft.optimization_overrides.optimizer,
+    optimizerSetup: draft.optimizer_setup,
+    view: draft.pipeline_view,
+    // Landed by construction; the default (`unbound`) would read as no campaign.
+    schema: {
+      status: "ok",
+      config: draft.node_config_schema,
+      output: draft.node_output_schema,
+      isSingleNode: draft.is_single_node,
+    },
+    modelCapabilities: draft.model_capabilities,
+    reach: draft.reach,
+  };
+}
+
 export function ConnectorProvider({
   campaignId,
   at,
+  draft,
   children,
 }: {
   campaignId: string | null;
-  at?: string | null;
+  at: string | null;
+  draft: DraftCampaignWire | null;
   children: ReactNode;
 }) {
-  const view = useConnectorViewEngine(campaignId, at ?? null);
-  return createElement(ConnectorContext.Provider, { value: view }, children);
-}
-
-// `fields` is a draft response's (`resolve_pipeline_for_draft`) and nothing else: a second transport, never a second source.
-export function StaticConnectorProvider({
-  fields,
-  children,
-}: {
-  fields: Partial<ConnectorView>;
-  children: ReactNode;
-}) {
-  const value = useMemo<ConnectorView>(() => ({ ...EMPTY, ...fields }), [fields]);
-  return createElement(ConnectorContext.Provider, { value }, children);
+  const served = useConnectorViewEngine(campaignId, at);
+  const drafted = useMemo(() => (draft ? draftConnector(draft) : null), [draft]);
+  return createElement(ConnectorContext.Provider, { value: drafted ?? served }, children);
 }
 
 export function useConnector(): ConnectorView {

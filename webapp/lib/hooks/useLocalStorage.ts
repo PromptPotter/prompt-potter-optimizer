@@ -9,8 +9,6 @@ export const STORAGE_KEYS = {
   sidebarCollapsed: "promptpotter.sidebar.collapsed",
   sidebarWidth: "promptpotter.sidebar.width",
   treeShowCandidates: "promptpotter.tree.showCandidates",
-  runCardExpanded: "promptpotter.runCard.expanded",
-  allowanceExhaustedDismissed: "promptpotter.allowance-exhausted.dismissed",
   chunkReloadAt: "promptpotter.chunk-reload-at",
 } as const;
 

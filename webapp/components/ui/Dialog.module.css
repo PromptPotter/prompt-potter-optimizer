@@ -25,13 +25,21 @@
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 
-.title {
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
   margin: 0 0 var(--space-8);
+}
+
+.title {
+  margin: 0;
   font-size:var(--text-lg);
   font-weight: 600;
 }
 
-.message {
+.card > p {
   margin: 0 0 var(--space-16);
   font-size:var(--text-base);
   color: var(--color-text-secondary);
@@ -44,11 +52,5 @@
   gap: var(--space-8);
   justify-content: flex-end;
   flex-wrap: wrap;
-}
-
-.bare {
-  display: flex;
-  justify-content: center;
-  width: 100%;
 }
 }

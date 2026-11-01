@@ -10,27 +10,20 @@ import { pathLeaf } from "@/lib/ids";
 import { SIDEBAR_WIDTH, useSidebarCollapsed, useSidebarWidth } from "@/lib/prefs/sidebar";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
-import { isRecordsTab, isWorkspaceTab } from "@/lib/view-tab";
 import { VendorSprite } from "@/components/ui";
-import { AccountModal } from "@/components/account/AccountModal";
 import { Sidebar } from "@/components/shell/sidebar/Sidebar";
 import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
-import { MobileAppBar } from "@/components/shell/MobileAppBar";
-import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
-import { ComparePane } from "@/components/compare/ComparePane";
-import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { CompareSelectionProvider } from "@/lib/state/compare-selection";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
-import { IngestFlowProvider } from "@/lib/ingest-flow";
+import { IngestFlowProvider, useIngest } from "@/lib/ingest-flow";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/remote/RemoteControl";
 import { RunMasthead } from "@/components/shell/masthead/RunMasthead";
-import { RecordsTabs, ViewTabs } from "@/components/shell/ViewTabs";
-import { WorkspaceHeader } from "@/components/shell/WorkspaceHeader";
-import { ChatPane, FilesPane } from "@/components/shell/lazy-panes";
+import { ViewTabs } from "@/components/shell/ViewTabs";
+import { Views } from "@/components/shell/Views";
 
 export function AppShell() {
   const { viewedPath } = useWorkspace();
@@ -49,7 +42,8 @@ export function AppShell() {
 }
 
 function AppShellInner() {
-  const { viewedPath, campaignId, cycleId, leafCycleId, tab, listScreen } = useWorkspace();
+  const { viewedPath, campaignId, cycleId, leafCycleId, views } = useWorkspace();
+  const { draft } = useIngest();
   // The chain is the hops ABOVE the leaf, so an L4 inner run resolves its OWN pipeline.
   const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
   const connectorAt = useMemo(
@@ -74,7 +68,7 @@ function AppShellInner() {
 
   return (
     <SelectionProvider cycleId={leafCycleId}>
-    <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt}>
+    <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt} draft={draft}>
     {/* Inside SelectionProvider: it composes `sampleSet` into the masked read. */}
     <LineageProvider campaignId={campaignId} cycleId={cycleId}>
     <HardSamplesProvider path={viewedPath} datasetName={leafDatasetName}>
@@ -82,7 +76,7 @@ function AppShellInner() {
       className={cx(
         "shell",
         sidebarCollapsed && "sidebar-collapsed",
-        listScreen && "mobile-list",
+        views.at(-1)?.family === "campaigns" && "mobile-list",
       )}
       style={
         sidebarCollapsed
@@ -105,32 +99,13 @@ function AppShellInner() {
       {/* A `.shell` child, not a sidebar one: the sidebar clips its overflow. */}
       <JobsDock />
       <main className="main" id="main-content" tabIndex={-1}>
-        <MobileAppBar />
+        <RunMasthead />
         <CriticalAlertBanner />
-        {isWorkspaceTab(tab) ? (
-          <WorkspaceHeader tab={tab} />
-        ) : (
-          <>
-            <RunMasthead />
-            <ViewTabs tab={tab} />
-            {isRecordsTab(tab) && <RecordsTabs tab={tab} />}
-          </>
-        )}
-        {tab === "chat" ? (
-          <ChatPane />
-        ) : tab === "dashboard" ? (
-          <DashboardTab />
-        ) : tab === "measurements" ? (
-          <MeasurementsPane claimsAddress />
-        ) : tab === "files" ? (
-          <FilesPane campaignId={campaignId} cycleId={cycleId} />
-        ) : (
-          <ComparePane />
-        )}
+        {/* Only a run has presets: a check-in opens on its chat. */}
+        {viewedPath !== null && <ViewTabs />}
+        <Views />
       </main>
-      {!isWorkspaceTab(tab) && <RemoteControl />}
-      {/* A `.shell` child: the phone hides the sidebar, and `#/account/<pane>` must open anywhere. */}
-      <AccountModal />
+      <RemoteControl />
       <VendorSprite />
     </div>
     </HardSamplesProvider>

@@ -5,6 +5,12 @@ type LiftSide = LiftEstimate["side"];
 
 export const PLACEHOLDER = "—";
 
+// A `{name}` in served words stands for the served model's field of that name.
+export function filled(words: string, model: object): string {
+  const fields = model as Record<string, unknown>;
+  return words.replace(/\{(\w+)\}/g, (_, name: string) => String(fields[name]));
+}
+
 export function unitPlural(unit: MeasuredUnit): string {
   return `${unit}s`;
 }
@@ -48,11 +54,6 @@ export function fmtGap(seconds: number): string {
 
 export function fmtUsd(n: number): string {
   return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
-}
-
-// Keeps the `:suffix`: it routes and bills differently, so it names a different run.
-export function shortModel(id: string): string {
-  return id.slice(id.lastIndexOf("/") + 1);
 }
 
 export function fmtCompact(v: number): string {
@@ -149,11 +150,6 @@ const SIDE_TONE: Record<LiftSide, string> = {
   below: "l4-eff-neg",
   spans: "l4-eff-flat",
 };
-
-// `null` is UNKNOWN, and warns.
-export function verdictTone(verdict: boolean | null): string {
-  return verdict === true ? "note-info" : "note-warn";
-}
 
 export function fmtClock(s: unknown): string {
   if (!s) return PLACEHOLDER;

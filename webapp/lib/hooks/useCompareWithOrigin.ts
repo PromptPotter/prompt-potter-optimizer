@@ -24,7 +24,7 @@ export function useCompareWithOrigin(
   arm: string | null,
 ): CompareWithOrigin {
   const { show } = useCompareSelection();
-  const { openView } = useWorkspace();
+  const { open } = useWorkspace();
   const { index } = useViewedLineage();
 
   const pair = useMemo(() => {
@@ -47,8 +47,8 @@ export function useCompareWithOrigin(
   const run = useCallback(() => {
     if (!pair) return;
     show(pair.channels);
-    openView("compare");
-  }, [pair, show, openView]);
+    open("compare");
+  }, [pair, show, open]);
 
   return {
     run: pair ? run : null,

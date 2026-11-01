@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field, ValidationError
 
@@ -68,7 +67,6 @@ from promptpotter.domain.pipeline_overlay import (
     merge_pipeline_params,
     node_config_items,
     normalize_model_id,
-    permitted_models_from_narrowing,
     steers_disallowed_model,
 )
 from promptpotter.domain.pipeline_parsing import (
@@ -82,7 +80,6 @@ from promptpotter.domain.pipeline_schema import (
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
-    MovableAgent,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
@@ -95,6 +92,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
 from promptpotter.domain.prompt_block import PackRefusal
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
+from promptpotter.domain.said import Tone
 from promptpotter.domain.search_point import (
     SHOTS_KEY,
     missing_template_vars,
@@ -126,6 +124,7 @@ from promptpotter.shared.errors import (
     validation_reason,
 )
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
@@ -503,50 +502,12 @@ def _validate_model_ownership(
             )
 
 
-KnobType = Literal["boolean", "integer", "number", "string", "array", "object"]
-
-_KNOB_TYPES: tuple[KnobType, ...] = get_args(KnobType)
-
-
-class KnobRow(StrictModel):
-    """One knob of one optimizer node, as every surface offers it: its only served row."""
-
-    key: str = Field(description="The knob's name under `nodes.{node}.config`")
-    description: str = Field(
-        description="What the knob does — its field description, as plain text (RST literals "
-        "unmarked)"
-    )
-    summary: str = Field(
-        description="The description's first sentence, cut at its first clause where that runs "
-        "long: the one line a setup surface shows before the whole text"
-    )
-    type: KnobType = Field(description="JSON Schema type the value takes")
-    options: list[str] | None = Field(
-        description="The closed set a string knob takes, in declared order; null when open"
-    )
-    nullable: bool = Field(description="Whether null is a legal value (an opt-in knob, off)")
-    minimum: float | None = Field(description="The least legal value, itself legal; null when none")
-    exclusive_minimum: float | None = Field(
-        description="A bound every legal value lies strictly above; null when none"
-    )
-    maximum: float | None = Field(
-        description="The greatest legal value, itself legal; null when none"
-    )
-    exclusive_maximum: float | None = Field(
-        description="A bound every legal value lies strictly below; null when none"
-    )
-    declared: Any = Field(description="The value the manifest declares — a campaign's floor")
-    value: Any = Field(description="The value this config runs, the manifest's under its overlays")
-    movable_by: list[MovableAgent] = Field(
-        description="The agents that may move it within a run, as a config row's `movable_by` "
-        "reads; `optimizer` where another member steers it, empty where only the operator does"
-    )
-
-
 class NodeKnobs(StrictModel):
     node: str = Field(description="The manifest node that owns these knobs")
     kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
-    knobs: list[KnobRow] = Field(description="Its knobs, in declared order")
+    keys: list[str] = Field(
+        description="Its knobs' keys, in declared order, each a row of `node_config_schema[node]`"
+    )
 
 
 class KnobRef(StrictModel):
@@ -656,6 +617,15 @@ class OptimizerSetup(StrictModel):
         "that opens or adds arms and adds none here is off, and absent"
     )
     pools: list[PoolRow] = Field(description="What the members draw from")
+    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
+        description="Per optimizer node, its typed config rows at this config — an llm node's "
+        "call config and prompt fields, a member's knobs: what its pipeline graph and node detail "
+        "draw"
+    )
+    reach: dict[str, NodeReach] = Field(
+        description="Where the search reaches per optimizer node at this config, summed off "
+        "`node_config_schema`"
+    )
 
 
 class CampaignPipelineResponse(StrictModel):
@@ -1066,21 +1036,12 @@ def _opened_parts(target: PipelineSchema) -> set[str]:
 
 def _node_knobs(selected: SelectedOptimizer) -> list[NodeKnobs]:
     nodes: list[NodeKnobs] = []
-    params = _param_rows(selected)
     initializers = {initializer.name for initializer in selected.plan.initializers}
     for node in selected.member_nodes:
-        if node in initializers:
+        keys = optimizers.NODE_MEMBERS.get(node).knobs.model_fields
+        if node in initializers or not keys:
             continue
-        schema = optimizers.NODE_MEMBERS.get(node).knobs.model_json_schema()
-        declared = selected.declared_knobs(node).model_dump(mode="json")
-        value = selected.knobs(node).model_dump(mode="json")
-        movable = {p.key: p.movable_by for p in params.get(node, [])}
-        rows = [
-            _knob_row(key, prop, schema.get("$defs") or {}, declared, value, movable[key])
-            for key, prop in (schema.get("properties") or {}).items()
-        ]
-        if rows:
-            nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), knobs=rows))
+        nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), keys=list(keys)))
     return nodes
 
 
@@ -1128,6 +1089,7 @@ def optimizer_setup(
 ) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
     opened = _opened_parts(target)
+    rows = selected.schema.node_config_schema(selected.steered_axes)
     return OptimizerSetup(
         main=[
             KnobRef(node=node, knob=knob)
@@ -1142,6 +1104,8 @@ def optimizer_setup(
             if p.proposes == "edits" or p.arms(selected) > 0
         ],
         pools=[_pool_row(selected, i, mint, opened) for i in selected.plan.initializers],
+        node_config_schema=rows,
+        reach=reach_map(rows),
     )
 
 
@@ -1320,24 +1284,50 @@ class ForkPreviewRequest(RequestBody):
     )
 
 
+SteerOutside = Literal["babysat", "refused"]
+SteerVerdict = Literal["clean", SteerOutside]
+
+
+class SteerOutsideInfo(NamedTuple):
+    title: str
+    detail: str
+    tone: Tone
+
+
+STEER_OUTSIDE_INFO: dict[SteerOutside, SteerOutsideInfo] = {
+    "babysat": SteerOutsideInfo(
+        "This steer leaves what the campaign permits, so the branch goes grade C.",
+        "Steering to it marks this branch — and every round after it — operator-babysat: excluded "
+        "from clean comparison, origin reuse, and the L4 rollup. The measurement is still "
+        "recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.",
+        "warn",
+    ),
+    "refused": SteerOutsideInfo(
+        "This steer leaves what the campaign permits.",
+        "Steering outside it is a babysit act this account may not take. Pick a permitted model.",
+        "danger",
+    ),
+}
+
+
+def steer_verdict(
+    stores: Stores, narrowing: Mapping[str, NodeSearchNarrowing], overlay: dict[str, Any] | None
+) -> SteerVerdict:
+    """The babysit act (decisions.md § 0005): a steer outside what the node permits needs `campaign.babysit`."""
+    if not steers_disallowed_model(narrowing, overlay):
+        return "clean"
+    return "babysat" if has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP) else "refused"
+
+
 class ForkPreviewResponse(StrictModel):
     """What `POST /commands/fork-cycle` would decide about this steer, asked without forking."""
 
-    steers_disallowed_model: bool = Field(
+    steer: SteerVerdict = Field(
         description=(
-            "The overlay picks a responder the campaign's declared `optimizer_narrowing` never "
-            "sanctioned, or touches a cost lever, which no permitted set can sanction. True means "
-            "the fork is the babysit act (decisions.md § 0005): it needs `campaign.babysit` (404 without it) "
-            "and stamps the branch grade C."
-        )
-    )
-    permitted_models: dict[str, list[str]] = Field(
-        description=(
-            "What the verdict above was compared AGAINST, per node — this campaign's declared "
-            "`optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so "
-            "a surface naming the permitted models cannot name a different set than the one that "
-            "decided. A node absent from it sanctions nothing, which is why any model steer there "
-            "counts."
+            "`clean` where the overlay stays inside the campaign's declared `optimizer_narrowing`. "
+            "Outside it — a responder never sanctioned, or a cost lever no permitted set can "
+            "sanction — the fork is the babysit act: `babysat` for a caller holding "
+            "`campaign.babysit` (the branch is graded C), `refused` for any other."
         )
     )
 
@@ -1346,10 +1336,7 @@ def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> F
     narrowing = resolve_campaign_config(
         stores, owned_campaign(stores, campaign_id), None
     ).optimizer_narrowing
-    return ForkPreviewResponse(
-        steers_disallowed_model=steers_disallowed_model(narrowing, overlay),
-        permitted_models=permitted_models_from_narrowing(narrowing),
-    )
+    return ForkPreviewResponse(steer=steer_verdict(stores, narrowing, overlay))
 
 
 class DatasetPipelineResponse(StrictModel):
@@ -1392,7 +1379,7 @@ def resolve_pipeline_for_dataset(stores: Stores, dataset_name: str) -> DatasetPi
 
 
 class OptimizerPipelineResponse(StrictModel):
-    """An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs and prompts included, is `OptimizerSetup`."""
+    """An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs, prompts and node rows included, is `OptimizerSetup`."""
 
     view: PipelineView | None = Field(
         description="The graph topology — the same shape a campaign pipeline serves"
@@ -1402,112 +1389,21 @@ class OptimizerPipelineResponse(StrictModel):
         "nests under this graph, as each `nests[].node` names it per campaign. Null where the manifest "
         "declares no measurement node."
     )
-    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
-        description="Per-node typed config rows of what is no member's knob — an llm node's call "
-        "config and prompt fields; a knob's one row is `OptimizerSetup.knobs`"
-    )
     node_output_schema: dict[str, NodeOutputSchema | None]
     model_capabilities: CapabilityMenu = Field(
         description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
         "it accepts and what a round costs are the facts every other node's rows need too"
     )
-    reach: dict[str, NodeReach] = Field(
-        description="Where the search reaches per node, summed off every param it carries — the "
-        "rows above and its knobs — rather than in the browser, the same reading a campaign "
-        "pipeline serves"
-    )
-
-
-def _param_rows(selected: SelectedOptimizer) -> dict[str, list[NodeConfigParam]]:
-    """Every param of every node, knobs included: what reach sums and a knob's `movable_by` reads."""
-    return selected.schema.node_config_schema(selected.steered_axes)
-
-
-def _knob_keys(selected: SelectedOptimizer, node: str) -> frozenset[str]:
-    if node not in selected.member_nodes:
-        return frozenset()
-    return frozenset(optimizers.NODE_MEMBERS.get(node).knobs.model_fields)
 
 
 def resolve_pipeline_for_optimizer(stores: Stores, optimizer: str) -> OptimizerPipelineResponse:
-    selected = resolve_optimizer(optimizer, {}, gate="off")
-    schema = selected.schema
-    # One reading for the glyph and each padlock: a knob's padlock rides its `KnobRow`.
-    rows = _param_rows(selected)
+    schema = resolve_optimizer(optimizer, {}, gate="off").schema
     return OptimizerPipelineResponse(
         view=schema.view,
         measurement_node=measurement_node(schema.view),
-        node_config_schema={
-            node: [r for r in node_rows if r.key not in _knob_keys(selected, node)]
-            for node, node_rows in rows.items()
-        },
         node_output_schema=schema.node_output_schemas(),
-        reach=reach_map(rows),
         # Per tenant: a hand-authored catalogue override lives in their workspace.
         model_capabilities=resolve_schema_menu(schema, workspace=stores.base_dir),
-    )
-
-
-def _knob_type(kind: Mapping[str, Any]) -> KnobType:
-    declared = kind.get("type") or ("object" if "properties" in kind else "string")
-    for known in _KNOB_TYPES:
-        if known == declared:
-            return known
-    raise ValueError(f"knob type {declared!r} is none of {', '.join(_KNOB_TYPES)}")
-
-
-_RST_LITERAL = re.compile(r"``(.+?)``", re.DOTALL)
-# Read on the marked text: a stop before a capital, a literal or the end ends a sentence; "e.g. x"
-# and "0.15" end none.
-_SENTENCE_END = re.compile(r"(?<=[.!?])(?=\s+[A-Z(`]|\s*$)")
-_CLAUSE_END = re.compile(r"[:;](?=\s)|\s—\s")
-_SUMMARY_CHARS = 120
-# A clause shorter than this is a symbol being named (`T: …`, `b: …`), no summary.
-_CLAUSE_MIN_CHARS = 24
-
-
-def _plain(text: str) -> str:
-    return _RST_LITERAL.sub(r"\1", text)
-
-
-def _summary(marked: str) -> str:
-    first = _plain(_SENTENCE_END.split(marked.strip(), maxsplit=1)[0].strip())
-    if len(first) <= _SUMMARY_CHARS:
-        return first
-    clause = _CLAUSE_END.search(first, _CLAUSE_MIN_CHARS)
-    return first[: clause.start()].rstrip() if clause else first
-
-
-def _knob_row(
-    key: str,
-    prop: Mapping[str, Any],
-    defs: Mapping[str, Any],
-    declared: Mapping[str, Any],
-    value: Mapping[str, Any],
-    movable_by: list[MovableAgent],
-) -> KnobRow:
-    options = [
-        defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
-        for ref in prop.get("anyOf") or [prop]
-    ]
-    nullable = any(o.get("type") == "null" for o in options)
-    kind = next(o for o in options if o.get("type") != "null")
-    enum = kind.get("enum") or ([kind["const"]] if "const" in kind else None)
-    description = str(prop.get("description") or "")
-    return KnobRow(
-        key=key,
-        description=_plain(description),
-        summary=_summary(description),
-        type=_knob_type(kind),
-        options=[str(v) for v in enum] if enum else None,
-        nullable=nullable,
-        minimum=kind.get("minimum"),
-        exclusive_minimum=kind.get("exclusiveMinimum"),
-        maximum=kind.get("maximum"),
-        exclusive_maximum=kind.get("exclusiveMaximum"),
-        declared=declared[key],
-        value=value[key],
-        movable_by=movable_by,
     )
 
 

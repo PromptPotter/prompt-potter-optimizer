@@ -4,7 +4,7 @@
 import { useAuth } from "@/lib/state/auth";
 import { postLogout } from "@/lib/api/account";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { Dialog } from "@/components/ui";
+import { Button, Dialog } from "@/components/ui";
 
 export function AccessGate() {
   const { status, me } = useAuth();
@@ -19,31 +19,20 @@ export function AccessGate() {
     void cmd.run("logout", postLogout).then(() => window.location.assign("/login"));
 
   return (
-    <Dialog open labelledBy="access-gate-title" bare>
-      <div className="account-modal consent-modal">
-        <header className="account-pane-head">
-          <h3 id="access-gate-title">This account is switched off</h3>
-        </header>
-
-        <div className="account-pane-body">
-          <p className="auth-note">
-            {me.email ? <strong>{me.email}</strong> : "This account"} is signed in, but access to
-            PromptPotter has been withdrawn for it. Nothing here will change that &mdash; whoever
-            runs this instance has to switch it back on.
-          </p>
-
-          <div className="consent-actions">
-            <button
-              type="button"
-              className="login-button"
-              disabled={cmd.pending !== null}
-              onClick={onSignOut}
-            >
-              {cmd.pending !== null ? "Signing out…" : "Sign out"}
-            </button>
-          </div>
-        </div>
-      </div>
+    <Dialog
+      open
+      title="This account is switched off"
+      footer={
+        <Button variant="primary" disabled={cmd.pending !== null} onClick={onSignOut}>
+          {cmd.pending !== null ? "Signing out…" : "Sign out"}
+        </Button>
+      }
+    >
+      <p>
+        {me.email ? <strong>{me.email}</strong> : "This account"} is signed in, but access to
+        PromptPotter has been withdrawn for it. Nothing here will change that &mdash; whoever runs
+        this instance has to switch it back on.
+      </p>
     </Dialog>
   );
 }

@@ -69,6 +69,12 @@ DisplayMetric = Literal["accuracy", "composite", "ability"]
 LevelUnit = Literal["rate", "score", "theta"]
 if not set(MeasurandUnit) < set(get_args(LevelUnit)):
     raise RuntimeError("LevelUnit must hold every MeasurandUnit (domain/arm_reading.py)")
+LEVEL_FORMATS: dict[str, str] = {"rate": "{:.0%}", "score": "{:.2f}", "theta": "θ {:.2f}"}
+
+
+def level_text(value: float | None, unit: LevelUnit | MeasurandUnit) -> str:
+    """A level as a person reads it in its unit; `—` where it is absent."""
+    return "—" if value is None else LEVEL_FORMATS[unit].format(value)
 
 
 class DisplayMetricInfo(NamedTuple):

@@ -2,11 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  failureKind,
-  operatorMessage,
   postDraftFromDataset,
   postDraftFromOrigin,
-  getDraft,
   postCommand,
   postIngestDataset,
   postBuildCandidateLibraryFromColumn,
@@ -20,13 +17,20 @@ import {
   type RaisedCommand,
   type StartCheckinOptions,
 } from "@/lib/api";
-import { checkinThreadKey, useThreads, type MessageTone } from "@/lib/chat/thread";
+import { draftRead } from "@/lib/api/reads";
+import { DRAFT_POLL_MS } from "@/lib/cadence";
+import type { Tone } from "@/lib/api/types.generated";
+import { checkinThreadKey, useThreads } from "@/lib/chat/thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { readyData, useRead } from "@/lib/hooks/useRead";
+import { dropCachedRead } from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
 type IngestPhase =
   | { stage: "idle" }
   | { stage: "uploading" }
+  // A draft this flow did not hold, waiting on its read's first answer.
+  | { stage: "reopening" }
   | { stage: "awaiting-context"; draft: DraftCampaignWire }
   | { stage: "checkin"; model: string }
   | {
@@ -106,11 +110,9 @@ export function useIngestFlow({
   const [minting, setMinting] = useState(false);
   // Every write rides a slot; a draft's edits are a queue on one, so overlapping blurs land in order.
   const opening = useCommand<"upload" | "dataset" | "origin">("checkin-open", { scope: subject });
-  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId, revalidate: false });
-  const writing = useCommand<"edit" | "library">("checkin-edit", {
-    scope: draftId,
-    revalidate: false,
-  });
+  // A landed write re-asks the draft read, so a tick in the air before it never lands over it.
+  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId });
+  const writing = useCommand<"edit" | "library">("checkin-edit", { scope: draftId });
   const starting = useCommand<"start">("checkin-start", { scope: draftId });
   // A counter, not a boolean: the first queued edit to land must not clear a sibling's flag.
   const [pendingPatches, setPendingPatches] = useState(0);
@@ -146,13 +148,16 @@ export function useIngestFlow({
   };
 
   const busy =
-    phase.stage === "uploading" || phase.stage === "checkin" || minting;
+    phase.stage === "uploading" ||
+    phase.stage === "reopening" ||
+    phase.stage === "checkin" ||
+    minting;
   const awaitingContext = phase.stage === "awaiting-context";
 
-  const say = (text: string, tone: MessageTone = "plain") =>
+  const say = (text: string, tone: Tone = "quiet") =>
     threads.append(threadKey.current, { kind: "message", role: "assistant", tone, text });
   const echo = (text: string) =>
-    threads.append(threadKey.current, { kind: "message", role: "user", tone: "plain", text });
+    threads.append(threadKey.current, { kind: "message", role: "user", tone: "quiet", text });
 
   // The flow now holds *id*: a fresh check-in's thread moves under it, and the address follows.
   const hold = (id: string) => {
@@ -171,6 +176,18 @@ export function useIngestFlow({
       p.stage === "ready" && p.draft.draft_id === updated.draft_id ? { ...p, draft: updated } : p,
     );
 
+  // The held draft's one read: a reopen lands its answer, and while Start is on screen it rides
+  // the clock, so the refusal tracks the wallet. Held across stages, so no kept body re-lands.
+  const draftNow = useRead(draftId !== null ? draftRead(draftId) : null, {
+    intervalMs: phase.stage === "ready" ? DRAFT_POLL_MS : undefined,
+  });
+  const served = readyData(draftNow);
+  const [landedServed, setLandedServed] = useState(served);
+  if (served !== landedServed) {
+    setLandedServed(served);
+    if (served) commitDraftUpdate(served.draft);
+  }
+
   const runCheckin = async (draft: DraftCampaignWire) => {
     const alive = begin();
     setPhase({ stage: "checkin", model: "the check-in model" });
@@ -182,7 +199,7 @@ export function useIngestFlow({
     const resolved = r.ok ? r.value.draft : draft;
     const resolution = r.ok ? r.value.resolution.last_resolution : null;
     const degradedCause = r.ok ? r.value.resolution.degraded_cause : null;
-    if (degradedCause) say(degradedCause, "warning");
+    if (degradedCause) say(degradedCause, "warn");
     say(resolution?.recap || resolution?.assessment || resolved.recap);
     // Even a complete draft lands in review: a launch spends money, so no path here mints.
     setPhase({
@@ -214,7 +231,7 @@ export function useIngestFlow({
       say(
         `“${file.name}” wasn’t picked up — the previous step was still loading. ` +
           `Nothing on screen is from this file; drop it again.`,
-        "warning",
+        "warn",
       );
       return;
     }
@@ -318,41 +335,34 @@ export function useIngestFlow({
     });
   };
 
-  const readDraft = async (id: string, alive: () => boolean) => {
-    try {
-      return await getDraft(id);
-    } catch (e) {
-      if (alive())
-        say(operatorMessage(e, failureKind(e)), "error");
-      return null;
-    }
-  };
-
-  // A revisit continues its kept thread; an empty one (a reload, a deep link) is retold.
-  const reopenDraft = async (id: string) => {
-    const alive = begin();
-    threadKey.current = checkinThreadKey(id);
-    const told = threads.of(threadKey.current).length === 0;
-    setDraftId(id);
-    setPhase({ stage: "uploading" });
-    const res = await readDraft(id, alive);
-    if (!alive()) return;
-    if (res === null) {
-      setPhase({ stage: "idle" });
-      return;
-    }
-    if (told) retell(res);
-    land(res, told);
-  };
-
   // A viewed draft this flow does not hold is read in: a deep link, a sidebar row, a reload.
   useEffect(() => {
     if (subject === null || subject === NEW_CHECKIN || subject === draftId) return;
-    // A server read the address asks for: the state it sets is that read's own landing.
+    threadKey.current = checkinThreadKey(subject);
+    // A reopen lands on a fresh answer, never a body kept from an earlier visit.
+    dropCachedRead(draftRead(subject).id);
+    // The address asks for a server read: the state it sets is that read's own start.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void reopenDraft(subject);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setDraftId(subject);
+    setPhase({ stage: "reopening" });
   }, [subject, draftId]);
+
+  // A revisit continues its kept thread; an empty one (a reload, a deep link) is retold.
+  useEffect(() => {
+    if (phase.stage !== "reopening") return;
+    if (draftNow.status === "failed") {
+      say(draftNow.failure.message, "danger");
+      // The read's own landing: a refused reopen leaves the check-in idle.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPhase({ stage: "idle" });
+      return;
+    }
+    if (draftNow.status !== "ready") return;
+    const told = threads.of(threadKey.current).length === 0;
+    if (told) retell(draftNow.data);
+    land(draftNow.data, told);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase.stage, draftNow]);
 
   // Every draft write rides this queue: Start awaits its tail, so no edit escapes the launch.
   const mutateDraft = (
@@ -440,12 +450,11 @@ export function useIngestFlow({
       if (first) onMint({ campaignId: first.hop.campaign_id, cycleId: first.hop.cycle_id });
       return;
     }
-    // No hop while queued: the draft stays the subject, landed on what its reopen serves.
+    // No hop is the start's own answer that it queued: the draft stays the subject until a slot frees.
     if (started.hop === null) {
       say(QUEUED_LINE);
-      const res = await readDraft(id, alive);
       setMinting(false);
-      if (res !== null && alive()) land(res, false);
+      setPhase({ stage: "queued" });
       return;
     }
     setMinting(false);
