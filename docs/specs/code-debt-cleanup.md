@@ -675,7 +675,7 @@ word's `git grep -c` for that sense is 0.
   `evidence/head_to_head.py::HeadToHead.swapped` / `swapped_in` beside the manifest `swap`;
   `application/library.py::library` beside `candidate_library` (rides the `candidate_library` →
   `answer_terms` rename); `domain/pool.py::PoolOffer` / `offered` beside
-  `datasets/startability.py::offered`.
+  `promptpotter/application/datasets/startability.py::offered`.
 - **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and `KnobRow` serves neither
   scope nor estimand.
 - **Seen building the setup screen**:
