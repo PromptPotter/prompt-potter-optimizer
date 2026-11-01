@@ -194,36 +194,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     recordView(campaignId, { viewedPath: viewedAddress, viewedCandidateId });
   }, [campaignId, viewedAddress, viewedCandidateId, recordView]);
 
-  const resumed = useCallback(
-    (path: CyclePath): ViewedSubject => {
-      const hop = path[0];
-      // Only a campaign SWITCH resumes: on the viewed campaign it re-drills forever against the record effect.
-      if (path.length !== 1 || !hop || hop.campaignId === campaignId) return { path };
-      const mem = viewFor(hop.campaignId);
-      const remembered = decodeCyclePath(mem.viewedPath ?? "");
-      const root = remembered?.[0];
-      if (!remembered || !root || root.campaignId !== hop.campaignId) return { path };
-      // Inner hops never appear in `/hierarchy`, so the ROOT hop's existence is the check.
-      const known = byAddress.has(encodeCyclePath([root]));
-      return known ? { path: remembered, candidateId: mem.viewedCandidateId } : { path };
-    },
-    [campaignId, viewFor, byAddress],
-  );
+  const resumed = (path: CyclePath): ViewedSubject => {
+    const hop = path[0];
+    // Only a campaign SWITCH resumes: on the viewed campaign it re-drills forever against the record effect.
+    if (path.length !== 1 || !hop || hop.campaignId === campaignId) return { path };
+    const mem = viewFor(hop.campaignId);
+    const remembered = decodeCyclePath(mem.viewedPath ?? "");
+    const root = remembered?.[0];
+    if (!remembered || !root || root.campaignId !== hop.campaignId) return { path };
+    // Inner hops never appear in `/hierarchy`, so the ROOT hop's existence is the check.
+    const known = byAddress.has(encodeCyclePath([root]));
+    return known ? { path: remembered, candidateId: mem.viewedCandidateId } : { path };
+  };
+  // Read by `navigate`, whose identity every consumer holds: a poll's 200 moves `byAddress`.
+  const resumedRef = useRef(resumed);
+  useEffect(() => {
+    resumedRef.current = resumed;
+  });
 
   // The list screen closes on a subject switch; a check-in opens on its chat.
-  const navigate = useCallback(
-    (to: ViewedSubject, opts: { resume?: boolean } = {}) => {
-      const target = to !== null && "path" in to && opts.resume && !to.candidateId ? resumed(to.path) : to;
-      setScreen((s) => ({
-        subject: target,
-        views:
-          target !== null && "draftId" in target
-            ? DEFAULT_VIEWS
-            : withViews(s.views.filter((v) => v.family !== "campaigns")),
-      }));
-    },
-    [resumed],
-  );
+  const navigate = useCallback((to: ViewedSubject, opts: { resume?: boolean } = {}) => {
+    const target =
+      to !== null && "path" in to && opts.resume && !to.candidateId
+        ? resumedRef.current(to.path)
+        : to;
+    setScreen((s) => ({
+      subject: target,
+      views:
+        target !== null && "draftId" in target
+          ? DEFAULT_VIEWS
+          : withViews(s.views.filter((v) => v.family !== "campaigns")),
+    }));
+  }, []);
 
   const open = useCallback(
     (family: FamilyId, key?: string | null) =>

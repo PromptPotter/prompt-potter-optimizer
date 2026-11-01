@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
-from functools import cached_property
+from functools import cached_property, lru_cache
 from typing import Any, Literal
 
 from promptpotter.application.hierarchy import (
@@ -177,10 +177,16 @@ class _Candidate:
 GENE_SOURCES_PER_LOCUS = 3
 
 
+@lru_cache(maxsize=4096)
+def _text_ratio(a: str, b: str) -> float:
+    """Keyed by content: a live tree is rebuilt each poll over the same earlier texts."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
 def _similarity(a: object, b: object) -> float:
     """Text by its matching blocks, shots by the keys they share, anything else equal or not."""
     if isinstance(a, str) and isinstance(b, str):
-        return SequenceMatcher(None, a, b).ratio()
+        return _text_ratio(a, b)
     if isinstance(a, tuple) and isinstance(b, tuple):
         union = set(a) | set(b)
         return len(set(a) & set(b)) / len(union) if union else 1.0

@@ -745,19 +745,24 @@ class _Spend:
         self._by_round: dict[int, SpendRollup] = {}
         self._calls = 0
         self._worked_s = 0.0
+        # A copy, since the next feed banks into the live rollups; one per feed, not per read.
+        self._view: _RoundSpend | None = None
 
     def feed(self, usage: TokenUsageRecord) -> None:
+        self._view = None
         spend_slot(self._by_round, usage.spend_round, SpendRollup).bank(usage)
         if not usage.cached:
             self._calls += 1
             self._worked_s += usage.duration_s
 
     def value(self) -> _RoundSpend:
-        return _RoundSpend(
-            {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
-            self._calls,
-            self._worked_s,
-        )
+        if self._view is None:
+            self._view = _RoundSpend(
+                {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
+                self._calls,
+                self._worked_s,
+            )
+        return self._view
 
 
 class _Metered:
