@@ -676,6 +676,31 @@ word's `git grep -c` for that sense is 0.
 
   The fold itself is the root: pydantic validates each screened line on every cold start. A fold
   snapshot keyed by `file_sig` would make a restart pay only the tail.
+- **Seen in the parsimony pass (2026-11-01)**:
+  - **One append rebuilds every campaign's entry**: `application/hierarchy.py::entries_version` and
+    `hierarchy_subtree.py::subtree_version` are store-wide. The shape is a per-campaign version and an
+    entry memo; what a shared input (the ruler, an account's spend) invalidates is the decision.
+  - **Activity rows are `Said` rows under other names**: `domain/activity.py::ActivityItem` and
+    `DecisionFact` carry label, tone and detail, with kind glyphs (★ ◆ ↻) beside the CSS tone glyphs,
+    and `chat/LiveSegment`'s `<dl>` honours only `danger`. One `Said` row reaches every constructor,
+    `LiveSegment`, `TimeRay` and the event contract.
+  - **Off-screen view columns stay mounted and poll**: `shell/Views.tsx` mounts every open column, so a
+    phone on the Dashboard preset runs every pane's reads at once. React's `<Activity mode="hidden">`
+    per column, on one IntersectionObserver, stops them and keeps their state. The fork: a column
+    swiped into is blank until its reads land.
+  - **Run data past `MAX_PATH` is read only where `store/io.py` reads it**: `io.py` writes through
+    `_long_path`, but `store/read_model.py::file_sig`, `_complete_lines` and `_LedgerTail._holds_last`
+    (among many: `grep -rnE "\.stat\(\)|[^_.a-z]open\(" promptpotter`) read bare, so a ledger past 260
+    characters reads as absent and a deep L4 store lists no course. This desk has long paths off. Root:
+    spell the data root once in its long form (`config/paths.py`) so every derived path carries it;
+    the cost is every comparison with a short-spelled path (`tmp_path`, `REPO`). The Linux box is unaffected.
+  - Unverified, for the next change to each file: `shell/CriticalAlertBanner` builds `Said` rows in the
+    browser and re-sorts `TONES` for `pinned`; `ViewTabs.show` is many `open`/`close` calls, not one
+    workspace act; `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after
+    (`iter_files(skip=)` exists); `domain/activity.py::ActivityFeed` falls back to `"run error"` where
+    `run_said` has none; `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
+    `line_config` per non-holder course; `FileTree` mounts a 2 s `useActivePointer()` poll for one
+    failure line; a `/hierarchy` 200 replaces every entry object in `lib/state/registry.tsx`.
 - **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
   `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as
   "no measurement". The panel walk runs hardest-first, so its first cells can hold one or two truth
