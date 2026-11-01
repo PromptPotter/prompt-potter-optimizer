@@ -322,6 +322,8 @@ max-complexity = 23
 [tool.ruff.lint.per-file-ignores]
 # A journey test walks a whole run on purpose; the ceiling bounds production code.
 "tests/**" = ["C901"]
+# Its environment is set before the first import reads it.
+"tests/conftest.py" = ["C901", "E402"]
 ".claude/hooks/**" = ["C901"]
 
 [tool.deptry]

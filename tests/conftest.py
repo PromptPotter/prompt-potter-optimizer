@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+import os
+import tempfile
+
+# CI's configuration wherever the suite is launched, set before anything reads it: no desk `.env`,
+# no desk workspace.
+_HOME = tempfile.TemporaryDirectory(prefix="pp-tests-", ignore_cleanup_errors=True)
+os.environ["PROMPTPOTTER_HOME"] = _HOME.name
+os.environ["PROMPTPOTTER_ENV_FILE"] = os.path.join(_HOME.name, ".env")
+
 from collections.abc import Iterator
 from pathlib import Path
 
