@@ -1,6 +1,9 @@
 "use client";
 // The dashboard's view families: each a run of `.box-grid` boxes, read top-down in the preset's order.
-import { CardFrame } from "@/components/ui";
+import { memo, useMemo } from "react";
+import { CardFrame, Said } from "@/components/ui";
+import { HEALTH_GRADE_INFO } from "@/lib/api/types.generated";
+import { useCycleStream } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useCandidatesState } from "@/lib/state/candidates";
 import { useSelection } from "@/lib/SelectionContext";
@@ -15,7 +18,6 @@ import { BackendRetries } from "@/components/dashboard/pipeline/BackendRetries";
 import { BackendRevisionDrift } from "@/components/dashboard/pipeline/BackendRevisionDrift";
 import { OptimizerCard } from "@/components/dashboard/pipeline/OptimizerCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
-import { FreqChart } from "@/components/dashboard/scoring/FreqChart";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { SubjectBox } from "@/components/shell/searchpoint/SubjectBox";
@@ -27,9 +29,29 @@ export function TimelinePane() {
       <div className="box-full">
         <TimeRay />
       </div>
+      <DegradedRounds />
     </>
   );
 }
+
+// A critical round is the run's pinned line (`dash.said`); a degraded one is read under the timeline.
+const DegradedRounds = memo(function DegradedRounds() {
+  const { dash } = useCycleStream();
+  const rounds = dash?.rounds;
+  const degraded = useMemo(() => (rounds ?? []).filter((r) => r.health.grade === "degraded"), [rounds]);
+  if (degraded.length === 0) return null;
+  return (
+    <ul className="rounds-degraded box-full" aria-label="Degraded rounds">
+      {degraded.map(({ round, health: { grade, reading } }) =>
+        reading ? (
+          <li key={round}>
+            <Said tone={HEALTH_GRADE_INFO[grade].tone} label={reading.title} detail={reading.advice} />
+          </li>
+        ) : null,
+      )}
+    </ul>
+  );
+});
 
 export function LeaderPane() {
   const { viewedPath, campaignId } = useWorkspace();
@@ -66,9 +88,6 @@ export function HeatmapPane() {
   return (
     <CardFrame title="Heatmap" headingTag="h2" span="full">
       <HardSamplesHeatmap />
-      <div className="card-inset">
-        <FreqChart />
-      </div>
     </CardFrame>
   );
 }

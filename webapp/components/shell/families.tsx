@@ -8,7 +8,6 @@ import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { ComparePane } from "@/components/compare/ComparePane";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
-import { TrendChart } from "@/components/dashboard/scoring/TrendChart";
 import {
   CandidatesPane,
   HeatmapPane,
@@ -28,7 +27,6 @@ export const FAMILIES: Record<FamilyId, Family> = {
   timeline: { label: "Timeline", pane: () => <TimelinePane />, glance: "rounds" },
   leader: { label: "Leader", pane: () => <LeaderPane />, glance: "selection" },
   candidates: { label: "Candidates", pane: () => <CandidatesPane />, glance: "candidates" },
-  trend: { label: "Trend", pane: () => <TrendChart />, glance: "lift" },
   spend: { label: "Spend", pane: () => <CostStrip />, glance: "spend" },
   heatmap: { label: "Heatmap", pane: () => <HeatmapPane /> },
   samples: { label: "Samples", pane: (key) => <MeasurementsPane preset={{ groupBy: "sample" }} cell={key} /> },
@@ -46,7 +44,8 @@ function NodePane({ nodeKey }: { nodeKey: string | null }) {
   return <NodeDetail node={node} />;
 }
 
-// The bottom nav: a phone shows each preset's LAST family, so the dashboard ends on its leader.
+// The bottom nav: a phone shows each preset's LAST family first, so the dashboard opens on its
+// leader with the candidates beside it.
 export const PRESETS: readonly { label: string; glyph: ReactNode; families: readonly FamilyId[] }[] = [
   {
     label: "Chat",
@@ -58,7 +57,7 @@ export const PRESETS: readonly { label: string; glyph: ReactNode; families: read
   {
     label: "Dashboard",
     glyph: <path d="M2.5 13V6.5M6.5 13V3M10.5 13V8M14 13H2" />,
-    families: ["timeline", "candidates", "trend", "spend", "heatmap", "optimizer", "leader"],
+    families: ["timeline", "spend", "heatmap", "optimizer", "candidates", "leader"],
   },
   {
     label: "Records",

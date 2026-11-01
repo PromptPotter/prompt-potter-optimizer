@@ -41,6 +41,7 @@ the rest of Lane C.
 
 - **A1** First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit).
 - **A3** Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier).
+- **A4** Arrangeable workspace — panels the operator resizes, collapses, pops out and docks back (§ Arrangeable workspace).
 
 ### Lane C — differentiator and capability
 
@@ -444,9 +445,31 @@ is the smaller change. Reorder re-keys every cell, so order is a searchpoint pro
 `components/ui/` primitive on Pointer Events, keyboard parity (`↑`/`↓` with an `aria-live`
 announcement), commit on drop, the handle the touch target.
 
+## Arrangeable workspace
+
+The dashboard becomes a workspace of panels the operator arranges: resize, collapse, pop out, dock
+back — Claude Code's cloud workspace for the mechanism, Prime Intellect Lab's run page for the card
+look, the operator's Stitch prototype of a draggable heading. On a phone panels stack, resize is
+height alone, and a popped panel is a full-screen sheet. Landed: no canvas paints detail over its
+marks (the canvas rule in `webapp/components/CLAUDE.md`). Owed, in order:
+
+1. **One view, one panel.** Each family in `components/dashboard/layout/panes.tsx` renders one frame;
+   Candidates hosts three today (chart, forest, inspector), which become regions of one panel.
+2. **The arrangement is data** — order, size and docked/popped per view ride the address beside the
+   open views (`lib/workspace.tsx`), never a second store.
+3. **Panel chrome is one `components/ui/` primitive**: the header row is the drag handle, an edge
+   resizes, collapse and pop-out sit in the header; Pointer Events with keyboard parity, the same
+   drag surface § Prompt-field order needs.
+4. **The tapped candidate's before/after** — its diff and flips against the origin in the inspector:
+   `SubjectBox` splits into the leader's picker and the subject reading the inspector hosts.
+5. **Grade leaves the masthead** for the Leader's action row (Compare with origin, Verify, Steer
+   fork); the masthead's BENCH figure stays read-only.
+
+Closes when the operator arranges the dashboard on a phone and a desktop, the arrangement survives a
+reload, and a popped panel docks back.
+
 ## Run card
 
-The run card is the chat's sample walk alone: the leader, the trend and the heatmap are the
-dashboard's, the target pipeline the chat hero's — no block renders in both views. Owed: the round
+The run card is the chat's sample walk alone: the leader and the heatmap are the dashboard's, the target pipeline the chat hero's — no block renders in both views. Owed: the round
 that changed each key, served ("changed in C7.3"), on the leader's diff. Rejected: the round rail of
 hollow/filled bars, the ring readout, and a second card mirroring the dashboard behind `more`.

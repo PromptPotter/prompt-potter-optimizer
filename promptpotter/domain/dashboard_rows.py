@@ -7,7 +7,7 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import arm_name
-from promptpotter.domain.bench import BandedValue, BenchReading
+from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
@@ -15,7 +15,7 @@ from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
-from promptpotter.domain.ruler import AbilityReading, LevelSeries, SeriesReading
+from promptpotter.domain.ruler import LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -233,7 +233,7 @@ class RoundHealth(FrozenModel):
 
 
 class RoundSummary(FrozenModel):
-    """Top-level `accuracy` is what the round MEASURED; its θ is `ServedRound.level`."""
+    """A closed round as its arms, its election and its health read; each number is an arm's own."""
 
     round: int
     leading: ArmName | None = Field(
@@ -245,14 +245,6 @@ class RoundSummary(FrozenModel):
     selected: ArmName | None = Field(
         description="The arm the election crowned; null on a round that held."
     )
-    # ``None`` where the round measured nothing readable: the chart draws a GAP, never a point at zero.
-    accuracy: float | None
-    composite_fitness: float | None
-    # Rows of the individual the round ENDED on: on a held round the retained parent, never the leading arm.
-    total: int
-    # Never add a `cumulative_accuracy`: a mean over DIFFERENT configurations is a score nobody scored.
-    # ``None`` where no bench pass graded this round's selection.
-    bench: BenchReading | None = None
     # Moves the stall counter and the life bank. Unset at round 0, which holds no election.
     improved: bool | None = None
     verdict_reason: str | None = None
@@ -271,7 +263,7 @@ class RoundSummary(FrozenModel):
     def of(cls, closed: RoundStatement) -> RoundSummary:
         arms = closed.cells.arms
         longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
-        election, fold, health = closed.election, closed.fold, closed.health
+        election, health = closed.election, closed.health
 
         def name(key: ArmKey) -> ArmName:
             return arm_name(key, closed.arms[key], closed.round)
@@ -284,11 +276,6 @@ class RoundSummary(FrozenModel):
             selected=None
             if election is None or election.selected is None
             else name(election.selected),
-            accuracy=None if fold is None else fold.accuracy,
-            composite_fitness=None
-            if fold is None or fold.accuracy is None
-            else fold.composite_fitness,
-            total=0 if fold is None else fold.total,
             improved=None if closed.round == 0 else closed.improved,
             verdict_reason=None
             if closed.round == 0 or election is None
@@ -317,13 +304,9 @@ class ServedRound(RoundSummary):
         description="How each sample of `selection` moved against the round before it that "
         "measured any, position for position with `selection` (`sample_movements`)."
     )
-    level: AbilityReading | None = Field(
-        description="This round's level on the cycle's `LevelSeries`, the one two rounds may "
-        "difference: null where `series_reading` carries a caveat."
-    )
     series_reading: SeriesReading | None = Field(
-        description="That level as read, under the caveat that withholds it, for a surface that "
-        "shows θ under its caveat; null where no scored cell sits on the scale."
+        description="This round's level on the cycle's `LevelSeries`, read under the caveat that "
+        "withholds it from differencing; null where no scored cell sits on the scale."
     )
 
 
@@ -380,7 +363,6 @@ def served_rounds(
             if closed.panel_precision is None
             else precision_verdict(closed.panel_precision),
             selection_movement=movement,
-            level=None if series is None else series.level(closed.round),
             series_reading=None if series is None else series.reading(closed.round),
         )
         for closed, movement in zip(ordered, movements, strict=True)

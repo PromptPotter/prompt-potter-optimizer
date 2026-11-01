@@ -424,8 +424,6 @@ export function subtreeCampaign(
   };
 }
 
-const NO_FITNESS_BANDS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-
 export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
@@ -434,7 +432,6 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
     measuring: false,
     inner: null,
     candidates: [],
-    fitness_bands: NO_FITNESS_BANDS,
     nodes: {},
     racing: null,
     ...over,
@@ -482,7 +479,6 @@ export function roundDoc(over: Partial<RoundView> = {}): RoundView {
     round: 0,
     arms: {},
     election: null,
-    fitness_bands: NO_FITNESS_BANDS,
     scoreboard: [],
     headline: null,
     ...over,
@@ -530,7 +526,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     error_count: 0,
     backend_retry_count: 0,
     recent_backend_warnings: [],
-    total_queries_scored: 0,
     total_backend_calls: 0,
     current_query_payload: null,
     open_positions: [],
@@ -603,10 +598,6 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     round: 0,
     leading: null,
     selected: null,
-    accuracy: 0,
-    composite_fitness: 0,
-    total: 0,
-    bench: null,
     improved: null,
     verdict_reason: null,
     candidates: [],
@@ -616,7 +607,6 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     panel_precision: null,
     panel_precision_verdict: null,
     selection_movement: [],
-    level: null,
     series_reading: null,
     optimizer_facts: [],
     ...over,

@@ -56,7 +56,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
+from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, spend_slot
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
@@ -357,7 +357,6 @@ class LiveDashboardProjection(Projection):
             return r
         return r.model_copy(
             update={
-                "bench": reading,
                 "candidates": [
                     c.model_copy(
                         update={"reading": c.reading.model_copy(update={"bench": reading})}
@@ -442,7 +441,6 @@ class LiveDashboardProjection(Projection):
         if facts.errored or facts.pipeline.error:
             s.error_count += 1
 
-        s.total_queries_scored += 1
         if not facts.cached:
             s.total_backend_calls += 1
             if is_degraded(facts):
@@ -539,11 +537,6 @@ class LiveDashboardProjection(Projection):
             measuring=measuring,
             inner=self._inner,
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
-            fitness_bands=fitness_bands(
-                GradedCell.of(w.facts, w.grade)
-                for walked in self._buffer.samples.values()
-                for w in walked
-            ),
             nodes=self._current_round_nodes(),
             racing=build_racing_block(self._buffer),
         )

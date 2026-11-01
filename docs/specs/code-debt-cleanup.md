@@ -204,6 +204,21 @@ somewhere:
 The frame, the run card, origin pairing, pipeline CSS and money format wait on the run-card session's
 files.
 
+### The candidates surface (review 2026-11-01)
+
+Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap.md) § Arrangeable workspace.
+
+- `useCandidatesModel` writes the module store during render (the per-cycle metric and overlap seeding).
+- Two sources for one question: `wonOnTheta` reads `facts.elects_on`, `electedMetric` reads `dash.display_metric`.
+- `FitnessChart::parentIdx` names the standing selection, not a parent.
+- Three interval formatters: `format.ts::fmtInterval`, `VerifyReading::band`, `SearchpointDrillIn::band`.
+- Two `cell_means` renderers: `SubjectSignals` and `channel-parts::CellMeans`.
+- Three ways into Compare (the toolbar menu, `CompareOriginAction`, the forest).
+- Teaching prose in `title=`: the `FitnessLegend` hint, the toolbar, the dendrogram `<title>`, `CompareOriginAction`, `RoundVerdict`.
+- `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
+- `CostStrip` sizes itself inline (`height: 140`); `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
+- `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
+
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
 - **`domain/bench.py::BENCH_STATE_INFO` is a second table over `ReadingState`** beside
@@ -221,8 +236,6 @@ files.
   one commit once the run-card session's `chat.css` hunk lands. **Re-test:** `git grep -c "wf-hero" -- webapp/app/styles/domains/chat.css`.
 - **`NodeKnobsPanel::POOL_NOUN` words a served closed set (`PoolRow.source`) locally.** Action: an
   exported word table. **Re-test:** `git grep -n "POOL_NOUN" -- webapp/components`.
-- **`FreqChart` inks the low half of the bands one colour and the high half another**: colour that
-  carries no meaning. Action: one ink. **Re-test:** read `FreqChart.tsx::colors`.
 - **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
 - **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card

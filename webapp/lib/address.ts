@@ -8,7 +8,6 @@ export const FAMILY_IDS = [
   "timeline",
   "leader",
   "candidates",
-  "trend",
   "spend",
   "heatmap",
   "samples",

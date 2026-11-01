@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import type { ServedDashboard } from "@/lib/api";
 import { FitnessChart } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
-import { ThetaCaveatNotice } from "./AbilityInfo";
+import { ThetaCaveats } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
 import { CardFrame, Chip, IconTree, Loading } from "@/components/ui";
@@ -74,7 +74,7 @@ export function CandidatesCard() {
 
 function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
   const m = useCandidatesModel(dash);
-  const { views, maskOpen, viewedCandidateId, areCourses, wonOnTheta } = m;
+  const { views, maskOpen, viewedCandidateId } = m;
 
   return (
     <CardFrame
@@ -85,15 +85,6 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
       title={<CandidatesToolbar model={m} />}
     >
       <div className="fitness-body">
-        {!areCourses && wonOnTheta && (
-          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability?.reading ?? null} />
-        )}
-        {!areCourses && wonOnTheta && m.floorPinned.length > 0 && (
-          <>
-            <ThetaCaveatNotice caveat="floor_pinned" ability={null} />
-            <div className="theta-caveat-arms">Affected: {m.floorPinned.join(", ")}.</div>
-          </>
-        )}
         {m.pickedSet && <SampleSetControl rounds={m.history} overlap={m.overlap} unit={m.unit} />}
         {/* The dendrogram's x-alignment depends on sharing this box with the canvas. */}
         <div className="fitness-chart-wrap">
@@ -120,6 +111,11 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             )}
             <ForestToggle model={m} />
           </div>
+          {!m.areCourses && m.wonOnTheta && (
+            <div className="fitness-notes">
+              <ThetaCaveats caveat={m.ability?.caveat ?? null} floorPinned={m.floorPinned} />
+            </div>
+          )}
         </div>
         {maskOpen && !viewedCandidateId && (
           <Criterion

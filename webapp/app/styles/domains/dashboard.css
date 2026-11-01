@@ -29,8 +29,6 @@
 .inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);padding-top:var(--space-8)}
 
 /* A card hosted inside another reads as a section of it: a rule above, no second frame. */
-.card-inset{margin-top:var(--space-14);min-width:0}
-.card-inset > .card{margin:0;background:none;border:0;border-top:0.5px solid var(--color-border);border-radius:0;padding:var(--space-12) 0 0}
 
 /* A run log under the region it belongs to, shown only while it holds entries. */
 .dash-log{margin-top:var(--space-12);padding:0 var(--space-12) var(--space-12)}
@@ -47,7 +45,7 @@
 .knob-clash-consequence{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-primary)}
 .knob-clash-relation{margin:var(--space-4) 0 0;font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 
-.trend-degraded{list-style:none;margin:var(--space-8) 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.rounds-degraded{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 
 .rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
 .rsv-cand-strip{min-width:0;max-width:100%;overflow-x:auto;padding-bottom:2px}

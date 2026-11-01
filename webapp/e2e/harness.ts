@@ -122,7 +122,7 @@ export async function ready(page: Page) {
 }
 
 /** The Dashboard preset's views as an address tail (`components/shell/families.tsx::PRESETS`). */
-export const DASHBOARD_VIEWS = "/timeline/candidates/trend/spend/heatmap/optimizer/leader";
+export const DASHBOARD_VIEWS = "/timeline/spend/heatmap/optimizer/candidates/leader";
 
 /** The reload is required: a fragment-only `goto` does not remount, so one view's crash would follow every later address. */
 export async function open(page: Page, hash = "") {

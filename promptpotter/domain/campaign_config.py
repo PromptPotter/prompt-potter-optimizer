@@ -441,9 +441,8 @@ class CampaignConfig(StrictModel):
         "the headline (CLI `bench`, command `grade-bench`), which grades the origin and the "
         "selection as they then stand. `at_end`: the origin's pass at launch, its price set "
         "aside under the ceiling, and the selection's once the run ends. `each_round`: that, "
-        "and every round that selects a new individual is graded too, so the trend carries a "
-        "held-out series beside the round composite. An arm of a head-to-head is minted "
-        "`at_end` where this says `manual`: its comparison is the bench score.",
+        "and every round that selects a new individual is graded too. An arm of a head-to-head "
+        "is minted `at_end` where this says `manual`: its comparison is the bench score.",
     )
 
     optimization: OptimizationConfig

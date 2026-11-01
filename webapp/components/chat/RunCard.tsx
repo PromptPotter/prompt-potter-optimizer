@@ -7,7 +7,7 @@ import { runNextStep } from "@/lib/derivations";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { HardSamplesPreview } from "@/components/chat/HardSamplesPreview";
 
-// The chat's one run block, the sample walk: the leader, the trend and the heatmap are the dashboard's.
+// The chat's one run block, the sample walk: the leader and the heatmap are the dashboard's.
 export function RunCard() {
   const { dash, isLive } = useCycleStream();
   const cv = useConnector();

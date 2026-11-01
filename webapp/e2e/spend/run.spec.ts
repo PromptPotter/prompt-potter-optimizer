@@ -214,7 +214,7 @@ test.describe("a campaign, end to end", () => {
         `round ${r.round} closed with no verdict — candidates were scored but no election was held`,
       ).not.toBeNull();
       console.log(
-        `[e2e] round ${r.round}: ${r.candidates.length} candidates, improved=${r.improved}, acc=${r.accuracy}`,
+        `[e2e] round ${r.round}: ${r.candidates.length} candidates, improved=${r.improved}`,
       );
     }
 

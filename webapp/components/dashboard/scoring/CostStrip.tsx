@@ -3,7 +3,7 @@ import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";
 import { CardFrame } from "@/components/ui";
-import { costSeries, roundCosts, spendLines } from "@/lib/derivations";
+import { costSeries, roundCosts } from "@/lib/derivations";
 import { useCycleStream } from "@/lib/poll";
 
 ensureChartRegistered();
@@ -26,17 +26,6 @@ export const CostStrip = memo(function CostStrip() {
   const options = barChartDefaults({
     plugins: {
       legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } },
-      tooltip: {
-        callbacks: {
-          afterBody: (items: { dataIndex: number }[]) => {
-            const r = rounds[items[0]?.dataIndex ?? -1];
-            if (!r) return "";
-            return spendLines(r.metered)
-              .filter((l) => l.kind.sent)
-              .map((l) => `${l.label} prefix ${l.kind.prefix.badge}`);
-          },
-        },
-      },
     },
     scales: {
       x: { stacked: true, ticks: { font: { size: 9 } }, grid: { display: false } },
