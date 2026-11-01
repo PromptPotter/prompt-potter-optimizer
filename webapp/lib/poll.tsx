@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { DASHBOARD_LIVE_POLL_MS, DASHBOARD_RECONNECT_POLL_MS } from "@/lib/cadence";
+import { phaseIs } from "@/lib/derivations";
 import { reportIncident } from "@/lib/diagnostics";
 import { dashboardRead, isWarming, stepsRead } from "./api";
 import { encodeCyclePath, type CyclePath } from "./ids";
@@ -162,7 +163,7 @@ function useDashboard(path: CyclePath | null, unit: string | null, intervalMs: n
 
 const NO_STEPS: HierarchyStep[] = [];
 
-function useRay(path: CyclePath | null, unit: string | null, intervalMs: number): TimeRayState {
+function useRay(path: CyclePath | null, unit: string | null, intervalMs: number | undefined): TimeRayState {
   const { onAuthError } = useAuthGate();
   const head = useRead(path ? stepsRead(path, RAY_WINDOW) : null, { auth: true, intervalMs });
   const headWindow = shownData(head);
@@ -222,10 +223,10 @@ export function CycleStreamProvider({
   // A replayed moment polls on the slow beat too: a fold at a past offset is immutable.
   const wantSlow = state.status === "offline" || state.status === "failed" || replaying;
   if (wantSlow !== slow) setSlow(wantSlow);
-  const ray = useRay(path, unit, intervalMs);
-
   // `run_phase` also rides `/hierarchy` and `/hierarchy/{address}`, so a change re-asks every live read.
   const phase = state.dash?.run_phase ?? null;
+  // A settled run's steps move only on a resume, whose phase change re-asks them below.
+  const ray = useRay(path, unit, phaseIs(phase, "settled") ? undefined : intervalMs);
   const seenRef = useRef<{ unit: string | null; phase: string | null }>({ unit: null, phase: null });
   useEffect(() => {
     if (phase === null) return;
