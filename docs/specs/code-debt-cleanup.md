@@ -219,6 +219,19 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 - `CostStrip` sizes itself inline (`height: 140`); `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 
+### On the box (2026-11-01)
+
+- Unexplained: in `justlogic.d234__e85387` / `cycle_f1591f054ad0`, R1's three candidates and R2's two
+  carry no score in `dashboard.json`. Read the cycle's ledger for their arms before calling it a bug.
+
+- One email holds two accounts on the box: the claimed host (`identity/default_claimed.json`) and the
+  Google sign-in that owns every webapp campaign. The host's coupon exemption and the CLI's identity
+  read the first, the webapp the second (`default_claim.py::_is_host` compares a user id, never the
+  declared `HOST_ADMIN_EMAIL`).
+- No verb sets an account's coupon or starts it afresh: `grant.json` is hand-written, and a reset is
+  moving `charges.jsonl` aside, which also drops the account's bill. A grant that counts charges from
+  its own `granted_at` would make a re-grant the reset.
+
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
 - **`domain/bench.py::BENCH_STATE_INFO` is a second table over `ReadingState`** beside
