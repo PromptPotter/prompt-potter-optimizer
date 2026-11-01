@@ -281,8 +281,10 @@ def _record(pytest_args: list[str]) -> int:
         if event not in ("open", "os.scandir", "os.listdir") or not args:
             return
         target = os.fsdecode(args[0]) if isinstance(args[0], str | bytes | os.PathLike) else None
-        if target is not None:
-            (opened if event == "open" else listed).add(target)
+        # Kept as recorded, the checkout's alone: a journey opens thousands of temp files, and
+        # bytecode is the hashed source over again.
+        if target is not None and (rel := _rel(target)) is not None and "__pycache__" not in rel:
+            (opened if event == "open" else listed).add(rel)
 
     class Ran:
         whole_suite = True
@@ -326,11 +328,6 @@ def _record(pytest_args: list[str]) -> int:
     if code or not plugin.whole_suite or collected - ran.keys() or before != _hashed():
         # A failed, partial or mid-edit run describes no tree: the old record stands.
         return code
-    # Bytecode is the hashed source over again, and it is most of what a session opens.
-    inside, scanned = (
-        {rel for p in paths if (rel := _rel(p)) is not None and "__pycache__" not in rel}
-        for paths in (opened, listed)
-    )
     package = {rel for rel in before if _is_code(rel)}
     reached = {
         node: sorted(rel for f in files if (rel := _rel(f)) in package)
@@ -342,8 +339,8 @@ def _record(pytest_args: list[str]) -> int:
             {
                 "files": before,
                 "ran": reached,
-                "opened": sorted(inside - package),
-                "listed": sorted(scanned),
+                "opened": sorted(opened - package),
+                "listed": sorted(listed),
             },
             indent=1,
         ),
