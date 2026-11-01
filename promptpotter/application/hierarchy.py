@@ -204,7 +204,7 @@ def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Sa
     if reading.ability is None or (theta := reading.ability.caveat) is None:
         return lines
     info = THETA_CAVEAT_INFO[theta]
-    return [*lines, caveat_row("theta_caveat", info.head, info.body)]
+    return [*lines, Said(key="theta_caveat", tone=info.tone, label=info.label, detail=info.detail)]
 
 
 def candidate_figures(reading: ArmReading) -> list[Figure]:

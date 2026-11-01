@@ -104,7 +104,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         )
         if rd.level.caveat is not None:
             parts.append(
-                f"- θ caveat: `{rd.level.caveat.value}` — {THETA_CAVEAT_INFO[rd.level.caveat].head}"
+                f"- θ caveat: `{rd.level.caveat.value}` — {THETA_CAVEAT_INFO[rd.level.caveat].label}"
             )
     if series := overlap_series(rd.overlap):
         parts.append(f"- overlap: {series}")

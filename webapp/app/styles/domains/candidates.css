@@ -58,10 +58,9 @@
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
 .ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-secondary)}
-.theta-caveat{margin:0 0 var(--space-8);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
-.theta-caveat strong{color:var(--color-text-primary)}
-.theta-caveat-spans{color:var(--color-text-secondary)}
-.theta-caveat-arms{margin:calc(var(--space-8) * -1) 0 var(--space-8);padding:0 var(--space-8) var(--space-6) calc(var(--space-8) + 2px);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
+/* Footnotes: under the chart and smaller than its labels, never louder than the bars. */
+.fitness-notes{margin-top:var(--space-6)}
+.fitness-notes .said{font-size:var(--text-xs);margin-bottom:var(--space-4)}
 .fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
 .fitness-mask{margin-top:var(--space-18)}
 @media (min-width:880px){

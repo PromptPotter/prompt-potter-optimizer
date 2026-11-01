@@ -20,7 +20,6 @@ from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 
@@ -88,16 +87,8 @@ class CurrentRound(StrictModel):
         "in this cycle's sandbox; null where no open cell has named one.",
     )
     candidates: list[LiveCandidate] = Field(default_factory=list)
-    fitness_bands: list[int] = Field(
-        description="How many scored rows across `candidates` graded into each tenth of [0, 1], "
-        "lowest first, banded as a closed round's `fitness_bands` is."
-    )
     nodes: dict[str, NodeBlock] = Field(default_factory=dict)
     racing: RacingBlock | None = None
-
-    @classmethod
-    def unentered(cls, measurement_node: str) -> CurrentRound:
-        return cls(measurement_node=measurement_node, fitness_bands=fitness_bands(()))
 
 
 class DashboardFacts(StrictModel):
@@ -134,7 +125,6 @@ class DashboardFacts(StrictModel):
     backend_retry_count: int = 0
     recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
 
-    total_queries_scored: int = 0
     total_backend_calls: int = 0
 
     current_query_payload: str | None = None
@@ -206,7 +196,7 @@ class LiveDashboardState(DashboardFacts):
     def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
         return cls(
             at_time=wiring.timestamp,
-            current_round=CurrentRound.unentered(wiring.measurement_node),
+            current_round=CurrentRound(measurement_node=wiring.measurement_node),
             **cls.launched(wiring),
         )
 

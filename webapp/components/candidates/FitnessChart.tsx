@@ -3,8 +3,8 @@ import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, getCss, lineLook, lineMotion, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
-import { liftOf, NOT_SEPARABLE } from "@/lib/derivations";
-import { fmtInterval, fmtLogits, fmtSigned, fmtUnit, unitCount } from "@/lib/format";
+import { liftOf } from "@/lib/derivations";
+import { fmtSigned } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 import {
   activeSeries,
@@ -370,7 +370,7 @@ export const FitnessChart = memo(function FitnessChart({
   inFlightIndex,
   onGeometry,
 }: Props) {
-  const { views, metrics, unit } = ctx;
+  const { views, metrics } = ctx;
   const themeVersion = useThemeVersion();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const labels = useMemo(() => views.map((v) => v.label), [views]);
@@ -548,57 +548,6 @@ export const FitnessChart = memo(function FitnessChart({
     },
     plugins: {
       legend: { display: false },
-      tooltip: {
-        callbacks: {
-          label: (item) => {
-            const v = views[item.dataIndex];
-            const spec = seriesByKey(String(item.dataset.label ?? ""));
-            return v && spec ? spec.tip(v, ctx) : "";
-          },
-          footer: (items) => {
-            const idx = items[0]?.dataIndex;
-            if (idx == null) return "";
-            const lines: string[] = [];
-            const bar = views[idx];
-            const reading = bar?.reading;
-            const n = reading?.panel.scored;
-            if (reading && n != null) {
-              const { expected: exp, cached } = reading.panel;
-              lines.push(
-                exp != null && exp !== n
-                  ? `${n} of ${unitCount(exp, unit)} scored`
-                  : `${unitCount(n, unit)} scored`,
-              );
-              if (cached != null && cached > 0) {
-                lines.push(`${cached} of ${unitCount(n, unit)} from cache`);
-              }
-            }
-            const theta = reading?.ability?.theta;
-            if (typeof theta === "number") {
-              const se = reading?.ability?.se;
-              // Named "se", not ±: the drawn whisker is the wider 95% band.
-              const tail = typeof se === "number" ? `, se ${fmtLogits(se)}` : "";
-              lines.push(`ability ${fmtUnit("theta", theta)}${tail} (elected on θ, not accuracy)`);
-            }
-            const ciLo = reading?.own?.accuracy?.ci_lo;
-            const ciHi = reading?.own?.accuracy?.ci_hi;
-            if (typeof ciLo === "number" && typeof ciHi === "number") {
-              lines.push(`accuracy 95% CI ${fmtInterval("level", ciLo, ciHi)}`);
-            }
-            const lift = liftOf(reading?.vs_reference ?? null);
-            if (lift != null) {
-              const flat = lift.side === "spans" ? ` — ${NOT_SEPARABLE}` : "";
-              lines.push(
-                `accuracy lift vs parent ${fmtUnit("delta", lift.value)} ${fmtInterval("delta", lift.ci_lo, lift.ci_hi)}${flat}`,
-              );
-            }
-            if (bar?.reading && !bar.reading.election.held) {
-              lines.push("no election yet — nothing crowned in this round");
-            }
-            return lines.join("\n");
-          },
-        },
-      },
       barCaps: { counts: cutCounts, parent: parentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },

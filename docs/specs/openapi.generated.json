@@ -2266,7 +2266,7 @@
           },
           "bench_trigger": {
             "default": "manual",
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `each_round`: that, and every round that selects a new individual is graded too, so the trend carries a held-out series beside the round composite. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `each_round`: that, and every round that selects a new individual is graded too. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "enum": [
               "manual",
               "at_end",
@@ -4413,14 +4413,6 @@
             "title": "Candidates",
             "type": "array"
           },
-          "fitness_bands": {
-            "description": "How many scored rows across `candidates` graded into each tenth of [0, 1], lowest first, banded as a closed round's `fitness_bands` is.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Fitness Bands",
-            "type": "array"
-          },
           "inner": {
             "anyOf": [
               {
@@ -4467,8 +4459,7 @@
           }
         },
         "required": [
-          "measurement_node",
-          "fitness_bands"
+          "measurement_node"
         ],
         "title": "CurrentRound",
         "type": "object"
@@ -13813,14 +13804,6 @@
               }
             ]
           },
-          "fitness_bands": {
-            "description": "How many scored rows of the `headline` arm's cells graded into each tenth of [0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, not a low score.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Fitness Bands",
-            "type": "array"
-          },
           "headline": {
             "anyOf": [
               {
@@ -13849,8 +13832,7 @@
           "arms",
           "election",
           "scoreboard",
-          "headline",
-          "fitness_bands"
+          "headline"
         ],
         "title": "RoundView",
         "type": "object"
@@ -15181,11 +15163,6 @@
             "title": "Total Backend Calls",
             "type": "integer"
           },
-          "total_queries_scored": {
-            "default": 0,
-            "title": "Total Queries Scored",
-            "type": "integer"
-          },
           "verification": {
             "description": "Each arm's latest verify and held-out bench pass on this cycle's ledger, in flight or ended; its rows are no round's cells.",
             "items": {
@@ -15255,44 +15232,12 @@
         "additionalProperties": false,
         "description": "A closed round as a dashboard serves it: the banked summary plus every reading derived from it.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy"
-          },
-          "bench": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "candidates": {
             "items": {
               "$ref": "#/components/schemas/DashboardCandidate"
             },
             "title": "Candidates",
             "type": "array"
-          },
-          "composite_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Fitness"
           },
           "health": {
             "$ref": "#/components/schemas/RoundHealth"
@@ -15318,17 +15263,6 @@
               }
             ],
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where the round selected, on a held round the challenger `verdict_reason` names as its best, at round 0 the origin. `panel_precision` is measured on it. Null where the selector could read no arm."
-          },
-          "level": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AbilityReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This round's level on the cycle's `LevelSeries`, the one two rounds may difference: null where `series_reading` carries a caveat."
           },
           "optimizer_facts": {
             "items": {
@@ -15412,11 +15346,7 @@
                 "type": "null"
               }
             ],
-            "description": "That level as read, under the caveat that withholds it, for a surface that shows θ under its caveat; null where no scored cell sits on the scale."
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
+            "description": "This round's level on the cycle's `LevelSeries`, read under the caveat that withholds it from differencing; null where no scored cell sits on the scale."
           },
           "verdict_reason": {
             "anyOf": [
@@ -15434,14 +15364,10 @@
           "round",
           "leading",
           "selected",
-          "accuracy",
-          "composite_fitness",
-          "total",
           "health",
           "overlap",
           "panel_precision_verdict",
           "selection_movement",
-          "level",
           "series_reading"
         ],
         "title": "ServedRound",

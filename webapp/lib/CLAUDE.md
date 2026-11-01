@@ -15,7 +15,7 @@ chart theme, vocabulary). A context one surface alone consumes lives in that sur
 
 | Surface | Reached by | Sole source for |
 |---|---|---|
-| `dashboard.json` | `lib/poll.tsx` → `useCycleStream()` | in-flight `current_round` + `rounds[]`: FitnessChart, TrendChart, and the SPEND breakdown |
+| `dashboard.json` | `lib/poll.tsx` → `useCycleStream()` | in-flight `current_round` + `rounds[]`: FitnessChart and the SPEND breakdown |
 | `/hierarchy` | `lib/state/registry.tsx` → `useRegistry()` / `useEntry(address)` | every surface that lists, switches, docks or heads a run; tags via `lib/derivations/hierarchy.ts::hasTag` / `tagValue` |
 | `/hierarchy/{address}` | `lib/lineage.tsx` | the genealogy at any depth, indexed once by `lib/derivations/lineage-candidates.ts::indexLineage` |
 | `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts` | the round (`RoundView`); `round_NNNN.json` is shown only as raw text in Files |

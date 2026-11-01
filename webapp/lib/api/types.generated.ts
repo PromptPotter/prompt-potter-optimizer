@@ -61,7 +61,6 @@ export interface ServedDashboard {
   error_count: number;
   backend_retry_count: number;
   recent_backend_warnings: BackendWarning[];
-  total_queries_scored: number;
   total_backend_calls: number;
   current_query_payload: string | null;
   open_positions: number[];
@@ -164,10 +163,6 @@ export interface ServedRound {
   leading: ArmName | null;
   /** The arm the election crowned; null on a round that held. */
   selected: ArmName | null;
-  accuracy: number | null;
-  composite_fitness: number | null;
-  total: number;
-  bench: BenchReading | null;
   improved: boolean | null;
   verdict_reason: string | null;
   candidates: DashboardCandidate[];
@@ -183,42 +178,10 @@ export interface ServedRound {
   /** How each sample of `selection` moved against the round before it that measured
    * any, position for position with `selection` (`sample_movements`). */
   selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
-  /** This round's level on the cycle's `LevelSeries`, the one two rounds may
-   * difference: null where `series_reading` carries a caveat. */
-  level: AbilityReading | null;
-  /** That level as read, under the caveat that withholds it, for a surface that
-   * shows θ under its caveat; null where no scored cell sits on the scale. */
+  /** This round's level on the cycle's `LevelSeries`, read under the caveat that
+   * withholds it from differencing; null where no scored cell sits on the
+   * scale. */
   series_reading: SeriesReading | null;
-}
-
-/** One individual's bench pass, read under a named scorer. */
-export interface BenchReading {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  accuracy: BandedValue | null;
-  /** Under the reading scorer's formula, which charges cost and length — so it is
-   * never the change in the hit rate. */
-  composite: BandedValue | null;
-  /** Rows carrying a verdict — a miss the prompt caused included: the population
-   * both columns are read over. */
-  n: number;
-  /** The round whose selection this is; 0 is the origin. */
-  round: number;
-  /** The searchpoint scored — the archive's `prompt_fields_id`. */
-  sp_hash: string;
-  /** Which column the headline reads. */
-  headline: 'accuracy' | 'composite';
-  /** The headline: this reading in its `headline` column, chosen here so no surface
-   * selects a column of its own. Stamped by :meth:`read` alone. */
-  level: BandedValue | null;
-}
-
-export interface BandedValue {
-  value: number;
-  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
-   * `None` below two rows, which have no spread. */
-  ci_lo: number | null;
-  ci_hi: number | null;
 }
 
 /** One candidate as `dashboard.json` serves it, the same shape live or closed. */
@@ -289,6 +252,14 @@ export interface OwnLevel {
   /** Rows carrying a verdict — a miss the prompt caused included: the population
    * both columns are read over. */
   n: number;
+}
+
+export interface BandedValue {
+  value: number;
+  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
+   * `None` below two rows, which have no spread. */
+  ci_lo: number | null;
+  ci_hi: number | null;
 }
 
 /** The cells one arm's walk holds of the panel its round asked of it. */
@@ -486,6 +457,28 @@ export interface ArmElection {
   crown: 'elected' | 'uncontested' | null;
 }
 
+/** One individual's bench pass, read under a named scorer. */
+export interface BenchReading {
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
+   * 1. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
+  /** Rows carrying a verdict — a miss the prompt caused included: the population
+   * both columns are read over. */
+  n: number;
+  /** The round whose selection this is; 0 is the origin. */
+  round: number;
+  /** The searchpoint scored — the archive's `prompt_fields_id`. */
+  sp_hash: string;
+  /** Which column the headline reads. */
+  headline: 'accuracy' | 'composite';
+  /** The headline: this reading in its `headline` column, chosen here so no surface
+   * selects a column of its own. Stamped by :meth:`read` alone. */
+  level: BandedValue | null;
+}
+
 /** A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones. */
 export interface VerifyReading {
   label: string;
@@ -587,6 +580,15 @@ export interface OptimizerFact {
   kind: 'stat' | 'note';
 }
 
+/** A round's level as its series read it, under the one caveat that withholds it. */
+export interface SeriesReading {
+  /** The round's level: the individual it ended on, read on the series' one scale */
+  reading: AbilityReading;
+  /** The level's own caveat, else its series'. Null, and it differences any other
+   * level of the series that is null too. */
+  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+}
+
 /** A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing. */
 export interface AbilityReading {
   theta: number;
@@ -620,15 +622,6 @@ export interface RulerOwn {
 export interface RulerScope {
   scorer: string;
   dataset: string;
-}
-
-/** A round's level as its series read it, under the one caveat that withholds it. */
-export interface SeriesReading {
-  /** The round's level: the individual it ended on, read on the series' one scale */
-  reading: AbilityReading;
-  /** The level's own caveat, else its series'. Null, and it differences any other
-   * level of the series that is null too. */
-  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** The latest verify or bench pass on one arm, as its records left it. */
@@ -770,9 +763,6 @@ export interface CurrentRound {
    * this cycle's sandbox; null where no open cell has named one. */
   inner: CycleHop | null;
   candidates: LiveCandidate[];
-  /** How many scored rows across `candidates` graded into each tenth of [0, 1],
-   * lowest first, banded as a closed round's `fitness_bands` is. */
-  fitness_bands: number[];
   nodes: Record<string, NodeBlock>;
   racing: RacingBlock | null;
 }
@@ -1119,11 +1109,6 @@ export interface RoundView {
   /** The arm the round ENDED on (`election.ended_on`), read: the headline's numbers
    * are its own. Null on a diag round, which elects nothing. */
   headline: ArmReading | null;
-  /** How many scored rows of the `headline` arm's cells graded into each tenth of
-   * [0, 1], lowest first: a band is closed above, so a 0.5 counts in the
-   * fifth and a 1.0 in the tenth. A row carrying no verdict is in none — an
-   * uncharged error's 0.0 is a floor, not a low score. */
-  fitness_bands: number[];
 }
 
 export interface Proposed {
@@ -4295,9 +4280,9 @@ export interface CampaignConfig {
    * which grades the origin and the selection as they then stand. `at_end`:
    * the origin's pass at launch, its price set aside under the ceiling, and
    * the selection's once the run ends. `each_round`: that, and every round
-   * that selects a new individual is graded too, so the trend carries a held-
-   * out series beside the round composite. An arm of a head-to-head is minted
-   * `at_end` where this says `manual`: its comparison is the bench score. */
+   * that selects a new individual is graded too. An arm of a head-to-head is
+   * minted `at_end` where this says `manual`: its comparison is the bench
+   * score. */
   bench_trigger: 'manual' | 'at_end' | 'each_round';
   optimization: OptimizationConfig;
 }
@@ -4764,8 +4749,9 @@ export interface RoundAdvanceInfo {
 }
 
 export interface ThetaCaveatInfo {
-  head: string;
-  body: string;
+  label: string;
+  detail: string;
+  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
 }
 
 export interface VerificationKindInfo {
@@ -4982,13 +4968,13 @@ export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
 
 // Mirror of domain/ruler.py::THETA_CAVEAT_INFO.
 export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
-  "disjoint_scopes": { head: "θ mixes datasets that share no scale", body: "These cells measure more than one dataset, and a difficulty is only ever fitted within one, so θ here averages scales that never met. Read each dataset's cells on their own; a lift paired on the same cells still holds." },
-  "cold_ruler": { head: "θ is not ability yet", body: "No difficulty ruler could be fitted from what this account measured before the round, so θ is plain accuracy on the logit scale. A candidate and the parent it is judged against are read on the cells both answered, so their lift holds; a θ compared across rounds or against another candidate's does not." },
-  "flat_ruler": { head: "θ is not ability here", body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider." },
-  "collapsed_band": { head: "θ is not ability this round", body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument." },
-  "prior_pinned": { head: "θ is not ability here", body: "The ruler gave most of this round's cells one shared difficulty, its prior, because every candidate that saw them answered the same way. That pinned value moves as the ruler takes in new rounds, so a higher θ than before can be the scale shifting, not the prompt improving. Compare within a round; don't read the level across rounds." },
-  "unmeasured_delta": { head: "θ skips some of these cells", body: "The ruler does not carry some of these cells, because no candidate outside this round's judging had answered them when the round opened. θ leaves them out, so it is read on fewer cells than the accuracy beside it, and two candidates can be read on different ones. A later round reads them once this round's answers have joined the ruler." },
-  "floor_pinned": { head: "θ reads nothing for an all-miss arm", body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected." },
+  "disjoint_scopes": { label: "θ mixes datasets", detail: "These samples come from more than one dataset, and difficulty is only rated within one, so this θ averages scales that don't compare. Read each dataset on its own; a lift against the parent still holds.", tone: "attention" },
+  "cold_ruler": { label: "θ is plain accuracy so far", detail: "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another scale. A lift against the parent holds; θ compared across rounds or candidates does not.", tone: "attention" },
+  "flat_ruler": { label: "θ is plain accuracy here", detail: "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as accuracy does. No round can change that.", tone: "attention" },
+  "collapsed_band": { label: "θ is plain accuracy this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as accuracy does. A round drawing harder and easier samples reads differently.", tone: "attention" },
+  "prior_pinned": { label: "θ shifts between rounds", detail: "Most samples this round got the default difficulty, because every candidate answered them alike. That default moves as rounds come in, so compare θ within a round, not across rounds.", tone: "attention" },
+  "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
+  "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
 };
 
 // Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS.

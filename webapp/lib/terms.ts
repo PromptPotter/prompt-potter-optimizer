@@ -8,9 +8,6 @@ export const TERMS = {
 
   criterion_accuracy: "Whether the answer is right, as the matcher grades it. Every dial below scales this — a dial at 0 is off.",
 
-  stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in measurements/.",
-  stub_score_freq:    "How many scored cells graded into each tenth of 0 to 1. The per-sample scores live in measurements/.",
-  badge_top:          "Page-anchor card — primary signal for round health.",
   brand_live_preview: "This page polls dashboard.json every 2s.",
 
   // The TWO caches share no mechanism and must never share a word.

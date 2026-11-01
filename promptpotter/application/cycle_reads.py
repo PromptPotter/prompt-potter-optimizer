@@ -99,12 +99,6 @@ class RoundView(StrictModel):
         description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
         "numbers are its own. Null on a diag round, which elects nothing."
     )
-    fitness_bands: list[int] = Field(
-        description="How many scored rows of the `headline` arm's cells graded into each tenth of "
-        "[0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in "
-        "the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, "
-        "not a low score."
-    )
 
 
 def served_round(
@@ -124,7 +118,6 @@ def served_round(
         election=closed.election,
         scoreboard=closed.scoreboard,
         headline=closed.headline,
-        fitness_bands=closed.fitness_bands,
     )
 
 

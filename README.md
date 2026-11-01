@@ -139,7 +139,7 @@ Scoring goes to the samples that tell candidates apart; anything already measure
     <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/candidates-dark.png" alt="The candidates chart: every candidate of the campaign with accuracy, ability and overlap, intervals drawn, and a served caveat above it" width="100%">
   </picture>
   <br>
-  <b>Every candidate, with its interval.</b> Accuracy, ability θ and the shared-cell overlap for each individual across all generations, with the lineage beneath. The caveat above the chart is served by the backend, not decided in the browser.
+  <b>Every candidate, with its interval.</b> Accuracy, ability θ and the shared-cell overlap for each individual across all generations, with the lineage beneath. The θ caveat under the chart is served by the backend, not decided in the browser.
 </td>
 </tr>
 </table>

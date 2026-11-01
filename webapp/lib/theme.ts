@@ -7,14 +7,14 @@ import {
   PointElement,
   CategoryScale,
   LinearScale,
-  Tooltip,
   Filler,
   BarController,
   LineController,
   type ChartOptions,
 } from "chart.js";
 
-// Chart.js v4 requires explicit registration of the components used.
+// Chart.js v4 requires explicit registration of the components used. Never its tooltip plugin: a
+// canvas paints no detail over its own marks — what a tap reads opens in the DOM below the chart.
 let registered = false;
 
 export function ensureChartRegistered(): void {
@@ -25,7 +25,6 @@ export function ensureChartRegistered(): void {
     PointElement,
     CategoryScale,
     LinearScale,
-    Tooltip,
     Filler,
     BarController,
     LineController,

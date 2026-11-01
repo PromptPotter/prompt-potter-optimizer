@@ -17,6 +17,7 @@
 - **Text and numeric controls commit on Enter or blur, never per keystroke** — `ui/CommitInput`.
 - **A lit chip wears the ink of what it drew**, lit from the served value, never a local boolean.
 - **A painted surface is a control** — SVG/tree nodes get keyboard operability and a `role`, a `<canvas>` an `aria-label`.
+- **A canvas paints no detail over its own marks** — a tap selects, and what it reads opens in the DOM below the chart; Chart.js `Tooltip` is never registered (`lib/theme.ts`). <!-- probe: git grep -cE "Tooltip" -- webapp/lib/theme.ts == 0 -->
 
 ## Render-cost guards (do not regress)
 

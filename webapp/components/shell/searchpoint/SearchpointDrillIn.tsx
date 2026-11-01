@@ -34,7 +34,7 @@ export function SearchpointDrillIn({
   onOverlay?: (next: Record<string, Record<string, unknown>>) => void;
   actions?: React.ReactNode;
 }) {
-  const accuracy = reading?.own?.accuracy?.value ?? null;
+  const accuracy = reading?.own?.accuracy ?? null;
   const composite = reading?.own?.composite?.value ?? null;
   const bench = reading?.bench ?? null;
   const pair = reading?.vs_reference ? readPaired(reading.vs_reference) : null;
@@ -64,11 +64,7 @@ export function SearchpointDrillIn({
             {accuracy != null && (
               <Fact
                 k="accuracy"
-                v={
-                  reading.panel.scored != null
-                    ? `${fmtPct1(accuracy)} of ${reading.panel.scored}`
-                    : fmtPct1(accuracy)
-                }
+                v={`${fmtPct1(accuracy.value)}${band(accuracy)}${onPanel(reading.panel)}`}
               />
             )}
             {(benchPass != null || bench != null) && (
@@ -82,11 +78,7 @@ export function SearchpointDrillIn({
                     ? `${fmtPct1(benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `${PLACEHOLDER} of ${bench?.n}`
-                      : `${fmtPct1(bench.level.value)} of ${bench.n}${
-                          bench.level.ci_lo != null && bench.level.ci_hi != null
-                            ? ` [${fmtPct1(bench.level.ci_lo)}, ${fmtPct1(bench.level.ci_hi)}]`
-                            : ""
-                        }`
+                      : `${fmtPct1(bench.level.value)}${band(bench.level)} of ${bench.n}`
                 }
               />
             )}
@@ -157,6 +149,17 @@ export function SearchpointDrillIn({
       {actions && <div className="inspector-actions">{actions}</div>}
     </>
   );
+}
+
+// The 95% band, blank where the served reading carries none.
+function band(v: { ci_lo: number | null; ci_hi: number | null }): string {
+  return v.ci_lo == null || v.ci_hi == null ? "" : ` [${fmtPct1(v.ci_lo)}, ${fmtPct1(v.ci_hi)}]`;
+}
+
+// "on 12 of 20" where the walk stopped short of its length.
+function onPanel({ scored, expected }: ArmReading["panel"]): string {
+  if (scored == null) return "";
+  return expected != null && expected !== scored ? ` on ${scored} of ${expected}` : ` on ${scored}`;
 }
 
 function Fact({ k, v, hint }: { k: string; v: React.ReactNode; hint?: string }) {
