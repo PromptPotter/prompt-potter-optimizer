@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -10,6 +10,7 @@ from pydantic import Field
 from promptpotter.application.cycle_reads import view_cycle
 from promptpotter.domain.cycle_paths import CyclePath
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.io import iter_files, read_bytes_optional, stat_optional
 from promptpotter.infrastructure.store.layout import CampaignLayout, campaign_root_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import iso_z
@@ -50,31 +51,25 @@ class FileContentResponse(StrictModel):
     )
 
 
-def _walk_files(root: Path) -> Iterator[Path]:
-    if not root.exists():
-        return
-    for entry in sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-        if entry.name.startswith(".") and entry.name != ".cache":
-            continue
-        if entry.is_dir():
-            yield from _walk_files(entry)
-        elif entry.is_file():
-            yield entry
+def _shown(relative: Path) -> bool:
+    """A dot-directory is the runtime's, except the cache an operator reads."""
+    return not any(part.startswith(".") and part != ".cache" for part in relative.parts)
 
 
-def _iso_mtime(p: Path) -> str:
-    return iso_z(datetime.fromtimestamp(p.stat().st_mtime, UTC))
+def _mtime(held: os.stat_result) -> str:
+    return iso_z(datetime.fromtimestamp(held.st_mtime, UTC))
+
+
+def _entry(path: str, scope: FileScope, held: os.stat_result) -> FileEntry:
+    return FileEntry(path=path, scope=scope, size=held.st_size, mtime=_mtime(held))
 
 
 def _resolve_safe_file(scope_root: Path, raw_path: str) -> Path:
     if not raw_path or ".." in raw_path or "\\" in raw_path or raw_path.startswith("/"):
         raise BadRequestError("Invalid path")
-    scope_root_resolved = scope_root.resolve()
     resolved = (scope_root / raw_path).resolve()
-    if not resolved.is_relative_to(scope_root_resolved):
+    if not resolved.is_relative_to(scope_root.resolve()):
         raise BadRequestError("Path escapes scope root")
-    if not resolved.is_file():
-        raise NotFoundError(f"File not found: {raw_path}")
     return resolved
 
 
@@ -96,29 +91,14 @@ def list_cycle_files(stores: Stores, path: CyclePath) -> FilesResponse:
     campaign_dir = campaign_root_dir_for(cycle.stores.base_dir, cycle.hop.campaign_id)
 
     entries: list[FileEntry] = []
-    for f in _walk_files(cycle.dir):
-        entries.append(
-            FileEntry(
-                path=f.relative_to(cycle.dir).as_posix(),
-                scope="cycle",
-                size=f.stat().st_size,
-                mtime=_iso_mtime(f),
-            )
-        )
+    for f, held in iter_files(cycle.dir):
+        if _shown(relative := f.relative_to(cycle.dir)):
+            entries.append(_entry(relative.as_posix(), "cycle", held))
         if len(entries) > _MAX_FILE_ENTRIES:
             raise ContentTooLargeError(f"Too many entries in cycle dir (>{_MAX_FILE_ENTRIES})")
-
     for f in CampaignLayout(campaign_dir).files():
-        if f.is_file():
-            entries.append(
-                FileEntry(
-                    path=f.name,
-                    scope="campaign",
-                    size=f.stat().st_size,
-                    mtime=_iso_mtime(f),
-                )
-            )
-
+        if (artifact := stat_optional(f)) is not None:
+            entries.append(_entry(f.name, "campaign", artifact))
     return FilesResponse(
         campaign_id=path[0].campaign_id, cycle_id=path[0].cycle_id, entries=entries
     )
@@ -138,26 +118,26 @@ def read_cycle_file(
         raise NotFoundError(f"Scope root not found: {path[0].campaign_id}/{path[0].cycle_id}")
 
     resolved = _resolve_safe_file(scope_root, file)
-    size = resolved.stat().st_size
-    classification = _classify_suffix(resolved.suffix.lower())
-    content_type: Literal["json", "markdown", "log", "text", "binary"] = classification or "text"
+    held = stat_optional(resolved)
+    if held is None:
+        raise NotFoundError(f"File not found: {file}")
+    raw = None if held.st_size > _MAX_PREVIEW_BYTES else read_bytes_optional(resolved)
+    content_type: Literal["json", "markdown", "log", "text", "binary"] = (
+        _classify_suffix(resolved.suffix.lower()) or "text"
+    )
     content: str | None = None
-    if size > _MAX_PREVIEW_BYTES:
-        content_type = "text"
-    elif classification is None or classification == "text":
+    if raw is not None:
         try:
-            content = resolved.read_text(encoding="utf-8")
+            content = raw.decode("utf-8")
         except UnicodeDecodeError:
             content_type = "binary"
-    else:
-        content = resolved.read_text(encoding="utf-8")
     return FileContentResponse(
         campaign_id=path[0].campaign_id,
         cycle_id=path[0].cycle_id,
         scope=scope,
         path=file,
-        size=size,
-        mtime=_iso_mtime(resolved),
+        size=held.st_size,
+        mtime=_mtime(held),
         content_type=content_type,
         content=content,
     )
