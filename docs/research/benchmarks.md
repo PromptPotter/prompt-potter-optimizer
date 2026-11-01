@@ -191,7 +191,7 @@ not naming which it rests on is not a result.
 **No query denominator.** Backend scoring is nearly all the wall clock and spend, so "per optimization
 query" prices the cheap part. Price a lift in wall clock and dollars. A head-to-head still holds total
 calls equal and reports calls, tokens and dollars (with the price table's date) beside wall clock, with
-a holdout never used for tuning ([`external-constraints.md`](external-constraints.md) § Ranked, item 4,
+a holdout never used for tuning ([`external-constraints.md`](external-constraints.md) § Ranked, item 3,
 and § Cost reporting).
 
 ### The winner's own number is biased upward
@@ -217,4 +217,4 @@ Named and corrected in *Correcting the Winner's Curse in Adaptive Benchmarking*
 ([arXiv:2605.05973](https://arxiv.org/abs/2605.05973)), assuming a fixed shortlist and smooth
 stabilized selection — which PoBB's adaptive stopping strains, so check their estimator against it
 before adopting. The same stopping is why ε carries no anytime-valid guarantee
-([`external-constraints.md`](external-constraints.md) § Ranked, item 3).
+([`external-constraints.md`](external-constraints.md) § Ranked, item 2).

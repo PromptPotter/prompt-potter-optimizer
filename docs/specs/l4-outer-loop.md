@@ -143,8 +143,8 @@ variance and power on demand.
 6. **Cross-sample terms, unbuilt:** area-under-lift-vs-budget (from `TokenUsageRecord.round`); `mean lift − λ·std` with
    `std` the cross-seed outcome dispersion, never `theta_se`, through the post-aggregate formula, never the election
    rank key; PoBB-decisive promotion over inner arms (`application/scoring/selection.py::elimination_p_best`).
-7. **Self-adopt mode (unbuilt, off by default)** — [SIFT](../research/landscape.md#sift-self-improvement-via-fast-tree-search-paper)
-   / DGM's loop with our statistics in its gates; prior art in
+7. **Self-adopt mode (unbuilt, off by default)** — [SIFT](../research/landscape.md#sift-self-improvement-via-fast-tree-search-paper)'s
+   loop with our statistics in its gates; prior art in
    [`../research/external-constraints.md`](../research/external-constraints.md) § L4. On a **decisive** outer election
    the winner's overrides become the outer campaign's `optimization.nodes` overlay and the outer cycle forks onto it.
    The overlay already binds per task (`application/runner/entry.py::run_optimization`), and cell identity keys on the

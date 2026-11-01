@@ -15,7 +15,7 @@ is [`benchmarks.md`](benchmarks.md)'s; tools set aside are [`landscape.md`](land
 
 **The gap is the third column.** Some rows race inside their own algorithm (CAPO), but no one serves
 a **stopping rule** across methods — and none, ours included, is anytime-valid under optional stopping
-([`external-constraints.md`](external-constraints.md) § Ranked, item 3, names the form that would be).
+([`external-constraints.md`](external-constraints.md) § Ranked, item 2, names the form that would be).
 Nobody serves a **comparability guard** — what must be held equal before two methods' numbers share a
 table. Hence a **bench**: a third party's search method plugs in as an optimizer manifest and is
 measured under one model, budget meter, grader, split and archive
@@ -38,7 +38,7 @@ instruction; [DSPy](https://github.com/stanfordnlp/dspy) (2023–) made the prom
 [GEPA](https://arxiv.org/abs/2507.19457) (ICLR 2026 Oral) is the common reference point — though CAPO
 outscored it on both tasks of the promptolution paper's head-to-head. Its gains shrink at matched
 rollout budgets ([LEVI](https://arxiv.org/abs/2605.09764);
-[`external-constraints.md`](external-constraints.md) § Ranked, item 4), while against weight updates
+[`external-constraints.md`](external-constraints.md) § Ranked, item 3), while against weight updates
 the economics run its way and SFT and GEPA compound — prompt search comes *before* fine-tuning, not
 instead of it (that page's § Direction and § Cost reporting carry the numbers).
 
@@ -107,10 +107,8 @@ comparison affordable at all.
 
 ## Recursive self-improvement — the adjacent axis
 
-An optimizer pointed at its own optimizer prompts is the same mechanism one level up, and a live
-research axis: Sakana's [Darwin Gödel Machine](https://arxiv.org/abs/2505.22954) rewrites a coding
-agent's source under evolutionary search; NVIDIA's [SoL-Pi](https://nvlabs.github.io/SoL-Pi/) a
-coding-agent harness under a held-out gate ([`landscape.md`](landscape.md) § SoL-Pi); Sakana's
+A live research axis: NVIDIA's [SoL-Pi](https://nvlabs.github.io/SoL-Pi/) rewrites a coding-agent
+harness under a held-out gate ([`landscape.md`](landscape.md) § SoL-Pi); Sakana's
 [RSI Lab](https://sakana.ai/rsi-lab/); a [reading list](https://github.com/leezythu/Awesome-Harness-Self-Improvement).
 PromptPotter already recurses — an outer cycle whose backend is an inner cycle
 ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)) — where the optimizer *is* the instrument,
@@ -126,8 +124,7 @@ elimination, a cost-per-fitness model or a subset-invariant ability scale — th
 and pipeline-parameter search, is the distinguishing claim.
 
 **Precedent and measured danger** are [`external-constraints.md`](external-constraints.md) § Ranked,
-items 1–2, and § L4's; cite STOP, Gödel Agent, ADAS, the Huxley-Gödel Machine, ShinkaEvolve, SICA and
-the tampering audits from there.
+item 1, and § L4's; cite STOP, ADAS, ShinkaEvolve, SICA and the tampering audits from there.
 
 ## Test-time compute, moved out of the request
 

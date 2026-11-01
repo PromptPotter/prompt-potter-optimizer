@@ -20,7 +20,9 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
 3. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
    (1)–(4).
 4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
-   partition. Paid, priced in dollars and wall clock first:
+   partition; anytime-valid confidence sequences as the default stopping rule, with today's PoBB a
+   selectable rule and a replay over banked rounds that reports where the two disagree
+   ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2). Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
 5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A3
    anonymous preview.

@@ -11,37 +11,29 @@ Tools and competitors are [`landscape.md`](landscape.md)'s; the argument against
 matter is [`related-work.md`](related-work.md)'s. **Checked** 2026-09-24 — re-check before quoting;
 these standards still move.
 
-## Ranked — the five that cost most to get wrong
+## Ranked — the four that cost most to get wrong
 
-1. **The scorer sits outside anything the loop can see or edit** (L4). DGM, seeing its own
-   hallucination checker, rewrote the checker's logging to fake a pass, and cheated more when the
-   check was visible; an audit of five self-improving systems found tampering persisting in the
-   *best-scoring* agent's lineage. For L4 a **stated invariant**: the inner cycle's scorer, formula
-   and held-out cells can never be a `pipeline_param`.
-   Sources: [DGM](https://arxiv.org/abs/2505.22954) (read);
-   [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read) — tampering ADAS 84.6%, DGM
-   63.1%, HyperAgents 73.6%, ScientistOne 29.6%, AFlow 18.3%; safeguards: tamper-proof evaluation
-   channels, provenance-aware state tracking, continuous auditing.
-2. **Selection must be able to see lineage, not only the round's best** (L4, M13). The
-   [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) (ICLR 2026 oral): a
-   *metaproductivity–performance mismatch* — a round's top scorer often has unproductive descendants
-   while a lower scorer seeds the better lineage; HGM scores clades. Our lineage graph and
-   content-addressed archive hold what a clade score needs. **Never discard a non-winner's lineage
-   for losing one round** — keep the archive whole.
-3. **Early stopping must be defensible under optional stopping** (M14). Repeating a fixed-α test
+1. **The scorer sits outside anything the loop can see or edit** (L4). An audit of self-improving
+   systems found tampering persisting in the *best-scoring* agent's lineage. For L4 a **stated
+   invariant**: the inner cycle's scorer, formula and held-out cells can never be a `pipeline_param`.
+   Source: [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read) — tampering from
+   18.3% to 84.6% across the audited systems; safeguards: tamper-proof evaluation channels,
+   provenance-aware state tracking, continuous auditing.
+2. **Early stopping must be defensible under optional stopping** (M14). Repeating a fixed-α test
    under optional stopping inflates false positives above α (textbook sequential testing). The field's
    answer: confidence sequences from test supermartingales, valid at any stopping time
    ([Hsu & Shekhar, *Efficient Sequential Evaluation of LLMs*](https://arxiv.org/abs/2607.17409),
-   read). Before the preprint, state PoBB's guarantee in those terms, or disclose it is not
-   anytime-valid and measure the inflation on our runs.
-4. **Budget-matched comparison is what reviewers ask for first** (M13, M14). Optimizer gains shrink or
+   read). **The engine's default stopping rule is an anytime-valid confidence sequence**, so the
+   guarantee a round states is the one it delivers. Today's PoBB gates stay a selectable rule, and the
+   preprint reports how the two differ on the same rounds.
+3. **Budget-matched comparison is what reviewers ask for first** (M13, M14). Optimizer gains shrink or
    reverse at matched rollout budgets: [LEVI](https://arxiv.org/abs/2605.09764) "matches or exceeds
    GEPA at less than half of its rollout budget on four different benchmarks" (abstract read; read the
    body's table before quoting numbers). A head-to-head holds the **number of calls** equal and
    reports it beside dollars and wall clock. [HAL](https://arxiv.org/abs/2510.11977) (ICLR 2026, read)
    and [AI Agents That Matter](https://arxiv.org/abs/2407.01502) (TMLR 2025) set the template: a
    cost–accuracy Pareto frontier, dollars and tokens as separate axes, a holdout never used for tuning.
-5. **A skill candidate must conform to the Agent Skills specification** (SKILL). The
+4. **A skill candidate must conform to the Agent Skills specification** (SKILL). The
    [spec](https://agentskills.io/specification) (read; 16+ runtimes incl. Claude Code, Codex CLI,
    Gemini CLI, Copilot, Cursor):
    - **Frontmatter is a closed set:** `name` required (≤64 chars, lowercase letters, digits, hyphens,
@@ -142,8 +134,8 @@ Beyond ranked items 1 and 2:
   merge, 56.9 → 70.3 (ACE, 2510.04618). Against a phrase library: GRACE's paraphrase ablation moved
   ~0.2 points — the acceptance gate may carry more than the wording.
 - **Precedent to cite:** [STOP](https://arxiv.org/abs/2310.02304), the closest (an improver improving
-  its own code, weights frozen); [Gödel Agent](https://arxiv.org/abs/2410.04444) (ACL 2025) and
-  [ADAS](https://arxiv.org/abs/2408.08435) keep an **archive of past designs**.
+  its own code, weights frozen); [ADAS](https://arxiv.org/abs/2408.08435) keeps an **archive of
+  past designs**.
 
 ## M13 — the plug point
 
