@@ -9,6 +9,7 @@ import {
   campaigns,
   command,
   dashboard,
+  DASHBOARD_VIEWS,
   drafts,
   passConsent,
   reportTape,
@@ -18,6 +19,7 @@ import {
   type Campaign,
   type Draft,
 } from "../harness";
+import { CAP_AXIS_INFO, SETUP_STEP_TITLES } from "@/lib/api/types.generated";
 import type { Page } from "@playwright/test";
 import type { RunLimits } from "@/lib/api/types.generated";
 
@@ -134,8 +136,8 @@ test.describe("a campaign, end to end", () => {
     await expect(start).toBeEnabled({ timeout: 120_000 });
 
     // After the enabled wait, so a missing field is a failure, not a race; `summary` because `getByText` also hits `<details>`.
-    await page.locator("summary", { hasText: "Run bounds" }).click();
-    await page.getByRole("spinbutton", { name: "Spend cap in USD" }).fill(String(BUDGET_USD));
+    await page.locator("summary", { hasText: SETUP_STEP_TITLES.run }).click();
+    await page.getByRole("spinbutton", { name: CAP_AXIS_INFO.usd.title }).fill(String(BUDGET_USD));
 
     await start.click();
 
@@ -155,7 +157,7 @@ test.describe("a campaign, end to end", () => {
       })
       .toBeTruthy();
 
-    await open(page, `${made.addr}/dashboard`);
+    await open(page, `${made.addr}${DASHBOARD_VIEWS}`);
     await ready(page);
     await expect(page.getByRole("img", { name: "Pipeline graph" })).toBeVisible();
   });
@@ -166,7 +168,7 @@ test.describe("a campaign, end to end", () => {
   }) => {
     test.setTimeout(1_500_000);
 
-    await open(page, `${made!.addr}/dashboard`);
+    await open(page, `${made!.addr}${DASHBOARD_VIEWS}`);
     await passConsent(page);
     await ready(page);
 
@@ -229,7 +231,7 @@ test.describe("a campaign, end to end", () => {
     expect(typeof usd, "the run has no USD cap at all").toBe("number");
     expect(usd).toBeLessThanOrEqual(BUDGET_USD);
 
-    await open(page, `${made!.addr}/dashboard`);
+    await open(page, `${made!.addr}${DASHBOARD_VIEWS}`);
     await passConsent(page);
     await ready(page);
   });

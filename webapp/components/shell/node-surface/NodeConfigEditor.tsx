@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import type { CapabilityMenu, DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
 import type { ParamIntent } from "@/lib/api/types";
-import { CommitInput, ValueList } from "@/components/ui";
+import { CommitInput, FailureLine, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
@@ -220,12 +220,20 @@ function EmptyConfig({
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
   const declared = node !== undefined ? scoped : Object.values(schema ?? {}).flat();
   const subject = node !== undefined ? "node" : "pipeline";
+  if (typeof status === "object") {
+    return (
+      <div className="config-editor">
+        <FailureLine
+          failure={status}
+          lead="The campaign's pipeline could not be read, so what this node runs is unknown — not empty."
+        />
+      </div>
+    );
+  }
   const said =
     status === "loading"
       ? "Resolving what this campaign runs…"
-      : status === "error"
-        ? "The campaign's pipeline could not be read, so what this node runs is unknown — not empty."
-        : status === "unbound"
+      : status === "unbound"
           ? "No campaign bound, so there is no resolved pipeline to read this node from."
           : node !== undefined && schema !== null && scoped === undefined
             ? `The served pipeline declares no node called ${node}.`

@@ -2,7 +2,7 @@
 // Never retries: each send mints a fresh idempotency key, so a retry is a second command.
 
 import { useRef, useState } from "react";
-import { ApiError, failureKind, operatorMessage, type FailureKind } from "@/lib/api";
+import { ApiError, commandMessage, failureKind, type FailureKind } from "@/lib/api";
 import { useAuthGate } from "@/lib/state/auth";
 import { reportIncident } from "@/lib/diagnostics";
 import { invalidateReads } from "@/lib/read-cache";
@@ -34,7 +34,7 @@ export function useCommand<V extends string>(
   surface: string,
   opts: {
     describe?: (f: CommandFailure, verb: V) => string | null;
-    /** `false` for a write no poll reads back (preferences, consent, logout). */
+    /** `false` for a write no read reads back (preferences, consent, logout); else every mounted read re-asks. */
     revalidate?: boolean;
     /** The subject's identity; a change clears `failure`. */
     scope?: string | null;
@@ -74,7 +74,7 @@ export function useCommand<V extends string>(
       const api = e instanceof ApiError ? e : null;
       const f: CommandFailure = {
         kind,
-        message: operatorMessage(e, kind),
+        message: commandMessage(e, kind),
         errorId: api?.errorId ?? null,
         code: api?.code ?? null,
         details: api?.details ?? null,

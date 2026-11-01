@@ -21,7 +21,10 @@
   padding: var(--space-6) var(--space-10);
   background: var(--color-background-secondary);
   border-bottom: 1px solid var(--color-border);
-  min-width: max-content;
+  /* The rows' size, so a `ch` track resolves to the same width in the header as in every row. */
+  font-size: var(--text-sm);
+  /* The template's floors, never its content: an `fr` track shares what the box has left. */
+  min-width: min-content;
 }
 
 .th {
@@ -37,7 +40,7 @@
 
 .body {
   position: relative;
-  min-width: max-content;
+  min-width: min-content;
 }
 
 .row,

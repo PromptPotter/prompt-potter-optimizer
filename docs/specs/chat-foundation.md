@@ -4,6 +4,8 @@
 
 **The copilot cannot mutate state directly.** A button click *is* the action, and each button is a thin trigger for a control-plane command that already exists.
 
+**The pipeline hero (`ChatPane.tsx` `.wf-hero` → `PipelineStack`, with its node detail) mounts over a run only** — over a check-in, its steps draw the draft's pipeline and host the one node detail.
+
 ## Arc 2 — the conversational endpoint, open
 
 The user ↔ assistant round-trip does not exist; chat input is disabled outside ingest.
@@ -20,5 +22,5 @@ The user ↔ assistant round-trip does not exist; chat input is disabled outside
 
 ## Open
 
-- **The empty thread is a generic chat:** wordmark, composer, a row of starter chips (HuggingChat's new-chat screen is the reference). The pipeline hero (`ChatPane.tsx` `.wf-hero` → `PipelineStack`) mounts only once a dataset is bound, and then compact.
+- **The empty thread is a generic chat:** wordmark, composer, a row of starter chips (HuggingChat's new-chat screen is the reference). The run's pipeline hero renders compact.
 - **Assistant tool-use (deferred):** Extended thinking · Web search · Code execution, MCP a planned fourth. Each renders as a generic **step**; only a richer per-tool field set needs a new `ProjectionKind`, declared on its record model first.

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
+from promptpotter.domain.said import Tone
 from promptpotter.infrastructure.identity import blocklist, default_claim
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
@@ -77,6 +78,45 @@ class Arrival(NamedTuple):
     user: User
     # This call opened the account: the one moment there is somebody new to announce.
     opened: bool
+
+
+SignInRefusal = Literal[
+    "state_invalid_or_expired",
+    "code_exchange_failed",
+    "provider_returned_error",
+    "callback_missing_params",
+    "signin_unavailable",
+    "accounts_full",
+]
+
+
+class SignInRefusalInfo(NamedTuple):
+    label: str
+    tone: Tone
+
+
+SIGN_IN_REFUSAL_INFO: dict[SignInRefusal, SignInRefusalInfo] = {
+    "state_invalid_or_expired": SignInRefusalInfo(
+        "That sign-in took too long and expired. Try Continue with Google again.", "warn"
+    ),
+    "code_exchange_failed": SignInRefusalInfo(
+        "We couldn't verify your sign-in with Google. Try again.", "warn"
+    ),
+    "provider_returned_error": SignInRefusalInfo(
+        "Google sign-in was cancelled. Try again when you're ready.", "attention"
+    ),
+    "callback_missing_params": SignInRefusalInfo(
+        "That sign-in link was incomplete. Try again.", "warn"
+    ),
+    "signin_unavailable": SignInRefusalInfo(
+        "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.", "danger"
+    ),
+    "accounts_full": SignInRefusalInfo(
+        "This server has reached its account limit, so it can't open a new account. "
+        "If you already have one, sign in with it.",
+        "warn",
+    ),
+}
 
 
 class AccountCeilingError(PotterError):

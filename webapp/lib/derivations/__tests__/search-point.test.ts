@@ -4,7 +4,6 @@ import type { ServedDashboard } from "@/lib/api";
 import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
-  liveObserveConfig,
   observeOptions,
   originPoint,
   resolveObserveSubject,
@@ -47,31 +46,6 @@ const liveDash = (candidates: (Partial<LiveCandidate> & { label: string })[]): S
       candidates: candidates.map(({ label, ...over }) => live(1, label, over)),
     }),
   });
-
-describe("liveObserveConfig", () => {
-  it("returns null with no live candidates", () => {
-    expect(liveObserveConfig(null)).toBeNull();
-    expect(liveObserveConfig(liveDash([]))).toBeNull();
-  });
-
-  it("picks the latest-seeded candidate — the last served row — and its resolved config", () => {
-    const r = liveObserveConfig(
-      liveDash([
-        { label: "C1.1", prompts: p("a"), resolved_params: { llm: { model: "x" } } },
-        { label: "C1.2", prompts: p("b") },
-        { label: "C1.3", prompts: p("c"), resolved_params: { llm: { model: "z" } } },
-      ]),
-    );
-    expect(r?.label).toBe("live — C1.3");
-    expect(r?.prompts).toEqual(p("c"));
-    expect(r?.config).toEqual({ llm: { model: "z" } });
-  });
-
-  it("defaults config to {} when the candidate carries none yet", () => {
-    const r = liveObserveConfig(liveDash([{ label: "C1.1", prompts: p("a") }]));
-    expect(r?.config).toEqual({});
-  });
-});
 
 describe("liveCandidateObserveConfig", () => {
   const snap = liveDash([

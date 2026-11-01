@@ -97,7 +97,7 @@
   grid-row: 1;
   color: var(--color-text-secondary);
 }
-.cmp-channel-cost {
+.cmp-channel-headline {
   grid-column: 4;
   grid-row: 1;
   padding-top: var(--space-14);
@@ -140,59 +140,7 @@
   padding-top: var(--space-8);
   border-top: 1px solid var(--color-border);
 }
-.cmp-cols {
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(var(--cmp-rows), auto);
-  grid-template-columns: max-content;
-  grid-auto-columns: minmax(14rem, 1fr);
-  overflow-x: auto;
-}
-.cmp-col {
-  display: contents;
-}
-.cmp-cell {
-  min-width: 0;
-  padding: var(--space-8) var(--space-16);
-  border-top: 1px solid var(--color-border);
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-}
-.cmp-cell.is-head {
-  border-top: 0;
-  padding-bottom: var(--space-12);
-}
-.cmp-cell.is-per_usd,
-.cmp-cell.is-spent,
-.cmp-cell.is-worked {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-.cmp-row-label {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  padding-left: 0;
-  background: var(--color-background-primary);
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.cmp-col-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-8);
-}
-.cmp-col-head .summary-block {
-  flex: 1;
-}
-.cmp-col-optimizer {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--color-accent);
-}
-.cmp-col-reads {
+.cmp-channel-line {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -252,14 +200,6 @@
   letter-spacing: normal;
   color: var(--color-text-secondary);
 }
-.cmp-col-panels {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-.cmp-col-panels:empty {
-  display: none;
-}
 @media (max-width: 640px) {
   .cmp-channel-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -271,7 +211,7 @@
     grid-column: 3;
   }
   .cmp-channel-lead,
-  .cmp-channel-cost {
+  .cmp-channel-headline {
     grid-column: 1 / -1;
     grid-row: auto;
     padding-top: 0;
@@ -284,14 +224,17 @@
   margin: 0;
   font-size: var(--text-xs);
 }
+/* `min-width: 0` down the chain, so a long spend band ellipsizes inside a phone card. */
 .cmp-channel-facts div {
   display: flex;
   gap: var(--space-4);
+  min-width: 0;
 }
 .cmp-channel-facts dt {
   color: var(--color-text-secondary);
 }
 .cmp-channel-facts dd {
+  min-width: 0;
   margin: 0;
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
@@ -523,8 +466,7 @@
   text-decoration: line-through;
   text-decoration-thickness: 1px;
 }
-.cmp-row-muted .cmp-tag,
-.cmp-row-muted .ov-axis {
+.cmp-row-muted .cmp-tag {
   text-decoration: none;
 }
 .cmp-row-nested {
@@ -551,15 +493,6 @@
 }
 .cmp-coverage-cell.is-scored {
   background: var(--color-background-secondary);
-}
-
-/* Undoes `compare-evidence.css`'s last-row emphasis: rows here are campaigns in run order, not a winner. */
-.cmp-forest .ov-row:last-child .ov-cell-label,
-.cmp-forest .ov-row:last-child .ov-cell-val {
-  font-weight: inherit;
-}
-.cmp-forest .ov-row:last-child .ov-cell-label {
-  color: var(--color-text-secondary);
 }
 
 .cmp-expr {

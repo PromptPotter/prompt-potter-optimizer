@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
+from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.application.views.render.primitives import (
     fmt_ci,
     fmt_fitness,
@@ -18,8 +19,9 @@ from promptpotter.domain.bench import (
     BenchScore,
 )
 from promptpotter.domain.paired_reading import ArmKey, LiftEstimate
-from promptpotter.domain.phases import StopReason, stop_next_step
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.run_standing import CEILING_FRACTION, RoundClocks, round_clocks
 from promptpotter.domain.spend import (
@@ -108,21 +110,22 @@ def _halt_info(index: CycleIndex, rounds: list[RoundResult]) -> dict[str, str] |
     """Gated on the cycle's TERMINAL state, never on a critical round L2 then healed away."""
     terminated = "yes" if index.stop_reason is StopReason.OPTIMIZER_ABORT else ""
     last_health: DegradationHealth | None = None
-    last_critical: DegradationHealth | None = None
+    last_critical: RoundResult | None = None
     for r in rounds:
         if r.health.grade != "unmeasured":
             last_health = r.health
             if r.health.grade == "critical":
-                last_critical = r.health
+                last_critical = r
     ended_critical = last_health is not None and last_health.grade == "critical"
     if not ended_critical and not terminated:
         return None
     if last_critical is not None:
-        tag = last_critical.cause or "critical"
+        health = last_critical.health
+        reading = health_reading(last_critical.round, health)
         return {
-            "tag": tag,
-            "node": last_critical.dominant_node or "",
-            "action": (last_critical.suggested_action or "").strip(),
+            "tag": health.cause or "critical",
+            "node": health.dominant_node or "",
+            "action": "" if reading is None else reading.advice,
             "terminated": terminated,
         }
     return {"tag": StopReason.OPTIMIZER_ABORT, "node": "", "action": "", "terminated": terminated}
@@ -152,9 +155,8 @@ def _render_header(
             parts.append(f"> {halt['action']}")
         parts.append("")
     # Beside the halt block, not inside it: the endings most needing a next step are ones it calls clean.
-    if next_step := stop_next_step(index.stop_reason):
-        parts.append(f"> **NEXT** — {next_step}")
-        parts.append("")
+    if index.stop_reason is not None and (said := stop_next_lines(index.stop_reason)):
+        parts += ["\n>\n".join(f"> {line}" for line in said), ""]
     if final and final.prompt_hashes:
         parts.append("**Prompt hashes**")
         parts.append("")

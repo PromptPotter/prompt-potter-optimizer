@@ -1,26 +1,20 @@
 import type { HeadToHead } from "@/lib/api";
 import { GuardBadge } from "./GuardBadge";
-import { cx } from "@/lib/cx";
-import {
-  sideTone,
-  fmtInterval,
-  fmtPValue,
-  fmtUnit,
-  PLACEHOLDER,
-  verdictTone,
-} from "@/lib/format";
-import { DataTable, type Column } from "@/components/ui";
+import { sideTone, fmtInterval, fmtPValue, fmtUnit, PLACEHOLDER } from "@/lib/format";
+import { DataTable, Said, type Column } from "@/components/ui";
 
 export function HeadToHeadVerdict({ h2h, scorerId }: { h2h: HeadToHead; scorerId: string }) {
+  const title = `Bench head-to-head${h2h.guard.head_to_head_id ? ` ${h2h.guard.head_to_head_id}` : ""}`;
   return (
     <div className="cmp-verdict">
-      <p className={cx("cmp-verdict-line", verdictTone(h2h.verdict))}>
-        <strong>
-          Bench head-to-head{h2h.guard.head_to_head_id ? ` ${h2h.guard.head_to_head_id}` : ""}
-        </strong>
-        {" — "}
-        {h2h.verdict_line}
-      </p>
+      {/* An unknown verdict warns like a refused one. */}
+      {h2h.verdict === true ? (
+        <p className="cmp-verdict-line note-info">
+          <strong>{title}</strong> — {h2h.verdict_line}
+        </p>
+      ) : (
+        <Said tone="warn" label={title} sub={`— ${h2h.verdict_line}`} className="cmp-verdict-line" />
+      )}
       <p className="cmp-verdict-meta">
         <span className="cmp-channel-badges" role="group" aria-label="Comparability guard">
           <GuardBadge guard={h2h.guard} />

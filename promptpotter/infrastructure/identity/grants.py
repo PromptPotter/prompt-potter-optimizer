@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated
 
-from pydantic import Field, ValidationError, field_serializer
+from pydantic import ValidationError, field_serializer
 
-from promptpotter.domain.strict_model import FrozenModel, WireFloat
+from promptpotter.domain.strict_model import FrozenModel, NonNegativeWireFloat
 from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import StoredConfigInvalidError, validation_reason
@@ -21,7 +20,7 @@ class PrincipalGrant(FrozenModel):
 
     delegated_by: str
     capabilities: frozenset[str]
-    spend_ceiling_usd: Annotated[WireFloat, Field(ge=0)] | None
+    spend_ceiling_usd: NonNegativeWireFloat | None
     note: str
 
     @property

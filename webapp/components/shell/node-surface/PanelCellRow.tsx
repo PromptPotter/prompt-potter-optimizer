@@ -1,6 +1,6 @@
 "use client";
 
-import { panelCellLabel, phaseIs, phaseWalks, runWord } from "@/lib/derivations";
+import { figureOf, panelCellLabel, phaseIs, phaseWalks } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import type { HierarchyCourse } from "@/lib/api";
 import { PairedLift } from "@/components/shell/PairedLift";
@@ -77,7 +77,7 @@ export function PanelCellRow({
       </span>
       <span className="pcr-meta">
         {phaseIs(state.status.run_phase, "settled") && (
-          <span className="pcr-status">{runWord(state.status)}</span>
+          <span className="pcr-status">{figureOf(run, "state")?.value}</span>
         )}
         <span className="pcr-score">
           {facts.standing ? <PairedLift reading={facts.standing.vs_origin} /> : PLACEHOLDER}

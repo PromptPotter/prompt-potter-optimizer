@@ -4,7 +4,7 @@ import { postCommand } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
-import { Button, FailureLine, SegmentedControl, type Segment } from "@/components/ui";
+import { Button, FailureLine, Said, SegmentedControl, type Segment } from "@/components/ui";
 
 type Mode = "compact" | "restore" | "purge-cold";
 
@@ -97,11 +97,15 @@ export function ArchiveCompactionControl() {
       <FailureLine failure={commit.failure ?? dry.failure} />
 
       {report !== null &&
-        report.notes.map((note) => (
-          <p key={note} className={blocked ? "note-warn" : "account-muted"}>
-            {note}
-          </p>
-        ))}
+        report.notes.map((note) =>
+          blocked ? (
+            <Said key={note} tone="warn" label={note} />
+          ) : (
+            <p key={note} className="account-muted">
+              {note}
+            </p>
+          ),
+        )}
 
       {report && !blocked && (
         <dl className="wsmaint-report">

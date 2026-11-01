@@ -10,24 +10,10 @@
   opacity: 0.6;
 }
 
-.ms-toolbar {
-  overflow-x: auto;
-  padding-bottom: var(--space-4);
-}
-
 .ms-summary {
   margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
-}
-
-.ms-check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
 }
 
 .ms-group-line {
@@ -56,8 +42,7 @@
   white-space: nowrap;
 }
 
-.ms-dim,
-.cell-dim {
+.ms-dim {
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
@@ -67,8 +52,13 @@
   font-weight: 600;
 }
 
-.ms-fit,
-.cell-fit {
+.ms-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.ms-fit {
   display: inline-block;
   min-width: 3.2em;
   padding: 0 var(--space-4);
@@ -77,30 +67,25 @@
   font-variant-numeric: tabular-nums;
 }
 
-.ms-status,
-.cell-status {
+.ms-status {
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
 }
 
-.ms-status.is-hit,
-.cell-status.is-hit {
+.ms-status.is-hit {
   color: var(--color-success);
 }
 
-.ms-status.is-miss,
-.cell-status.is-miss {
+.ms-status.is-miss {
   color: var(--color-danger);
 }
 
-.ms-status.is-err,
-.cell-status.is-err {
+.ms-status.is-err {
   color: var(--color-warn);
 }
 
-.ms-status.is-unsc,
-.cell-status.is-unsc {
+.ms-status.is-unsc {
   color: var(--color-text-secondary);
 }
 

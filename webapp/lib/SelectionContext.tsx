@@ -3,19 +3,10 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import type { ObserveState } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
 
-// A node id alone is ambiguous: `promptpotter-self`'s TARGET pipeline reuses the OPTIMIZER's node ids.
-export type NodeScope = "optimizer" | "target";
-
-export interface SelectedNode {
-  id: string;
-  scope: NodeScope;
-}
-
 interface Selection {
   candidate: SelectedCandidate | null;
   // null follows live.
   round: number | null;
-  node: SelectedNode | null;
   // `null` is no pick (the served set); `[]` is the picker open with nothing selected.
   sampleSet: number[] | null;
   // `null` follows `resolveObserveSubject`'s own rule.
@@ -23,7 +14,6 @@ interface Selection {
   setObserve: (s: ObserveState) => void;
   setSelectionForCandidate: (c: SelectedCandidate | null) => void;
   setSelectionForRound: (r: number | null) => void;
-  setSelectionForNode: (n: SelectedNode | null) => void;
   setSelectionForSampleSet: (ids: number[] | null) => void;
 }
 
@@ -38,7 +28,6 @@ export function SelectionProvider({
 }) {
   const [candidate, setCandidate] = useState<SelectedCandidate | null>(null);
   const [round, setRound] = useState<number | null>(null);
-  const [node, setNode] = useState<SelectedNode | null>(null);
   const [sampleSet, setSampleSet] = useState<number[] | null>(null);
   const [observe, setObserve] = useState<ObserveState | null>(null);
   const [prevCycle, setPrevCycle] = useState(cycleId);
@@ -48,7 +37,6 @@ export function SelectionProvider({
     const kept = candidate && candidate.cycle_id === cycleId ? candidate : null;
     setCandidate(kept);
     setRound(kept ? kept.round : null);
-    setNode(null);
     setSampleSet(null);
     setObserve(null);
   }
@@ -70,10 +58,6 @@ export function SelectionProvider({
     }
   }, []);
 
-  const setSelectionForNode = useCallback((n: SelectedNode | null) => {
-    setNode(n);
-  }, []);
-
   const setSelectionForSampleSet = useCallback((ids: number[] | null) => {
     setSampleSet(ids);
   }, []);
@@ -82,24 +66,20 @@ export function SelectionProvider({
     () => ({
       candidate,
       round,
-      node,
       sampleSet,
       observe,
       setObserve,
       setSelectionForCandidate,
       setSelectionForRound,
-      setSelectionForNode,
       setSelectionForSampleSet,
     }),
     [
       candidate,
       round,
-      node,
       sampleSet,
       observe,
       setSelectionForCandidate,
       setSelectionForRound,
-      setSelectionForNode,
       setSelectionForSampleSet,
     ],
   );

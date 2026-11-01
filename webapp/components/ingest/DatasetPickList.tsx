@@ -6,6 +6,7 @@ import {
   type OriginEntry,
   type UnstartedCampaign,
 } from "@/lib/api";
+import { START_BLOCK_WORDS } from "@/lib/api/types.generated";
 import { fmtAgo, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
 import type { CollectionState } from "@/lib/hooks/useCollection";
@@ -141,7 +142,7 @@ export function DatasetPickList({
                 {d.start_block ? (
                   <p className="ingest-pick-why">
                     {d.summary ? `${d.summary} ` : ""}
-                    {d.start_block.explanation}
+                    {START_BLOCK_WORDS[d.start_block]}
                   </p>
                 ) : null}
               </li>

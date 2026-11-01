@@ -114,7 +114,7 @@ derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.m
   their access. **A pool is drawn where it lands, under the arms it feeds**: `PoolRow.fills` names each
   candidate part its entries in play reach (a prompt field the target opens, or the shots), and a pool
   no member draws serves no fill and no pack, so it renders nothing; `PoolRow.packs` is the block pool's
-  pack picker. An initializer's knobs are its row, never a `KnobRow`, and `main` naming one is refused. **A pool picks by path**: each `PoolRow.offered` path (`*`, a block's
+  pack picker. An initializer's knobs are its row, never a `NodeKnobs` entry, and `main` naming one is refused. **A pool picks by path**: each `PoolRow.offered` path (`*`, a block's
   part, that part's run from one source, an entry id, each with what it reads as and the entries it keeps) is one chip, lit while `active`
   holds it; the last lit chip stays lit. The offer is the initializer's `held`, the set its refusal checks,
   over the split the Start will draw (`pipeline_resolve.py::_draft_mint`), so `demo_pool` offers its keys

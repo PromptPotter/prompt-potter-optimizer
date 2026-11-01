@@ -697,6 +697,11 @@ def degradation_health(
         samples=samples,
         structural_count=0,
         transient_count=0,
+        hole_count=0,
+        no_result_count=no_result,
+        not_attempted=0,
+        unscored=0,
+        output_ceiling_count=0,
         degraded_rate=degraded_rate,
         consecutive_degraded_rounds=0,
         prior_clean_rounds=0,
@@ -948,7 +953,13 @@ def bench_line(
         "spend": None,
     } | line
     return BenchLine(
-        run=LineRun(selecting=selecting, ending=ending, selection=selection, rounds_closed=1),
+        run=LineRun(
+            selecting=selecting,
+            pass_open=False,
+            ending=ending,
+            selection=selection,
+            rounds_closed=1,
+        ),
         **fields,
     )
 
@@ -1038,7 +1049,13 @@ def cycle_result(
             held_by=None,
             origin=None,
             selected=None,
-            run=LineRun(selecting=False, ending=stop_reason, selection=None, rounds_closed=0),
+            run=LineRun(
+                selecting=False,
+                pass_open=False,
+                ending=stop_reason,
+                selection=None,
+                rounds_closed=0,
+            ),
         ),
         origin=None,
         selected=None,

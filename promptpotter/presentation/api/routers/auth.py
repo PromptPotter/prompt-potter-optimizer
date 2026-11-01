@@ -20,12 +20,15 @@ from promptpotter.application.jobs.account_activity import (
 )
 from promptpotter.application.jobs.coupon import (
     AccountKey,
-    CouponStatus,
-    coupon_status,
     put_account_key,
     remove_account_key,
 )
-from promptpotter.application.jobs.quota import QuotaStatus, quota_status
+from promptpotter.application.jobs.quota import (
+    CouponStatus,
+    QuotaStatus,
+    coupon_status,
+    quota_status,
+)
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import TERMS_VERSION, settings
 from promptpotter.domain.run_records import Device, device_of
@@ -166,7 +169,7 @@ def _flow_nonce(request: Request, provider: str, state: str) -> str | None:
     return nonce if hmac.compare_digest(flow_state.encode(), state.encode()) else None
 
 
-def _redirect_with_error(code: str) -> RedirectResponse:
+def _redirect_with_error(code: account.SignInRefusal) -> RedirectResponse:
     """The callback is browser-navigated: raising would dump raw JSON into the tab.
 
     A CODE and nothing else: the access log keeps this URL, so it never carries who tried.

@@ -686,6 +686,25 @@ def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> Stric
     return model.model_validate({k: v for k, v in config.items() if k in model.model_fields})
 
 
+def _carrying_knobs(schema: PipelineSchema, declared: PipelineManifest) -> PipelineSchema:
+    table = optimizers.NODE_MEMBERS.table
+    nodes: list[PipelineNode] = []
+    for node in schema.declared_nodes:
+        model = table[node.name].knobs if node.name in table else None
+        if model is None or not model.model_fields:
+            nodes.append(node)
+            continue
+        dumped = _knobs(node.name, node.kind, declared.nodes[node.name].config).model_dump(
+            mode="json"
+        )
+        knob_schema = model.model_json_schema()
+        knob_schema["properties"] = {
+            key: {**prop, "default": dumped[key]} for key, prop in knob_schema["properties"].items()
+        }
+        nodes.append(node.model_copy(update={"knob_schema": knob_schema}))
+    return schema.model_copy(update={"declared_nodes": nodes})
+
+
 def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     try:
         shipped = optimizers.MANIFESTS.get(name).directory
@@ -776,7 +795,7 @@ def _select(
     checkin = {n.name for n in checkin_manifest().schema.declared_nodes}
     if taken := sorted(set(manifest.nodes) & checkin):
         raise ValueError(f"optimizer {name!r} declares {taken}, which the bench's check-in owns.")
-    schema = _parse(manifest.laid_over(overlay), schemas)
+    schema = _carrying_knobs(_parse(manifest.laid_over(overlay), schemas), manifest)
     selected = SelectedOptimizer(
         name=name,
         manifest=manifest,

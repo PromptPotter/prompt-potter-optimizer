@@ -1,15 +1,10 @@
 "use client";
-import type { ReactNode } from "react";
 import type { ServedBackpressure } from "@/lib/api";
-import {
-  PREFIX_STATE_TITLES,
-  RATE_PRICED_LABEL,
-  type PrefixReading,
-} from "@/lib/api/types.generated";
 import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
-import { affordableText, spendHeadline } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtUsd, fmtTokens, PLACEHOLDER } from "@/lib/format";
+import { LOOKAHEAD_WORDS } from "@/lib/api/types.generated";
+import { affordableText, lookaheadDepthLabel, lookaheadExplained } from "@/lib/derivations";
+import { fmtDuration, fmtUsd } from "@/lib/format";
 import { RunLimitsControl } from "@/components/shell/remote/RunLimitsControl";
 import type { RemoteModel } from "./useRemoteModel";
 
@@ -20,53 +15,17 @@ function providerHold(held: ServedBackpressure): string {
   return `rate-limited ${fmtDuration(held.held_for_s)} · ${next}${pace}`;
 }
 
-function cacheTag(prefix: PrefixReading): ReactNode {
-  return (
-    <span className="remote-spend-cache" title={PREFIX_STATE_TITLES[prefix.state]}>
-      {` · ${prefix.badge}`}
-    </span>
-  );
-}
-
-function IdentityAndSpend({ model: m }: { model: RemoteModel }) {
-  const { metered } = m;
+// The panel says what the masthead does not: whether an operator's hand is on this cycle.
+function Provenance() {
   return (
     <div className="remote-panel-section">
-      <div className="section-title">Identity</div>
-      <div className="row"><span className="lbl">Unit</span><span className="val">{fmtText(m.cycleId)}</span></div>
-      <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(m.datasetName)}</span></div>
-      <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(m.updatedAt)}</span></div>
-      {m.babysat ? (
-        <div className="row">
-          <span className="lbl">Provenance</span>
-          <Term className="val remote-babysat" content="An operator manually intervened (skip) — this cycle is no longer purely reproducible.">
-            <span aria-hidden="true">✎</span> babysat
-          </Term>
-        </div>
-      ) : null}
-      <div className="section-title">Spend</div>
-      {metered && m.lines.map((l) => (
-        <div key={l.key} className="row">
-          <span className="lbl">{l.label}</span>
-          <span className="val">
-            {metered.rate_known ? fmtUsd(l.kind.billed_usd) : fmtTokens(l.kind.tokens)}
-            {cacheTag(l.kind.prefix)}
-          </span>
-        </div>
-      ))}
-      <div className="row"><span className="lbl">Billed</span><span className="val">{metered ? spendHeadline(metered) : PLACEHOLDER}</span></div>
-      {metered?.calls_rate_priced ? (
-        <div className="row"><span className="lbl">{RATE_PRICED_LABEL}</span><span className="val">{fmtUsd(metered.rate_priced_usd)}</span></div>
-      ) : null}
-      <div className="row"><span className="lbl">Tokens</span><span className="val">{metered ? fmtTokens(metered.billed_tokens) : PLACEHOLDER}</span></div>
-      {metered?.bill_is_floor ? (
-        <div className="row">
-          <span className="lbl">USD cap</span>
-          <Term className="val remote-spend-warn" content="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">
-            <span aria-hidden="true">⚠</span> inactive
-          </Term>
-        </div>
-      ) : null}
+      <div className="section-title">Provenance</div>
+      <div className="row">
+        <span className="lbl">Intervened</span>
+        <Term className="val remote-babysat" content="An operator manually intervened (skip) — this cycle is no longer purely reproducible.">
+          <span aria-hidden="true">✎</span> babysat
+        </Term>
+      </div>
     </div>
   );
 }
@@ -112,10 +71,10 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           </Term>
         </div>
       ) : null}
-      <span className="remote-cells-group" title={la.explained}>
-        <span aria-hidden="true" className="remote-cells-icon">
+      <span className="remote-cells-group">
+        <Term className="remote-cells-icon" content={lookaheadExplained(la)}>
           ⇉
-        </span>
+        </Term>
         <SegmentedControl
           ariaLabel={`Calls to hold in flight, up to ${la.pick_max}`}
           className="remote-cells"
@@ -126,7 +85,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
             label: String(d.cells),
             fill: d.fill ?? undefined,
             disabled: pending || !d.pickable,
-            title: d.label,
+            title: lookaheadDepthLabel(d),
           }))}
         />
       </span>
@@ -136,8 +95,8 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           <Switch
             checked={la.auto}
             label="Hold as many as the stop rules allow, every round"
-            locked={pending || la.auto_refusal !== ""}
-            lockedNote={la.auto_refusal || "not available now"}
+            locked={pending || la.auto_refusal !== null}
+            lockedNote={la.auto_refusal === null ? "saving" : LOOKAHEAD_WORDS[la.auto_refusal]}
             onChange={() => m.arm(la.depth, !la.auto)}
           />
         </span>
@@ -149,7 +108,7 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
 export function RemotePanel({ model: m }: { model: RemoteModel }) {
   return (
     <div className="remote-panel" role="region" aria-label="Job status and configuration">
-      <IdentityAndSpend model={m} />
+      {m.babysat && <Provenance />}
       <SamplesInFlight model={m} />
       <div className="remote-panel-section">
         <div className="section-title">Finishing criteria</div>

@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.round_health import DegradationHealth, HealthCause, HealthGrade
+from promptpotter.domain.round_health import (
+    HEALTH_CAUSE_INFO,
+    DegradationHealth,
+    HealthCause,
+    HealthGrade,
+    HealthReading,
+)
 from promptpotter.domain.scoring import (
     NO_RESULT,
     GradedCell,
@@ -236,12 +242,12 @@ def compute_degradation_health(
     transient_count: int,
     prior_clean_rounds: int,
     consecutive_degraded_rounds: int,
+    no_result_count: int,
+    hole_count: int,
+    not_attempted: int,
+    unscored: int,
+    output_ceiling_count: int,
     dominant_node: str | None = None,
-    no_result_count: int = 0,
-    hole_count: int = 0,
-    not_attempted: int = 0,
-    unscored: int = 0,
-    output_ceiling_count: int = 0,
     last_error: str | None = None,
     answer_modal_share: float | None = None,
     node_failure_rates: dict[str, float] | None = None,
@@ -272,6 +278,7 @@ def compute_degradation_health(
             structural_count=structural_count,
             transient_count=transient_count,
             hole_count=hole_count,
+            no_result_count=no_result_count,
             not_attempted=not_attempted,
             unscored=unscored,
             output_ceiling_count=output_ceiling_count,
@@ -279,9 +286,6 @@ def compute_degradation_health(
             degraded_rate=0.0,
             consecutive_degraded_rounds=0,
             prior_clean_rounds=prior_clean_rounds,
-            suggested_action=(
-                _suggested_action(counts, "origin_unmeasured", None) if is_origin else None
-            ),
         )
 
     grade, cause = _grade(counts)
@@ -298,6 +302,7 @@ def compute_degradation_health(
         structural_count=structural_count,
         transient_count=transient_count,
         hole_count=hole_count,
+        no_result_count=no_result_count,
         answer_modal_share=answer_modal_share,
         degraded_rate=counts.degraded_rate,
         consecutive_degraded_rounds=consecutive_degraded_rounds,
@@ -305,7 +310,6 @@ def compute_degradation_health(
         dominant_node=dominant_node,
         node_failure_rates=dict(counts.node_failure_rates),
         node_warnings={n: list(v) for n, v in counts.node_warnings.items()},
-        suggested_action=_suggested_action(counts, cause, dominant_node),
     )
 
 
@@ -353,12 +357,6 @@ class _RoundCounts:
         # A starved node's per-sample failures are usually ``transient``, so structural attribution misses it.
         return evidence_starved_node(self.node_failure_rates)
 
-    def reported_by(self, node: str | None) -> str:
-        msgs = self.node_warnings.get(node or "", [])
-        if not msgs:
-            return ""
-        return f" Reported by {node}: «{'; '.join(msgs[:2])}»."
-
 
 def _grade(counts: _RoundCounts) -> tuple[HealthGrade, HealthCause | None]:
     """Ordered by severity, so a cause never masks one graded above it."""
@@ -378,123 +376,122 @@ def _grade(counts: _RoundCounts) -> tuple[HealthGrade, HealthCause | None]:
         # ANY missing cell, not a rate: this baseline is permanent.
         return "degraded", "origin_incomplete"
     if counts.degraded_rate >= DEGRADED_RATE_FLAG:
-        return "degraded", "degraded"
+        return "degraded", "degraded" if counts.structural else "transient"
     return "healthy", None
 
 
-def _origin_unmeasured_action(counts: _RoundCounts) -> str:
+def _origin_unmeasured_finding(health: DegradationHealth) -> str:
+    panel = health.samples + health.not_attempted
     # ``panel`` is 0 when the connector returned an empty list and the walk finished.
     measured = (
-        f"only {counts.attempted} of {counts.panel} origin cells were measured"
-        if counts.panel
+        f"only {health.samples} of {panel} origin cells were measured"
+        if panel
         else "the origin measured nothing"
     )
     unsent = (
-        f"{counts.not_attempted} were never sent — the walk stopped early, so those "
-        "cells did not fail, they never ran. "
-        if counts.not_attempted
-        else "The pipeline/connector returned no result rows at all (a crash or "
-        "an empty return, not a wrong answer). "
+        f" {health.not_attempted} were never sent — the walk stopped early, so those "
+        "cells did not fail, they never ran."
+        if health.not_attempted
+        else " The pipeline/connector returned no result rows at all (a crash or "
+        "an empty return, not a wrong answer)."
     )
     ungraded = (
-        f"{counts.unscored} of the cells that DID run carry no verdict — the scoring "
+        f" {health.unscored} of the cells that DID run carry no verdict — the scoring "
         "formula names a term their rows do not carry, so they were measured and "
-        "not graded. Fix the formula and re-read them; do not re-buy them. "
-        if counts.unscored
+        "not graded."
+        if health.unscored
         else ""
     )
     return (
         f"{measured}, so there is no origin to elect candidates against and nothing here says "
-        f"anything about the prompt. {unsent}{ungraded}"
-        "Re-measure with `resume`. If it stops in the same place, read the error on "
-        "the last cell that WAS measured — the cause is upstream of the prompt."
+        f"anything about the prompt.{unsent}{ungraded}"
     )
 
 
-def _suggested_action(
-    counts: _RoundCounts, cause: HealthCause | None, dominant_node: str | None
-) -> str | None:
-    where = f"{dominant_node} " if dominant_node else ""
-    reported = counts.reported_by(dominant_node)
+def health_finding(health: DegradationHealth, cause: HealthCause) -> str:
+    """What the stamped counts say, before the cause's remedy; rates divide by cells SENT."""
+    node = health.dominant_node
+    where = f"{node} " if node else ""
+    msgs = health.node_warnings.get(node or "", [])
+    # Every sentence it rides opens on *node* (`where`), so it is not named again.
+    reported = f" It reports «{'; '.join(msgs[:2])}»." if msgs else ""
+    sent = health.samples
     match cause:
-        case None:
-            return None
         case "origin_unmeasured":
-            return _origin_unmeasured_action(counts)
+            return _origin_unmeasured_finding(health)
         case "evidence_starved":
-            pct = round(counts.node_failure_rates.get(dominant_node or "", 0.0) * 100)
+            pct = round(health.node_failure_rates.get(node or "", 0.0) * 100)
             return (
                 f"{where}produced no evidence on {pct}% of samples — the enricher is "
-                f"starved (e.g. quota / rate-limit exhausted), not a prompt fault.{reported} "
-                "Fix the backend (restore quota) and `resume` — don't burn rounds chasing it."
+                f"starved (e.g. quota / rate-limit exhausted), not a prompt fault.{reported}"
             )
         case "unscoreable":
-            pct = round(counts.no_result_rate * 100)
+            pct = round(health.no_result_count / sent * 100)
             return (
                 f"the pipeline produced no extractable answer on {pct}% of samples — "
                 "the model's output isn't matching what the grader reads (it ran "
-                "successfully, but no parseable label came back). Fix the prompt's "
-                "answer_format so the model commits a single parseable label (or the "
-                "extraction contract), then rescore — don't optimize against it."
+                "successfully, but no parseable label came back)."
             )
         case "holed":
             # Counts, not a percentage: the rate is over cells SENT, and a round cut short sent few.
             never_sent = (
-                f", and {counts.not_attempted} more were never sent" if counts.not_attempted else ""
+                f", and {health.not_attempted} more were never sent" if health.not_attempted else ""
             )
             return (
-                f"{counts.holes} of the {counts.attempted} cells this round measured returned no "
+                f"{health.hole_count} of the {sent} cells this round measured returned no "
                 f"measurement at all — they were attempted and errored{never_sent}. There is "
-                "nothing here to optimize against and nothing about the prompt to conclude. "
-                "Re-measure: a plain `resume` re-runs the cells (their errored rows are never "
-                "served from cache). If they keep failing, the cause is upstream of the prompt — "
-                "read the row's error text before changing anything."
+                "nothing here to optimize against and nothing about the prompt to conclude."
             )
         case "persistent":
             return (
-                f"{counts.consecutive_degraded_rounds} consecutive degraded rounds — "
-                f"likely a persistent pipeline problem.{reported} "
-                "Consider aborting and fixing config."
+                f"{where}degraded {health.consecutive_degraded_rounds} rounds running — "
+                f"likely a persistent pipeline problem.{reported}"
             )
         case "structural" | "structural_untested":
-            pct = round(counts.structural_rate * 100)
+            pct = round(health.structural_count / sent * 100)
             return (
                 f"{where}failing structurally on {pct}% of samples — likely a config/schema "
-                f"fault, not noise.{reported} "
-                "Consider aborting, fixing config, and re-minting."
+                f"fault, not noise.{reported}"
             )
         case "origin_incomplete":
-            reported_cells = counts.attempted - counts.holes - counts.no_result
+            panel = sent + health.not_attempted
+            reported_cells = sent - health.hole_count - health.no_result_count
             never_sent = (
-                f", {counts.not_attempted} of them never sent" if counts.not_attempted else ""
+                f", {health.not_attempted} of them never sent" if health.not_attempted else ""
             )
             return (
-                f"the origin measured {reported_cells} of {counts.panel} cells — "
-                f"{counts.panel - reported_cells} never "
-                f"reported{never_sent}. This baseline is what every later round's lift is read "
-                "against, so the "
-                "shortfall is permanent and silent: overlap lines will quote the surviving cells as "
-                "though nothing were missing. Re-measure the origin before spending a round on top of "
-                "it — a plain `resume` re-runs errored cells, which are never served from cache."
+                f"the origin measured {reported_cells} of {panel} cells — "
+                f"{panel - reported_cells} never reported{never_sent}. This baseline is what "
+                "every later round's lift is read against, so the shortfall is permanent and "
+                "silent: overlap lines will quote the surviving cells as though nothing were "
+                "missing."
             )
         case "degraded":
-            pct = round(counts.degraded_rate * 100)
+            pct = round(health.degraded_rate * 100)
             return (
-                f"{where}degraded on {pct}% of samples, {counts.structural} of them failing "
-                f"STRUCTURALLY — under the abort bar, but not noise.{reported} "
-                "Read the node's error before trusting this round's numbers."
-                if counts.structural
-                else f"{where}degraded on {pct}% of samples, all transient."
-                f"{reported} The numbers are soft but usable; no action "
-                "needed if the next round comes back clean."
+                f"{where}degraded on {pct}% of samples, {health.structural_count} of them failing "
+                f"STRUCTURALLY — under the abort bar, but not noise.{reported}"
+            )
+        case "transient":
+            pct = round(health.degraded_rate * 100)
+            return (
+                f"{where}degraded on {pct}% of samples, all transient — the numbers are soft but "
+                f"usable.{reported}"
             )
 
 
-def critical_health_title(round_num: int, health: DegradationHealth) -> str | None:
-    if health.grade != "critical":
+def health_reading(round_num: int, health: DegradationHealth) -> HealthReading | None:
+    """Worded at every read from the stamped facts, so a rewording reaches every closed round."""
+    cause = health.cause
+    if cause is None:
         return None
-    who = "Degraded origin" if round_num == 0 else f"Round {round_num} degraded"
-    return f"{who} — pipeline may be structurally broken"
+    info = HEALTH_CAUSE_INFO[cause]
+    who = "Origin" if round_num == 0 else f"Round {round_num}"
+    return HealthReading(
+        cause=cause,
+        title=f"{who}: {info.title}",
+        advice=f"{health_finding(health, cause)} {info.remedy}",
+    )
 
 
 def assemble_prior_healths(
@@ -532,8 +529,8 @@ def _collect_node_warnings(results: Sequence[GradedCell]) -> dict[str, list[str]
             by_code = seen.setdefault(w.step, {})
             code = w.code or "unknown"
             if code not in by_code:
-                msg = w.message.strip()
-                by_code[code] = (f"[{code}] {msg}" if msg else f"[{code}]")[:200]
+                # The step and code are the warning's fields: the sentence is its message alone.
+                by_code[code] = (w.message.strip() or code)[:200]
     return {step: list(by_code.values()) for step, by_code in seen.items()}
 
 
@@ -552,14 +549,14 @@ def compute_round_health(
     *,
     results: Sequence[GradedCell],
     prior_healths: Sequence[DegradationHealth],
-    is_origin: bool = False,
     # Cells the walk never sent: they have no row in ``results``.
-    not_attempted: int = 0,
-    # Passed in, never recounted off ``results``: ``runner/round.py`` owns the number the round file carries.
-    unscored: int = 0,
+    not_attempted: int,
+    is_origin: bool = False,
 ) -> DegradationHealth:
     structural = transient = no_result = holes = 0
     ceiling = sum(1 for r in results if ran_to_output_ceiling(r.facts))
+    # An errored cell's grade carries no `unscored`: only a measured row can lack a verdict.
+    unscored = sum(1 for r in results if r.grade.unscored is not None)
     structural_nodes: dict[str, int] = {}
     # From the END: `Walk.take` appends the row of the cell that aborts the round before returning.
     last_error = next(

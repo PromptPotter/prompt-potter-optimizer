@@ -8,7 +8,7 @@
   border: 0.5px solid var(--color-border);
 }
 
-.accent {
+.attention {
   color: var(--color-accent);
   border-color: var(--color-accent);
 }

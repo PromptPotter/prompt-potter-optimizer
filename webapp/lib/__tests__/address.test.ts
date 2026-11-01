@@ -1,195 +1,102 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_ADDRESS, formatAddress, parseAddress, type Address } from "../address";
+import {
+  DEFAULT_VIEWS,
+  EMPTY_ADDRESS,
+  formatAddress,
+  parseAddress,
+  type Address,
+  type View,
+} from "../address";
 
 // Pinned literals: changing an address string breaks every link anyone saved.
 
 const roundTrip = (a: Address): Address | null => parseAddress(formatAddress(a));
+const PATH = [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }];
+const view = (family: View["family"], key: string | null = null): View => ({ family, key });
 
 describe("formatAddress", () => {
   // `workspace.tsx` drops the hash on this equality.
   it("writes the empty address for following the default view", () => {
-    expect(formatAddress({ kind: "follow", tab: "chat", cell: null })).toBe(EMPTY_ADDRESS);
+    expect(formatAddress({ subject: null, views: DEFAULT_VIEWS })).toBe(EMPTY_ADDRESS);
     expect(EMPTY_ADDRESS).toBe("#/");
   });
 
   it("addresses a check-in by its draft id, and a fresh one as new", () => {
-    expect(formatAddress({ kind: "checkin", draftId: "d_6553261b89ac48e0" })).toBe(
+    expect(formatAddress({ subject: { draftId: "d_6553261b89ac48e0" }, views: DEFAULT_VIEWS })).toBe(
       "#/d/d_6553261b89ac48e0",
     );
-    expect(formatAddress({ kind: "checkin", draftId: null })).toBe("#/new");
-    expect(roundTrip({ kind: "checkin", draftId: "d_6553261b89ac48e0" })).toEqual({
-      kind: "checkin",
-      draftId: "d_6553261b89ac48e0",
-    });
-    expect(roundTrip({ kind: "checkin", draftId: null })).toEqual({
-      kind: "checkin",
-      draftId: null,
-    });
+    expect(formatAddress({ subject: { draftId: null }, views: DEFAULT_VIEWS })).toBe("#/new");
     expect(parseAddress("#/d")).toBeNull();
-    expect(parseAddress("#/new/chat")).toBeNull();
   });
 
-  it("names a non-default view while following", () => {
-    expect(formatAddress({ kind: "follow", tab: "dashboard", cell: null })).toBe("#/dashboard");
+  it("names the open views in the order opened while following", () => {
+    expect(formatAddress({ subject: null, views: [view("samples"), view("spend")] })).toBe(
+      "#/samples/spend",
+    );
   });
 
-  it("strips the cycle_ prefix every minter emits", () => {
+  it("strips the cycle_ prefix every minter emits, and omits the default view", () => {
+    expect(formatAddress({ subject: { path: PATH }, views: DEFAULT_VIEWS })).toBe(
+      "#/c/justlogic__cf67b3/ee7bb41bbde0",
+    );
+  });
+
+  it("appends hops in pairs, then the candidate, the moment and the views", () => {
     expect(
       formatAddress({
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "dashboard",
-        candidateId: null, at: null, cell: null,
+        subject: {
+          path: [
+            { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
+            { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
+          ],
+          candidateId: "sp_9f2",
+          at: 512,
+        },
+        views: [view("chat"), view("samples", "ab12")],
       }),
-    ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0/dashboard");
-  });
-
-  it("omits the default view, so the common address stays short", () => {
-    expect(
-      formatAddress({
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "chat",
-        candidateId: null, at: null, cell: null,
-      }),
-    ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0");
-  });
-
-  it("appends hops in pairs and the candidate last", () => {
-    expect(
-      formatAddress({
-        kind: "cycle",
-        path: [
-          { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
-          { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
-        ],
-        tab: "dashboard",
-        candidateId: "sp_9f2", at: null, cell: null,
-      }),
-    ).toBe("#/c/pp-self__aa11bb/outer0000/justlogic__cc22dd/inner0000/dashboard/k/sp_9f2");
-  });
-
-  it("writes the moment after the candidate, and names the default view before it", () => {
-    const path = [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }];
-    expect(
-      formatAddress({ kind: "cycle", path, tab: "chat", candidateId: null, at: 512, cell: null }),
-    ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0/chat/t/512");
-    expect(
-      formatAddress({
-        kind: "cycle",
-        path,
-        tab: "dashboard",
-        candidateId: "sp_9f2",
-        at: 512,
-        cell: { answer: "ab12" },
-      }),
-    ).toBe("#/c/justlogic__cf67b3/ee7bb41bbde0/dashboard/k/sp_9f2/t/512/x/ab12");
-  });
-
-  it("addresses an account pane", () => {
-    expect(formatAddress({ kind: "account", pane: "activity" })).toBe("#/account/activity");
+    ).toBe("#/c/pp-self__aa11bb/outer0000/justlogic__cc22dd/inner0000/k/sp_9f2/t/512/chat/samples=ab12");
   });
 });
 
 describe("parseAddress round trip", () => {
   const cases: Array<[string, Address]> = [
-    ["following, default view", { kind: "follow", tab: "chat", cell: null }],
-    ["following, explicit view", { kind: "follow", tab: "files", cell: null }],
-    [
-      "pinned, default view",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "chat",
-        candidateId: null, at: null, cell: null,
-      },
-    ],
-    [
-      "pinned, explicit view",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "compare",
-        candidateId: null, at: null, cell: null,
-      },
-    ],
-    [
-      "pinned with a parked candidate",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "dashboard",
-        candidateId: "sp_9f2a1c", at: null, cell: null,
-      },
-    ],
-    [
-      "pinned, a replayed moment",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "dashboard",
-        candidateId: null, at: 4096, cell: null,
-      },
-    ],
+    ["following, default view", { subject: null, views: DEFAULT_VIEWS }],
+    ["following, a keyed view", { subject: null, views: [view("account", "storage")] }],
+    ["a check-in", { subject: { draftId: "d_6553261b89ac48e0" }, views: DEFAULT_VIEWS }],
+    ["a fresh check-in", { subject: { draftId: null }, views: DEFAULT_VIEWS }],
     [
       "pinned, a candidate, a moment at offset zero and a cell",
       {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "chat",
-        candidateId: "sp_9f2a1c",
-        at: 0,
-        cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" },
+        subject: { path: PATH, candidateId: "sp_9f2a1c", at: 0 },
+        views: [view("samples", "9f2a1c0b7d3e4f5a.ab12cd34ef56"), view("files")],
       },
     ],
     [
-      "an inner hop",
+      "an inner hop and two views",
       {
-        kind: "cycle",
-        path: [
-          { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
-          { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
-        ],
-        tab: "compare",
-        candidateId: null, at: null, cell: null,
+        subject: {
+          path: [
+            { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
+            { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
+          ],
+          candidateId: null,
+          at: null,
+        },
+        views: [view("compare"), view("chat")],
       },
     ],
     [
       "a fork cycle id",
       {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41_fork_9a2f" }],
-        tab: "dashboard",
-        candidateId: null, at: null, cell: null,
+        subject: {
+          path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41_fork_9a2f" }],
+          candidateId: null,
+          at: null,
+        },
+        views: [view("timeline"), view("leader")],
       },
     ],
-    [
-      "following, a cell open on the default view",
-      { kind: "follow", tab: "chat", cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" } },
-    ],
-    [
-      "pinned, a parked candidate and a cell open on the default view",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "chat",
-        candidateId: "sp_9f2a1c",
-        at: null,
-        cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" },
-      },
-    ],
-    [
-      "pinned, a cell open on an explicit view",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_ee7bb41bbde0" }],
-        tab: "measurements",
-        candidateId: null,
-        at: null,
-        cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" },
-      },
-    ],
-    ["an account pane", { kind: "account", pane: "storage" }],
+    ["a check-in's node", { subject: { draftId: "d_6553261b89ac48e0" }, views: [view("chat"), view("node", "target.llm_only")] }],
   ];
 
   for (const [name, address] of cases) {
@@ -198,22 +105,16 @@ describe("parseAddress round trip", () => {
 });
 
 describe("parseAddress tolerates what a person types", () => {
-  it("reads a bare hash as following", () => {
-    expect(parseAddress("#")).toEqual({ kind: "follow", tab: "chat", cell: null });
-    expect(parseAddress("")).toEqual({ kind: "follow", tab: "chat", cell: null });
-    expect(parseAddress("#/")).toEqual({ kind: "follow", tab: "chat", cell: null });
-  });
-
-  it("defaults the account pane when none is named", () => {
-    expect(parseAddress("#/account")).toEqual({ kind: "account", pane: "profile" });
+  it("reads a bare hash as following the default view", () => {
+    for (const hash of ["#", "", "#/"]) {
+      expect(parseAddress(hash)).toEqual({ subject: null, views: DEFAULT_VIEWS });
+    }
   });
 
   it("restores the cycle_ prefix", () => {
     expect(parseAddress("#/c/a__b/deadbeef")).toEqual({
-      kind: "cycle",
-      path: [{ campaignId: "a__b", cycleId: "cycle_deadbeef" }],
-      tab: "chat",
-      candidateId: null, at: null, cell: null,
+      subject: { path: [{ campaignId: "a__b", cycleId: "cycle_deadbeef" }], candidateId: null, at: null },
+      views: DEFAULT_VIEWS,
     });
   });
 });
@@ -224,17 +125,20 @@ describe("parseAddress refuses what is not an address", () => {
     "#/c/a__b",
     "#/c/a__b/deadbeef/justlogic__cc22dd",
     "#/c/a__b/deadbeef/k",
-    "#/c/a__b/deadbeef/dashboard/t",
-    "#/c/a__b/deadbeef/dashboard/t/-4",
-    "#/c/a__b/deadbeef/dashboard/t/12/k/sp_9f2", // the moment follows the candidate
-    "#/dashboard/t/12", // a followed view has no moment
-    "#/c/a__b/deadbeef/dashboard/leftover",
-    "#/c/a__b/../dashboard",
+    "#/c/a__b/deadbeef/t",
+    "#/c/a__b/deadbeef/t/-4",
+    "#/c/a__b/deadbeef/t/12/k/sp_9f2", // the moment follows the candidate
+    "#/t/12", // a followed view has no moment
+    "#/c/a__b/deadbeef/samples/leftover",
+    "#/c/a__b/../samples",
     "#/c/a__b/dead beef",
-    "#/account/billing",
-    "#/account/activity/extra",
+    "#/samples/samples", // one family never shows twice
+    "#/samples=a=b",
+    "#/samples=..",
     "#/nosuchview",
-    "#/dashboard/extra",
+    "#/node=llm_only", // a node is scoped
+    "#/node=judge.llm_only",
+    "#/new/d",
   ];
   for (const hash of bad) {
     it(`rejects ${hash || "(empty)"}`, () => expect(parseAddress(hash)).toBeNull());

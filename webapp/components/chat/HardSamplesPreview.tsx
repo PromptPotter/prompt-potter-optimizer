@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import type { DatasetItem } from "@/lib/api";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
-import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
+import { useWorkspace } from "@/lib/workspace";
 import { RosterNote } from "@/components/measurements/RosterNote";
 import { fmtDuration, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
@@ -15,7 +15,7 @@ type SampleBucket = Exclude<DatasetItem["hit_spread"], "unmeasured">;
 export function HardSamplesPreview() {
   const { items, measuredCount, totals, failure } = useHardSamples();
   const { dash, isLive } = useCycleStream();
-  const [showAll, setShowAll] = useState(false);
+  const { open } = useWorkspace();
   const ranked = useMemo(() => items.map((it) => it.position), [items]);
 
   const walk = isLive ? (dash?.walk ?? null) : null;
@@ -111,12 +111,11 @@ export function HardSamplesPreview() {
         <button
           type="button"
           className="hsp-spread"
-          aria-expanded={showAll}
-          onClick={() => setShowAll((v) => !v)}
+          onClick={() => open("samples")}
           title={
             measuredCount > 0
-              ? `${measuredCount} of ${items.length} rows measured in this scope - click for the leaderboard`
-              : `${items.length} rows - click for the leaderboard`
+              ? `${measuredCount} of ${items.length} rows measured in this scope - open Samples`
+              : `${items.length} rows - open Samples`
           }
         >
           {totals && measuredCount > 0 ? (
@@ -133,12 +132,6 @@ export function HardSamplesPreview() {
           )}
         </button>
       </div>
-      {showAll && (
-        <div className="hsp-full">
-          <MeasurementsPane preset={{ groupBy: "sample" }} />
-        </div>
-      )}
-
     </div>
   );
 }

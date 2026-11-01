@@ -4,6 +4,7 @@ import { useState } from "react";
 import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";
 import { Criterion } from "@/components/shell/scoring/Criterion";
+import type { ReadFailure } from "@/lib/hooks/useRead";
 import { NO_DIALS, lensOf, type ScoringMask } from "@/lib/scoring-mask";
 
 export function ChannelMask({
@@ -13,7 +14,7 @@ export function ChannelMask({
   onClose,
 }: {
   subject: SubjectReading;
-  invalid: string | null;
+  invalid: ReadFailure | null;
   onApply: (from: string, to: string) => void;
   onClose: () => void;
 }) {

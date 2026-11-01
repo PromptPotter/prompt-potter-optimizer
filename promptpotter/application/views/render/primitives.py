@@ -5,7 +5,6 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.domain.bench import BENCH_STATE_INFO, BenchColumn
-from promptpotter.domain.hierarchy import ROUNDS_CAP_WORDS
 from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -43,15 +42,6 @@ def bench_readout(bench: BenchScore) -> str:
         f"{bench.headline} {level(graded.selected)} selected (round {graded.selected.round}) · "
         f"{level(graded.origin)} origin · lift {lift} · {bench.bench_size} held-out rows"
     )
-
-
-def rounds_readout(closed: int, cap: int | None) -> str:
-    """A course's rounds against its cap: `lib/derivations/hierarchy.ts::roundsText`, the same."""
-    if cap == 0:
-        return ROUNDS_CAP_WORDS["origin_only"]
-    if cap is None:
-        return f"{closed} · {ROUNDS_CAP_WORDS['no_axis']}"
-    return f"{closed} of {cap}"
 
 
 def fmt_coverage(coverage: Coverage) -> str:

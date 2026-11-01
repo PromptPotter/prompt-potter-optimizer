@@ -6,7 +6,7 @@ from pydantic import Field
 
 from promptpotter.application.datasets.startability import dataset_reading, offered
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.dataset_start import DatasetStartBlock
+from promptpotter.domain.dataset_start import StartBlock
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetTier,
@@ -43,10 +43,10 @@ class DatasetIndexEntry(StrictModel):
             "``null`` when none are, which is not the same as a dataset holding zero usable rows."
         ),
     )
-    start_block: DatasetStartBlock | None = Field(
+    start_block: StartBlock | None = Field(
         description=(
             "``null`` = a check-in can open it here. Otherwise why not: the same reading "
-            "``POST /datasets/{name}/draft`` refuses with."
+            "``POST /datasets/{name}/draft`` refuses with, worded by `START_BLOCK_WORDS`."
         ),
     )
 

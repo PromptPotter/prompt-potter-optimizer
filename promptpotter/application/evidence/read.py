@@ -709,19 +709,9 @@ def _scenario(
             # The cycle's, not the chain's: the chain stops at the parting.
             total_rounds=len(recorded.rounds),
             n_samples_scored=len(_masked(points[-1], keys).sheet),
-            note=_SCENARIO_NOTE,
         ),
         [_masked(p, keys) for p in points],
     )
-
-
-_SCENARIO_NOTE = (
-    "This re-ranks the RECORD under the formula you named — it does not re-run the campaign. "
-    "θ is not re-fitted and no election is replayed, so the round named here is where the two "
-    "readings first part, not a verdict the campaign reached. The chain STOPS at that round: past "
-    "it the run would have stood on a parent it never had, and no measurement says what that "
-    "produces. `ab` replay is what re-derives an election exactly."
-)
 
 
 def _candidate_point(cycle: _Cycle, candidate_id: str) -> _ChainPoint | None:

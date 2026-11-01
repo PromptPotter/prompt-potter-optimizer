@@ -79,7 +79,6 @@ from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.coupon import (
     bind_account,
-    coupon_status,
     keyed_client,
     resolve_api_key,
 )
@@ -94,9 +93,11 @@ from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadStarte
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
+    CouponState,
     QuotaExceededError,
     admit_launch,
     clamp_budget_change,
+    coupon_status,
     cycle_share,
     hold_budget_change,
     hold_moved,
@@ -114,6 +115,7 @@ from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner.campaign_result import line_run
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
 from promptpotter.application.runner.loop import round_bounds
@@ -165,6 +167,7 @@ from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
+    CampaignPhase,
     PauseCause,
     RunPhase,
     StopLoop,
@@ -2709,20 +2712,10 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     rows: tuple[tuple[Any, ...], ...] = (
         # door, issuer, face, own key, declared, delegated, running, spent, admitted, reserve
         ("launch", _WEB, None, None, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
-        ("launch", _WEB, None, None, 0.15, None, None, None, (0.15, None), (0.30, _FACE.tokens)),
+        # A USD ceiling holds no tokens: every send under it is priced, so the dollars bound it.
+        ("launch", _WEB, None, None, 0.15, None, None, None, (0.15, None), (0.30, None)),
         ("launch", _WEB, None, None, 10.0, None, None, None, HostAllowanceExhaustedError, None),
-        (
-            "launch",
-            _WEB,
-            None,
-            "openrouter",
-            10.0,
-            None,
-            None,
-            None,
-            (10.0, None),
-            (0.30, _FACE.tokens),
-        ),
+        ("launch", _WEB, None, "openrouter", 10.0, None, None, None, (10.0, None), (0.30, None)),
         (
             "launch",
             _WEB,
@@ -2760,8 +2753,8 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             (settings.UNPRICED_GRACE_USD, _FACE.token_amount - 500_000),
         ),
         ("launch", None, None, None, None, None, None, None, _UNBOUNDED, _UNBOUNDED),
-        ("launch", _WEB, hand_set, None, 10.0, 2.0, None, None, (2.0, None), (2.0, 50_000)),
-        ("launch", _WEB, hand_set, None, 10.0, None, None, None, (10.0, None), (20.0, 50_000)),
+        ("launch", _WEB, hand_set, None, 10.0, 2.0, None, None, (2.0, None), (2.0, None)),
+        ("launch", _WEB, hand_set, None, 10.0, None, None, None, (10.0, None), (20.0, None)),
         (
             "launch",
             _WEB,
@@ -2772,7 +2765,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             None,
             None,
             (2.0, None),
-            (1.0, 50_000),
+            (1.0, None),
         ),
         (
             "launch",
@@ -2870,8 +2863,22 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             f"door {n}: the coupon held back another amount than it has left for the run"
         )
 
-    # The choke point: the account's own key wins unasked, per provider; the box's key only on a live coupon.
+    # A pass killed mid-bench leaves its bracket open; the next holder of the cycle closes it.
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
+    killed = _account_stores(tmp_path / "killed", issuer=_WEB, user=user, spent=None)
+    RunCallbacks(CycleEventLog.open(CycleDir(killed.campaigns.cycle_dir(_HELD_HOP)))).on_phase(
+        CampaignPhase.BENCH, "enter"
+    )
+
+    async def _retaken() -> bool:
+        async with paid_pass(stores=killed, verb="bench", hop=_HELD_HOP, declared=Budget()):
+            return line_run(killed, _HELD_HOP).pass_open
+
+    assert not asyncio.run(_retaken()), (
+        "a cycle retaken after a killed bench pass read the dead bracket as a pass in flight"
+    )
+
+    # The choke point: the account's own key wins unasked, per provider; the box's key only on a live coupon.
     spent_out = _account_stores(
         tmp_path / "keys", issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter"
     )
@@ -2894,7 +2901,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         )
     )
     status = coupon_status(spent_out)
-    assert (status.left_usd, status.exhausted) == (0.0, True), (
+    assert (status.left.usd, status.state) == (0.0, CouponState.USED_UP), (
         "the coupon read another remainder than the box's keys left it"
     )
     assert status.own_key_spend.billed_usd == pytest.approx(5.0), "the own key's spend went unread"

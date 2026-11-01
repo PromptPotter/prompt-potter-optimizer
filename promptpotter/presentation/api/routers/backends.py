@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from fastapi import APIRouter
 from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.jobs.launcher.admission import probe_backend
+from promptpotter.domain.connector import BackendReachability, backend_reachability
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import NotFoundError
@@ -23,14 +22,11 @@ class BackendResponse(StrictModel):
     )
 
 
-BackendReachability = Literal["live", "unreachable", "error"]
-
-
 class BackendHealthResponse(StrictModel):
     backend_id: str = Field(description="Backend identifier")
     base_url: str = Field(description="Backend API base URL probed")
     status: BackendReachability = Field(
-        description="Reachability: 'live', 'unreachable', or 'error'"
+        description="Reachability, worded by `BACKEND_REACHABILITY_INFO`"
     )
     checked_at: str = Field(description="ISO 8601 probe timestamp")
     detail: str | None = Field(
@@ -60,7 +56,7 @@ async def get_backend_health(backend_id: str) -> BackendHealthResponse:
     return BackendHealthResponse(
         backend_id=connector.name,
         base_url=connector.base_url(),
-        status="live" if down is None else "unreachable",
+        status=backend_reachability(down),
         checked_at=utcnow_iso(),
         detail=None if down is None else str(down),
     )

@@ -50,28 +50,28 @@ describe("Dialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("takes its name from a host heading, and with no onClose a dismissal gesture is inert", () => {
+  it("with no onClose draws no way out, and a dismissal gesture is inert", () => {
     render(
-      <Dialog open labelledBy="gate-h">
-        <h2 id="gate-h">Accept the terms</h2>
+      <Dialog open title="Gate">
+        body
       </Dialog>,
     );
-    const dialog = screen.getByRole("dialog", { name: "Accept the terms" });
+    const dialog = screen.getByRole("dialog", { name: "Gate" });
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
     fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.mouseDown(dialog.parentElement as HTMLElement);
     expect(screen.getByRole("dialog")).toBe(dialog);
   });
 
-  it("draws no heading when the host brings its own card, and still takes the name", () => {
+  it("a dismissable dialog with no footer draws its own close", () => {
+    const onClose = vi.fn();
     render(
-      <Dialog open title="Account" onClose={() => {}} bare>
-        <div>
-          <h3>Profile</h3>
-        </div>
+      <Dialog open title="T" onClose={onClose}>
+        body
       </Dialog>,
     );
-    expect(screen.getByRole("dialog").getAttribute("aria-label")).toBe("Account");
-    expect(screen.queryByRole("heading", { name: "Account" })).toBeNull();
+    fireEvent.click(screen.getByRole("button"));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("moves focus in on open and restores it on close", () => {
@@ -83,14 +83,14 @@ describe("Dialog", () => {
 
     const onClose = () => {};
     const { rerender } = render(
-      <Dialog open title="T" onClose={onClose}>
+      <Dialog open title="T" onClose={onClose} footer={<button>ok</button>}>
         <button>inside</button>
       </Dialog>,
     );
     expect(document.activeElement?.textContent).toBe("inside");
 
     rerender(
-      <Dialog open={false} title="T" onClose={onClose}>
+      <Dialog open={false} title="T" onClose={onClose} footer={<button>ok</button>}>
         <button>inside</button>
       </Dialog>,
     );

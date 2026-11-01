@@ -42,7 +42,7 @@ export function MeasurementRun({
 }) {
   const { dash, isLive } = useCycleStream();
   const cv = useConnector();
-  const { viewedPath, leafCycleId, drillInto } = useWorkspace();
+  const { viewedPath, leafCycleId, navigate } = useWorkspace();
   // The DECLARED backend type, not "the tree found inner runs": minting cells would tally as misses.
   const isL4 = useLeafIsL4();
   const { index } = useViewedLineage();
@@ -53,7 +53,7 @@ export function MeasurementRun({
   );
   const openRun = (run: HierarchyCourse): void => {
     const at = pathOfAddress(run.address).at(-1);
-    if (at) drillInto(at.campaignId, at.cycleId);
+    if (at && viewedPath) navigate({ path: [...viewedPath, at] });
   };
   const { setSelectionForCandidate, candidate: selected } = useSelection();
   const onSelectCandidate = (c: ArmRow | null): void => {
@@ -225,7 +225,7 @@ export function MeasurementRun({
                     </span>
                   )}
                   {early && (
-                    <Badge tone={early === "broken" ? "danger" : "default"}>
+                    <Badge tone={early === "broken" ? "danger" : "quiet"}>
                       <Term content={TERMS[`arm_${early}`]}>{early.replace("_", " ")}</Term>
                     </Badge>
                   )}

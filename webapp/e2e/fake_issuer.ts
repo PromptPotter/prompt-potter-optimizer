@@ -12,7 +12,7 @@ const WEBAPP = path.resolve(__dirname, "..");
 export type FakeIssuer = {
   baseURL: string;
   mintSession(opts: { tenantId: string; email: string | null }): string;
-  /** `0` leaves the account's coupon used up with nothing spent, which is what `AllowanceExhausted` reads. */
+  /** `0` leaves the account's coupon used up with nothing spent, which a check-in's draft serves as a `launch_refusal`. */
   seedCouponFace(tenantId: string, usd: number): void;
   blockEmails(emails: string[]): void;
   stop(): Promise<void>;

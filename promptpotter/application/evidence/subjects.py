@@ -151,8 +151,8 @@ class ScenarioReading(StrictModel):
     where there is none. Reading a mid-chain counterfactual against the branch's final crown instead
     would compare two different rounds and report the gap between them as a change.
 
-    ``note`` carries the caveat as a SERVED FACT, the way ``Comparability.note`` does — because the
-    honest limit of a lens is not something a surface can be trusted to remember.
+    Worded by ``SCENARIO_WORDS`` on every surface, its ``caveat`` with it: the honest limit of a
+    lens is not something a surface can be trusted to remember.
     """
 
     recorded_winner_key: str | None
@@ -162,7 +162,38 @@ class ScenarioReading(StrictModel):
     invariant_rounds: int
     total_rounds: int
     n_samples_scored: int
-    note: str
+
+
+type ScenarioWord = Literal[
+    "parted",
+    "crowned",
+    "instead_of",
+    "held",
+    "round",
+    "rounds",
+    "unchanged",
+    "reads_over",
+    "sample",
+    "samples",
+    "caveat",
+]
+SCENARIO_WORDS: dict[ScenarioWord, str] = {
+    "parted": "parts from the record at round",
+    "crowned": "where it would have crowned",
+    "instead_of": "instead of",
+    "held": "never parts from the record",
+    "round": "round",
+    "rounds": "rounds",
+    "unchanged": "unchanged",
+    "reads_over": "the head reads over",
+    "sample": "sample",
+    "samples": "samples",
+    "caveat": "This re-ranks the RECORD under the formula you named — it does not re-run the "
+    "campaign. θ is not re-fitted and no election is replayed, so the round named here is where "
+    "the two readings first part, not a verdict the campaign reached. The chain STOPS at that "
+    "round: past it the run would have stood on a parent it never had, and no measurement says "
+    "what that produces. `ab` replay is what re-derives an election exactly.",
+}
 
 
 class WinnerChainPoint(StrictModel):

@@ -26,6 +26,7 @@ from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
+    scan_bench_open,
     scan_bench_passes,
     scan_launch_clocks,
     scan_ledger_spend,
@@ -168,10 +169,12 @@ def line_run(stores: Stores, hop: CycleHop) -> LineRun:
     standing = None if index is None else index.standing
     # A pass holds the cycle too, and reads SCORING: only the loop's hold is a run still selecting.
     run = derive_run_state(stores.campaigns.cycle_dir(hop)) if named else None
+    attached = run is not None and run.producer.attached
+    scoring = run is not None and run.run_phase is RunPhase.SCORING
     return LineRun(
-        selecting=run is not None
-        and run.producer.attached
-        and run.run_phase is not RunPhase.SCORING,
+        selecting=attached and not scoring,
+        # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
+        pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
         ending=None if index is None else index.stop_reason,
         selection=None if standing is None else standing.selection,
         rounds_closed=0 if standing is None else standing.rounds_closed,

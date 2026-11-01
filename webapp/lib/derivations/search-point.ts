@@ -1,4 +1,4 @@
-import { liveCandidate, liveCandidates, roundOf } from "@/lib/poll";
+import { liveCandidate, roundOf } from "@/lib/poll";
 import type { ServedDashboard } from "@/lib/api";
 import type {
   ArmName,
@@ -105,16 +105,6 @@ function rowConfig(
     config: row.resolved_params ?? {},
     label,
   };
-}
-
-// The served list orders the latest-seeded row last.
-export function liveObserveConfig(
-  dash: ServedDashboard | null,
-  nodeId?: string | null,
-): ObserveConfig | null {
-  const latest = liveCandidates(dash).at(-1);
-  if (!latest) return null;
-  return rowConfig(latest, `live — ${latest.reading.arm.label}`, nodeId);
 }
 
 export function liveCandidateObserveConfig(

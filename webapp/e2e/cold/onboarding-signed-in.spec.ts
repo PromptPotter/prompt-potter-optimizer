@@ -1,7 +1,7 @@
 import { test, expect, ready } from "../harness";
 import { startFakeIssuer, type FakeIssuer } from "../fake_issuer";
 
-// `AccessGate` and `AllowanceExhausted` need a signed-in NON-host identity, which the auth-off servers cannot produce.
+// `AccessGate` and a used-up coupon need a signed-in NON-host identity, which the auth-off servers cannot produce.
 
 let fake: FakeIssuer;
 
@@ -25,13 +25,13 @@ test("a blocked account sees AccessGate, not the app", async ({ page, context })
   await expect(page.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
 
-test("an account whose coupon is used up sees AllowanceExhausted", async ({ page, context, request }) => {
+test("an account whose coupon is used up reads it inline, never under a modal", async ({ page, context, request }) => {
   const tenantId = "e2e-fake-allowance";
   fake.seedCouponFace(tenantId, 0);
   const sessionId = fake.mintSession({ tenantId, email: "allowance@example.com" });
   await context.addCookies([{ name: "promptpotter_session", value: sessionId, url: fake.baseURL }]);
 
-  // Pre-accept Terms, or ConsentGate paints over AllowanceExhausted; `request` is bound to the cold project's baseURL, hence full URLs.
+  // Pre-accept Terms, or ConsentGate paints over the app; `request` is bound to the cold project's baseURL, hence full URLs.
   const cookie = { Cookie: `promptpotter_session=${sessionId}` };
   const me = await (
     await request.get(`${fake.baseURL}/api/v1/auth/me`, { headers: cookie })
@@ -43,14 +43,7 @@ test("an account whose coupon is used up sees AllowanceExhausted", async ({ page
 
   await page.goto(fake.baseURL);
   await ready(page);
-  // The apostrophe is U+2019 (`&rsquo;` in the source) — a straight `'` will not match.
-  const notice = page.getByRole("dialog", { name: "That’s the last of your free runs" });
-  await expect(notice).toBeVisible();
-
-  // The remedy the server's `host_allowance_exhausted` names is one click away.
-  await notice.getByRole("button", { name: "Add my own key" }).click();
-  await expect.poll(() => new URL(page.url()).hash).toContain("/account/keys");
-  await expect(
-    page.getByRole("dialog", { name: "Account" }).getByRole("heading", { name: "API keys" }),
-  ).toBeVisible();
+  // The refusal is the account's reading beside its spend; a launch's own control shows its note.
+  await expect(page.locator(".account-spend.account-spend-exhausted")).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });

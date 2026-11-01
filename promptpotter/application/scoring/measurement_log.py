@@ -54,7 +54,6 @@ from promptpotter.domain.scoring import (
     is_hit,
     is_verifier_graded,
 )
-from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import list_populations, load_population
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -93,7 +92,6 @@ def _row_cell(cell: GradedCell, *, key: str, slot: int) -> CellRow:
     facts = cell.facts
     if facts.answer is None:
         raise KeyError(f"the cell of sample {facts.sample_key} names no archive answer")
-    account = TokenAccount.from_step_tokens(facts.pipeline.step_tokens)
     return CellRow(
         position=slot,
         answer=facts.answer,
@@ -102,9 +100,6 @@ def _row_cell(cell: GradedCell, *, key: str, slot: int) -> CellRow:
         fitness=cell.grade.fitness if cell.scored else None,
         cached=facts.cached,
         predicted=_trim(facts.predicted),
-        seconds=facts.cost_s,
-        input_tokens=account.input if account else None,
-        output_tokens=account.output if account else None,
     )
 
 
@@ -174,6 +169,7 @@ def _assemble(
         error=facts.error,
         terminal_node=pd.terminal_node,
         seconds=facts.cost_s,
+        cached=facts.cached,
         spans=spans,
         other_outputs={k: v for k, v in recorded.items() if k not in attributed},
     )

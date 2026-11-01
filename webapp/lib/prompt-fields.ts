@@ -1,5 +1,5 @@
 import type { DraftPatch, NodePrompt } from "@/lib/api/types";
-import type { NodeScope } from "@/lib/SelectionContext";
+import type { NodeScope } from "@/lib/address";
 
 interface PromptFieldMeta {
   label: string;

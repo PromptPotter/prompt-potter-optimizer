@@ -22,6 +22,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import bound_round
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_bench_open
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -72,6 +73,11 @@ class RunCallbacks:
         view: PhaseView | None = None,
     ) -> None:
         self._emit(PhaseRecord(phase=str(phase), event=event, round=round, view=view))
+
+    def close_dead_bench(self) -> None:
+        """Every holder calls it as it takes the cycle: a bench bracket still open is a dead one's."""
+        if scan_bench_open(self.ledger.path):
+            self.on_phase(CampaignPhase.BENCH, "exit")
 
     def on_round_entered(self, round_num: int) -> None:
         self._emit(RoundEnteredRecord(round=round_num))

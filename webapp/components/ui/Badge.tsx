@@ -1,22 +1,21 @@
 import type { ReactNode } from "react";
+import type { Tone } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import s from "./Badge.module.css";
 
-export type BadgeTone = "default" | "accent" | "success" | "danger";
-
 export function Badge({
-  tone = "default",
+  tone = "quiet",
   title,
   className,
   children,
 }: {
-  tone?: BadgeTone | undefined;
+  tone?: Tone | undefined;
   title?: string;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <span className={cx(s.badge, tone !== "default" && s[tone], className)} title={title}>
+    <span className={cx(s.badge, s[tone], className)} title={title}>
       {children}
     </span>
   );

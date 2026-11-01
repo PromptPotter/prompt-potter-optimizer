@@ -1,0 +1,45 @@
+@layer ui {
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-10);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  flex: 0 1 12ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Takes what the row leaves; the marks are drawn in percent, so it shrinks without clipping. */
+.axis {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 1.5em;
+  overflow: visible;
+}
+
+.reference {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.value {
+  flex: 0 0 auto;
+}
+
+/* --bp-sm: the value takes its own line under the axis. */
+@media (max-width: 640px) {
+  .value {
+    flex-basis: 100%;
+  }
+}
+}

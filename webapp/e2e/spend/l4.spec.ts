@@ -8,6 +8,7 @@ import {
   assertRoundMeasured,
   command,
   dashboard,
+  DASHBOARD_VIEWS,
   passConsent,
   reportTape,
   roundsOf,
@@ -162,7 +163,7 @@ test.describe("the recursion, end to end", () => {
       );
     }
 
-    await open(page, `${outer!.addr}/dashboard`);
+    await open(page, `${outer!.addr}${DASHBOARD_VIEWS}`);
     await passConsent(page);
     await ready(page);
     await expect(page.getByRole("img", { name: "Pipeline graph" })).toBeVisible();

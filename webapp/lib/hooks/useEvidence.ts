@@ -8,7 +8,7 @@ interface EvidenceRead {
   evidence: Evidence | null;
   loading: boolean;
   failure: ReadFailure | null;
-  invalidMetric: string | null;
+  invalidMetric: ReadFailure | null;
 }
 
 export type EvidenceAsk = NonNullable<Parameters<typeof evidenceRead>[1]>;
@@ -30,7 +30,7 @@ export function useEvidence(
     return { evidence: null, loading: read.status === "loading", failure: null, invalidMetric: null };
   }
   if (read.failure.kind === "invalid" && read.kept !== null) {
-    return { evidence: read.kept, loading: false, failure: null, invalidMetric: read.failure.message };
+    return { evidence: read.kept, loading: false, failure: null, invalidMetric: read.failure };
   }
   return { evidence: null, loading: false, failure: read.failure, invalidMetric: null };
 }

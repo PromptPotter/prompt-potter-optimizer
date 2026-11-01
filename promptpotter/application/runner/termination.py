@@ -81,16 +81,13 @@ def end_run_on(
         logger.warning("Optimization paused %s (%s).", where, str(exc) or "user-initiated")
     if info.outcome is not StopOutcome.FAILED:
         return reason, None
-    message = str(exc) or type(exc).__name__
     tb: str | None = None
     if info.has_traceback:
         tb = traceback.format_exc()
         logger.exception("Optimization ended %s: %s.", where, info.label)
     else:
-        logger.warning("Optimization ended %s: %s — %s", where, info.label, message)
-    return reason, emit_error_record(
-        kind=type(exc).__name__, message=message, stop_reason=reason, traceback=tb
-    )
+        logger.warning("Optimization ended %s: %s — %s", where, info.label, exc)
+    return reason, emit_error_record(exc, stop_reason=reason, traceback=tb)
 
 
 def origin_gate_tripped(health: DegradationHealth, mode: OriginGateMode) -> StopReason | None:

@@ -1,15 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { fmtGap } from "@/lib/format";
-import { raySteps, rayHead } from "@/lib/derivations";
-import type { ActivityItem, HierarchyStep, ProducerReading } from "@/lib/api/types";
-import type { RunPhase, RunStatus, WaitingOn } from "@/lib/api/types.generated";
-import {
-  PRODUCER_STATE_INFO,
-  RAY_HEAD_WORDS,
-  RUN_PHASE_INFO,
-  STOP_REASON_INFO,
-} from "@/lib/api/types.generated";
-import { hierarchyStep, producerReading as producer } from "@/lib/test-fixtures";
+import { raySteps } from "@/lib/derivations";
+import type { ActivityItem, HierarchyStep } from "@/lib/api/types";
+import { hierarchyStep } from "@/lib/test-fixtures";
 
 const ROOT = "camp::cycle_root";
 const INNER = "camp::cycle_root~inner::cycle_in";
@@ -24,7 +17,7 @@ function read(over: Partial<ActivityItem>): ActivityItem {
     icon: "★",
     label: "Round 1",
     detail: null,
-    tone: "good",
+    tone: "success",
     round: 1,
     arm: null,
     healed: null,
@@ -100,105 +93,6 @@ describe("raySteps", () => {
     expect(steps[0]?.round).toBe(2);
     expect(steps[1]?.arm).toBeNull();
     expect(steps[1]?.round).toBe(3);
-  });
-});
-
-describe("rayHead", () => {
-  const RUNNING: RunStatus = { run_phase: "running", stop_reason: null, mark: "running" };
-
-  const head = (
-    items: HierarchyStep[],
-    phase: RunPhase,
-    reading: ProducerReading,
-    status: RunStatus = RUNNING,
-    waitingOn: WaitingOn | null = null,
-  ) => {
-    const out = rayHead(
-      raySteps(items, ROOT),
-      items,
-      { run_phase: phase, status, producer: reading },
-      ROOT,
-      waitingOn,
-    );
-    if (out === null) throw new Error("a served run has a head");
-    return out;
-  };
-
-  it("states no head before the first dashboard lands", () => {
-    const items = [round(0, 1, 0)];
-    expect(rayHead(raySteps(items, ROOT), items, null, ROOT, null)).toBeNull();
-  });
-
-  it("names the newest step only while the served producer is stepping", () => {
-    const items = [round(0, 1, 0), round(30, 2, 1)];
-    const stepping = head(items, "running", producer({ state: "live" }));
-    expect([stepping.wedged, stepping.detail]).toEqual([false, "Round 2"]);
-    const quiet = head(items, "running", producer({ state: "idle" }));
-    expect([quiet.wedged, quiet.detail]).toEqual([false, RAY_HEAD_WORDS.no_recent_step]);
-  });
-
-  it("reads wedged off the served state, clocked by its served silence", () => {
-    const wedged = producer({ state: "wedged", silent_for_s: 360 });
-    const read = head([round(0, 1, 0)], "running", wedged);
-    expect([read.wedged, read.label, read.detail]).toEqual([
-      true,
-      PRODUCER_STATE_INFO.wedged.label,
-      `${RAY_HEAD_WORDS.stalled} for 6m`,
-    ]);
-  });
-
-  it("heads an open cell with the measuring word and its served clock", () => {
-    const measuring = producer({ state: "idle", silent_for_s: 400, open_for_s: 261 });
-    const read = head([round(0, 1, 0)], "running", measuring, RUNNING, {
-      label: "C1.1",
-      position: 12,
-    });
-    expect(read.label).toBe(RAY_HEAD_WORDS.measuring);
-    expect(read.detail).toBe("C1.1 · sample 12 · open 4m");
-  });
-
-  it("reads waiting-on-a-child when the root opened a call and the newest event is below", () => {
-    const start = item({ ts: at(10), offset: 1, activity: read({ kind: "running" }) });
-    const waiting = producer({ state: "live" });
-    const got = head([round(0, 1, 0), start, innerRound(20, 1, 0)], "running", waiting);
-    expect([got.label, got.tone]).toEqual([RAY_HEAD_WORDS.on_child, "quiet"]);
-    expect(got.target?.[got.target.length - 1]?.cycleId).toBe("cycle_in");
-  });
-
-  it("stops waiting once the call's completion lands", () => {
-    const start = item({ ts: at(10), offset: 1, activity: read({ kind: "running" }) });
-    const done = item({ ts: at(15), offset: 2, activity: read({ kind: "done" }) });
-    const items = [round(0, 1, 0), start, done, innerRound(20, 1, 0)];
-    const live = producer({ state: "live" });
-    expect(head(items, "running", live).label).toBe(PRODUCER_STATE_INFO.live.label);
-  });
-
-  it("defers to the server for every state the server owns", () => {
-    const items = [round(0, 1, 0)];
-    expect(
-      head(items, "terminal", producer(), {
-        run_phase: "terminal",
-        stop_reason: "crashed",
-        mark: "failed",
-      }),
-    ).toMatchObject({ label: STOP_REASON_INFO.crashed.label, tone: "danger" });
-    expect(
-      head(items, "terminal", producer(), {
-        run_phase: "terminal",
-        stop_reason: "target_hit",
-        mark: "success",
-      }).tone,
-    ).toBe("success");
-    expect(
-      head(items, "gate", producer({ state: "held", attached: true }), {
-        run_phase: "gate",
-        stop_reason: null,
-        mark: "gate",
-      }),
-    ).toMatchObject({ label: RUN_PHASE_INFO.gate.label, tone: "attention" });
-    expect(head(items, "paused", producer()).detail).toBe("resumable");
-    const attached = producer({ state: "live", attached: true });
-    expect(head(items, "paused", attached).detail).toBe("stopping at its next checkpoint");
   });
 });
 

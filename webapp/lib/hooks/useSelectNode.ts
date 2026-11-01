@@ -33,8 +33,8 @@ export function useSelectNode(opts: { resume?: boolean } = {}): SelectNode {
       const nodePath = pathOfAddress(node.address);
       const own = selectedNodeOf(node, pathLeaf(nodePath).cycleId);
       const selected = isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm);
-      if (selected) navigate(nodePath, { resume });
-      else navigate(nodePath, { candidate: node.facts.individual });
+      if (selected) navigate({ path: nodePath }, { resume });
+      else navigate({ path: nodePath, candidateId: node.facts.individual });
       setSelectionForCandidate(selected ? null : own);
     },
     [candidate, navigate, resume, setSelectionForCandidate],

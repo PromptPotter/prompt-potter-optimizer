@@ -2,20 +2,20 @@
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import { cx } from "@/lib/cx";
-import { fmtGap, PLACEHOLDER } from "@/lib/format";
+import { fmtGap } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
-import { useCycleStream, useTimeRay } from "@/lib/poll";
+import { useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
-import { armAt, rayHead, raySteps, type RayStep } from "@/lib/derivations";
+import { useViewedLineage } from "@/lib/lineage";
+import { armAt, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
+// The chronology alone: the run's state now is the masthead's STATE.
 export const TimeRay = memo(function TimeRay() {
-  const { viewedPath, navigate, at, setAt } = useWorkspace();
+  const { viewedPath, viewedCandidateId, navigate, at } = useWorkspace();
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
-  const { dash } = useCycleStream();
   const { pick } = useSelectNode();
   const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
 
@@ -29,29 +29,14 @@ export const TimeRay = memo(function TimeRay() {
     el.scrollLeft = el.scrollWidth;
   }, [steps.length, at]);
 
-  const waitingOn = dash?.waiting_on ?? null;
-  // The word is the course's; a phase change on the 2 s poll invalidates the subtree that serves it.
-  const runPhase = dash?.run_phase ?? null;
-  const status = useViewedCourse()?.state.status ?? null;
-  const producer = dash?.producer ?? null;
-  const head = useMemo(
-    () =>
-      rayHead(
-        steps,
-        served,
-        runPhase && status && producer ? { run_phase: runPhase, status, producer } : null,
-        rootKey,
-        waitingOn,
-      ),
-    [steps, served, runPhase, status, producer, rootKey, waitingOn],
-  );
-
   if (!viewedPath || (!loaded && steps.length === 0)) return null;
+  const setAt = (offset: number | null) =>
+    navigate({ path: viewedPath, candidateId: viewedCandidateId, at: offset });
 
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
-    // Another course's ledger offset means nothing here, so that step returns this course to its head.
-    setAt(elsewhere ? null : step.offset);
+    // Another course's ledger offset means nothing here: that step opens the other course at its head.
+    if (!elsewhere) setAt(step.offset);
     if (step.arm) {
       const node = armAt(index, step.path, step.arm);
       if (node) {
@@ -59,7 +44,7 @@ export const TimeRay = memo(function TimeRay() {
         return;
       }
     }
-    if (elsewhere) navigate(step.path);
+    if (elsewhere) navigate({ path: step.path });
     if (step.round != null) setSelectionForRound(step.round);
   };
 
@@ -105,7 +90,6 @@ export const TimeRay = memo(function TimeRay() {
           </button>
         )}
       </div>
-      <HeadCap head={head} onGo={() => head?.target && navigate(head.target)} />
     </section>
   );
 });
@@ -163,42 +147,5 @@ function Step({
         </button>
       </span>
     </>
-  );
-}
-
-function HeadCap({
-  head,
-  onGo,
-}: {
-  head: ReturnType<typeof rayHead>;
-  onGo: () => void;
-}) {
-  const body = (
-    <>
-      <span className="dash-time-ray-head-label">{head ? head.label : PLACEHOLDER}</span>
-      {head?.detail && <span className="dash-time-ray-head-detail">{head.detail}</span>}
-    </>
-  );
-  const className = cx(
-    "dash-time-ray-head",
-    head && (head.wedged ? "ray-head-wedged" : `tone-${head.tone}`),
-  );
-  if (!head?.target) {
-    return (
-      <span className={className} title="The head of the ray — what this run is doing now.">
-        {body}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={onGo}
-      title="The newest activity is in a child run — open it."
-    >
-      {body}
-      <span aria-hidden="true">↳</span>
-    </button>
   );
 }

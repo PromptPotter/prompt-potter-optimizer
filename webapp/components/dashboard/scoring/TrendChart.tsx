@@ -9,18 +9,16 @@ import {
   lineMotion,
   useThemeVersion,
 } from "@/lib/theme";
-import { Badge, CardFrame } from "@/components/ui";
+import { Badge, CardFrame, Said } from "@/components/ui";
 import { metricInkToken } from "@/components/candidates/series";
-import { degradedRoundNotices, fitnessTrend } from "@/lib/derivations";
+import { HEALTH_GRADE_INFO } from "@/lib/api/types.generated";
+import { fitnessTrend } from "@/lib/derivations";
 import { useCycleStream } from "@/lib/poll";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 
 ensureChartRegistered();
 
-type Props = { density?: "full" } | { density: "glyph"; onOpen: () => void };
-
-export const TrendChart = memo(function TrendChart(props: Props) {
-  const glyph = props.density === "glyph";
+export const TrendChart = memo(function TrendChart() {
   const { dash, isLive } = useCycleStream();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   useThemeVersion();
@@ -34,7 +32,8 @@ export const TrendChart = memo(function TrendChart(props: Props) {
   const hasBench = benchData.some((b) => typeof b === "number");
   const hasTheta = thetaData.some((t) => typeof t === "number");
   const labels = points.map((p) => String(p.round));
-  const degraded = degradedRoundNotices(dash?.rounds);
+  // A critical round is the run's pinned line (`dash.said`); a degraded one sits beside its reading.
+  const degraded = (dash?.rounds ?? []).filter((r) => r.health.grade === "degraded");
 
   // A changed dataset id re-raises its line, which is how the live round line pulses per scored query.
   const series = [
@@ -46,17 +45,12 @@ export const TrendChart = memo(function TrendChart(props: Props) {
       ? [{ id: "theta", data: thetaData, ...lineLook(getCss(metricInkToken("ability", dash.display_metric)), true), yAxisID: "theta", label: "ability θ · potter's election", spanGaps: true }]
       : []),
   ];
-  const data = {
-    labels,
-    datasets: glyph ? series.map((s) => ({ ...s, pointRadius: 0 })) : series,
-  };
+  const data = { labels, datasets: series };
   const options = lineChartDefaults({
     animation: lineMotion(reducedMotion),
-    ...(glyph ? { events: [] } : {}),
     plugins: {
-      legend: { display: !glyph, labels: { boxWidth: 10, font: { size: 10 } } },
+      legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } },
       tooltip: {
-        enabled: !glyph,
         callbacks: {
           afterBody: (items: { dataIndex: number; datasetIndex: number }[]) => {
             const point = points[items[0]?.dataIndex ?? -1];
@@ -73,28 +67,12 @@ export const TrendChart = memo(function TrendChart(props: Props) {
     scales: {
       x: { display: false },
       y: { display: false, min: 0, max: 1 },
-      theta: { display: hasTheta && !glyph, position: "right" as const, grid: { display: false }, ticks: { font: { size: 9 } } },
+      theta: { display: hasTheta, position: "right" as const, grid: { display: false }, ticks: { font: { size: 9 } } },
     },
   });
   const ariaLabel = `Round composite on the search split per round${
     hasBench ? ", with the bench score of each graded selection on held-out rows" : ""
   }${hasTheta ? ", with ability θ" : ""}`;
-
-  if (props.density === "glyph") {
-    // One round is a level, not a trend, and a pointless line draws nothing.
-    if (points.length < 2) return null;
-    return (
-      <button
-        type="button"
-        className="trend-glyph"
-        onClick={props.onOpen}
-        aria-label={`Trend — open the dashboard. ${ariaLabel}`}
-        title="Trend — open the dashboard"
-      >
-        <Line datasetIdKey="id" data={data} options={options} aria-hidden="true" />
-      </button>
-    );
-  }
 
   return (
     <CardFrame title={<span>Trend</span>} actions={<Badge>campaign</Badge>}>
@@ -109,17 +87,13 @@ export const TrendChart = memo(function TrendChart(props: Props) {
       </div>
       {degraded.length > 0 && (
         <ul className="trend-degraded" aria-label="Degraded rounds">
-          {degraded.map((d) => (
-            <li key={d.round} className="trend-degraded-row" title={d.detail}>
-              <span className="trend-degraded-dot" aria-hidden="true">
-                ●
-              </span>
-              <span className="trend-degraded-label">
-                {d.round === 0 ? "Origin" : `R${d.round}`} degraded
-              </span>
-              <span className="trend-degraded-detail">{d.detail}</span>
-            </li>
-          ))}
+          {degraded.map(({ round, health: { grade, reading } }) =>
+            reading ? (
+              <li key={round}>
+                <Said tone={HEALTH_GRADE_INFO[grade].tone} label={reading.title} detail={reading.advice} />
+              </li>
+            ) : null,
+          )}
         </ul>
       )}
     </CardFrame>

@@ -7,9 +7,9 @@ import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDr
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { searchpointCopyChoices, selectedNodeOf, type CompareItem } from "@/lib/derivations";
 import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";
-import { CopyButton, SegmentedControl } from "@/components/ui";
+import { CopyButton, Said, SegmentedControl, Term } from "@/components/ui";
 import { ChannelMap } from "./ChannelMap";
-import { CellMeans } from "./channel-parts";
+import { CellMeans, MainLine } from "./channel-parts";
 import { ChannelRestore, useScenarioEdits, withOverlay } from "./config-edit";
 import type { ChannelModel } from "./useChannelModel";
 
@@ -20,7 +20,6 @@ export function ChannelDetail({
   points,
   own,
   axis,
-  inColumn,
 }: {
   model: ChannelModel;
   item: CompareItem;
@@ -28,17 +27,16 @@ export function ChannelDetail({
   points: readonly CladogramChannel[];
   own: CladogramChannel | null;
   axis: string;
-  inColumn: boolean;
 }) {
   const { edits, setEdits } = useScenarioEdits();
-  const { folds, head, selected, setSelected, picked, level, spentTo } = model;
+  const { folds, head, selected, setSelected, picked, level, spentTo, line } = model;
   if (!folds.detail) return null;
   const map = <ChannelMap model={model} reading={reading} points={points} own={own} />;
   if (reading === null) return map;
   if (!level) return null;
   return (
     <>
-      {!inColumn && head.options.length > 1 && (
+      {head.options.length > 1 && (
         <SegmentedControl
           options={head.options}
           value={head.value}
@@ -114,7 +112,27 @@ export function ChannelDetail({
           <dd>{reading.cached_samples ?? PLACEHOLDER}</dd>
         </div>
       </dl>
-      {rulerNote && headline && <p className="note-warn">{reading.comparable_note}</p>}
+      {rulerNote && headline && (
+        <Said tone="warn" label={reading.comparable_note} />
+      )}
+
+      <div className="cmp-channel-line">
+        <Term
+          className="cmp-metric-label"
+          content={
+            <p className="cmp-line-key">
+              Each round&rsquo;s pick, from the origin up to the highlighted searchpoint: its
+              accuracy on the cells it measured, then its lift over its parent on those same cells,
+              toned by the 95% interval. The lift is the round&rsquo;s verdict — the accuracy moves
+              with the subset each round drew. A held round crowned nobody, so the line kept its
+              parent.
+            </p>
+          }
+        >
+          main line
+        </Term>
+        <MainLine steps={line} />
+      </div>
 
       <p className="cmp-channel-lineage">
         <button

@@ -4,7 +4,14 @@ import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api";
 import { maskedSubject } from "@/lib/api/reads";
-import { DataTable, Empty, type Column } from "@/components/ui";
+import {
+  DataTable,
+  Empty,
+  IntervalRow,
+  intervalDomain,
+  type Column,
+  type IntervalDomain,
+} from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtInterval, fmtUnit, shortId, type MetricUnit } from "@/lib/format";
 import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
@@ -155,32 +162,20 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
   );
 }
 
-const AXIS_W = 220;
-const ROW_H = 18;
-
-function scaleOver(rows: readonly { value: number | null; ci_lo: number | null; ci_hi: number | null }[]) {
-  const bounds = rows.flatMap((r) =>
-    r.value === null ? [] : [r.ci_lo ?? r.value, r.value, r.ci_hi ?? r.value],
-  );
-  if (bounds.length === 0) return null;
-  const lo = Math.min(...bounds);
-  const hi = Math.max(...bounds);
-  const pad = (hi - lo || 1) * 0.1;
-  const [d0, d1] = [lo - pad, hi + pad];
-  return (v: number) => 4 + ((v - d0) / (d1 - d0)) * (AXIS_W - 8);
-}
-
 function Merged({ evidence }: { evidence: Evidence }) {
   const rows = evidence.subjects;
-  const x = scaleOver([...rows, ...rows.flatMap((r) => r.winner_chain ?? [])]);
-  if (x === null) {
+  const domain = intervalDomain(
+    [...rows, ...rows.flatMap((r) => r.winner_chain ?? [])].flatMap((r) =>
+      r.value === null ? [] : [r.ci_lo ?? r.value, r.value, r.ci_hi ?? r.value],
+    ),
+  );
+  if (domain === null) {
     return (
       <Empty>No subject in this selection could be read under this metric.</Empty>
     );
   }
   return (
-    // `cmp-forest` turns off `ov-forest`'s newest-row emphasis: these rows are subjects, not rounds.
-    <div className="ov-forest cmp-forest">
+    <div className="ov-forest">
       {rows.map((r, i) => (
         <div key={r.key}>
           <MergedRow
@@ -188,9 +183,9 @@ function Merged({ evidence }: { evidence: Evidence }) {
             title={r.key}
             row={r}
             unit={evidence.metric.spec.unit}
-            x={x}
-            colour={seriesVar(i)}
-            muted={r.comparable === false}
+            domain={domain}
+            ink={seriesVar(i)}
+            className={cx(r.comparable === false && "cmp-row-muted")}
           />
           {r.winner_chain?.map((p: WinnerChainPoint) => (
             <MergedRow
@@ -199,9 +194,9 @@ function Merged({ evidence }: { evidence: Evidence }) {
               title={p.candidate_id}
               row={p}
               unit={evidence.metric.spec.unit}
-              x={x}
-              colour={seriesVar(i)}
-              nested
+              domain={domain}
+              ink={seriesVar(i)}
+              className="cmp-row-nested"
             />
           ))}
         </div>
@@ -215,58 +210,43 @@ function MergedRow({
   title,
   row,
   unit,
-  x,
-  colour,
-  muted,
-  nested,
+  domain,
+  ink,
+  className,
 }: {
   label: string;
   title: string;
   row: { value: number | null; ci_lo: number | null; ci_hi: number | null; n_cells: number };
   unit: MetricUnit;
-  x: (v: number) => number;
-  colour: string;
-  muted?: boolean;
-  nested?: boolean;
+  domain: IntervalDomain;
+  ink: string;
+  className: string;
 }) {
   const value = fmtUnit(unit, row.value);
   const interval = fmtInterval(unit, row.ci_lo, row.ci_hi);
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
-    <div className={cx("ov-row", nested && "cmp-row-nested", muted && "cmp-row-muted")}>
-      <span className="ov-cell-label" title={title}>
-        {label}
-      </span>
-      <svg
-        className="ov-axis"
-        width={AXIS_W}
-        height={ROW_H}
-        viewBox={`0 0 ${AXIS_W} ${ROW_H}`}
-        role="img"
-        aria-label={`${label}: ${value} ${interval} over ${cells}`}
-      >
-        {row.ci_lo !== null && row.ci_hi !== null && (
-          <line
-            x1={x(row.ci_lo)}
-            y1={ROW_H / 2}
-            x2={x(row.ci_hi)}
-            y2={ROW_H / 2}
-            stroke="var(--color-ci)"
-            strokeWidth={1.5}
-          />
-        )}
-        {row.value !== null && (
-          <circle cx={x(row.value)} cy={ROW_H / 2} r={nested ? 2.5 : 3.5} fill={colour} />
-        )}
-      </svg>
-      <span className="ov-cell-val">
-        {value}
-        <span className="l4-subtle">
-          {" "}
-          {interval} · {cells}
-        </span>
-      </span>
-    </div>
+    <IntervalRow
+      className={className}
+      label={label}
+      title={title}
+      value={
+        <>
+          {value}
+          <span className="l4-subtle">
+            {" "}
+            {interval} · {cells}
+          </span>
+        </>
+      }
+      domain={domain}
+      point={row.value}
+      lo={row.ci_lo}
+      hi={row.ci_hi}
+      pointInk={ink}
+      intervalInk="var(--color-ci)"
+      ariaLabel={`${label}: ${value} ${interval} over ${cells}`}
+    />
   );
 }
 
@@ -305,7 +285,7 @@ export function SeriesLegend({
                 aria-expanded={masking === address}
                 onClick={() => onMask(address)}
               >
-                what if…
+                mask
               </button>
             )}
           </li>

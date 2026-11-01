@@ -23,10 +23,11 @@ from promptpotter.application.jobs.quota import (
 )
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CampaignLaunch,
@@ -53,6 +54,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
@@ -120,11 +122,7 @@ def release_slot(
             error=(
                 None
                 if stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
-                else ErrorRecord(
-                    kind="launch_failed",
-                    message=str(exc) or type(exc).__name__,
-                    stop_reason=stop_reason,
-                )
+                else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
             ),
         )
     except Exception:
@@ -562,6 +560,8 @@ async def paid_pass(
             holding = hop
             # Asked of a producer gone since, as a launch's RUNNING record empties the inbox.
             _take_pause(stores, hop)
+            # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
+            RunCallbacks(CycleEventLog.open(CycleDir(cycle_dir))).close_dead_bench()
             # The rate-limit and slot waits poll it too, as a loop's do.
             set_abort_check(RunControl(cycle_dir=cycle_dir).pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)

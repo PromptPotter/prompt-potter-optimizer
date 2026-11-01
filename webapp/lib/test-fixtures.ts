@@ -21,6 +21,7 @@ import type {
   LiveCandidate,
   Measured,
   MeteredSpend,
+  NodeConfigParam,
   NodePrompt,
   OverlapReading,
   PairedReading,
@@ -32,10 +33,11 @@ import type {
   ServedRound,
   StepFacts,
 } from "@/lib/api/types";
+import type { Figure, Said } from "@/lib/api/types.generated";
 
 // The envelope every rendered level wears, empty; each builder lays its level's own fields over it.
-function envelope(): { caveat: null; tags: HierarchyTag[]; children: never[] } {
-  return { caveat: null, tags: [], children: [] };
+function envelope(): { tags: HierarchyTag[]; figures: Figure[]; lines: Said[]; children: never[] } {
+  return { tags: [], figures: [], lines: [], children: [] };
 }
 
 const NO_METER: MeteredSpend = {
@@ -54,6 +56,30 @@ const NO_METER: MeteredSpend = {
   replay_share: null,
 };
 
+export function configParam(over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam {
+  return {
+    value: null,
+    declared: null,
+    kind: "number",
+    integer: false,
+    nullable: false,
+    minimum: null,
+    exclusive_minimum: null,
+    maximum: null,
+    exclusive_maximum: null,
+    options: [],
+    description: "",
+    summary: "",
+    never_axis: "",
+    movable_by: [],
+    held: false,
+    source: "campaign",
+    permitted: [],
+    permitted_stated: false,
+    ...over,
+  };
+}
+
 export function lifetimeSpend(over: Partial<LifetimeSpend> = {}): LifetimeSpend {
   return {
     billed_usd: 0,
@@ -71,17 +97,16 @@ export function accountKey(provider: string, last4: string): AccountKey {
   return { provider, last4, added_at: "2026-01-01T00:00:00Z" };
 }
 
-// A fresh non-host account on a $5 face, nothing spent, no key held.
+// A fresh non-host account on a $5 face, nothing drawn, no key held.
 export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
   return {
-    host: false,
-    face_usd: 5,
-    face_tokens: null,
-    left_usd: 5,
-    left_tokens: null,
+    state: "open",
+    face: { usd: 5, tokens: null },
+    drawn: { usd: 0, tokens: 0 },
+    held: { usd: 0, tokens: 0 },
+    left: { usd: 5, tokens: null },
+    binding: "usd",
     used_share: 0,
-    exhausted: false,
-    void: false,
     host_key_spend: lifetimeSpend(),
     own_key_spend: lifetimeSpend(),
     keys: [],
@@ -210,9 +235,9 @@ export function producerReading(over: Partial<ProducerReading> = {}): ProducerRe
 
 export function health(
   grade: RoundHealth["grade"],
-  over: Partial<RoundHealth> = {},
+  reading: RoundHealth["reading"] = null,
 ): RoundHealth {
-  return { grade, suggested_action: null, ...over };
+  return { grade, reading };
 }
 
 export function armReading(
@@ -360,7 +385,6 @@ export function subtreeCourse(
       task: null,
       standing: null,
       rounds_closed: 0,
-      rounds_cap: null,
       spend: NO_METER,
       bench: null,
       elects_on: "ability",
@@ -370,6 +394,7 @@ export function subtreeCourse(
       from_candidate: null,
       ...facts,
     },
+    said: null,
     ...over,
   };
 }
@@ -392,7 +417,6 @@ export function subtreeCampaign(
       line: root,
       lifecycle: "active",
       spend_lifetime: lifetimeSpend(),
-      line_course: null,
       runs_with: null,
       deletable_stubs: 0,
     },
@@ -506,7 +530,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     error_count: 0,
     backend_retry_count: 0,
     recent_backend_warnings: [],
-    recent_loop_warnings: [],
     total_queries_scored: 0,
     total_backend_calls: 0,
     current_query_payload: null,
@@ -522,10 +545,9 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       pick_max: 1,
       affordable: null,
       cell_reserve_usd: null,
-      unavailable: "",
-      explained: "",
-      auto_refusal: "",
-      depths: [{ cells: 1, label: "One at a time", fill: null, pickable: true }],
+      discards: 0,
+      auto_refusal: "one_at_a_time",
+      depths: [{ cells: 1, fill: null, pickable: true }],
     },
     waiting_on: null,
     producer: producerReading(),
@@ -537,7 +559,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     },
     backpressure: null,
     measured_unit: "sample",
-    last_query_elapsed_s: 0,
     at_time: "",
     round_cells_ceiling: 0,
     run_limits: { budget: {}, optimizer: [] },
@@ -551,11 +572,11 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     allotment: null,
     catch_up_log: [],
     current_round: currentRound(),
-    error: null,
     observed: null,
     walk: null,
     round_axis: { completed: [], live: null, position: null },
     pause: null,
+    said: null,
     ...over,
   };
 }
@@ -591,9 +612,7 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     candidates: [],
     selection: [],
     health: health("healthy"),
-    health_alert: null,
     overlap: unreadOverlap(),
-    overlap_line: [],
     panel_precision: null,
     panel_precision_verdict: null,
     selection_movement: [],

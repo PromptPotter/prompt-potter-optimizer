@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { connectorReachability } from "../connector-state";
 import type { BackendHealthResponse } from "@/lib/api";
+import { BACKEND_REACHABILITY_INFO } from "@/lib/api/types.generated";
 
 const health = (status: BackendHealthResponse["status"]): BackendHealthResponse => ({
   backend_id: "b1",
@@ -11,31 +12,24 @@ const health = (status: BackendHealthResponse["status"]): BackendHealthResponse 
 });
 
 describe("connectorReachability", () => {
-  it("probing when not yet polled", () => {
-    expect(connectorReachability(null)).toMatchObject({
-      reachable: false,
-      down: false,
-      stateCls: "idle",
-      stateLabel: "probing…",
-    });
+  it("probing when not yet polled — neither reachable nor down", () => {
+    expect(connectorReachability(null)).toMatchObject({ reachable: false, stateCls: "idle" });
   });
 
   it("live when the probe reports live", () => {
-    expect(connectorReachability(health("live"))).toMatchObject({
+    expect(connectorReachability(health("live"))).toEqual({
       reachable: true,
-      down: false,
       stateCls: "live",
-      stateLabel: "reachable",
+      stateLabel: BACKEND_REACHABILITY_INFO.live.label,
     });
   });
 
-  it("down for any non-live status", () => {
-    for (const s of ["unreachable", "error"] as const) {
-      expect(connectorReachability(health(s))).toMatchObject({
+  it("down for any non-live status, worded by its own served status", () => {
+    for (const s of ["unreachable", "missing_extra"] as const) {
+      expect(connectorReachability(health(s))).toEqual({
         reachable: false,
-        down: true,
         stateCls: "offline",
-        stateLabel: "unreachable",
+        stateLabel: BACKEND_REACHABILITY_INFO[s].label,
       });
     }
   });

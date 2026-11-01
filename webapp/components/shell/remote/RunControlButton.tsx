@@ -1,5 +1,6 @@
 "use client";
-import { FailureLine } from "@/components/ui";
+import { FailureLine, Said } from "@/components/ui";
+import { cx } from "@/lib/cx";
 import { useRunControl } from "@/lib/hooks/useRunControl";
 
 const PLAY_ICON = (
@@ -22,9 +23,7 @@ export function RunControlButton() {
   if (run.noneReason) {
     return (
       <div className="run-ctl" role="group" aria-label="Run control">
-        <span className="run-ctl-pausing" role="status">
-          {run.noneReason}
-        </span>
+        <Said tone="warn" label={run.noneReason} live />
       </div>
     );
   }
@@ -33,7 +32,7 @@ export function RunControlButton() {
     <div className="run-ctl" role="group" aria-label="Run control">
       <button
         type="button"
-        className={`run-ctl-primary ${run.running ? "is-pause" : "is-play"}`}
+        className={cx("remote-btn", run.running ? "remote-pause" : "remote-play")}
         onClick={run.toggle}
         disabled={run.pending}
         aria-label={run.label}
@@ -47,11 +46,9 @@ export function RunControlButton() {
         {run.running ? PAUSE_ICON : PLAY_ICON}
       </button>
       {run.pausing && run.running ? (
-        <span className="run-ctl-pausing" role="status" aria-live="polite">
-          {run.pausingNote}
-        </span>
+        <Said tone="warn" label={run.pausingNote} live />
       ) : null}
-      <FailureLine failure={run.failure} className="run-ctl-err" />
+      <FailureLine failure={run.failure} />
     </div>
   );
 }

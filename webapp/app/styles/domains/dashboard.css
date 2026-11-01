@@ -4,51 +4,25 @@
 
 @media (max-width:880px){
   .content{padding:var(--space-12)}
-  .run-error-banner{max-height:26vh;overflow-y:auto;overscroll-behavior:contain}
 }
 
-.critical-alert{position:sticky;top:0;z-index:40;display:flex;align-items:baseline;gap:var(--space-12);
-  padding:var(--space-10) var(--space-18);border-bottom:1px solid transparent;font-size:var(--text-md)}
-.critical-alert.critical{background:var(--color-danger-bg);border-bottom-color:var(--color-danger-border);
-  color:var(--color-danger);box-shadow:inset 4px 0 0 var(--color-danger);animation:critical-pulse 1.4s ease-in-out infinite}
-.critical-alert.warn{background:var(--color-warn-bg);border-bottom-color:var(--color-warn-border);
+.critical-alert{position:sticky;top:0;z-index:40;display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-10);
+  padding:var(--space-8) var(--space-14);border-bottom:1px solid transparent;font-size:var(--text-sm)}
+.critical-alert.tone-danger{background:var(--color-danger-bg);border-bottom-color:var(--color-danger-border);
+  color:var(--color-danger);box-shadow:inset 4px 0 0 var(--color-danger)}
+.critical-alert.tone-warn{background:var(--color-warn-bg);border-bottom-color:var(--color-warn-border);
   color:var(--color-warn);box-shadow:inset 4px 0 0 var(--color-warn)}
-.critical-alert.info{background:var(--color-background-secondary);border-bottom-color:var(--color-border);
+.critical-alert.tone-attention{background:var(--color-background-secondary);border-bottom-color:var(--color-border);
   color:var(--color-text-primary);box-shadow:inset 4px 0 0 var(--color-accent)}
-.critical-alert-icon{font-size:var(--text-lg);line-height:1;flex-shrink:0}
-.critical-alert-body{display:flex;align-items:baseline;gap:var(--space-10);flex-wrap:wrap;min-width:0;flex:1}
-.critical-alert-title{font-weight:700;letter-spacing:.01em;color:currentColor}
-.critical-alert-detail{font-size:var(--text-sm);color:var(--color-text-secondary);font-weight:400;
-  overflow:hidden;text-overflow:ellipsis;min-width:0}
-.critical-alert-jump{font-family:inherit;font-size:var(--text-sm);color:currentColor;background:var(--color-background-primary);
+/* Inked by the banner; its detail is a tap away behind `Term`. */
+.critical-alert .said{flex:1;min-width:0;margin:0;color:inherit;font-weight:600}
+.critical-alert-stop{font-family:inherit;font-size:var(--text-sm);font-weight:700;color:currentColor;background:var(--color-background-primary);
   border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px var(--space-10);cursor:pointer;flex-shrink:0}
-.critical-alert-jump:hover{background:var(--color-background-hover)}
-.critical-alert-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.critical-alert-stop{background:var(--color-danger);color:var(--color-background-primary);
-  border-color:var(--color-danger);font-weight:700}
-.critical-alert-stop:hover{background:var(--color-danger-border);border-color:var(--color-danger-border)}
-@keyframes critical-pulse{0%,100%{opacity:1}50%{opacity:.72}}
-
-.run-error-banner{
-  background:var(--color-danger-bg);
-  border:1px solid var(--color-danger-border);
-  border-radius:4px;
-  padding:var(--space-10) var(--space-14);
-  margin-bottom:12px;
-  color:var(--color-text-primary);
-  font-size:var(--text-sm);
-}
-.run-error-banner-head{
-  display:flex;gap:var(--space-10);align-items:baseline;
-  font-size:var(--text-xs);letter-spacing:.08em;text-transform:uppercase;
-  color:var(--color-danger);font-weight:700;margin-bottom:4px;
-}
-.run-error-banner-stop{color:var(--color-text-secondary);font-weight:500;letter-spacing:0;text-transform:none}
-.run-error-banner-msg{margin:0;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word}
-.run-error-banner-list{margin:var(--space-6) 0 0 0;padding-left:18px;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:var(--text-xs)}
-.run-error-banner-list li{margin:2px 0}
-.run-error-banner.is-warn{background:var(--color-warn-bg);border-color:var(--color-warn-border)}
-.run-error-banner.is-warn .run-error-banner-head{color:var(--color-warn)}
+.critical-alert-stop:hover{background:var(--color-background-hover)}
+.critical-alert-stop:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.critical-alert-stop:disabled{cursor:progress;opacity:.6}
+/* A refused Pause takes its own row under the alert. */
+.critical-alert-failure{flex-basis:100%}
 
 .inspector-card{max-height:var(--box-scroll-max);overflow:auto}
 .inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
@@ -74,10 +48,6 @@
 .knob-clash-relation{margin:var(--space-4) 0 0;font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 
 .trend-degraded{list-style:none;margin:var(--space-8) 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
-.trend-degraded-row{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--text-xs);line-height:1.4;min-width:0}
-.trend-degraded-dot{color:var(--color-warn);flex:none;font-size:var(--text-xs)}
-.trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
-.trend-degraded-detail{color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
 .rsv-cand-strip{min-width:0;max-width:100%;overflow-x:auto;padding-bottom:2px}
@@ -165,7 +135,6 @@
 .mech-knob-input{width:min(6.5rem,40%);text-align:right;font-variant-numeric:tabular-nums}
 .mech-knob-json{width:min(12rem,55%);text-align:left;font-family:var(--font-mono);resize:vertical}
 .mech-row-head select{max-width:55%}
-.mech-member{display:flex;flex-direction:column;gap:var(--space-8)}
 .mech-all{display:flex;flex-direction:column;gap:var(--space-12)}
 .mech-all > summary{cursor:pointer;font-size:var(--text-sm);font-weight:600;color:var(--color-text-secondary);padding:var(--space-4) 0;min-height:32px;display:flex;align-items:center;gap:var(--space-6)}
 .mech-all > summary small{font-weight:400}
@@ -202,9 +171,9 @@
 .dash-time-ray-step.is-elsewhere{border-style:dashed}
 .dash-time-ray-step.is-viewing{color:var(--color-accent);border-color:var(--color-accent);
   box-shadow:inset 0 -2px 0 var(--color-accent)}
-.dash-time-ray-step.tone-good{color:var(--color-text-primary)}
+.dash-time-ray-step.tone-success{color:var(--color-text-primary)}
 .dash-time-ray-step.tone-warn{color:var(--color-warn);border-color:var(--color-warn-border)}
-.dash-time-ray-step.tone-bad{color:var(--color-danger-border);border-color:var(--color-danger-border)}
+.dash-time-ray-step.tone-danger{color:var(--color-danger-border);border-color:var(--color-danger-border)}
 .dash-time-ray-x{font-variant-numeric:tabular-nums;color:var(--color-text-secondary)}
 .dash-time-ray-gap{flex-shrink:0;padding:0 2px;color:var(--color-text-secondary);
   font-size:var(--text-xs);letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -216,25 +185,6 @@
   color:var(--color-accent);background:var(--color-background-primary);
   border:0.5px solid var(--color-accent);font-size:var(--text-xs)}
 .dash-time-ray-empty{padding:var(--space-4) var(--space-6);color:var(--color-text-secondary);font-size:var(--text-xs)}
-/* max-width + min-width:0 are load-bearing: uncapped, the ray's `overflow:hidden` swallows the detail with no ellipsis. */
-.dash-time-ray-head{position:sticky;right:0;flex-shrink:0;max-width:60%;min-width:0;display:inline-flex;align-items:baseline;
-  gap:var(--space-6);padding:var(--space-8) var(--space-14);border-left:0.5px solid var(--color-border);
-  background:var(--color-background-tertiary);color:var(--color-text-primary);
-  font-family:inherit;font-size:var(--text-xs);text-align:left}
-.dash-time-ray-head-label{flex:0 0 auto}
-button.dash-time-ray-head{cursor:pointer}
-.dash-time-ray-head-label{font-weight:700;letter-spacing:0.03em;text-transform:uppercase}
-.dash-time-ray-head-detail{color:var(--color-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Tone of the served status mark: `domain/cycle_index.py::STATUS_MARK_INFO`. */
-.dash-time-ray-head.tone-live,
-.dash-time-ray-head.tone-success{box-shadow:inset 3px 0 0 var(--color-success)}
-.dash-time-ray-head.tone-attention{box-shadow:inset 3px 0 0 var(--color-accent)}
-.dash-time-ray-head.tone-warn{box-shadow:inset 3px 0 0 var(--color-warn)}
-.dash-time-ray-head.tone-danger{box-shadow:inset 3px 0 0 var(--color-danger)}
-.dash-time-ray-head.tone-quiet{box-shadow:inset 3px 0 0 var(--color-border)}
-.ray-head-wedged{color:var(--color-warn);box-shadow:inset 3px 0 0 var(--color-warn);
-  background-image:repeating-linear-gradient(135deg,transparent 0 6px,
-    rgba(var(--color-warn-rgb),0.10) 6px 12px)}
 @media (prefers-reduced-motion:reduce){
   .dash-time-ray-track{scroll-behavior:auto}
 }

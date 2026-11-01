@@ -8,9 +8,11 @@ import type {
   NodeReach,
   OptimizerSetup,
 } from "@/lib/api";
+import type { ReadFailure } from "@/lib/hooks/useRead";
 import type { PipelineView } from "./pipeline";
 
-export type PipelineStatus = "unbound" | "loading" | "ok" | "error";
+// A failed read IS its `ReadFailure`, so every surface renders its sentence through `FailureLine`.
+export type PipelineStatus = "unbound" | "loading" | "ok" | ReadFailure;
 
 export interface NodeSchemaReading {
   // Never infer the read's state from a null map: an in-flight read and an empty node both hold no rows.

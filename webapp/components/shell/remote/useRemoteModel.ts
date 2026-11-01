@@ -1,7 +1,7 @@
 "use client";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { readSpend, tagValue, waitingText } from "@/lib/derivations";
+import { waitingText } from "@/lib/derivations";
 import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
 import { encodeCyclePath } from "@/lib/ids";
@@ -11,24 +11,18 @@ import { useWorkspace } from "@/lib/workspace";
 export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
 
 export function useRemoteModel() {
-  const {
-    cycleId,
-    viewedPath,
-    drillInto,
-    backToOuter,
-  } = useWorkspace();
+  const { viewedPath, navigate } = useWorkspace();
   const leafEntry = useEntry(viewedPath ? encodeCyclePath(viewedPath) : null);
-  const { dash, status, isLive } = useCycleStream();
+  const { dash, isLive } = useCycleStream();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const isOuterView = (viewedPath?.length ?? 1) === 1;
 
-  if (!viewedPath || !cycleId) return null;
+  if (!viewedPath) return null;
 
   // No `settled` gate: a verb is still offered there, and this gates `RunControlButton`'s only mount.
   if (!dash) return null;
   const { lookahead, producer } = dash;
   const innerHop = isLive ? dash.current_round.inner : null;
-  const { metered, lines } = readSpend(dash);
   const waitNote =
     producer.call_holds && producer.open_for_s !== null && dash.waiting_on
       ? `waiting on ${waitingText(dash.waiting_on)} · ${fmtDuration(producer.open_for_s)}`
@@ -45,22 +39,17 @@ export function useRemoteModel() {
   };
 
   return {
-    cycleId,
-    datasetName: tagValue(leafEntry, "dataset") ?? undefined,
-    updatedAt: dash.at_time,
     babysat: leafEntry?.level === "course" && leafEntry.state.intervened,
-    offline: status === "offline",
     inner: !isOuterView,
     innerHop,
-    drillInto,
-    backToOuter,
+    toOuter: () => navigate({ path: viewedPath.slice(0, 1) }),
+    toInner: (campaignId: string, cycleId: string) =>
+      navigate({ path: [...viewedPath, { campaignId, cycleId }] }),
     skipRefusal: dash.admission.skip_refusal,
-    metered,
-    lines,
+    // RunLimitsControl reads the cycle's spend beside the caps it edits.
+    metered: dash.spend_metered,
     budget: dash.run_limits.budget,
     share: dash.allotment,
-    benchLiftPerUsd:
-      leafEntry?.level === "course" ? (leafEntry.facts.bench?.cost.lift_per_usd ?? null) : null,
     lookahead,
     waitNote,
     providerHeld: dash.backpressure,

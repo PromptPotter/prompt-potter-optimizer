@@ -1,28 +1,28 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { Budget, StartCheckinOptions } from "@/lib/api";
-import { ELAPSED_TICK_MS } from "@/lib/cadence";
-import { budgetAxis } from "@/lib/derivations";
+import type { StartCheckinOptions } from "@/lib/api";
+import type { SetupStep as Step } from "@/lib/api/types.generated";
+import { backendHealthRead } from "@/lib/api/reads";
+import { CONNECTOR_HEALTH_POLL_MS, ELAPSED_TICK_MS } from "@/lib/cadence";
+import { BACKEND_REACHABILITY_INFO, COUPON_STATE_INFO } from "@/lib/api/types.generated";
+import { stepAnswer, type FieldSchema } from "@/lib/derivations";
 import { useCollection } from "@/lib/hooks/useCollection";
+import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useRegistry } from "@/lib/state/registry";
 import type { BlockItem } from "@/lib/chat/thread";
 import { useIngest } from "@/lib/ingest-flow";
+import { useWorkspace } from "@/lib/workspace";
+import { familiesNamed } from "@/components/shell/families";
 import { Composer } from "@/components/chat/Composer";
 import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
-import { FailureLine } from "@/components/ui";
+import { FailureLine, Loading, Said } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
-import { ORIGIN_KEY } from "@/lib/origin-readiness";
 import { DatasetPreview } from "./DatasetPreview";
-import {
-  SchemaFields,
-  setIn,
-  writeOnlyDefaults,
-  type Commit,
-  type FieldSchema,
-} from "./SchemaFields";
+import { SchemaFields, setIn, writeOnlyDefaults, type Commit } from "./SchemaFields";
 import { ComposerTools } from "./ComposerTools";
 import { SetupStep } from "./SetupStep";
 import { PipelineSetupSection, pipelineLabel } from "./PipelineSetupSection";
@@ -64,9 +64,10 @@ function EntryList({
   // Read only while the list is on screen: a run viewed never waits on, or polls, either.
   const collection = useCollection();
   if (collection.kind === "needsAuth") return null;
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   const counts =
     collection.kind === "ready"
-      ? `${collection.origins.length} origins · ${collection.entries.length} datasets`
+      ? `${count(collection.origins.length, "origin")} · ${count(collection.entries.length, "dataset")}`
       : "origins and datasets";
   return (
     <details
@@ -77,7 +78,7 @@ function EntryList({
     >
       <summary>
         Start a campaign —{" "}
-        {drafts.length > 0 ? `${drafts.length} open check-ins · ` : ""}
+        {drafts.length > 0 ? `${count(drafts.length, "open check-in")} · ` : ""}
         {counts}
       </summary>
       <DatasetPickList
@@ -102,6 +103,7 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
           Parsing your file…
         </p>
       ) : null}
+      {phase.stage === "reopening" ? <Loading>Reading your check-in…</Loading> : null}
       {phase.stage === "checkin" ? <CheckinLoadingWindow model={phase.model} /> : null}
       {phase.stage === "collision" ? (
         <CollisionCard flow={flow} existingSlug={phase.existingSlug} suggestedSlug={phase.suggestedSlug} />
@@ -145,17 +147,26 @@ export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail:
   return { head, tail };
 }
 
-// Off a check-in it takes only a file, which opens a fresh one: a run's chat never answers a check-in.
+// Off a check-in a file opens a fresh one, and text is command words: the view labels it names open.
 export function IngestComposer() {
   const { flow, subject } = useIngest();
-  const asking = subject !== null && flow.awaitingContext;
+  const { open } = useWorkspace();
+  const [words, setWords] = useState("");
+  const onRun = subject === null;
+  const asking = !onRun && flow.awaitingContext;
+  const say = () => {
+    const named = familiesNamed(words);
+    if (named === null) return;
+    for (const family of named) open(family);
+    setWords("");
+  };
   return (
     <Composer
-      value={asking ? flow.inputText : ""}
-      onChange={flow.setInputText}
-      onSubmit={flow.submitContext}
-      canSend={asking}
-      placeholder={asking ? "Describe the task…" : "Drop a dataset file…"}
+      value={onRun ? words : asking ? flow.inputText : ""}
+      onChange={onRun ? setWords : flow.setInputText}
+      onSubmit={onRun ? say : flow.submitContext}
+      canSend={onRun || asking}
+      placeholder={onRun ? "Name a view, or drop a file…" : asking ? "Describe the task…" : "Drop a dataset file…"}
       onFile={flow.attachFile}
       accept=".csv,.tsv,.tab,.txt,.json,.jsonl,.ndjson,.xlsx,.xlsm,.xls,.ods,text/csv,application/json"
       attachLabel="Attach a dataset file"
@@ -165,30 +176,19 @@ export function IngestComposer() {
   );
 }
 
-function boundsLabel(launch: StartCheckinOptions, campaign: Budget, arms: number): string {
-  const usd = launch.budget?.usd;
-  const spend = usd == null ? "account's cap" : `$${usd} cap`;
-  const rounds = budgetAxis(campaign, "rounds");
-  const each = arms > 0 ? " · each arm" : "";
-  return `${spend} · ${rounds == null ? "no round cap" : `${rounds} round${rounds === 1 ? "" : "s"}`}${each}`;
-}
-
-type Step = "data" | "scoring" | "pipeline" | "run";
-
-// Which step answers a served gap; a field none answers opens nothing, and its hint still prints by Start.
-const STEP_OF_GAP: Record<string, Step> = {
-  [ORIGIN_KEY.columnQuery]: "data",
-  [ORIGIN_KEY.columnGroundTruth]: "data",
-  [ORIGIN_KEY.scoringMatcher]: "scoring",
-  [ORIGIN_KEY.connector]: "pipeline",
-  [ORIGIN_KEY.backendNodeConfig]: "pipeline",
-};
-
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const blockersId = useId();
+  const notice = readyData(useMachineStatus())?.notice ?? null;
   // The schema's `writeOnly` subtree, already in `StartCheckinOptions` shape.
   const [launch, setLaunch] = useState<StartCheckinOptions>({});
   const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
+  // The probe the run control reads, on the connector this draft would launch.
+  const health = readyData(
+    useRead(served ? backendHealthRead(served.connector) : null, {
+      auth: true,
+      intervalMs: CONNECTOR_HEALTH_POLL_MS,
+    }),
+  );
   const [h2h, setH2h] = useState<HeadToHeadDraft>({ id: "", arms: [] });
   const [seededFor, setSeededFor] = useState<string | null>(null);
   if (served && served.draft_id !== seededFor) {
@@ -208,15 +208,14 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   }, [failure]);
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, raised, degradedCause } = flow.phase;
-  // `blocked` mirrors the server gate alone — never AND in `gaps.length`.
+  // `blocked` mirrors the two served gates alone: the origin's and the allowance's at the declared budget.
   const { complete: ready, gaps } = draft.readiness;
-  const blocked = !ready;
-  const gapped = new Set(gaps.map((g) => STEP_OF_GAP[g.field]));
-  const columns =
-    draft.column_query && draft.column_ground_truth
-      ? `${draft.column_query} → ${draft.column_ground_truth}`
-      : "columns not set";
+  const refusal = draft.launch_refusal;
+  const backend = health === null || health.status === "live" ? null : BACKEND_REACHABILITY_INFO[health.status];
+  const blocked = !ready || refusal !== null;
+  const gapped = new Set<Step | null>(gaps.map((g) => g.step));
   const steps = (draft.setup_schema as FieldSchema).properties ?? {};
+  const runValues = { ...draft, ...launch };
   const commit: Commit = (path, value, writeOnly) => {
     if (writeOnly) setLaunch((l) => setIn(l, path, value));
     else flow.applyPatch(setIn({}, path, value));
@@ -235,29 +234,24 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       ) : null}
 
       {!ready ? (
-        <OriginCheckinPanel
-          draft={draft}
-          lastResolution={resolution}
-          raised={raised}
-          onApply={flow.applyPatch}
-        />
+        <OriginCheckinPanel lastResolution={resolution} raised={raised} onApply={flow.applyPatch} />
       ) : null}
 
-      {/* The backbone leads, open: its knobs and prompts frame every step after it. */}
-      <SetupStep title="Optimizer" answer={draft.optimization_overrides.optimizer} open>
+      {/* The backbone leads: its knobs and prompts frame every step after it. */}
+      <SetupStep step="optimizer" answer={draft.optimization_overrides.optimizer} gapped={gapped}>
         <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
       </SetupStep>
 
       <SetupStep
-        title="Data"
-        answer={`${draft.slug} · ${draft.n_samples.toLocaleString()} rows · ${columns}`}
-        open={gapped.has("data")}
+        step="data"
+        answer={steps.data ? stepAnswer(steps.data, draft) : null}
+        gapped={gapped}
       >
         {steps.data ? <SchemaFields schema={steps.data} values={draft} onCommit={commit} /> : null}
         <DatasetPreview draft={draft} />
       </SetupStep>
 
-      <SetupStep title="Scoring" answer={draft.scoring_matcher} open={gapped.has("scoring")}>
+      <SetupStep step="scoring" answer={draft.scoring_matcher} gapped={gapped}>
         <Criterion
           startRung={1}
           dialsOnly
@@ -274,7 +268,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         />
       </SetupStep>
 
-      <SetupStep title="Pipeline" answer={pipelineLabel(draft)} open={gapped.has("pipeline")}>
+      <SetupStep step="pipeline" answer={pipelineLabel(draft)} gapped={gapped}>
         <PipelineSetupSection draft={draft} onApply={flow.applyPatch}>
           <PipelineDependencies
             dependencies={draft.dependencies}
@@ -289,9 +283,9 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       </SetupStep>
 
       <SetupStep
-        title="Head-to-head"
+        step="head_to_head"
         answer={h2h.arms.length === 0 ? "one campaign" : h2h.arms.map((a) => a.key).join(" vs ")}
-        open={false}
+        gapped={gapped}
       >
         <HeadToHeadSection
           value={h2h}
@@ -301,29 +295,30 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         />
       </SetupStep>
 
-      <SetupStep
-        title="Run bounds"
-        answer={boundsLabel(launch, draft.optimization_overrides.budget, h2h.arms.length)}
-        open={gapped.has("run")}
-      >
-        {steps.run ? (
-          <SchemaFields schema={steps.run} values={{ ...draft, ...launch }} onCommit={commit} />
-        ) : null}
+      <SetupStep step="run" answer={steps.run ? stepAnswer(steps.run, runValues) : null} gapped={gapped}>
+        {steps.run ? <SchemaFields schema={steps.run} values={runValues} onCommit={commit} /> : null}
       </SetupStep>
 
       {/* A disabled button carries no tooltip on touch, so the reason must be text on the page. */}
       {blocked ? (
         <ul id={blockersId}>
-          {gaps.length > 0 ? (
-            gaps.map((g) => <li key={g.field}>{g.hint}</li>)
-          ) : (
+          {gaps.map((g) => (
+            <li key={g.field}>{g.hint}</li>
+          ))}
+          {refusal ? (
             <li>
-              The setup isn’t ready to start yet — the server reported no specific field, so try
-              re-running the check-in.
+              <Said
+                tone={COUPON_STATE_INFO[refusal.state].tone}
+                label={COUPON_STATE_INFO[refusal.state].label}
+                detail={refusal.reason}
+              />
             </li>
-          )}
+          ) : null}
         </ul>
       ) : null}
+
+      {notice ? <Said tone={notice.tone} label={notice.label} detail={notice.detail} /> : null}
+      {backend ? <Said tone={backend.tone} label={backend.label} /> : null}
 
       <FailureLine failure={failure} />
 

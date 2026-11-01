@@ -5,23 +5,16 @@ import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useIngest } from "@/lib/ingest-flow";
 import { useWorkspace } from "@/lib/workspace";
-import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { Button, Dialog, FailureLine, Menu, MenuItem } from "@/components/ui";
 
-interface Props {
-  campaign: ListedCampaign;
-  variant?: "row" | "standalone";
-}
-
-export function CampaignMenu({ campaign, variant = "row" }: Props) {
-  const inRow = variant === "row";
+export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
   const cmd = useCommand<"archive" | "unarchive" | "rename" | "delete">("campaign-menu");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
   const renameFormId = useId();
   // The ROOT hop: a drilled-in inner leaf still belongs to the campaign being deleted.
-  const { campaignId: viewedCampaignId, followActive } = useWorkspace();
+  const { campaignId: viewedCampaignId, navigate } = useWorkspace();
   const { flow } = useIngest();
   // An unstarted campaign has no run to rename or archive: Delete is its one action.
   const unstarted = campaign.level === "unstarted";
@@ -63,17 +56,13 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
       () => postCommand("delete-campaign", { campaign_id: campaign.address }),
       // Lets go of the view BEFORE the re-poll rather than discovering it by 404.
       () => {
-        if (viewedCampaignId === campaign.address) followActive();
+        if (viewedCampaignId === campaign.address) navigate(null);
       },
     );
   };
 
   const pending = cmd.pending !== null;
   const archived = !unstarted && campaign.facts.lifecycle === "archived";
-  const deleteActions: ModalAction[] = [
-    { label: "Cancel", onClick: () => setConfirmDelete(false) },
-    { label: "Delete", variant: "danger", onClick: runDelete },
-  ];
 
   return (
     <>
@@ -92,8 +81,8 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
             aria-label="Campaign actions"
             title="Campaign actions"
             disabled={pending}
-            // In a row the ROW is the tab stop: focus here would nest one tab stop in another.
-            tabIndex={inRow ? -1 : undefined}
+            // The ROW is the tab stop: focus here would nest one tab stop in another.
+            tabIndex={-1}
           >
             ⋯
           </button>
@@ -169,17 +158,25 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
         </form>
         <p className="campaign-rename-id">{campaign.address}</p>
       </Dialog>
-      <Modal
+      <Dialog
         open={confirmDelete}
         title={unstarted ? "Delete this unstarted campaign?" : "Delete this campaign?"}
-        message={
-          unstarted
-            ? `This permanently removes the "${campaign.label}" check-in — its setup and its upload — from disk. There is no recovery. What the check-in cost stays on the account.`
-            : `This permanently removes "${campaign.label}" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`
-        }
-        actions={deleteActions}
         onClose={() => setConfirmDelete(false)}
-      />
+        footer={
+          <>
+            <Button onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            <Button variant="danger" onClick={runDelete}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>
+          {unstarted
+            ? `This permanently removes the "${campaign.label}" check-in — its setup and its upload — from disk. There is no recovery. What the check-in cost stays on the account.`
+            : `This permanently removes "${campaign.label}" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`}
+        </p>
+      </Dialog>
     </>
   );
 }

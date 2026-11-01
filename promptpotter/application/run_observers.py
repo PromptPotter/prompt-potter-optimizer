@@ -60,6 +60,8 @@ logger = logging.getLogger(__name__)
 UNREPORTED_KINDS: frozenset[str] = frozenset(
     {
         "decision",  # replayed on resume (`resume_and_fork/replayers.py`)
+        "command",  # the dispatcher's idempotency and the command state (`ledger_scan.py`)
+        "cycle_seed",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "account_event",  # the account trail's (`store/account_trail.py`)
         "trail_tombstone",  # the account trail's (`store/account_trail.py`)
         "spend_hold",  # the account spend book's (`store/account_spend.py`)
@@ -258,6 +260,7 @@ def build_run_observers(
         release_cycle(cycle_dir)
         raise
     session.state.locked_cycle = cycle_dir
+    observers.callbacks.close_dead_bench()
     if forked_from is not None:
         # The line moved onto this cycle; the one it left is no longer this process's.
         release_cycle(forked_from.cycle_dir)

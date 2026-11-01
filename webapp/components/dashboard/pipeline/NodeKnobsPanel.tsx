@@ -4,15 +4,15 @@ import { useState } from "react";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
   optimizerRosterRead,
-  type KnobRow,
   type ManifestNodeOverlay,
+  type NodeConfigParam,
   type OptimizerRoster,
   type OptimizerSetup,
   type PoolFill,
   type PoolOffer,
   type PoolRow,
 } from "@/lib/api";
-import { knobRange, knobText, parseKnob } from "@/lib/derivations";
+import { knobGroups, knobRange, knobText, parseKnob } from "@/lib/derivations";
 import { promptField, promptFieldLabel } from "@/lib/prompt-fields";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
@@ -52,8 +52,14 @@ export function NodeKnobsPanel({
   if (!editable && !campaignId) {
     return <Empty className="mech-empty">Select a campaign to see its optimizer&apos;s knobs.</Empty>;
   }
-  if (cv.schema.status === "error") {
-    return <Empty className="mech-empty">Could not load the optimizer&apos;s knobs.</Empty>;
+  if (typeof cv.schema.status === "object") {
+    return (
+      <FailureLine
+        failure={cv.schema.status}
+        lead="Could not load the optimizer's knobs."
+        className="mech-empty"
+      />
+    );
   }
   if (setup === null) {
     return <Loading className="mech-empty">Reading the optimizer&apos;s knobs…</Loading>;
@@ -65,33 +71,6 @@ export function NodeKnobsPanel({
       entry={readyData(rosterRead)?.optimizers.find((o) => o.name === cv.optimizer)}
       onChange={onChange}
     />
-  );
-}
-
-// One member's knobs as `OptimizerSetup` serves them — the node detail's reading, never `node_config_schema`.
-export function MemberKnobList({ node }: { node: string }) {
-  const cv = useConnector();
-  const rosterRead = useRead(optimizerRosterRead());
-  // A member `knobs` does not list declares none.
-  const group = cv.optimizerSetup?.knobs.find((g) => g.node === node);
-  if (group === undefined || group.knobs.length === 0) return null;
-  const knobs = group.knobs;
-  const entry = readyData(rosterRead)?.optimizers.find((o) => o.name === cv.optimizer);
-  return (
-    <section className="mech-member" aria-label={`${node} knobs`}>
-      <span className="prompt-editor-title">Knobs</span>
-      <ul className="mech-list">
-        {knobs.map((k) => (
-          <KnobItem
-            key={k.key}
-            node={node}
-            knob={k}
-            declaredLabel={declaredLabel(entry)}
-            onChange={undefined}
-          />
-        ))}
-      </ul>
-    </section>
   );
 }
 
@@ -111,18 +90,19 @@ function KnobGroups({
   onChange: OnChange;
 }) {
   const declared = declaredLabel(entry);
+  const groups = knobGroups(setup);
   const isMain = (node: string, key: string) =>
     setup.main.some((ref) => ref.node === node && ref.knob === key);
   // Served in `main`'s order; the server refuses a manifest whose `main` names no member's knob.
   const main = setup.main.flatMap((ref) => {
-    const row = setup.knobs.find((g) => g.node === ref.node)?.knobs.find((k) => k.key === ref.knob);
+    const row = groups.find((g) => g.node === ref.node)?.knobs.find((k) => k.key === ref.knob);
     return row ? [{ node: ref.node, knob: row }] : [];
   });
-  const rest = setup.knobs
+  const rest = groups
     .map((g) => ({ ...g, knobs: g.knobs.filter((k) => !isMain(g.node, k.key)) }))
     .filter((g) => g.knobs.length > 0);
 
-  if (setup.knobs.length === 0) {
+  if (groups.length === 0) {
     return <Empty className="mech-empty">{optimizer ?? "This optimizer"} declares no knobs.</Empty>;
   }
   return (
@@ -211,7 +191,7 @@ export function KnobItem({
   onChange,
 }: {
   node: string;
-  knob: KnobRow;
+  knob: NodeConfigParam;
   declaredLabel: string;
   showNode?: boolean;
   onChange: OnChange;
@@ -245,7 +225,7 @@ export function KnobItem({
         {set ? (
           <KnobControl knob={k} value={k.value} onSet={set} />
         ) : (
-          <Badge tone={k.value === true ? "success" : "default"}>{fmtValue(k.value)}</Badge>
+          <Badge tone={k.value === true ? "success" : "quiet"}>{fmtValue(k.value)}</Badge>
         )}
       </div>
       {k.summary ? <p className="mech-row-desc">{k.summary}</p> : null}
@@ -461,14 +441,14 @@ function KnobControl({
   value,
   onSet,
 }: {
-  knob: KnobRow;
+  knob: NodeConfigParam;
   value: unknown;
   onSet: (next: unknown) => void;
 }) {
-  if (knob.type === "boolean") {
+  if (knob.kind === "bool") {
     return <Switch checked={value === true} label={knob.key} onChange={() => onSet(value !== true)} />;
   }
-  if (knob.options) {
+  if (knob.kind === "enum") {
     return (
       <select aria-label={knob.key} value={String(value)} onChange={(e) => onSet(e.target.value)}>
         {knob.options.map((o) => (
@@ -481,12 +461,12 @@ function KnobControl({
   }
   const commits = (draft: string) => parseKnob(knob, draft) !== undefined;
   const commit = (draft: string) => onSet(parseKnob(knob, draft));
-  if (knob.type === "integer" || knob.type === "number") {
+  if (knob.kind === "number") {
     return (
       <CommitInput
         className="mech-knob-input"
         aria-label={knob.key}
-        inputMode={knob.type === "integer" ? "numeric" : "decimal"}
+        inputMode={knob.integer ? "numeric" : "decimal"}
         placeholder={knob.nullable ? "off" : undefined}
         value={knobText(value)}
         validate={commits}
@@ -494,7 +474,7 @@ function KnobControl({
       />
     );
   }
-  if (knob.type === "string") {
+  if (knob.kind === "string") {
     return (
       <CommitInput
         className="mech-knob-input"

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, get_args
 
+from promptpotter.domain.said import Tone
 from promptpotter.shared.errors import PotterError
+from promptpotter.shared.extras import MissingExtraError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -44,6 +46,36 @@ class BackendUnreachableError(PotterError):
             f"Start the backend and try again.",
             details={"backend_type": backend_type, "backend_url": backend_url},
         )
+
+
+#: `missing_extra` is this install's defect, `unreachable` the backend's.
+BackendReachability = Literal["live", "unreachable", "missing_extra"]
+
+
+class BackendReachabilityInfo(NamedTuple):
+    label: str
+    tone: Tone
+
+
+BACKEND_REACHABILITY_INFO: dict[BackendReachability, BackendReachabilityInfo] = {
+    "live": BackendReachabilityInfo("Backend reachable", "success"),
+    "unreachable": BackendReachabilityInfo("Backend unreachable", "warn"),
+    "missing_extra": BackendReachabilityInfo("Python extra not installed", "warn"),
+}
+assert BACKEND_REACHABILITY_INFO.keys() == set(get_args(BackendReachability))
+
+
+def backend_reachability(
+    down: BackendUnreachableError | MissingExtraError | None,
+) -> BackendReachability:
+    """What the launch's own probe (`admission.py::probe_backend`) read, as one status."""
+    match down:
+        case None:
+            return "live"
+        case MissingExtraError():
+            return "missing_extra"
+        case BackendUnreachableError():
+            return "unreachable"
 
 
 class WireAdapter(Protocol):

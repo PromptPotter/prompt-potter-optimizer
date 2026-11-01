@@ -37,12 +37,16 @@
   margin-left: 8px;
   font-size:var(--text-sm);
 }
+/* A side's ink (`format.ts::sideTone`) is the element's colour: text and `currentColor` marks take it. */
+.l4-eff-pos,
 .l4-eff-pos .l4-effect-mean {
   color: var(--color-success);
 }
+.l4-eff-neg,
 .l4-eff-neg .l4-effect-mean {
   color: var(--color-danger);
 }
+.l4-eff-flat,
 .l4-eff-flat .l4-effect-mean {
   color: var(--color-text-secondary);
 }
@@ -63,33 +67,8 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-top: 6px;
+  margin-top: var(--space-6);
 }
-.ov-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-10);
-  font-size:var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-.ov-cell-label {
-  flex: 0 0 12ch;
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-  font-size:var(--text-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ov-axis {
-  flex: 0 0 auto;
-}
-.ov-cell-val {
-  flex: 0 0 auto;
-  color: var(--color-text-primary);
-}
-.ov-row:last-child .ov-cell-label,
-.ov-row:last-child .ov-cell-val {
+.ov-latest {
   font-weight: 700;
-  color: var(--color-text-primary);
 }

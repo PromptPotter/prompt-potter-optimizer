@@ -1,25 +1,27 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { SETUP_STEP_TITLES, type SetupStep as Step } from "@/lib/api/types.generated";
 
 // Closed it is one line naming its current answer, so a phone sees every step and Start.
+// It opens on a served gap naming it, and on nothing else.
 export function SetupStep({
-  title,
+  step,
   answer,
-  open,
+  gapped,
   children,
 }: {
-  title: string;
+  step: Step;
   answer: ReactNode;
-  open: boolean;
+  gapped: ReadonlySet<Step | null>;
   children: ReactNode;
 }) {
   // Read once: React rewrites `open` on every prop change, which would shut a step the operator opened.
-  const [initiallyOpen] = useState(open);
+  const [initiallyOpen] = useState(gapped.has(step));
   return (
     <details className="setup-step" open={initiallyOpen}>
       <summary>
-        <b>{title}</b> <small>{answer}</small>
+        <b>{SETUP_STEP_TITLES[step]}</b> <small>{answer}</small>
       </summary>
       {children}
     </details>

@@ -470,6 +470,13 @@ assert not (GRADE_KEYS & _CELL.keys), "a grade is a formula's reading, never a f
 
 #: ERR and UNSC are states of their own, not a bad MISS; a re-grade recovers UNSC.
 SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
+SAMPLE_STATUS_LABELS: dict[SampleStatus, str] = {
+    "HIT": "Hit",
+    "MISS": "Miss",
+    "ERR": "Error",
+    "UNSC": "Unscored",
+}
+assert SAMPLE_STATUS_LABELS.keys() == set(get_args(SampleStatus))
 
 
 @dataclass(frozen=True, slots=True)

@@ -57,7 +57,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
         <button
           type="button"
           className="cand-title cand-crumb"
-          onClick={() => m.navigate(viewedPath)}
+          onClick={() => m.navigate({ path: viewedPath })}
           title="Back to this course's candidates"
         >
           ‹ {m.viewedLabel} · runs
@@ -118,6 +118,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
           <Chip
             icon
             on={open || m.lensActive || m.maskOpen || m.showCache}
+            expanded={open}
             ariaLabel="More candidate options"
             title="Lens, scoring mask, cache overlay, and the θ explainer"
             onClick={toggle}
@@ -207,6 +208,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
               <Chip
                 icon
                 on={open}
+                expanded={open}
                 ariaLabel="Download this run"
                 title="Download this run"
                 onClick={toggle}

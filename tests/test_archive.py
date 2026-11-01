@@ -1140,7 +1140,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert all(c.facts.bench is None for c in listed.children if c is not line_course), (
         "the bench graded a course that does not hold the line"
     )
-    assert listed.facts.line_course == line_course.facts, "the campaign's bench is not its line's"
+    assert [r for r in listed.figures if r.key == "bench"] == [
+        r for r in line_course.figures if r.key == "bench"
+    ], "the campaign's bench is not its line's"
     # The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
     validator = subtree_version(stores, listed.address)
     filed(

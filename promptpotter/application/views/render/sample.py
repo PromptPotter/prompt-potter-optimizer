@@ -9,9 +9,10 @@ from promptpotter.application.views.render.primitives import (
     YELLOW,
     _step_tag,
 )
+from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.results_health import is_deprecated, terminal_node
-from promptpotter.domain.scoring import graded_answer, is_hit
+from promptpotter.domain.scoring import graded_answer
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import Grade, MeasuredCell
@@ -56,24 +57,20 @@ def fmt_query_result(
     pred = _ellide(_one_line(graded_answer(facts, grade) or ""), 30)
     gt = _ellide(facts.ground_truth.strip(), 30)
     q = _ellide(facts.query.replace("\n", " ").strip(), 15)
-    err = facts.error or ("pipeline error" if facts.errored else None)
     pd = facts.pipeline
     step = _step_tag(terminal_node(facts), display_tags)
 
     tt = facts.shown_s
 
-    if err:
-        # Asked FIRST: an errored row carries no ``fitness``, which the MISS ladder reads as a grade.
-        tag = "ERR"
+    status = sample_status(facts, grade)
+    if status == "ERR":
+        tag: str = status
     elif is_deprecated(facts):
         tag = "DEPR"
-    elif grade.unscored is not None:
-        # Before the hit ladder: MISS would report the FORMULA's silence as the arm's failure.
-        tag = "UNSC"
-    elif is_hit(grade.fitness):
-        tag = "HIT"
-    else:
+    elif status == "MISS":
         tag = _miss_tag(grade)
+    else:
+        tag = status
 
     cache_marker = "\U0001f4d6" if cached else ""
 
@@ -102,8 +99,9 @@ def fmt_query_result(
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
     sid_col = f"#{position:03d}"
     step_block = f" {step}" if step else ""
-    if err:
-        return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} {str(err)[:40]!r} gt:{gt!r} q:{q!r}"
+    if status == "ERR":
+        err = facts.error or "pipeline error"
+        return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} {err[:40]!r} gt:{gt!r} q:{q!r}"
 
     # An L4 outer sample never reaches the HIT threshold and its ground truth is a placeholder.
     if (inner := pd.inner) is not None:

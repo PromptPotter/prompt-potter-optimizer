@@ -39,6 +39,13 @@ export const DENSE: Density = {
   labels: false,
 };
 
+export const forestWidth = (d: Density, maxCol: number): number =>
+  d.leftPad + (maxCol + 1) * d.colW + d.rightPad;
+
+// The labelled drawing where it fits the box, else the label-free one; DENSE until the box is measured.
+export const densityFor = (maxCol: number, boxW: number | null): Density =>
+  boxW !== null && forestWidth(ROOMY, maxCol) <= boxW ? ROOMY : DENSE;
+
 export const LANE_H = 26;
 export const HEADER_H = 18;
 export const TOP_PAD = HEADER_H + 8;

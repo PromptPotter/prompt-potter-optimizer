@@ -1,27 +1,21 @@
 import { memo } from "react";
-import type { LivesReading } from "@/lib/api/types";
-import { LIVES_WORDS } from "@/lib/api/types.generated";
-import { livesLabel, livesPips, livesSpent } from "@/lib/derivations";
+import { LIVES_WORDS, type Said } from "@/lib/api/types.generated";
 import { HeartIcon } from "./HeartIcon";
 
-// An empty bank is a skull, never an empty row, which reads as "no lives mode".
-export const Hearts = memo(function Hearts({
-  lives,
-  className,
-}: {
-  lives: LivesReading;
-  className?: string;
-}) {
-  const label = livesLabel(lives);
-  const { banked, spent } = livesPips(lives);
+// The served `lives` row: its value's pips drawn as hearts, an empty bank its skull, never an empty
+// row, which reads as "no lives mode".
+export const Hearts = memo(function Hearts({ row, className }: { row: Said; className?: string }) {
+  const label = row.sub ?? row.label;
   return (
     <span className={className ?? "hearts"} title={label} aria-label={label} role="img">
-      {livesSpent(lives) ? (
+      {row.value === LIVES_WORDS.empty ? (
         <span className="hearts-dead" aria-hidden="true">
           {LIVES_WORDS.empty}
         </span>
       ) : (
-        Array.from({ length: banked + spent }, (_, i) => <HeartIcon key={i} filled={i < banked} />)
+        Array.from(row.value ?? "", (pip, i) => (
+          <HeartIcon key={i} filled={pip === LIVES_WORDS.banked} />
+        ))
       )}
     </span>
   );

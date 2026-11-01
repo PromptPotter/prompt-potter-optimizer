@@ -1,14 +1,11 @@
 "use client";
-import { useMemo } from "react";
 import { optimizerRosterRead, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
-import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRead } from "@/lib/hooks/useRead";
-import { useSelection } from "@/lib/SelectionContext";
+import { useWorkspace } from "@/lib/workspace";
 import { ReadState, SegmentedControl } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
-import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 
 export function OptimizerSetupSection({
   draft,
@@ -18,35 +15,9 @@ export function OptimizerSetupSection({
   onApply: (patch: DraftPatch) => void;
 }) {
   const { optimizer } = draft.optimization_overrides;
-  const setup = draft.optimizer_setup;
-  const fields = useMemo(
-    () => ({
-      optimizer,
-      optimizerSetup: setup,
-      schema: { status: "ok" as const, config: null, output: null, isSingleNode: false },
-    }),
-    [optimizer, setup],
-  );
-  return (
-    <StaticConnectorProvider fields={fields}>
-      <OptimizerSetupInner draft={draft} onApply={onApply} />
-    </StaticConnectorProvider>
-  );
-}
-
-function OptimizerSetupInner({
-  draft,
-  onApply,
-}: {
-  draft: DraftCampaignWire;
-  onApply: (patch: DraftPatch) => void;
-}) {
-  const { optimizer } = draft.optimization_overrides;
-  const { doc, failure } = useOptimizerPipeline(useConnector().optimizer);
+  const { doc, status } = useOptimizerPipeline();
   const rosterRead = useRead(optimizerRosterRead());
-  const { node: selected, setSelectionForNode } = useSelection();
-  // Match on SCOPE too: node ids are not disjoint across pipelines (self-optimization shares all).
-  const shown = selected?.scope === "optimizer" ? selected : null;
+  const { close } = useWorkspace();
 
   return (
     <>
@@ -68,7 +39,7 @@ function OptimizerSetupInner({
                 value={optimizer}
                 onChange={(name) => {
                   if (name === optimizer) return;
-                  setSelectionForNode(null);
+                  close("node");
                   onApply({ optimization_overrides: { optimizer: name } });
                 }}
                 ariaLabel="Optimizer"
@@ -92,9 +63,9 @@ function OptimizerSetupInner({
       <PipelineFlow
         layer={{
           view: doc?.view ?? null,
-          status: doc ? "ok" : failure ? "error" : "loading",
+          status,
           connector: "PromptPotter",
-          reach: doc?.reach ?? null,
+          reach: draft.optimizer_setup.reach,
           scope: "optimizer",
           nestsNode: doc?.measurement_node ?? null,
           activeNode: null,
@@ -102,10 +73,6 @@ function OptimizerSetupInner({
         }}
         tone="neutral"
       />
-
-      {shown ? (
-        <NodeDetail node={shown} onClose={() => setSelectionForNode(null)} onPromptApply={onApply} />
-      ) : null}
     </>
   );
 }

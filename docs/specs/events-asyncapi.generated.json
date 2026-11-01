@@ -276,7 +276,6 @@
               "round",
               "warning",
               "error",
-              "merge",
               "progress"
             ],
             "title": "Kind",
@@ -300,15 +299,8 @@
             "title": "Round"
           },
           "tone": {
-            "default": "muted",
-            "enum": [
-              "good",
-              "warn",
-              "bad",
-              "muted"
-            ],
-            "title": "Tone",
-            "type": "string"
+            "$ref": "#/components/schemas/Tone",
+            "default": "quiet"
           }
         },
         "required": [
@@ -1512,6 +1504,7 @@
           "no_manifest",
           "held_elsewhere",
           "not_held",
+          "in_flight",
           "selecting",
           "origin_unscored",
           "graded",
@@ -1864,7 +1857,7 @@
           "usd": {
             "anyOf": [
               {
-                "ge": 0.0,
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -1878,7 +1871,7 @@
           "wall_clock_s": {
             "anyOf": [
               {
-                "gt": 0.0,
+                "exclusiveMinimum": 0.0,
                 "type": "number"
               },
               {
@@ -2999,15 +2992,8 @@
             "type": "string"
           },
           "tone": {
-            "default": "muted",
-            "enum": [
-              "good",
-              "warn",
-              "bad",
-              "muted"
-            ],
-            "title": "Tone",
-            "type": "string"
+            "$ref": "#/components/schemas/Tone",
+            "default": "quiet"
           },
           "value": {
             "title": "Value",
@@ -3100,7 +3086,7 @@
       },
       "DegradationHealth": {
         "additionalProperties": false,
-        "description": "A round's degradation verdict from the backend's warning stamps; it never stops the run.",
+        "description": "A round's degradation verdict from the backend's warning stamps; it never stops the run.\n\nFacts only: its words are read off them, never stamped (`results_health.py::health_reading`).",
         "properties": {
           "answer_modal_share": {
             "anyOf": [
@@ -3126,7 +3112,8 @@
                   "evidence_starved",
                   "structural_untested",
                   "persistent",
-                  "degraded"
+                  "degraded",
+                  "transient"
                 ],
                 "type": "string"
               },
@@ -3168,7 +3155,6 @@
             "type": "string"
           },
           "hole_count": {
-            "default": 0,
             "title": "Hole Count",
             "type": "integer"
           },
@@ -3183,6 +3169,10 @@
             ],
             "default": null,
             "title": "Last Error"
+          },
+          "no_result_count": {
+            "title": "No Result Count",
+            "type": "integer"
           },
           "node_failure_rates": {
             "additionalProperties": {
@@ -3202,12 +3192,10 @@
             "type": "object"
           },
           "not_attempted": {
-            "default": 0,
             "title": "Not Attempted",
             "type": "integer"
           },
           "output_ceiling_count": {
-            "default": 0,
             "title": "Output Ceiling Count",
             "type": "integer"
           },
@@ -3223,24 +3211,11 @@
             "title": "Structural Count",
             "type": "integer"
           },
-          "suggested_action": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Suggested Action"
-          },
           "transient_count": {
             "title": "Transient Count",
             "type": "integer"
           },
           "unscored": {
-            "default": 0,
             "title": "Unscored",
             "type": "integer"
           }
@@ -3250,6 +3225,11 @@
           "samples",
           "structural_count",
           "transient_count",
+          "hole_count",
+          "no_result_count",
+          "not_attempted",
+          "unscored",
+          "output_ceiling_count",
           "degraded_rate",
           "consecutive_degraded_rounds",
           "prior_clean_rounds"
@@ -3474,6 +3454,17 @@
         "additionalProperties": false,
         "description": "An arm of ``CycleRecord`` declared here, since ``CycleResult.error`` sits below that union.",
         "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
           "kind": {
             "title": "Kind",
             "type": "string"
@@ -3523,6 +3514,7 @@
         "required": [
           "kind",
           "message",
+          "detail",
           "stop_reason"
         ],
         "title": "ErrorRecord",
@@ -4619,7 +4611,7 @@
       },
       "LivesReading": {
         "additionalProperties": false,
-        "description": "A run's life bank: what is left of it, and its cap. Its pips and words are `bar` / `label`,\nread off `LIVES_WORDS` the same way on every surface (`lib/derivations/lives.ts`).",
+        "description": "A run's life bank: what is left of it, and its cap.",
         "properties": {
           "cap": {
             "anyOf": [
@@ -9176,6 +9168,17 @@
         ],
         "title": "TokenUsageRecord",
         "type": "object"
+      },
+      "Tone": {
+        "enum": [
+          "quiet",
+          "success",
+          "live",
+          "attention",
+          "warn",
+          "danger"
+        ],
+        "type": "string"
       },
       "TrailTombstoneRecord": {
         "additionalProperties": false,

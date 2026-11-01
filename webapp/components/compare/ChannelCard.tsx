@@ -7,9 +7,9 @@ import { useCompareSelection } from "@/lib/state/compare-selection";
 import type { HierarchyCampaign } from "@/lib/api";
 import type { CompareItem } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { ChannelColumn, type ColumnPlace } from "./ChannelColumn";
+import { Said } from "@/components/ui";
 import { ChannelDetail } from "./ChannelDetail";
-import { CostFacts, HeadlineBadges, Metric, Swatch, benchLead } from "./channel-parts";
+import { HeadlineBadges, HeadlineFacts, Metric, Swatch, benchLead } from "./channel-parts";
 import type { MetricUnit } from "@/lib/format";
 import { useChannelModel, type ChannelModel } from "./useChannelModel";
 
@@ -18,46 +18,23 @@ export function ChannelCard({
   ownNote,
   points,
   spec,
-  column,
   run,
 }: {
   item: CompareItem;
   ownNote: boolean;
   points: readonly CladogramChannel[];
   spec: { unit: MetricUnit; axis_label: string };
-  column: ColumnPlace | null;
   run: HierarchyCampaign | null;
 }) {
   const { reading, headline, slot } = item;
-  const model = useChannelModel(item, run, spec.unit, column ? "winner" : "own");
+  const model = useChannelModel(item, run, spec.unit);
   // Null for an unread channel: it plots no series, so any ink here would be another channel's.
   const own = slot === null ? null : (points[slot] ?? null);
   const rulerNote = ownNote && reading?.comparable === false;
-  const notes = <ChannelNotes reading={reading} withdrawn={model.withdrawn} rulerNote={rulerNote && !headline} />;
-  const detail = (
-    <ChannelDetail
-      model={model}
-      item={item}
-      rulerNote={rulerNote}
-      points={points}
-      own={own}
-      axis={spec.axis_label}
-      inColumn={column !== null}
-    />
-  );
-
-  if (column && headline) {
-    return (
-      <ChannelColumn model={model} headline={headline} run={run} ink={own?.ink ?? null} place={column}>
-        {notes}
-        {detail}
-      </ChannelColumn>
-    );
-  }
   return (
     <li className="cmp-channel">
       <ChannelIdRow model={model} item={item} ink={own?.ink ?? null} axis={spec.axis_label} />
-      {notes}
+      <ChannelNotes reading={reading} withdrawn={model.withdrawn} rulerNote={rulerNote && !headline} />
       <details className="cmp-channel-detail" open={model.folds.detail}>
         <summary
           onClick={(e) => {
@@ -67,7 +44,14 @@ export function ChannelCard({
         >
           {reading === null ? "Lineage" : "Search reading, lineage and configuration"}
         </summary>
-        {detail}
+        <ChannelDetail
+          model={model}
+          item={item}
+          rulerNote={rulerNote}
+          points={points}
+          own={own}
+          axis={spec.axis_label}
+        />
       </details>
     </li>
   );
@@ -123,7 +107,7 @@ function ChannelIdRow({
       >
         ✕
       </button>
-      {headline && <CostFacts row={headline} />}
+      {headline && <HeadlineFacts row={headline} />}
     </div>
   );
 }
@@ -149,17 +133,17 @@ function ChannelNotes({
   return (
     <>
       {withdrawn && (
-        <p className="note-warn">
-          ✗ A setting was changed at or above the point this channel reads, and nothing ran
-          under it. Every number here is unknown until it is measured — restore it below, or
-          steer &amp; fork from that searchpoint to actually run it.
-        </p>
+        <Said
+          tone="warn"
+          label="A setting was changed at or above the point this channel reads, and nothing ran under it. Every number here is unknown until it is measured — restore it below, or steer & fork from that searchpoint to actually run it."
+        />
       )}
-      {rulerNote && <p className="note-warn">{reading.comparable_note}</p>}
+      {rulerNote && <Said tone="warn" label={reading.comparable_note} />}
       {reading.human_intervened && (
-        <p className="note-warn">
-          An operator intervened mid-run on this cycle, so it is no longer purely reproducible.
-        </p>
+        <Said
+          tone="warn"
+          label="An operator intervened mid-run on this cycle, so it is no longer purely reproducible."
+        />
       )}
     </>
   );
