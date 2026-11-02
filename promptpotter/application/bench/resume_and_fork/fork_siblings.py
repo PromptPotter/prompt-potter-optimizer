@@ -30,7 +30,7 @@ from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_c
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import owned_campaign
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError, graceful
+from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import acting_principal
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -59,15 +59,14 @@ def _fork_sibling_setup(
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
 
-    with graceful("FORK_CUT decision append failed"):
-        record_decision(
-            CycleEventLog.open(CycleDir(parent_dir)),
-            BenchCheckpointKind.FORK_CUT,
-            {"from_round": from_round},
-            child.cycle_id,
-            node=None,
-            data={"forked_at": utcnow_iso(), "fork": payload.model_dump(mode="json")},
-        )
+    record_decision(
+        CycleEventLog.open(CycleDir(parent_dir)),
+        BenchCheckpointKind.FORK_CUT,
+        {"from_round": from_round},
+        child.cycle_id,
+        node=None,
+        data={"forked_at": utcnow_iso(), "fork": payload.model_dump(mode="json")},
+    )
 
     save_active_pointer(campaign_store.workspace, child)
     logger.info(

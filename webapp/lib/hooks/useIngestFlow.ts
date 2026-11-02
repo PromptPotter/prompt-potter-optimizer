@@ -220,7 +220,7 @@ export function useIngestFlow({
       return;
     }
     say(
-      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Send when ready.`,
+      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Or let me propose it from the rows.`,
     );
     setPhase({ stage: "awaiting-context", draft });
   };
@@ -383,7 +383,8 @@ export function useIngestFlow({
   const submitContext = async () => {
     if (phase.stage !== "awaiting-context") return;
     const text = inputText.trim();
-    if (!text) return;
+    // Without one, the resolver proposes the task from the rows, as `new <file>` lets it.
+    if (!text) return runCheckin(phase.draft);
     const id = phase.draft.draft_id;
     setInputText("");
     echo(text);

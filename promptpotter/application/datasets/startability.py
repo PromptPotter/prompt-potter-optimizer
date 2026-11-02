@@ -24,6 +24,7 @@ from promptpotter.application.datasets.loaders import (
     held_bank,
     source_extra,
 )
+from promptpotter.application.datasets.origin_readiness import columns_confirmed
 from promptpotter.application.datasets.tabular_ingest import read_tabular
 from promptpotter.application.jobs.quota import spends_the_hosts_own_key
 from promptpotter.config.paths import install_datasets_root
@@ -154,10 +155,11 @@ def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
 
 
 def draft_samples(stores: Stores, draft: DraftCampaign) -> Sequence[Sample] | None:
-    """What the draft's Start partitions; ``None`` while its dataset's bank is not held, since a read never fetches."""
+    """What the draft's Start partitions; ``None`` while it has none to read: a read never fetches
+    a bank, and never cuts an upload by columns the gate has not confirmed."""
     upload = stores.drafts.upload_of(draft.draft_id)
     if upload is not None:
-        return cut_bank(stores, upload_source(draft, upload))
+        return cut_bank(stores, upload_source(draft, upload)) if columns_confirmed(draft) else None
     if draft.source_dataset is None:
         return None
     held = held_bank(stores, resolve_dataset(stores, draft.source_dataset))

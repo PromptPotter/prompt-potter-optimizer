@@ -178,8 +178,28 @@ class OriginResolution(StrictModel):
 
 def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
     """Ready is not mintable: a node's required ``{{template vars}}`` are checked only at mint."""
-    gaps: list[FieldGap] = []
+    gaps = _column_gaps(draft)
+    _check_confirmed(
+        draft,
+        field_key="task_description",
+        value=draft.raw_task_description,
+        label="task framing",
+        hint="Describe what the prompt should do.",
+        gaps=gaps,
+    )
 
+    _check_node_models(draft, gaps=gaps)
+
+    return OriginReadiness(gaps=tuple(gaps))
+
+
+def columns_confirmed(draft: DraftCampaign) -> bool:
+    """The gate's column clause: only past it may anything cut the upload's rows."""
+    return not _column_gaps(draft)
+
+
+def _column_gaps(draft: DraftCampaign) -> list[FieldGap]:
+    gaps: list[FieldGap] = []
     _check_column(
         draft,
         field_key="column.query",
@@ -203,18 +223,7 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
                 "Pick two different columns.",
             )
         )
-    _check_confirmed(
-        draft,
-        field_key="task_description",
-        value=draft.raw_task_description,
-        label="task framing",
-        hint="Describe what the prompt should do.",
-        gaps=gaps,
-    )
-
-    _check_node_models(draft, gaps=gaps)
-
-    return OriginReadiness(gaps=tuple(gaps))
+    return gaps
 
 
 def _check_column(

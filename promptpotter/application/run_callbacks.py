@@ -23,7 +23,6 @@ from promptpotter.domain.run_standing import RunStanding
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_bench_open
-from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
@@ -57,12 +56,9 @@ class RunCallbacks:
     # What one phase view needs of an earlier one (`views/ingress.py`); a fork keeps its parent's.
     view_context: ViewContext = field(default_factory=ViewContext)
 
-    def _emit(self, record: CycleRecord) -> int | None:
-        """``None`` where the append failed — ``next_offset`` then still names the previous record."""
-        offset: int | None = None
-        with graceful("ledger append failed"):
-            offset = self.ledger.append(record)
-        return offset
+    def _emit(self, record: CycleRecord) -> int:
+        """A failed append raises: a run that goes on past a lost record states what it cannot fold."""
+        return self.ledger.append(record)
 
     def on_phase(
         self,
@@ -94,7 +90,7 @@ class RunCallbacks:
         *,
         lives: LivesConfig | None,
         outlay: LineOutlay,
-    ) -> tuple[int | None, RunStanding]:
+    ) -> tuple[int, RunStanding]:
         line, series, standing = stated_line(closing, prior, difficulty, lives=lives, outlay=outlay)
         anchors = self.view_context.anchors()
         return self._emit(RoundClosedRecord.of(line, slot_of, series, standing, anchors)), standing

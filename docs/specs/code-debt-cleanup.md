@@ -28,6 +28,31 @@ acting.
     failure line said live is not draft state and is not retold.
   **Re-test:** `git grep -n "ThreadProvider" -- webapp/components/chat/README.md`;
   `git grep -n "queued_drafts" -- promptpotter` serves a stage.
+- **Left by the upload check-in's 422** (`25be69eac` cut rows on every draft read; fixed 2026-11-02 by
+  gating `startability.py::draft_samples` on `origin_readiness.py::columns_confirmed`):
+  - **Save, then a response that can fail**: `application/datasets/ingest.py::ingest_draft` writes the draft before the router
+    builds `draft_wire`, so a failed build leaves an orphan the browser never gets an id for;
+    `draft_editing` / `origin_resolving` write (or pay a resolver turn) and the dispatcher then records the
+    command `rejected`. Action: the effect and its response are one step that lands or does not.
+  - **Two fields for one idea**: `DraftCampaign.column_query == ""` means unset while
+    `field_provenance["column.query"]` says UNSET/PROPOSED/CONFIRMED. Action: the column is absent until set.
+  - **Row validity is Start's, not the gate's**: with both columns confirmed, one blank cell makes
+    `materialize_samples` raise on every draft read. Action: a blank cell is a gap the gate serves.
+  - **"Run the resolver now" lives three times**: webapp `useIngestFlow` (`advance`, `land`,
+    `submitContext`), CLI `new.py::_hold_checkin`, `DraftCampaign.resolution_pending`. Action: the served flag
+    alone. **Rides with:** the host assistant ([`host-assistant.md`](host-assistant.md)).
+  - `ResolveOriginPayload.message` has no caller; a failed reopen leaves a dead state, since re-clicking
+    the same address re-runs no effect (`useIngestFlow.ts`).
+  - Copy promises "any column names work" (`DatasetPickList.tsx`) while auto-detect matches only the
+    literal `query`/`ground_truth` (`draft_campaign.py::_auto_detect_columns`).
+  **Re-test:** upload a CSV whose headers are not `query`/`ground_truth` with a blank target cell, confirm
+  both columns, reopen the draft.
+- **The phone draws the run's figures twice**: `shell/Views.tsx::ViewGlances` (any time more than one view
+  is open; the Dashboard preset opens six) repeats the masthead `RunMasthead::RunFacts` `FigureRow`,
+  both reading the same served `Said` figures. Action: delete the strip; a masthead figure some
+  `FAMILIES[f].glance` names becomes that view's door (`open(family)` already moves an open view to
+  newest and scrolls to it), lit while open; I12 and `components/CLAUDE.md` § "Where is this run" follow.
+  **Re-test:** `git grep -n "ViewGlances" -- webapp/components`.
 - **A backend wire skew is discovered as a 100% degraded origin, not refused at launch** — the box's
   TermNorm read `answer_field` while PromptPotter sent `answer_fields` (2026-10-31); the origin paid
   for every cell to learn it. Action: the connector's health/probe serves the wire contract it
@@ -219,6 +244,23 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 - `CostStrip` sizes itself inline (`height: 140`); `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 
+### What a cycle writes to disk (storage survey 2026-11-01)
+
+- **`tracing/file_sink.py::FileSink`, the local Langfuse shadow, has no reader and runs on every
+  cycle**, also with no Langfuse configured and in L4 inner cycles. It writes most of a run home's
+  files: one file per panel row per cycle (`langfuse/datasets/ground_truth/*.json`, a copy of
+  `banks/{hash}.json`), one per trace, one per observation (written at open and again at close), and
+  a scores `.jsonl` + `.lock` per trace. Action: delete it and its `data_root.py::_cycle_rows`
+  langfuse rows, keeping `state.json` (`LangfuseSink`'s id map). Langfuse and MLflow keep their
+  native formats, and a local Langfuse-format copy is rendered from the ledger on demand.
+  **Rides with:** the next on-disk reshape (§ One record shape for every scoring pass).
+  **Re-test:** `git grep -n "FileSink(" -- promptpotter`; `find <offline home> -path '*langfuse*' -type f | wc -l`.
+- **A bank mint keeps exact repeated rows**: `logic-proofwriter` (`banks/1d4ed70f….json`) repeats
+  whole `(query, ground_truth)` rows, a query up to 3×. Each repeat has the same
+  `domain/sample.py::sample_key`, so a panel can draw one sample twice. Action: the mint keeps one
+  row per `sample_key`, so the content address names distinct rows. **Rides with:** the next
+  dataset ingest. **Re-test:** count rows against distinct `(query, ground_truth)` pairs in that bank.
+
 ### On the box (2026-11-01)
 
 - Unexplained: in `justlogic.d234__e85387` / `cycle_f1591f054ad0`, R1's three candidates and R2's two
@@ -231,6 +273,38 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 - No verb sets an account's coupon or starts it afresh: `grant.json` is hand-written, and a reset is
   moving `charges.jsonl` aside, which also drops the account's bill. A grant that counts charges from
   its own `granted_at` would make a re-grant the reset.
+
+### One record shape for every scoring pass (2026-11-01, two independent reads agree)
+
+**Rule: the ledger writes a pass the same way whatever verb sent it**; the verb and the row set are
+fields. The per-cell records already hold it (`SampleScoredRecord` + `role`, for `RECORDED_ROLES`). The
+records ABOUT a pass do not: origin, measure (`MeasureEnterView`), backfill (`RaceCatchUpRecord`),
+overlap (`RoundCells.overlap`), repair (`RoundRestatedRecord`), verify (`VerifyEnterView`,
+`VerifyGradedView`) and bench (`BenchEnterView`, `BenchGradedView`, `BenchScoredView`) each have their
+own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
+
+**First arc: verify and the bench grade**, one act (an individual scored outside a round) built twice.
+- Essential and kept: the row population (REPORT vs BENCH scope, never paired, `SCOPE_ROLES`), the
+  subject (a candidate at a cycle vs the line), the comparator (fresh vs recorded vs origin-paired with
+  `LiftCost`), the fold scope (own ledger vs the line), the bench's reserve and `reads_before`.
+- Accidental and merged: `VerifyPass`/`BenchPass` (same facts, other names), the views, the phase, the
+  fold (`ledger_scan.py::_Verify` vs `_Bench`), the renderers, the stop banking (only the bench banks a
+  `PassStop`; a failed verify is inferred from a bare exit), the served can-run answer (only
+  `BenchStatus.can_grade`), where `paid_pass` is taken, the spend bucket and source stamp, where the
+  reading is joined, the chat bracket, the embedded entry (bench only).
+- A skipped automatic verify is never reported: `diagnostics/verify.py::verify_on_saturation` logs its
+  `DiagnosticError` at info and drops it, and re-opens the session from disk mid-loop. The served
+  can-run status and a banked refusal on the one pass are where the skip lands.
+- Target: one `VerificationPass` keyed by `VerificationKind`, one enter view and one graded view, one
+  phase, one fold keyed `(kind, arm.key)`, a served can-run status for both. **Open (operator): one verb
+  with a row choice, or two verbs over the one pass** — the comparator and subject differ, so the two
+  readings stay either way.
+- Names: `verify` reads as a correctness check; `bench` collides with `application/bench/` (the
+  optimizer runtime); `bench` / `grade-bench` / "Grade on bench" disagree. "held-out" is the clear word.
+- Ledger shape changes, so run data is wiped (after the 11-02 demo); archive and survivor rows untouched.
+
+**Seen alongside:** `campaign_store/store.py::CampaignStore.bank_final` still swallows a failed export
+write (`graceful`); the export is the run's handed-on prompt, so a lost one is never reported.
 
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
@@ -802,9 +876,6 @@ word's `git grep -c` for that sense is 0.
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).
   - `vitest.config.ts` loads as CommonJS (Vite warns on every run).
-- **A worktree's `webapp/node_modules` junction makes a forced recursive delete reach the main
-  tree's**, so a worktree is removed by unlinking its junctions first. **Re-test:**
-  `git worktree remove` on a worktree with its junctions in place leaves main's `node_modules`.
 - **A side worktree cannot pass the full gate**: Turbopack refuses the `node_modules` junction
   ("points out of the filesystem root"), so `next-build` and `playwright` never run there, and pytest's
   `compileall` breaks on long Temp paths. A rebuilt commit series is therefore gated without them.

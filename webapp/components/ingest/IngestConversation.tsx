@@ -19,7 +19,7 @@ import { familiesNamed } from "@/components/shell/families";
 import { Composer } from "@/components/chat/Composer";
 import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
-import { FailureLine, Loading, Said } from "@/components/ui";
+import { Button, FailureLine, Loading, Said } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { DatasetPreview } from "./DatasetPreview";
 import { SchemaFields, setIn, writeOnlyDefaults, type Commit } from "./SchemaFields";
@@ -118,9 +118,7 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
             cases the model must respect — a few sentences is plenty.
           </p>
           {!flow.inputText.trim() ? (
-            <FailureLine
-              failure={{ message: "Context can’t be empty — the check-in needs it to set things up." }}
-            />
+            <Button onClick={flow.submitContext}>Propose it from the rows</Button>
           ) : null}
         </div>
       ) : null}

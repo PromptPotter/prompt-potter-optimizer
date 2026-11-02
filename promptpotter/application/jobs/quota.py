@@ -592,9 +592,17 @@ def share_campaign_ceiling(
     return _allotment(left, own=stores.campaigns.cycle_metered(hop, meter))
 
 
-def _left(ceiling: Budget, *, spent: Budget, beside: Budget) -> Budget:
+class _Left(NamedTuple):
+    """SIGNED, never a `Budget`: a provider bills after the send is admitted, so spend can pass a
+    ceiling, and a ceiling moved under the spend leaves less than nothing."""
+
+    usd: float | None
+    tokens: int | None
+
+
+def _left(ceiling: Budget, *, spent: Budget, beside: Budget) -> _Left:
     """Per axis *ceiling* names: what neither the campaign's spend nor its siblings' holds took."""
-    return Budget(
+    return _Left(
         usd=None if ceiling.usd is None else ceiling.usd - spent.usd_amount - beside.usd_amount,
         tokens=None
         if ceiling.tokens is None
@@ -602,7 +610,7 @@ def _left(ceiling: Budget, *, spent: Budget, beside: Budget) -> Budget:
     )
 
 
-def _allotment(left: Budget, *, own: Budget) -> Budget:
+def _allotment(left: _Left, *, own: Budget) -> Budget:
     return Budget(
         usd=None if left.usd is None else own.usd_amount + max(0.0, left.usd),
         tokens=None if left.tokens is None else own.token_amount + max(0, left.tokens),

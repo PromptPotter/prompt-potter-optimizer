@@ -7,6 +7,7 @@
 **Ingress is the per-cycle `CycleEventLog`** (`ledger.py`, `cycles/{cycle_id}/.runtime/ledger.jsonl`); **no
 campaign fact rides a side file beside it** — a campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
 A fork's file holds only its own appends; the parent's prefix is walked from the cut, never copied.
+**A ledger append is never swallowed**: a failed one raises, so nothing goes on past a record no fold will read. <!-- probe: git grep -cE "graceful\(.*append" -- promptpotter/*.py == 0 -->
 **Every append to or rewrite of a shared file serializes inside `store/io.py`** — Windows runs `O_APPEND` as
 seek-then-write and loses the overwritten record silently. **`store/io.py::take_lock` is the one OS file lock.** <!-- probe: git grep -cE "filelock|msvcrt|fcntl" -- promptpotter/*.py <= 7 -->
 

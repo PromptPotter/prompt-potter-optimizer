@@ -226,7 +226,7 @@ One campaign, driven from wherever the work already happens:
 
 | | |
 |---|---|
-| **Webapp** | The browser control plane on this page, at the domain root — [app.promptpotter.com](https://app.promptpotter.com) hosted, `http://localhost:8001/` local. Chat-first: talk to the Potter and watch it work inline, with a button whenever a decision is yours. Ships as a reusable chat-app template ([spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/chat-foundation.md)). |
+| **Webapp** | The browser control plane on this page, at the domain root — [app.promptpotter.com](https://app.promptpotter.com) hosted, `http://localhost:8001/` local. Chat-first: talk to the Potter and watch it work inline, with a button whenever a decision is yours. Ships as a reusable chat-app template ([spec](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/host-assistant.md)). |
 | **`/potter-run`** | Claude Code skill — an agent launches, supervises and diagnoses a full campaign from your editor. |
 | **CLI** | `python -m promptpotter new <name>` / `resume`. |
 | **REST API** | Every control verb the webapp issues, for when another system drives the campaign. |
