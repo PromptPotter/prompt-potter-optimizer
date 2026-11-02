@@ -30,7 +30,7 @@ separates a host admin is a small, explicitly-named set.
 
 **Host-admin acts only through the operator-admin channel** (`presentation/admin_bot.py` — the
 blocklist, `/grant`, `/revoke`, `/spend`, `/trail`), outbound-only and never an inbound API route
-([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)). **No `/commands/{kind}` verb
+([decisions.md § 0004](../decisions.md#0004--operator-admin-channels)). **No `/commands/{kind}` verb
 is admin-only.** Who is host-admin is the chat-id lock and nothing else; the default-claim marker
 (`HOST_ADMIN_EMAIL` → `maybe_claim_default`) answers only which tenant the terminal resolves, never a
 capability. Cross-tenant reads (`jobs/install_spend.py::read_install_spend`) are never an inbound
@@ -60,7 +60,7 @@ owner set; a `blocked` one (`shared/identity.py::AccessState`) holds an empty se
 `default_identity` on the CLI / auth-off path. A **delegate** holds an attenuated subset.
 
 **The capability ladder, delegated sub-principals, the per-grant ceiling and the bounded step verb**
-— owned by [decisions.md § 0005](../decisions.md#0005-delegated-principals-and-capability-scoping).
+— owned by [decisions.md § 0005](../decisions.md#0005--delegated-principals-and-capability-scoping).
 Enforced at: `require_capability` in the dispatcher's `_applier`
 (`application/commands/dispatcher.py`, the same 404); the one-level rule at
 `grants.py::grant_principal`; attenuation clamped at read by
@@ -76,7 +76,7 @@ nothing extra.
 (`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id` and the
 caches at `Stores.archive_home`; a constructed `Stores` cannot name another tenant's directory.
 `SHARED_ARCHIVE` is the one deliberate crossing — a cache hit then tells one account what another
-ran ([decisions.md § 0002](../decisions.md#0002-identity-foundation)) — and that home is the
+ran ([decisions.md § 0002](../decisions.md#0002--identity-foundation)) — and that home is the
 host's alone to compact or purge. `Stores.tenant_id` derives from the identity; today
 `tenant_id == user_id`.
 
@@ -150,7 +150,7 @@ stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
   the host coupon, what the box's keys may pay for an account over its life (`Settings.HOST_COUPON`,
   or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key
-  (`coupon.py::resolve_api_key`, [decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)).
+  (`coupon.py::resolve_api_key`, [decisions.md § 0003](../decisions.md#0003--spend-and-tenancy)).
   Past it the account sends on a key of its own (`/auth/api-keys`) and the box pays nothing.
   **Both units, because the USD one can go blind** on an unpriced call
   (`Settings.UNPRICED_GRACE_USD`). A launch is admitted at its campaign's declared ceiling or
@@ -176,7 +176,7 @@ stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
   (`deps.py::require_site_records_token`, constant-time; unset → 404), touching `site_records/`
   alone, outside every tenant.
 - **Blocklist edits never have an inbound door** — the on-box, outbound-only bot
-  ([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)).
+  ([decisions.md § 0004](../decisions.md#0004--operator-admin-channels)).
 - **CORS answers `Settings.ALLOWED_ORIGINS` alone**, exact origins; a `*`, path or pattern refuses
   to load (`settings.py::Settings._exact_origins`), since the app serves credentialed requests. For
   the same reason it offers no `*` method or header: the methods are derived from the mounted
