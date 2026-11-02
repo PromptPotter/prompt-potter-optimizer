@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.commands.draft_editing import origin_effect
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
+from promptpotter.application.datasets.draft_build import (
+    DraftCampaignWire,
+    draft_wire,
+    read_draft_wire,
+)
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import (
     OriginResolution,
@@ -13,6 +17,7 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_projection,
 )
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
+from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import PotterError, ServiceUnavailableError
 
@@ -31,16 +36,21 @@ class ResolveOriginResponse(StrictModel):
     draft: DraftCampaignWire
 
 
-def resolve_origin(
+async def resolve_origin(
     dispatched: DispatchedToDraft[ResolveOriginPayload],
 ) -> Applier[ResolveOriginResponse]:
     stores = dispatched.dispatcher.stores
     draft_id, message = dispatched.payload.draft_id, dispatched.payload.message
     draft = owned_draft(stores, draft_id)
+    # Before the paid call: the turn's prompt slots are the chain's declared prompt fields.
+    served = await draft_served(stores, draft)
+    pipeline = draft_pipeline(stores, draft, served)
 
     async def _apply() -> ResolveOriginResponse:
         try:
-            result = await resolve_origin_turn(stores=stores, draft=draft, message=message)
+            result = await resolve_origin_turn(
+                stores=stores, draft=draft, pipeline=pipeline, message=message
+            )
         except PotterError:
             raise
         except Exception as exc:
@@ -49,16 +59,17 @@ def resolve_origin(
             raise ServiceUnavailableError(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc
+        # A turn writes no field the pipeline reads, so the declaration read before it holds.
         return ResolveOriginResponse(
-            resolution=result.resolution, draft=draft_wire(stores, result.draft)
+            resolution=result.resolution, draft=draft_wire(stores, result.draft, served)
         )
 
-    def _on_replay() -> ResolveOriginResponse:
-        # `checkin.json::resolution` is the live turn's block: a deduped retry re-spends no LLM call.
+    async def _on_replay() -> ResolveOriginResponse:
+        # The draft's `resolution.json` is the live turn's block: a deduped retry re-spends no LLM call.
         replayed = owned_draft(stores, draft_id)
         return ResolveOriginResponse(
             resolution=load_resolution(stores, replayed),
-            draft=draft_wire(stores, replayed),
+            draft=await read_draft_wire(stores, replayed),
         )
 
     before = origin_projection(draft)

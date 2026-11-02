@@ -46,7 +46,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.sample import Bank
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -89,7 +89,9 @@ async def open_session(
     complete_registries(every_treatment=False)
     if stores is None:
         stores = local_stores(tenant=None)
-    down = await probe_backend(backend_type_of_dataset(stores, dataset_name))
+    down = await probe_backend(
+        runnable_definition(resolve_dataset(stores, dataset_name).directory).backend_type
+    )
     if down is not None:
         raise down
     session = await init_services(

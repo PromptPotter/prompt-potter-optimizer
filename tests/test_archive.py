@@ -44,6 +44,7 @@ from factories import (
     seat,
     set_cycle,
     sheet,
+    stored_campaign,
     workspace,
 )
 from offline_world import Router
@@ -310,6 +311,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
 # 2. The archive on disk
 
 
+@pytest.mark.usefixtures("offline")
 def test_the_archive_on_disk_keeps_every_paid_answer(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -541,12 +543,12 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     definition = built_stores.tenant_datasets.dataset_dir("compacted-renamed")
     definition.mkdir(parents=True)
     (definition / DEFINITION_FILE).write_text(
-        "pipeline:\n  nodes:\n    llm_only: {type: llm}\n  pipelines:\n    default: [llm_only]\n"
+        "pipeline:\n  backend_type: termnorm\n"
         "campaign:\n  scoring: label_match(predicted, ground_truth)\n"
         "  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",
     )
-    opened = open_cell(built_stores, "compacted-renamed", compacted_refs[q1.query])
+    opened = asyncio.run(open_cell(built_stores, "compacted-renamed", compacted_refs[q1.query]))
     assert opened.position == compacted_bank.slot_of[q1.key], (
         "an old answer opened at another bank's slot"
     )
@@ -772,9 +774,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # Rounds stand; a rewind retracts every election, close and crown past it, for every reader.
     closing = seat(stores).cycle
     hop = CycleHop(campaign_id="rewound__20260101-000000", cycle_id="cycle_rewound")
-    stores.campaigns.create_campaign(
-        minted_campaign(hop, owner_user_id=str(stores.identity.user_id))
-    )
+    stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
     stores.campaigns.mint_cycle(hop)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     closed: list[RoundResult] = []
@@ -858,9 +858,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # the remedy it names deletes the campaign, paused as it is, and keeps the paid measurement.
     # `rewrite_lines` writes a fresh file: a ledger index takes a same-inode growth for an append.
     stranded = CycleHop(campaign_id="stranded__20260101-000000", cycle_id="cycle_stranded")
-    stores.campaigns.create_campaign(
-        minted_campaign(stranded, owner_user_id=str(stores.identity.user_id))
-    )
+    stored_campaign(stores, minted_campaign(stranded, owner_user_id=str(stores.identity.user_id)))
     stores.campaigns.mint_cycle(stranded)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(stranded)))
     _emit_round(closing, ledger, [], "c0")
@@ -975,9 +973,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     # An applied scenario forks at its round, keeps the parent's holdout and carries its criterion.
     scenario, scenario_log = _minted(stores, "cycle_applyscenario")
-    stores.campaigns.create_campaign(
-        minted_campaign(scenario, owner_user_id=str(stores.identity.user_id))
-    )
+    stored_campaign(stores, minted_campaign(scenario, owner_user_id=str(stores.identity.user_id)))
     scenario_rounds: list[RoundResult] = []
     scenario_pick = ArmKey(
         [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
@@ -1015,9 +1011,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     # A fork's own ledger displaces its parent's prefix once.
     displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")
-    stores.campaigns.create_campaign(
-        minted_campaign(displaced, owner_user_id=str(stores.identity.user_id))
-    )
+    stored_campaign(stores, minted_campaign(displaced, owner_user_id=str(stores.identity.user_id)))
     stores.campaigns.mint_cycle(displaced)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(displaced)))
     closed = []
@@ -1180,7 +1174,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # back to C0, another the grand to b, an arm of the trunk's round 1 never crowned; rewinds re-run
     # the grand's round 1 and its round 3.
     family = CycleHop(campaign_id="family__20260101-000000", cycle_id="cycle_family")
-    stores.campaigns.create_campaign(
+    stored_campaign(
+        stores,
         minted_campaign(
             family,
             config=CampaignConfig(
@@ -1188,7 +1183,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 scoring="label_match(predicted, ground_truth)",
             ),
             owner_user_id=str(stores.identity.user_id),
-        )
+        ),
     )
     stores.campaigns.mint_cycle(family)
 
@@ -1342,7 +1337,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     }
     for name, (asker, rnd, pick, role) in asks.items():
         spawned = CycleHop(campaign_id=f"{name}__20260101-000000", cycle_id=f"cycle_{name}")
-        sandbox.campaigns.create_campaign(minted_campaign(spawned))
+        stored_campaign(sandbox, minted_campaign(spawned))
         sandbox.campaigns.mint_cycle(spawned)
         sandbox.campaigns.record_spawned(
             spawned,
@@ -1562,9 +1557,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     def repaired(cycle_id: str, *, consumed: bool) -> tuple[CycleHop, CycleHop]:
         hop = CycleHop(campaign_id=f"{cycle_id}__20260101-000000", cycle_id=cycle_id)
-        stores.campaigns.create_campaign(
-            minted_campaign(hop, owner_user_id=str(stores.identity.user_id))
-        )
+        stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
         stores.campaigns.mint_cycle(hop)
         drawn = partition_bank(repair_bank, DatasetSplit(bench=0), seed=0)
         stores.campaigns.write_bank_partition(hop, drawn.record(dataset_hash="bank"))

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from pydantic import Field, model_validator
+from collections.abc import Iterable
+from typing import Any, ClassVar
+
+from pydantic import Field, create_model, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from promptpotter.application.bench.llm_call import (
     LLMCallContext,
@@ -101,7 +105,11 @@ class OriginNextAction(OptimizerResponseModel):
 
 
 class CheckinOutput(OptimizerResponseModel):
-    """Task decomposition leaves the origin block empty; origin resolution fills it AND the Layer-1 fields."""
+    """Task decomposition leaves the origin block empty; origin resolution fills it AND the Layer-1
+    fields `checkin_output` offers."""
+
+    # The Layer-1 slots the model is shown; `checkin_output` narrows them to a chain's.
+    offered: ClassVar[tuple[str, ...]] = PROMPT_FIELDS
 
     # Field order is GENERATION order; optional and trailing, a constrained decoder skips a field.
     persona: str = ""
@@ -130,10 +138,10 @@ class CheckinOutput(OptimizerResponseModel):
         problems = [
             f"{name} must not be empty"
             for name in ("task_intent", "answer_format")
-            if not getattr(self, name).strip()
+            if name in self.offered and not getattr(self, name).strip()
         ] + [
             f"{name} is {len(value)} chars (at most {ORIGIN_FIELD_MAX})"
-            for name in PROMPT_FIELDS
+            for name in self.offered
             if len(value := getattr(self, name)) > ORIGIN_FIELD_MAX
         ]
         if problems:
@@ -145,6 +153,22 @@ class CheckinOutput(OptimizerResponseModel):
 
 
 assert set(PROMPT_FIELDS) <= set(CheckinOutput.model_fields)
+
+
+def checkin_output(prompt_fields: Iterable[str]) -> type[CheckinOutput]:
+    """A slot for each prompt field a node declares, so a chain bearing none offers the model none.
+    A hidden slot keeps its place and reads empty."""
+    offered = tuple(f for f in PROMPT_FIELDS if f in set(prompt_fields))
+    if offered == PROMPT_FIELDS:
+        return CheckinOutput
+    hidden: dict[str, Any] = {
+        name: (SkipJsonSchema[str], "") for name in PROMPT_FIELDS if name not in offered
+    }
+    narrowed = create_model(
+        "CheckinOutput", __base__=CheckinOutput, __doc__=CheckinOutput.__doc__, **hidden
+    )
+    narrowed.offered = offered
+    return narrowed
 
 
 def campaign_framing(
@@ -175,13 +199,17 @@ def _checkin_template() -> OptimizerPromptTemplate:
 
 
 async def run_checkin(
-    *, consultation_instruction: str, user_content: str, context: LLMCallContext
+    *,
+    response_model: type[CheckinOutput],
+    consultation_instruction: str,
+    user_content: str,
+    context: LLMCallContext,
 ) -> tuple[CheckinOutput, int]:
     raw, _prompt, repair_attempts = await run_optimizer_node(
         template_name="checkin",
         template=_checkin_template(),
         prompt_vars={"consultation_instruction": consultation_instruction},
-        response_model=CheckinOutput,
+        response_model=response_model,
         user_content=user_content,
         context=context,
     )
@@ -213,6 +241,7 @@ async def commit_task_framing(
     token = set_cycle_ledger(ledger)
     try:
         result, _ = await run_checkin(
+            response_model=CheckinOutput,
             consultation_instruction=(
                 "Return a JSON object with exactly these keys. Be concise and actionable."
             ),

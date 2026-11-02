@@ -2235,7 +2235,8 @@ export interface DraftCampaignWire {
   /** `term=weight` dials joined by commas; empty scores correctness alone. */
   scoring_dials: string;
   /** The draft's overrides, its `budget` the one Start declares:
-   * `pipeline_resolve.draft_config`'s, a free account's tier laid last. */
+   * `pipeline_resolve.draft_pipeline`'s config, a free account's tier laid
+   * last. */
   optimization_overrides: OptimizationOverrides;
   /** The optimizer as this draft's config runs it, as a campaign serves it. */
   optimizer_setup: OptimizerSetup;
@@ -2262,10 +2263,6 @@ export interface DraftCampaignWire {
   node_output_schema: Record<string, NodeOutputSchema | null>;
   reach: Record<string, NodeReach>;
   is_single_node: boolean;
-  /** WHY the axes read as they do. `unreachable` = the backend probe failed, so
-   * nothing in the schema is a lock anyone set and an editor draws no padlock
-   * off it. */
-  schema_source: 'backend' | 'local' | 'unreachable';
   /** A null `reasoning_efforts` is UNKNOWN, never unsupported. */
   model_capabilities: Record<string, Record<string, ModelCapability>>;
   dependencies: DraftDependency[];
@@ -3584,7 +3581,7 @@ export interface DatasetIndexEntry {
   /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
    * ``POST /datasets/{name}/draft`` refuses with, worded by
    * `START_BLOCK_WORDS`. */
-  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | null;
+  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
 }
 
 /** One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology */
@@ -3818,13 +3815,8 @@ export interface ResolveOriginResponse {
   draft: DraftCampaignWire;
 }
 
-/** The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it. */
+/** The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the */
 export interface OriginResolution {
-  complete: boolean;
-  provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
-  /** Each gated field's current value, by field id. */
-  values: Record<string, unknown>;
-  gaps: FieldGap[];
   /** Null until a resolver turn ran, and again after a later edit. */
   last_resolution: OriginLastResolution | null;
   /** Proposals the last turn left unclicked. */
@@ -4699,7 +4691,7 @@ export type CouponState = 'unmetered' | 'retired' | 'used_up' | 'held' | 'open';
 export type SlotBound = 'throttle' | 'machine';
 
 // promptpotter.domain.dataset_start::StartBlock
-export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable';
+export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
 
 // promptpotter.application.datasets.origin_readiness::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5160,6 +5152,7 @@ export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "empty": "It holds no row with both a query and an answer.",
   "missing_extra": "It runs through a Python extra this install lacks.",
   "unreadable": "Its samples could not be read on this install.",
+  "backend_unreachable": "Its backend is not answering; it opens once the backend is up.",
 };
 
 // Mirror of application/datasets/origin_readiness.py::SETUP_STEP_TITLES.

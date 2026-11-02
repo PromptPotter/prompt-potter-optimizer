@@ -21,9 +21,9 @@ from promptpotter.application.datasets.tabular_ingest import read_candidate_libr
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import (
-    dataset_pipeline_declaration,
-    overlay_dataset_pipeline,
+    ServedPipeline,
     resolve_campaign_config,
+    served_pipeline,
 )
 from promptpotter.application.run_observers import check_every_record_reported
 from promptpotter.application.scoring.judges import registry as judge_registry
@@ -41,9 +41,9 @@ from promptpotter.infrastructure.llm.capabilities import ensure_model_capabiliti
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_experiment,
-    declared_backend_type,
     extract_panel_rows,
     resolve_dataset,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
@@ -142,35 +142,6 @@ def _verify_package_cache_scope(
     )
 
 
-async def _resolve_pipeline_schema(
-    client: BackendClient,
-    stores: Stores,
-    dataset: ResolvedDataset,
-    *,
-    connector: Connector,
-    experiment: dict[str, Any] | None,
-) -> tuple[PipelineSchema, dict[str, Any]]:
-    """RAISES, never ``None``: a schema optional at its readers is a run that completes with wrong numbers.
-    A served schema is the backend's answer with the dataset's file laid on, so one that cannot
-    answer raises: the file alone declares another pipeline."""
-    local_raw = dataset_pipeline_declaration(stores, dataset, experiment)
-    declaration: dict[str, Any] | None
-    if connector.serves_pipeline:
-        declaration = overlay_dataset_pipeline(await client.fetch_pipeline(), local_raw or {})
-    else:
-        declaration = local_raw
-    if declaration is None:
-        raise PayloadInvalidError(
-            f"{dataset.name} declares no pipeline. Every measurement is keyed on its "
-            f"schema, so there is no run without it.",
-            code="pipeline_config_invalid",
-            details={"dataset_dir": str(dataset.directory)},
-        )
-    schema = parse_pipeline_response(declaration)
-    logger.info("Pipeline: %s (%d nodes)", dataset.name, len(schema.nodes))
-    return schema, declaration
-
-
 def _session_bank(
     stores: Stores,
     dataset: ResolvedDataset,
@@ -226,15 +197,18 @@ async def init_services(
     stores: Stores | None = None,
     enable_tracing: bool = True,
     program: object | None = None,
+    served: ServedPipeline | None = None,
 ) -> Session:
-    """*stores* is the ONE way to relocate the tree: the L4 inner runner passes a sandboxed one."""
+    """*stores* is the ONE way to relocate the tree: the L4 inner runner passes a sandboxed one.
+    *served* is a check-in Start's one backend read, under which it landed the definition."""
     if stores is None:
         stores = build_stores(identity, projects_root=default_projects_root())
 
     await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset = resolve_dataset(stores, dataset_name)
-    connector = connectors.CONNECTORS.get(declared_backend_type(dataset.directory))
+    definition = runnable_definition(dataset.directory)
+    connector = connectors.CONNECTORS.get(definition.backend_type)
     panel = dataset_experiment(stores, dataset, connector)
     if panel is None and connector.owns_panel and build_panel(stores, dataset):
         panel = dataset_experiment(stores, dataset, connector)
@@ -251,13 +225,11 @@ async def init_services(
     )
     logger.info("Backend: %s %s", connector.name, client.base_url)
 
-    pipeline_schema, pipeline_declaration = await _resolve_pipeline_schema(
-        client,
-        stores,
-        dataset,
-        connector=connector,
-        experiment=experiment,
-    )
+    if served is None:
+        served = await served_pipeline(stores, connector, experiment=experiment)
+    declaration = served.over(definition.pipeline)
+    pipeline_schema = parse_pipeline_response(declaration)
+    logger.info("Pipeline: %s (%d nodes)", dataset.name, len(pipeline_schema.nodes))
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
     backend_revision = await _read_backend_revision(client, connector)
     bank, candidate_library = _session_bank(
@@ -273,7 +245,7 @@ async def init_services(
         backend_id=connector.name,
         backend_client=client,
         pipeline_schema=pipeline_schema,
-        pipeline_declaration=pipeline_declaration,
+        pipeline_declaration=declaration,
         backend_revision=backend_revision,
         bank=bank,
         candidate_library=candidate_library,

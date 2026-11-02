@@ -14,9 +14,10 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter import connectors
+from promptpotter.application.datasets.draft_campaign import DatasetBasis, UploadBasis
 from promptpotter.application.datasets.loaders import (
     cut_bank,
     fetch_bank,
@@ -34,9 +35,9 @@ from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBloc
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
-    declared_backend_type,
     is_dataset_dir,
     resolve_dataset,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import DatasetAccessError, NotFoundError, PayloadInvalidError
@@ -84,7 +85,7 @@ def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
 def dataset_extra(dataset_dir: Path) -> Extra | None:
     """What the dataset runs through beyond core: its connector's declaration, else its source's."""
     try:
-        backend_type = declared_backend_type(dataset_dir)
+        backend_type = runnable_definition(dataset_dir).backend_type
     except PayloadInvalidError:
         backend_type = ""
     connector = connectors.CONNECTORS.table.get(backend_type)
@@ -121,7 +122,9 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
         return DatasetReading(None, StartBlock.MISSING_EXTRA)
     try:
         held = held_bank(stores, dataset)
-    except (ValueError, OSError, BackendUnreachableError):
+    except BackendUnreachableError:
+        return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
+    except (ValueError, OSError):
         logger.exception("datasets: %s could not be read for the listing", name)
         return DatasetReading(None, StartBlock.UNREADABLE)
     n_held = None if held is None else len(held.samples)
@@ -144,11 +147,11 @@ def checkin_bank(stores: Stores, name: str) -> Bank:
     return fetched
 
 
-def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
+def upload_source(draft: DraftCampaign, upload: UploadBasis) -> dict[str, Any]:
     """The definition names the kept upload and the cut; the rows stay in the upload alone."""
     return {
         "recipe": "table",
-        "upload": upload,
+        "upload": upload.kept,
         "query": draft.column_query,
         "truth": draft.column_ground_truth,
     }
@@ -157,24 +160,27 @@ def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
 def draft_samples(stores: Stores, draft: DraftCampaign) -> Sequence[Sample] | None:
     """What the draft's Start partitions; ``None`` while it has none to read: a read never fetches
     a bank, and never cuts an upload by columns the gate has not confirmed."""
-    upload = stores.drafts.upload_of(draft.draft_id)
-    if upload is not None:
-        return cut_bank(stores, upload_source(draft, upload)) if columns_confirmed(draft) else None
-    if draft.source_dataset is None:
-        return None
-    held = held_bank(stores, resolve_dataset(stores, draft.source_dataset))
-    return None if held is None else held.samples
+    match draft.basis:
+        case UploadBasis() as upload:
+            if not columns_confirmed(draft):
+                return None
+            return cut_bank(stores, upload_source(draft, upload))
+        case DatasetBasis(dataset=name):
+            held = held_bank(stores, resolve_dataset(stores, name))
+            return None if held is None else held.samples
+        case _:
+            assert_never(draft.basis)
 
 
 def checkin_rows(stores: Stores, draft: DraftCampaign) -> list[dict[str, str]]:
-    upload = stores.drafts.upload_of(draft.draft_id)
-    if upload is not None:
-        path = stores.tenant_datasets.upload_path(upload)
-        return list(read_tabular(path.read_bytes(), path.name).rows)
-    name = draft.source_dataset
-    if name is None:
-        raise PayloadInvalidError(f"draft {draft.draft_id!r} names neither an upload nor a dataset")
-    return labelled_rows(checkin_bank(stores, name).samples)
+    match draft.basis:
+        case UploadBasis(kept=kept):
+            path = stores.tenant_datasets.upload_path(kept)
+            return list(read_tabular(path.read_bytes(), path.name).rows)
+        case DatasetBasis(dataset=name):
+            return labelled_rows(checkin_bank(stores, name).samples)
+        case _:
+            assert_never(draft.basis)
 
 
 def _offer() -> dict[str, Path]:

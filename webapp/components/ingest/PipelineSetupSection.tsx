@@ -66,13 +66,6 @@ export function PipelineSetupSection({
 
       {children}
 
-      {/* An unread schema is NOT a locked one: only the backend declares which params may move. */}
-      {draft.schema_source === "unreachable" ? (
-        <p>
-          <small>Backend unreachable — which params may be tuned is unknown until it is up.</small>
-        </p>
-      ) : null}
-
       {llmOnly ? (
         llmNode ? (
           <NodeSurface

@@ -71,8 +71,8 @@ from promptpotter.domain.run_records import (
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.dataset_access import (
-    declared_backend_type,
     read_dataset_framing,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
@@ -202,7 +202,7 @@ def declare(
         campaign_config,
         purpose=purpose,
         dataset_hash=session.bank.dataset_hash,
-        connector=declared_backend_type(session.dataset.directory),
+        connector=runnable_definition(session.dataset.directory).backend_type,
         bench_defaults_pin=bench_defaults_pin(),
     )
 
@@ -520,6 +520,11 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     campaigns = session.store.campaigns
     if billed is not None:
         campaigns.adopt_ledger(hop, billed)
+    _write_plan(session.store, hop, plan.drawn, plan.seed)
+    session = session.bound(hop, purpose=declaration.purpose)
+    # What the origin hash was taken under, appended before the campaign is visible, so every
+    # reader of it finds what its run init read.
+    session.record_resolved_run()
     campaigns.create_campaign(
         Campaign(
             campaign_id=hop.campaign_id,
@@ -536,10 +541,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
             lifecycle_changed_at=now,
         )
     )
-    _write_plan(session.store, hop, plan.drawn, plan.seed)
-    session = session.bound(hop, purpose=declaration.purpose)
-    # What the origin hash was taken under, so a resume that no longer hashes alike names why.
-    session.record_resolved_run()
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
     declare_run_wiring(session, campaign_config, ledger, selected=plan.optimizer, tracing=None)
     campaigns.mint_cycle(hop)

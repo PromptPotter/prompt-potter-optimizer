@@ -29,33 +29,38 @@ def read_payload_file(path: Path) -> Any:
         raise PayloadInvalidError(str(exc)) from exc
 
 
-def pause_cycle(dispatched: DispatchedToCycle[PauseCyclePayload]) -> Applier[object]:
+async def pause_cycle(dispatched: DispatchedToCycle[PauseCyclePayload]) -> Applier[object]:
     return Applier.for_loop(dispatched.dispatcher.run_state(dispatched.hop).pause_refusal)
 
 
-def origin_gate_decision(
+async def origin_gate_decision(
     dispatched: DispatchedToCycle[OriginGateDecisionPayload],
 ) -> Applier[object]:
     return Applier.for_loop(dispatched.dispatcher.run_state(dispatched.hop).gate_refusal)
 
 
-def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Applier[object]:
+async def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Applier[object]:
     return Applier.for_loop(
         dispatched.dispatcher.run_state(dispatched.hop).arms_refusal(dispatched.payload.keep)
     )
 
 
-def skip_searchpoint(dispatched: DispatchedToCycle[SkipSearchpointPayload]) -> Applier[object]:
+async def skip_searchpoint(
+    dispatched: DispatchedToCycle[SkipSearchpointPayload],
+) -> Applier[object]:
     return Applier.for_loop(dispatched.dispatcher.run_state(dispatched.hop).admission.skip_refusal)
 
 
-def set_sample_lookahead(
+async def set_sample_lookahead(
     dispatched: DispatchedToCycle[SetSampleLookaheadPayload],
 ) -> Applier[object]:
     payload = dispatched.payload
     if payload.cells == 1 and not payload.auto:
         # A disarm leaves the loop nothing to take: the record removes the arming.
-        return Applier.silent(lambda: None)
+        async def _disarm() -> None:
+            return None
+
+        return Applier.silent(_disarm)
     # `auto` is a mode and stands across launches; one press is spent by its round, so it needs a run.
     return Applier.for_loop(
         ""

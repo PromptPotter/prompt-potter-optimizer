@@ -5440,7 +5440,7 @@
           },
           "optimization_overrides": {
             "$ref": "#/components/schemas/OptimizationOverrides",
-            "description": "The draft's overrides, its `budget` the one Start declares: `pipeline_resolve.draft_config`'s, a free account's tier laid last."
+            "description": "The draft's overrides, its `budget` the one Start declares: `pipeline_resolve.draft_pipeline`'s config, a free account's tier laid last."
           },
           "optimizer_setup": {
             "$ref": "#/components/schemas/OptimizerSetup",
@@ -5504,16 +5504,6 @@
             "title": "Sample Preview",
             "type": "array"
           },
-          "schema_source": {
-            "description": "WHY the axes read as they do. `unreachable` = the backend probe failed, so nothing in the schema is a lock anyone set and an editor draws no padlock off it.",
-            "enum": [
-              "backend",
-              "local",
-              "unreachable"
-            ],
-            "title": "Schema Source",
-            "type": "string"
-          },
           "scoring_dials": {
             "description": "`term=weight` dials joined by commas; empty scores correctness alone.",
             "title": "Scoring Dials",
@@ -5568,7 +5558,6 @@
           "node_output_schema",
           "reach",
           "is_single_node",
-          "schema_source",
           "model_capabilities",
           "dependencies",
           "readiness",
@@ -12040,12 +12029,8 @@
       },
       "OriginResolution": {
         "additionalProperties": false,
-        "description": "The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it.",
+        "description": "The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the\ndraft's `readiness`, recomputed on every read.",
         "properties": {
-          "complete": {
-            "title": "Complete",
-            "type": "boolean"
-          },
           "degraded_cause": {
             "anyOf": [
               {
@@ -12058,13 +12043,6 @@
             "description": "Why the last turn came back thin (a paid repair retry); null where it did not.",
             "title": "Degraded Cause"
           },
-          "gaps": {
-            "items": {
-              "$ref": "#/components/schemas/FieldGap"
-            },
-            "title": "Gaps",
-            "type": "array"
-          },
           "last_resolution": {
             "anyOf": [
               {
@@ -12076,13 +12054,6 @@
             ],
             "description": "Null until a resolver turn ran, and again after a later edit."
           },
-          "provenance": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/Provenance"
-            },
-            "title": "Provenance",
-            "type": "object"
-          },
           "raised": {
             "description": "Proposals the last turn left unclicked.",
             "items": {
@@ -12090,20 +12061,8 @@
             },
             "title": "Raised",
             "type": "array"
-          },
-          "values": {
-            "additionalProperties": true,
-            "description": "Each gated field's current value, by field id.",
-            "title": "Values",
-            "type": "object"
           }
         },
-        "required": [
-          "complete",
-          "provenance",
-          "values",
-          "gaps"
-        ],
         "title": "OriginResolution",
         "type": "object"
       },
@@ -15742,7 +15701,8 @@
           "verifier_graded",
           "empty",
           "missing_extra",
-          "unreadable"
+          "unreadable",
+          "backend_unreachable"
         ],
         "title": "StartBlock",
         "type": "string"

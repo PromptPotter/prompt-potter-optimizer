@@ -130,9 +130,6 @@ def release_slot(
 
 
 async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingExtraError | None:
-    # A campaign that outlived its dataset dir: ``connectors.get`` is strict and would raise.
-    if not backend_type:
-        return None
     connector = connectors.CONNECTORS.get(backend_type)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
@@ -258,7 +255,7 @@ async def admit_and_hold(
         raise down
     t_probe = time.perf_counter()
     declared, asked = declare_run_budget(
-        request.campaign_config(stores), stores=stores, hop=hop, requested=request.budget
+        request.declared_budget(stores), stores=stores, hop=hop, requested=request.budget
     )
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
     held = await asyncio.to_thread(
@@ -469,7 +466,9 @@ async def embedded_share(
     )
     admitted = False
     try:
-        declared, asked = declare_run_budget(config, stores=stores, hop=hop, requested=requested)
+        declared, asked = declare_run_budget(
+            config.optimization.budget, stores=stores, hop=hop, requested=requested
+        )
         held = await asyncio.to_thread(
             admit_and_share,
             declared,
@@ -507,7 +506,9 @@ def inner_share(
     )
     admitted = False
     try:
-        declared, asked = declare_run_budget(config, stores=stores, hop=hop, requested=Budget())
+        declared, asked = declare_run_budget(
+            config.optimization.budget, stores=stores, hop=hop, requested=Budget()
+        )
         held = admit_and_share(
             declared,
             asked,

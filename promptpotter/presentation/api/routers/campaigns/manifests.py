@@ -6,7 +6,7 @@ from pydantic import Field
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
-    draft_wire,
+    read_draft_wire,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import (
@@ -53,12 +53,12 @@ class DraftReopenResponse(StrictModel):
 
 
 @campaigns_router.get("/drafts/{draft_id}", response_model=DraftReopenResponse)
-def get_draft(stores: StoresDep, draft_id: str) -> DraftReopenResponse:
+async def get_draft(stores: StoresDep, draft_id: str) -> DraftReopenResponse:
     """Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded."""
     draft = owned_draft(stores, draft_id)
     block = load_resolution(stores, draft)
     return DraftReopenResponse(
-        draft=draft_wire(stores, draft),
+        draft=await read_draft_wire(stores, draft),
         resolution=block.last_resolution,
         raised=block.raised,
         resolution_pending=draft.resolution_pending(),

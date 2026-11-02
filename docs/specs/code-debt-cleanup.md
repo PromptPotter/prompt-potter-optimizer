@@ -114,13 +114,14 @@ acting.
    Action: selection rides `RunScope` (4), keyed by node, no fallback. **Re-test:** `git grep -n 'gate="off"' -- promptpotter`.
 8. **A broad exception tuple turns programming errors into "did not resolve"** —
    `pipeline_resolve.py::_ROOT_UNRESOLVED` catches `ValueError, KeyError, TypeError, OSError`;
-   `line_config` swallows silently, `application/hierarchy.py::_UNRESOLVED` serves it as data. Action: catch typed
-   `DatasetAccessError` / `StoredConfigInvalidError` only, served as a typed refusal. **Re-test:** read `_ROOT_UNRESOLVED`.
-9. **Reads fall back from the recorded fact to today's files** — `_campaign_merge`
-   (`read_resolved_run(hop).declaration` → `dataset_pipeline_declaration`),
-   `resolve_pipeline_for_campaign` (`recorded or experiment_outside_run`), `_dataset_of` swallowing
+   `line_config` swallows silently, `application/hierarchy.py::_UNRESOLVED` serves it as data. It omits
+   `LedgerUnreadableError`, which a root with no resolved run now raises, so one bad campaign fails the
+   whole hierarchy listing instead of its own row. Action: catch typed `DatasetAccessError` /
+   `StoredConfigInvalidError` / `LedgerUnreadableError` only, each served as its row's typed refusal.
+   **Re-test:** read `_ROOT_UNRESOLVED`.
+9. **Reads fall back from the recorded fact to today's files** — `_dataset_of` swallowing
    `DatasetAccessError`; `parse_cycle_seed` builds a whole served response to read schema rows. Action: a
-   minted cycle's recorded declaration or a refusal; the write path reads 1's fold. **Re-test:** `git grep -n "experiment_outside_run" -- promptpotter/application`.
+   minted cycle's recorded declaration or a refusal; the write path reads 1's fold. **Re-test:** read `pipeline_resolve.py::_dataset_of`.
 10. **Engine decisions narrated into `logger.warning`** — `bench/resume_and_fork/repair.py`, `origin_gate.py`,
     `termination.py`, `escalation/firing.py`. Action: each decision a field of its step's record.
     **Re-test:** `git grep -c "logger.warning" -- promptpotter/application/bench/resume_and_fork/repair.py`.
@@ -260,6 +261,12 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
   `domain/sample.py::sample_key`, so a panel can draw one sample twice. Action: the mint keeps one
   row per `sample_key`, so the content address names distinct rows. **Rides with:** the next
   dataset ingest. **Re-test:** count rows against distinct `(query, ground_truth)` pairs in that bank.
+- **An archived answer's outputs are read off today's backend**: `scoring/measurement_log.py::open_cell`
+  reads the live declaration to build `outputs_of`, because an `ArchiveEntry` records only
+  `node_configs` and `PipelineData.wire()` is flat, with no per-node attribution. Action: a per-node
+  output-key map filed with the answer; existing rows name no campaign to join, so a backfill reads
+  today's declaration per dataset hash. Operator decides. **Rides with:** the next archive reshape.
+  **Re-test:** `git grep -n "dataset_pipeline(" -- promptpotter/application/scoring/measurement_log.py`.
 
 ### On the box (2026-11-01)
 
@@ -337,7 +344,7 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
 - **Run files read as dicts have no shape row**: `data_root.py::KINDS` proves `draft.json`,
-  `checkin.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
+  `resolution.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
   `diagnostics/`, `banks/cuts.jsonl`, `rates.json`, the langfuse mirror and the account's
   `model_capabilities.yaml` by presence alone, because their readers walk `dict`s
   (`read_json_optional`, `read_json_tolerant`, `read_yaml_optional`, `fold_jsonl`). A reshape there
@@ -647,12 +654,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   cell and Cell 2 say the test set is the ~4,060 non-mini rows and the default target mistral-small;
   `load_and_split` tests on the second 10 mini rows per task. Action: the notebook states what
   `shared_config.py` runs. **Re-test:** `grep -n "non-mini" notebooks/bbeh_potter.ipynb`.
-- **An unread backend schema serves "lands nowhere"**: with `schema_source: unreachable` no prompt
-  node declares a part, so `application/pipeline_resolve.py::_pool_fills` serves `PoolRow.fills` empty, the state
-  its description reserves for "nothing in play", and the check-in draws the pool nowhere. Also
-  `application/datasets/ingest.py::fetch_backend_nodes` returns `{}` for an `in_process` connector, never its
-  `pipeline_declaration`. Action: an unknown fill is served unknown. **Re-test:** a draft on an
-  unreachable backend serves its fills unknown, not empty.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
   `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
   hands it down.

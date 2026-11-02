@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_arms,
@@ -16,11 +17,7 @@ from promptpotter.application.jobs.launcher.admission import (
     probe_backend,
     release_slot,
 )
-from promptpotter.application.jobs.launcher.checkin import (
-    OpenedCheckin,
-    open_checkin,
-    start_ready_draft,
-)
+from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
     CyclePlan,
@@ -32,6 +29,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.pipeline_resolve import draft_served
 from promptpotter.domain.campaign import ArmName
 from promptpotter.domain.campaign_config import CampaignConfig, effective_config
 from promptpotter.domain.connector import BackendUnreachableError
@@ -39,7 +37,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.dataset_access import declared_backend_type
+from promptpotter.infrastructure.store.dataset_access import runnable_definition
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
@@ -101,7 +99,7 @@ async def _probe(backend_type: str) -> None:
 
 
 async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
-    await _probe(declared_backend_type(dataset.directory))
+    await _probe(runnable_definition(dataset.directory).backend_type)
     session = await init_services(
         dataset_name=dataset.name, identity=stores.identity, stores=stores
     )
@@ -111,13 +109,14 @@ async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
 async def checkin_arms(
     stores: Stores, claim: DraftClaim, request: HeadToHeadRequest
 ) -> CheckinArms:
+    served = await draft_served(stores, owned_draft(stores, claim.draft_id))
     try:
-        await _probe(start_ready_draft(stores, claim.draft_id).connector)
+        await _probe(served.connector)
     except BackendUnreachableError as exc:
         exc.details["draft_id"] = claim.draft_id
         raise
     overlays = [request.declared_optimization(arm) for arm in request.arms]
-    return CheckinArms(claim, await open_checkin(stores, claim.draft_id, overlays=overlays))
+    return CheckinArms(claim, await open_checkin(stores, claim.draft_id, served, overlays=overlays))
 
 
 def _opened(source: ArmSource) -> tuple[Session, CampaignConfig, OpenedCheckin | None]:

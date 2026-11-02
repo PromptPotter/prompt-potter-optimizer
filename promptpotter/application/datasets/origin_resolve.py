@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ValidationError
 
 from promptpotter.application.bench.task_context import (
     CheckinOutput,
+    checkin_output,
     draft_call_context,
     run_checkin,
 )
@@ -21,7 +22,6 @@ from promptpotter.application.datasets.origin_readiness import (
     checklist_field,
     field_values,
     origin_readiness,
-    resolution_block,
     save_checkin_draft,
 )
 from promptpotter.application.jobs.quota import paid_call
@@ -32,6 +32,12 @@ from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from promptpotter.application.pipeline_resolve import DraftPipeline
+    from promptpotter.domain.pipeline_schema import PipelineNode
 
 _PREVIEW_ROWS = 10
 
@@ -61,9 +67,22 @@ class OriginResolutionResult:
     draft: DraftCampaign
 
 
-def build_origin_consultation(draft: DraftCampaign, message: str | None = None) -> tuple[str, str]:
+class OriginConsultation(NamedTuple):
+    user_content: str
+    instruction: str
+    # Offers only the prompt fields the chain's prompt nodes declare: the ones a turn may write.
+    response_model: type[CheckinOutput]
+
+
+def build_origin_consultation(
+    draft: DraftCampaign, pipeline: DraftPipeline, message: str | None = None
+) -> OriginConsultation:
     """Deterministic (no timestamp, no id), so an unchanged turn replays free; adding either re-bills every turn."""
-    readiness = origin_readiness(draft)
+    readiness = origin_readiness(draft, pipeline)
+    response_model = checkin_output(
+        f for node in pipeline.chain.prompt_nodes() for f in node.prompt_fields
+    )
+    slots = response_model.offered
     values = field_values(draft)
     provenance = {key: prov.value for key, prov in draft.field_provenance.items()}
     preview = [dict(row) for row in draft.sample_preview[:_PREVIEW_ROWS]]
@@ -102,24 +121,33 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
     consultation_instruction = (
         "This is a draft-campaign origin. Fill 'assessment', 'findings', and "
         "'next_action' (and 'recap' only when ready). ALSO decompose the "
-        "task_description you propose this turn into the Layer 1 prompt fields + "
-        "task_context — that decomposition seeds the campaign's starting prompt. "
-        "Author 'answer_format' so the model emits an EXTRACTABLE answer: when an "
-        "'answer_extraction_requirement' appears in the context, the format MUST "
-        "satisfy it verbatim. A closed 'answer_space' (when present) is enumerated "
-        "into the prompt deterministically, so frame the task around the labels "
-        "rather than re-listing them."
+        "task_description you propose this turn into "
+        + (
+            "the Layer 1 prompt fields + task_context — that decomposition seeds the "
+            "campaign's starting prompt. "
+            if slots
+            else "task_context. "
+        )
     )
-    return user_content, consultation_instruction
+    if "answer_format" in slots:
+        consultation_instruction += (
+            "Author 'answer_format' so the model emits an EXTRACTABLE answer: when an "
+            "'answer_extraction_requirement' appears in the context, the format MUST "
+            "satisfy it verbatim. A closed 'answer_space' (when present) is enumerated "
+            "into the prompt deterministically, so frame the task around the labels "
+            "rather than re-listing them."
+        )
+    return OriginConsultation(user_content, consultation_instruction.rstrip(), response_model)
 
 
 async def resolve_origin_turn(
     *,
     stores: Stores,
     draft: DraftCampaign,
+    pipeline: DraftPipeline,
     message: str | None = None,
 ) -> OriginResolutionResult:
-    user_content, consultation_instruction = build_origin_consultation(draft, message)
+    consultation = build_origin_consultation(draft, pipeline, message)
 
     # Bound here as well as in `CommandDispatcher`: the CLI path (`new <file>`) has no dispatcher.
     context = draft_call_context(stores, draft.draft_id)
@@ -128,35 +156,34 @@ async def resolve_origin_turn(
         # No launch admitted this call and no run's book watches it; a check-in has no producer.
         async with paid_call(stores=stores, bucket="turn"):
             raw, repair_attempts = await run_checkin(
-                consultation_instruction=consultation_instruction,
-                user_content=user_content,
+                response_model=consultation.response_model,
+                consultation_instruction=consultation.instruction,
+                user_content=consultation.user_content,
                 context=context,
             )
     finally:
         reset_cycle_ledger(token)
 
     raised = raised_commands(draft, raw)
-    updated = _apply_findings(draft, raw, raised)
+    updated = _apply_findings(draft, raw, raised, pipeline.chain.prompt_nodes())
 
     degraded_cause = _degraded_cause(
         output=raw, applied=updated is not draft, repair_attempts=repair_attempts
     )
     updated = updated.patch(resolver_ran=True)
 
-    block = resolution_block(updated).model_copy(
-        update={
-            "last_resolution": OriginLastResolution(
-                assessment=raw.assessment,
-                questions=checkin_questions(updated, raw.next_action.questions),
-                recap=raw.recap,
-            ),
-            "raised": [
-                proposal.command(updated.draft_id)
-                for proposal in raised
-                if updated.field_provenance.get(proposal.field) is not Provenance.CONFIRMED
-            ],
-            "degraded_cause": degraded_cause,
-        }
+    block = OriginResolution(
+        last_resolution=OriginLastResolution(
+            assessment=raw.assessment,
+            questions=checkin_questions(updated, raw.next_action.questions),
+            recap=raw.recap,
+        ),
+        raised=[
+            proposal.command(updated.draft_id)
+            for proposal in raised
+            if updated.field_provenance.get(proposal.field) is not Provenance.CONFIRMED
+        ],
+        degraded_cause=degraded_cause,
     )
     save_checkin_draft(stores, updated, resolution=block)
 
@@ -213,7 +240,10 @@ def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[OriginP
 
 
 def _apply_findings(
-    draft: DraftCampaign, output: CheckinOutput, raised: list[OriginProposal]
+    draft: DraftCampaign,
+    output: CheckinOutput,
+    raised: list[OriginProposal],
+    prompt_nodes: Sequence[PipelineNode],
 ) -> DraftCampaign:
     values: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
@@ -224,7 +254,7 @@ def _apply_findings(
         )
     written = {
         node.name: fields
-        for node in draft.prompt_nodes()
+        for node in prompt_nodes
         if (
             fields := {
                 name: text

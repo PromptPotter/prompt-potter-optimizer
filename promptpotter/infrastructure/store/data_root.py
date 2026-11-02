@@ -407,7 +407,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     *_CAMPAIGN_KINDS,
     *_DRAFT_KINDS,
     Kind("draft", _WS, f"{_DRAFT}/draft.json", Fate.RUN),
-    Kind("draft check-in", _WS, f"{_DRAFT}/checkin.json", Fate.RUN),
+    Kind("draft resolution", _WS, f"{_DRAFT}/resolution.json", Fate.RUN),
     # Retired by the hold `reset` takes on it, with the draft it claims.
     Kind("draft claim", _WS, f"{DRAFTS_DIR}/.*.claim", Fate.RUN),
     Kind("active session", _WS, f"{WORKSPACE_STATE_DIR}/active_session.json", Fate.RUN),

@@ -34,6 +34,7 @@ from factories import (
     optimizer_state,
     round_result,
     seat,
+    stored_campaign,
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -1097,7 +1098,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             backend_revision=None,
         )
     )
-    campaigns.create_campaign(minted_campaign(hop))
+    stored_campaign(built_stores, minted_campaign(hop))
     ledger = CycleLayout(cycle_dir).ledger
     hold_cycle(cycle_dir)
     os.utime(ledger, (0, 0))

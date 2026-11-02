@@ -1,37 +1,47 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ValidationError
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import owned_draft, rendered_pipeline_json
+from promptpotter.application.datasets.draft_campaign import (
+    DatasetBasis,
+    UploadBasis,
+    owned_draft,
+)
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
 from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
-from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
+from promptpotter.application.pipeline_resolve import (
+    DraftPipeline,
+    ServedPipeline,
+    draft_pipeline,
+    draft_served,
+    resolved_output_schemas,
+)
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import merge_config_layers
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ANSWER_FIELDS_KEY,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     description_key,
     description_path,
+    description_paths,
     narrowing_of,
 )
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -40,9 +50,13 @@ class DraftPatchPlan(NamedTuple):
     provenance: dict[str, Provenance]
     column_query: str | None
     column_ground_truth: str | None
+    # What the patched draft's connector serves, read once for the plan and the wire after it.
+    served: ServedPipeline
 
 
-def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch) -> DraftPatchPlan:
+async def plan_draft_patch(
+    stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
+) -> DraftPatchPlan:
     changes: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
 
@@ -67,12 +81,27 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             f"patch.connector {patch.connector!r} does not serve an uploaded table; one of "
             f"{sorted(n for n, c in connectors.CONNECTORS.table.items() if c.serves_uploads)}."
         )
+    if patch.connector is not None and isinstance(draft.basis, DatasetBasis):
+        raise PayloadInvalidError(
+            f"patch.connector: {draft.basis.dataset!r} runs the backend its definition names."
+        )
+    held = await draft_served(stores, draft)
+    if (
+        patch.connector is not None
+        and isinstance(draft.basis, UploadBasis)
+        and patch.connector != draft.basis.connector
+    ):
+        changes["basis"] = replace(draft.basis, connector=patch.connector)
+    served = (
+        await draft_served(stores, draft.patch(basis=changes["basis"]))
+        if "basis" in changes
+        else held
+    )
     if patch.scoring_dials is not None:
         # Canonical spelling, so two drafts declaring the same criterion mint the same block.
         changes["scoring_dials"] = spell_dials(parse_dials(patch.scoring_dials))
 
     for patch_val, draft_attr in (
-        (patch.connector, "connector"),
         (patch.scoring_matcher, "scoring_matcher"),
         (patch.origin_prompts, "origin_prompts"),
         (patch.pipeline_steps, "pipeline_steps"),
@@ -87,7 +116,7 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             draft.pipeline_overlay if overlay is None else overlay, patch.node_output
         )
     if patch.node_narrowing is not None:
-        _params, rows, _schema = draft_pipeline(stores, draft)
+        rows = draft_pipeline(stores, draft, held).rows
         overlay = dict(draft.pipeline_overlay if overlay is None else overlay)
         for node, intents in patch.node_narrowing.items():
             try:
@@ -96,10 +125,9 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
                 raise PayloadInvalidError(f"patch.node_narrowing.{node}: {exc}") from exc
             overlay[node] = {**_block(overlay.get(node)), "optimizer": narrowing.model_dump()}
     if overlay is not None:
-        before = parse_pipeline_response(rendered_pipeline_json(draft))
-        after = parse_pipeline_response(
-            rendered_pipeline_json(draft.patch(pipeline_overlay=overlay))
-        )
+        before = _description_keys(draft_pipeline(stores, draft, held))
+        patched = draft.patch(pipeline_overlay=overlay, **changes)
+        after = _description_keys(draft_pipeline(stores, patched, served))
         changes["pipeline_overlay"] = _narrowing_follows_schema(overlay, before, after)
 
     if patch.optimization_overrides is not None:
@@ -140,8 +168,10 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     if changes.keys() & {"pipeline_overlay", "optimization_overrides"}:
         # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
         free = on_free_tier(stores)
-        was_unpriced, was_outside = _refusals(stores, draft, free=free)
-        unpriced, outside = _refusals(stores, draft.patch(**changes), free=free)
+        was_unpriced, was_outside = _refusals(draft_pipeline(stores, draft, held), free=free)
+        unpriced, outside = _refusals(
+            draft_pipeline(stores, draft.patch(**changes), served), free=free
+        )
         refuse_unpriced([r for r in unpriced if r not in was_unpriced])
         refuse_outside_free_tier([o for o in outside if o not in was_outside])
 
@@ -150,12 +180,21 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         provenance=provenance,
         column_query=patch.column_query,
         column_ground_truth=patch.column_ground_truth,
+        served=served,
     )
 
 
-def _refusals(stores: Stores, draft: DraftCampaign, *, free: bool) -> tuple[list[str], list[str]]:
-    params, _rows, schema = draft_pipeline(stores, draft)
-    config = draft_config(stores, draft)
+def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:
+    """Per node, the description params of the output schema the draft's config folds."""
+    return {
+        node: [description_key(p) for p in description_paths(schema.json_schema)]
+        for node, schema in resolved_output_schemas(pipeline.chain, pipeline.params).items()
+        if schema is not None
+    }
+
+
+def _refusals(pipeline: DraftPipeline, *, free: bool) -> tuple[list[str], list[str]]:
+    config, params, schema = pipeline.config, pipeline.params, pipeline.chain
     selected = select_optimizer(config.optimization)
     outside = outside_free_tier(config, selected, params, schema) if free else []
     return unpriced_routes(config, selected, params, schema), outside
@@ -195,7 +234,7 @@ def _authored_contract(overlay: dict[str, Any], edit: NodeOutputEdit) -> dict[st
 
 
 def _narrowing_follows_schema(
-    overlay: dict[str, Any], before: PipelineSchema, after: PipelineSchema
+    overlay: dict[str, Any], before: dict[str, list[str]], after: dict[str, list[str]]
 ) -> dict[str, Any]:
     """A stored ``param_keys`` names description keys by PATH, so it follows an edited schema."""
     out = dict(overlay)
@@ -203,9 +242,8 @@ def _narrowing_follows_schema(
         opt = block.get("optimizer") if isinstance(block, dict) else None
         if not isinstance(opt, dict) or not isinstance(opt.get("param_keys"), list):
             continue
-        was, now = before.get_node(name), after.get_node(name)
-        old = set(was.description_keys) if was else set()
-        new = now.description_keys if now else []
+        old = set(before.get(name, []))
+        new = after.get(name, [])
         if set(new) == old:
             continue
         kept = [k for k in opt["param_keys"] if description_path(k) is None or k in new]

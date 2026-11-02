@@ -74,9 +74,7 @@ def _harness_reply(body: dict[str, Any]) -> dict[str, Any] | None:
     return {ANSWER_KEY: answer, "terminal_node": HARNESS_NODE}
 
 
-def _pipeline_declaration(
-    _stores: Stores, _dataset: ResolvedDataset, _experiment: Mapping[str, Any] | None
-) -> dict[str, Any]:
+def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
         "name": "n8n eval harness",
         "version": "v1",

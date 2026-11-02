@@ -225,6 +225,16 @@ export function useIngestFlow({
     setPhase({ stage: "awaiting-context", draft });
   };
 
+  // A refusal that kept its draft (a down backend) opens it: its read lands it, or says the failure.
+  const reopenKept = (failure: CommandFailure | null) => {
+    const kept = failure?.details?.draft_id;
+    if (typeof kept !== "string") return false;
+    opening.clear();
+    hold(kept);
+    setPhase({ stage: "reopening" });
+    return true;
+  };
+
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
     // A refused drop must SAY so, or the previous campaign's draft reads as this file's.
     if (busy) {
@@ -255,7 +265,7 @@ export function useIngestFlow({
         });
         return;
       }
-      setPhase({ stage: "idle" });
+      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
       return;
     }
     threads.setFileDetail(threadKey.current, id, `${r.value.n_samples} rows`);
@@ -270,7 +280,7 @@ export function useIngestFlow({
     const r = await opening.run("dataset", () => postDraftFromDataset(name));
     if (!alive()) return;
     if (!r.ok) {
-      setPhase({ stage: "idle" });
+      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
       return;
     }
     advance(r.value);
@@ -287,7 +297,7 @@ export function useIngestFlow({
     const r = await opening.run("origin", () => postDraftFromOrigin(entry.origin_id));
     if (!alive()) return;
     if (!r.ok) {
-      setPhase({ stage: "idle" });
+      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
       return;
     }
     hold(r.value.draft_id);

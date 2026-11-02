@@ -59,13 +59,14 @@ from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.commands.dispatcher import (
+    Applier,
     CommandCall,
     CommandDispatcher,
     DispatchedToCycle,
 )
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.datasets.draft_campaign import new_draft
+from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
@@ -362,14 +363,14 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
-    applier = change_run_limits(DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop))
+    dispatched = DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop)
 
-    async def apply() -> None:
-        ran = applier.run()
-        assert inspect.isawaitable(ran)
-        await ran
+    async def apply() -> Applier[object]:
+        applier = await change_run_limits(dispatched)
+        await applier.run()
+        return applier
 
-    asyncio.run(apply())
+    applier = asyncio.run(apply())
     assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
     effect = applier.effect_fn()
     assert isinstance(effect, ArmedCeilingEffect), f"a limits change acked {effect!r}"
@@ -3508,10 +3509,10 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug="drafted",
+        basis=DatasetBasis("drafted"),
         n_samples=1,
         sample_preview=[],
         headers=[],
-        source_dataset="drafted",
     )
     stores.drafts.write_draft(draft.draft_id, draft.to_disk())
     undrafted = account_usd()

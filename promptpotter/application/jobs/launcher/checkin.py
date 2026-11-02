@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import Field, JsonValue
 
 from promptpotter.application.datasets.authored import with_optimization
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
+from promptpotter.application.datasets.draft_campaign import (
+    DatasetBasis,
+    DraftCampaign,
+    owned_draft,
+)
 from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
@@ -35,7 +39,14 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import land_job, on_free_tier
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
+from promptpotter.application.pipeline_resolve import (
+    DraftPipeline,
+    ServedPipeline,
+    draft_backend_type,
+    draft_budget,
+    draft_pipeline,
+    draft_served,
+)
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
@@ -64,13 +75,6 @@ class StartCheckinResponse(StrictModel):
     )
 
 
-def start_ready_draft(stores: Stores, draft_id: str) -> DraftCampaign:
-    """The draft as Start reads it, every time it reads it: by id, under the claim."""
-    draft = owned_draft(stores, draft_id)
-    assert_origin_ready(draft)
-    return draft
-
-
 @dataclass(frozen=True, slots=True)
 class CheckinStart:
     """Carries the claim, never the draft: the claim refuses every edit until the mint closes."""
@@ -95,32 +99,34 @@ class CheckinStart:
         return self.claim.draft_id
 
     def backend_type(self, stores: Stores) -> str:
-        return owned_draft(stores, self.claim.draft_id).connector
+        return draft_backend_type(stores, owned_draft(stores, self.claim.draft_id))
 
-    def campaign_config(self, stores: Stores) -> CampaignConfig:
-        return draft_config(stores, owned_draft(stores, self.claim.draft_id))
+    def declared_budget(self, stores: Stores) -> Budget:
+        return draft_budget(stores, owned_draft(stores, self.claim.draft_id))
 
 
 def _land_draft(
-    stores: Stores, draft: DraftCampaign, overlays: Sequence[Mapping[str, JsonValue]]
+    stores: Stores,
+    draft: DraftCampaign,
+    pipeline: DraftPipeline,
+    overlays: Sequence[Mapping[str, JsonValue]],
 ) -> dict[str, NodePrompt] | None:
     """An upload's definition lands once its cut passed every mint refusal of each config the
     Start runs (the draft's, under each overlay), so a refused Start takes no slug. One its own
     upload landed is a Start refused after landing: the retry lands the draft again. Answers the
     origin an authored check-in over an existing dataset overrides."""
-    if (canonical := draft.source_dataset) is not None:
-        persist_origin_candidate_library(stores, canonical, draft)
+    params, chain = pipeline.params, pipeline.chain
+    basis = draft.basis
+    if isinstance(basis, DatasetBasis):
+        persist_origin_candidate_library(stores, basis.dataset, draft)
         # An origin authored over an existing slug writes no dataset: only the override carries it.
         # `committed_prompts` rather than the raw map, or the label enumeration is lost.
         return (
-            {step: NodePrompt(fields=f) for step, f in draft.committed_prompts().items()}
+            {step: NodePrompt(fields=f) for step, f in draft.committed_prompts(chain).items()}
             if draft.authored_prompts()
             else None
         )
-    upload = stores.drafts.upload_of(draft.draft_id)
-    if upload is None:
-        raise LaunchError(f"draft {draft.draft_id} names no upload to commit")
-    source = upload_source(draft, upload)
+    source = upload_source(draft, basis)
     datasets = stores.tenant_datasets
     if datasets.slug_exists(draft.slug) and definition_source(
         datasets.dataset_dir(draft.slug)
@@ -128,20 +134,19 @@ def _land_draft(
         raise LaunchError(
             f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
         )
-    params, _rows, schema = draft_pipeline(stores, draft)
     rows = cut_bank(stores, source)
     for overlay in overlays:
-        config = with_optimization(draft_config(stores, draft), overlay)
+        config = with_optimization(pipeline.config, overlay)
         refuse_unrunnable(
             config,
             select_optimizer(config.optimization),
             rows,
             params,
-            schema,
+            chain,
             free=on_free_tier(stores),
             shelf=stores.block_packs,
         )
-    commit_upload_definition(stores, draft, source=source)
+    commit_upload_definition(stores, draft, basis, source=source, chain=chain)
     return None
 
 
@@ -156,22 +161,31 @@ class OpenedCheckin:
 
 
 async def open_checkin(
-    stores: Stores, draft_id: str, *, overlays: Sequence[Mapping[str, JsonValue]]
+    stores: Stores,
+    draft_id: str,
+    served: ServedPipeline,
+    *,
+    overlays: Sequence[Mapping[str, JsonValue]],
 ) -> OpenedCheckin:
-    """*overlays* are what each campaign the Start mints lays over the draft's `optimization`."""
-    draft = start_ready_draft(stores, draft_id)
-    origin_override = _land_draft(stores, draft, overlays)
+    """*overlays* are what each campaign the Start mints lays over the draft's `optimization`;
+    *served* is the Start's one backend read, taken once its slot is held."""
+    draft = owned_draft(stores, draft_id)
+    pipeline = draft_pipeline(stores, draft, served)
+    assert_origin_ready(draft, pipeline)
+    origin_override = _land_draft(stores, draft, pipeline, overlays)
     session = await init_services(
-        dataset_name=draft.dataset_name, identity=stores.identity, stores=stores
+        dataset_name=draft.dataset_name,
+        identity=stores.identity,
+        stores=stores,
+        served=served,
     )
-    declared = draft_config(
-        stores, draft, session_chain=[n.name for n in session.pipeline_schema.nodes]
-    )
-    return OpenedCheckin(draft, session, declared, origin_override)
+    return OpenedCheckin(draft, session, pipeline.config, origin_override)
 
 
-async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
-    opened = await open_checkin(stores, draft_id, overlays=[{}])
+async def _commit_checkin(stores: Stores, request: CheckinStart) -> MintedCycle:
+    draft_id = request.claim.draft_id
+    served = await draft_served(stores, owned_draft(stores, draft_id))
+    opened = await open_checkin(stores, draft_id, served, overlays=[{}])
     session = opened.session
     plan = resolve_cycle_plan(
         session,
@@ -197,7 +211,7 @@ async def hold_checkin_start(
     hop: CycleHop | None = None
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        minted = await _commit_checkin(stores, request.claim.draft_id)
+        minted = await _commit_checkin(stores, request)
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
         land_job(stores, job_registry, job.job_id, hop, held.share)
         claim_cycle(stores, job_registry, job, hop)

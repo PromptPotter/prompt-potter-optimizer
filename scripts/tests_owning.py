@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import subprocess
 import sys
 import tomllib
 from collections.abc import Iterator
@@ -367,7 +368,9 @@ def main(argv: list[str]) -> int:
         return 0
     queue_behind_siblings("tests_owning")
     if nodes is None:
-        return _record(pytest_args)
+        # A fresh process: this one holds every module's parsed tree, which the suite's peak omits.
+        record = [sys.executable, __file__, "--record", "--", *pytest_args]
+        return subprocess.run(record, cwd=REPO, check=False).returncode
     if not nodes:
         print("tests_owning: no test owns what moved")
         return 0

@@ -328,16 +328,19 @@ class LedgerUnreadableError(ConflictError):
 
     code = "ledger_unreadable"
 
-    def __init__(self, *, ledger: str, offset: int, reason: str, campaign_id: str | None) -> None:
+    def __init__(
+        self, *, ledger: str, offset: int | None, reason: str, campaign_id: str | None
+    ) -> None:
+        """*offset* ``None``: the ledger lacks a record every reader of it relies on."""
         remedy = (
             "no verb repairs it"
             if campaign_id is None
             else f"`python -m promptpotter delete {campaign_id}` removes its campaign and keeps "
             "every measurement cache"
         )
+        where = ledger if offset is None else f"{ledger} line {offset}"
         super().__init__(
-            f"{ledger} line {offset} was written in a shape this build does not read ({reason}). "
-            f"No migration exists: {remedy}.",
+            f"{where} is unreadable by this build ({reason}). No migration exists: {remedy}.",
             details={
                 "ledger": ledger,
                 "offset": offset,

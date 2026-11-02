@@ -4,5 +4,5 @@
 
 ## checkin — the bench's one llm node
 
-**One node, two modes, one output schema (`CheckinOutput`).** <!-- probe: git grep -cE "class \w*Checkin\w*Output\(" -- promptpotter/*.py <= 1 --> Decomposition turns a raw `task_description` into the six Layer-1 prompt strings plus `task_context`; origin resolution adds `assessment`, `findings`, `next_action` and `recap`.
+**One node, two modes, one output schema (`CheckinOutput`).** <!-- probe: git grep -cE "class \w*Checkin\w*Output\(" -- promptpotter/*.py <= 1 --> Decomposition turns a raw `task_description` into the six Layer-1 prompt strings plus `task_context`; origin resolution adds `assessment`, `findings`, `next_action` and `recap`, and is offered only the prompt slots its chain's prompt nodes declare (`task_context.py::checkin_output`).
 **Both modes bill a cycle ledger** (`task_context.py::checkin_call_context`): resolution the draft's, decomposition the run's.

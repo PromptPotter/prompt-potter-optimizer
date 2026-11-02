@@ -4,7 +4,7 @@ import logging
 from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, assert_never
 
 from pydantic import Field, ValidationError
 
@@ -16,11 +16,12 @@ from promptpotter.application.datasets.authored import (
     with_optimization,
 )
 from promptpotter.application.datasets.draft_campaign import (
+    DatasetBasis,
     DraftCampaign,
-    declared_pipeline_json,
+    UploadBasis,
+    committed_pipeline_json,
     default_campaign_config,
     draft_scoring_block,
-    rendered_pipeline_json,
     scoring_choice,
     split_overlay,
 )
@@ -49,6 +50,7 @@ from promptpotter.application.runner.inner.tasks import is_self_optimization, pa
 from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
+from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.arms import Concluded
 from promptpotter.domain.bench import partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
@@ -58,6 +60,7 @@ from promptpotter.domain.campaign_config import (
     apply_cycle_seed,
     effective_config,
 )
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, render_prompt
 from promptpotter.domain.paired_reading import ArmKey
@@ -76,7 +79,6 @@ from promptpotter.domain.pipeline_parsing import (
 )
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
-    DEFAULT_PIPELINE,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     CapabilityMenu,
@@ -99,6 +101,7 @@ from promptpotter.domain.search_point import (
     strip_rendered_prompt,
 )
 from promptpotter.domain.strict_model import RequestBody, StrictModel
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import default_routes
@@ -108,15 +111,15 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
     declared_pipelines,
     definition_version,
-    read_dataset_definition,
-    read_dataset_pipeline,
     resolve_dataset,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
 from promptpotter.shared.errors import (
     BadRequestError,
     DatasetAccessError,
+    LedgerUnreadableError,
     ManifestUnreadableError,
     NotFoundError,
     PayloadInvalidError,
@@ -132,6 +135,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.optimizers.nodes import Initializer
     from promptpotter.config.prompt_blocks import PackShelf
+    from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -139,6 +143,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.spend import Budget
     from promptpotter.domain.treatment import Treatment
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -335,7 +340,7 @@ def apply_identity_layer(
     return pipeline_params
 
 
-def overlay_dataset_pipeline(served: dict[str, Any], local: Mapping[str, Any]) -> dict[str, Any]:
+def overlay_dataset_pipeline(served: Mapping[str, Any], local: Mapping[str, Any]) -> dict[str, Any]:
     out = dict(served)
     # The definition names the backend it runs: what the operator chose outranks a self-description.
     if local.get("backend_name"):
@@ -349,18 +354,87 @@ def overlay_dataset_pipeline(served: dict[str, Any], local: Mapping[str, Any]) -
     return out
 
 
-def dataset_pipeline_declaration(
-    stores: Stores, dataset: ResolvedDataset, experiment: Mapping[str, Any] | None
-) -> dict[str, Any] | None:
-    definition = read_dataset_definition(dataset.directory)
-    if definition is None:
-        return None
-    connector = connectors.CONNECTORS.table.get(definition.backend_type)
-    if connector is None or connector.pipeline_declaration is None:
-        return definition.pipeline
-    return overlay_dataset_pipeline(
-        connector.pipeline_declaration(stores, dataset, experiment), definition.pipeline
-    )
+@dataclass(frozen=True)
+class ServedPipeline:
+    """What a connector serves of its pipeline; each reader lays its own local definition on it."""
+
+    connector: str
+    # `None`: the connector serves none, so the local definition is the whole of it.
+    doc: Mapping[str, Any] | None
+
+    def over(self, local: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(local) if self.doc is None else overlay_dataset_pipeline(self.doc, local)
+
+
+async def served_pipeline(
+    stores: Stores, connector: Connector, *, experiment: Mapping[str, Any] | None
+) -> ServedPipeline:
+    """Read live at every moment that needs it; raises ``BackendUnreachableError``, never a stand-in."""
+    served: Mapping[str, Any] | None = None
+    if connector.serves_pipeline:
+        client = BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir)
+        try:
+            served = await client.fetch_pipeline()
+        finally:
+            await client.aclose()
+    elif connector.pipeline_declaration is not None:
+        served = connector.pipeline_declaration(stores, experiment)
+    return ServedPipeline(connector.name, served)
+
+
+def _draft_dataset(stores: Stores, draft: DraftCampaign) -> ResolvedDataset | None:
+    match draft.basis:
+        case UploadBasis():
+            return None
+        case DatasetBasis(dataset=name):
+            return resolve_dataset(stores, name)
+        case _:
+            assert_never(draft.basis)
+
+
+def _draft_local(stores: Stores, draft: DraftCampaign) -> dict[str, Any]:
+    """What run init lays over the served pipeline once Start lands: an upload's committed doc,
+    a reused dataset's own file."""
+    match draft.basis:
+        case UploadBasis() as upload:
+            return committed_pipeline_json(draft, upload)
+        case DatasetBasis(dataset=name):
+            return runnable_definition(resolve_dataset(stores, name).directory).pipeline
+        case _:
+            assert_never(draft.basis)
+
+
+def draft_backend_type(stores: Stores, draft: DraftCampaign) -> str:
+    """The backend the draft's Start runs: an upload's pick, else the one its definition names."""
+    match draft.basis:
+        case UploadBasis(connector=connector):
+            return connector
+        case DatasetBasis(dataset=name):
+            return runnable_definition(resolve_dataset(stores, name).directory).backend_type
+        case _:
+            assert_never(draft.basis)
+
+
+async def draft_served(stores: Stores, draft: DraftCampaign) -> ServedPipeline:
+    try:
+        return await served_pipeline(
+            stores,
+            connectors.CONNECTORS.get(draft_backend_type(stores, draft)),
+            experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
+        )
+    except BackendUnreachableError as exc:
+        exc.details["draft_id"] = draft.draft_id
+        raise
+
+
+async def dataset_pipeline(
+    stores: Stores, dataset: ResolvedDataset, *, experiment: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """A dataset's pipeline outside a run, over the experiment its panel holds today."""
+    definition = runnable_definition(dataset.directory)
+    connector = connectors.CONNECTORS.get(definition.backend_type)
+    served = await served_pipeline(stores, connector, experiment=experiment)
+    return served.over(definition.pipeline)
 
 
 def experiment_outside_run(
@@ -762,31 +836,39 @@ def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[
     return lock.locked if lock is not None and lock.declared == scoring else scoring
 
 
-def draft_config(
-    stores: Stores, draft: DraftCampaign, *, session_chain: Sequence[str] | None = None
-) -> CampaignConfig:
-    """What Start declares and every read before it shows; only Start holds a ``session_chain``.
-    A free account's takes the tier's layer last, bound to each node's model."""
-    config = _draft_declared(stores, draft, session_chain)
+def draft_config(stores: Stores, draft: DraftCampaign, declared: PipelineSchema) -> CampaignConfig:
+    """What Start declares and every read before it shows, over *declared*: the draft's chain
+    (`DraftPipeline.declared`). A free account's takes the tier's layer last, bound to each node's model."""
+    config = _draft_declared(stores, draft)
+    if isinstance(draft.basis, DatasetBasis) and draft.pipeline_steps:
+        # Via `exclude_nodes`: a reused dataset's `pipelines.default` stays the first campaign's.
+        excluded = [n for n in declared.active_steps if n not in draft.pipeline_steps]
+        config = config.model_copy(update={"exclude_nodes": excluded})
     if not on_free_tier(stores):
         return config
-    schema = parse_pipeline_response(rendered_pipeline_json(draft))
     nodes = {
         n.name: {**n.current_config, **config.pipeline_overlay.get(n.name, {})}
-        for n in schema.declared_nodes
+        for n in declared.declared_nodes
         if n.is_llm
     }
     return with_free_tier_layer(config, nodes)
 
 
-def _draft_declared(
-    stores: Stores, draft: DraftCampaign, session_chain: Sequence[str] | None
-) -> CampaignConfig:
-    canonical = draft.source_dataset
-    if canonical is None:
+def draft_budget(stores: Stores, draft: DraftCampaign) -> Budget:
+    """The ceiling a Start admits: no node bears on it, so it reads no pipeline."""
+    config = _draft_declared(stores, draft)
+    if on_free_tier(stores):
+        config = with_free_tier_layer(config, {})
+    return config.optimization.budget
+
+
+def _draft_declared(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
+    if isinstance(draft.basis, UploadBasis):
         # A fresh upload commits its overlay and chain into its own `dataset.yaml::pipeline`.
-        return with_optimization(default_campaign_config(draft), draft.optimization_overrides)
-    dataset_dir = resolve_dataset(stores, canonical).directory
+        return with_optimization(
+            default_campaign_config(draft, draft.basis), draft.optimization_overrides
+        )
+    dataset_dir = resolve_dataset(stores, draft.basis.dataset).directory
     declared = load_dataset_campaign_config(dataset_dir)
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
     update: dict[str, Any] = {
@@ -796,15 +878,7 @@ def _draft_declared(
     # The file's block carries anchors a draft's two fields cannot: it stands until they move.
     if scoring_choice(declared.scoring) != (draft.scoring_matcher, draft.scoring_dials):
         update["scoring"] = draft_scoring_block(draft)
-    if draft.pipeline_steps:
-        chain = _declared_chain(dataset_dir) if session_chain is None else session_chain
-        # Via `exclude_nodes`: a reused dataset's `pipelines.default` stays the first campaign's.
-        update["exclude_nodes"] = [n for n in chain if n not in draft.pipeline_steps]
     return with_optimization(declared, draft.optimization_overrides).model_copy(update=update)
-
-
-def _declared_chain(dataset_dir: Path) -> list[str]:
-    return declared_pipelines(read_dataset_pipeline(dataset_dir) or {}).get(DEFAULT_PIPELINE, [])
 
 
 def _locked(stores: Stores, hop: CycleHop, config: CampaignConfig) -> CampaignConfig:
@@ -854,7 +928,9 @@ class _Merge:
 class _CampaignMerge(_Merge):
     dataset: ResolvedDataset | None
     hop: CycleHop
-    raw: dict[str, Any] | None
+    # What its mint recorded run init read: the laid declaration, and the panel it measured.
+    declaration: dict[str, Any]
+    experiment: dict[str, Any] | None
     seed: CycleSeed | None
 
     def with_seed(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -869,15 +945,14 @@ class _CampaignMerge(_Merge):
         )
 
 
-def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
-    schema = parse_pipeline_response(rendered_pipeline_json(draft))
-    cfg = draft_config(stores, draft)
+def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> _Merge:
+    declared = parse_pipeline_response(served.over(_draft_local(stores, draft)))
+    cfg = draft_config(stores, draft, declared)
     # Still the operator's own layer here, where a fresh upload's Start files it in `dataset.yaml::pipeline`.
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
     active, filtered = _resolve_active_schema(
-        schema,
-        # The draft's schema already runs the chosen chain; excluding drops what it can still add.
-        exclude=[],
+        declared,
+        exclude=list(cfg.exclude_nodes),
         narrowing={**cfg.optimizer_narrowing, **narrowing},
         dataset_dir=None,
     )
@@ -893,7 +968,7 @@ def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
     )
     return _Merge(
         # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
-        declared=parse_pipeline_response(declared_pipeline_json(draft)),
+        declared=declared,
         filtered=filtered,
         active=active,
         cfg=cfg,
@@ -907,11 +982,16 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
     dataset = _dataset_of(stores, campaign)
     dataset_dir = None if dataset is None else dataset.directory
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
-    # The cycle's recorded merge first: the committed dataset file carries no `param_keys` at all.
-    raw = stores.campaigns.read_resolved_run(hop).declaration
-    if raw is None and dataset is not None:
-        raw = dataset_pipeline_declaration(stores, dataset, experiment_outside_run(stores, dataset))
-    schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {DEFAULT_PIPELINE: []}})
+    # What the cycle ran is what its mint recorded, never today's files or backend.
+    resolved = stores.campaigns.read_resolved_run(hop)
+    if resolved.declaration is None:
+        raise LedgerUnreadableError(
+            ledger=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
+            offset=None,
+            reason="it holds no resolved run, which its mint appends before the campaign exists",
+            campaign_id=hop.campaign_id,
+        )
+    schema = parse_pipeline_response(resolved.declaration)
     seed = stores.campaigns.read_cycle_seed(hop)
     cfg = resolve_campaign_config(stores, campaign, hop)
     active, filtered = _resolve_active_schema(
@@ -939,7 +1019,8 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         free=on_free_tier(stores),
         dataset=dataset,
         hop=hop,
-        raw=raw,
+        declaration=resolved.declaration,
+        experiment=resolved.experiment,
         seed=seed,
     )
 
@@ -1166,8 +1247,10 @@ def _response(
     )
 
 
-def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> CampaignPipelineResponse:
-    m = _draft_merge(stores, draft)
+def resolve_pipeline_for_draft(
+    stores: Stores, draft: DraftCampaign, served: ServedPipeline
+) -> CampaignPipelineResponse:
+    m = _draft_merge(stores, draft, served)
     return _response(
         m,
         _draft_params(m),
@@ -1176,21 +1259,29 @@ def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> Campaign
         campaign_id=draft.draft_id,
         cycle_id="",
         dataset_name=draft.slug,
-        connector=draft.connector,
-        backend_type=draft.connector,
+        connector=served.connector,
+        backend_type=served.connector,
         # A dataset dir is what declares inner cells, and a check-in has none yet.
         nests=[],
         mint=_draft_mint(stores, draft, m),
     )
 
 
-def draft_pipeline(
-    stores: Stores, draft: DraftCampaign
-) -> tuple[dict[str, Any], dict[str, list[NodeConfigParam]], PipelineSchema]:
-    """What the draft's nodes run with, their rows, and the chain they run in, before Start commits any of it."""
-    m = _draft_merge(stores, draft)
+class DraftPipeline(NamedTuple):
+    """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
+    the chain they run in, the chain as declared before the draft narrowed it, and its config."""
+
+    params: dict[str, Any]
+    rows: dict[str, list[NodeConfigParam]]
+    chain: PipelineSchema
+    declared: PipelineSchema
+    config: CampaignConfig
+
+
+def draft_pipeline(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftPipeline:
+    m = _draft_merge(stores, draft, served)
     params = _draft_params(m)
-    return params, _rows(m, params), m.filtered
+    return DraftPipeline(params, _rows(m, params), m.filtered, m.declared, m.cfg)
 
 
 def _draft_params(m: _Merge) -> dict[str, Any]:
@@ -1214,10 +1305,7 @@ def resolve_pipeline_for_campaign(
 ) -> CampaignPipelineResponse:
     """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
     m = _campaign_merge(stores, campaign, at)
-    # Recorded first: a live resolve recomputes a banked identity off a roster it never ran.
-    experiment = stores.campaigns.read_resolved_run(m.hop).experiment or experiment_outside_run(
-        stores, m.dataset
-    )
+    # The recorded roster alone: a live resolve recomputes a banked identity off one it never ran.
     params = apply_identity_layer(
         m.params,
         m.active,
@@ -1225,7 +1313,7 @@ def resolve_pipeline_for_campaign(
         m.filtered,
         stores=stores,
         judges=m.cfg.judges,
-        experiment=experiment,
+        experiment=m.experiment,
         provenance=m.provenance,
     )
     params = m.with_seed(params)
@@ -1244,12 +1332,12 @@ def resolve_pipeline_for_campaign(
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=str((m.raw or {}).get("backend_name", "")),
+        connector=m.declaration["backend_name"],
         # The campaign's DECLARED kind — one definition serves every campaign on the slug.
         backend_type=campaign.connector,
         nests=[]
         if m.dataset is None
-        else nested_pipeline_refs(m.dataset, experiment, m.filtered.view),
+        else nested_pipeline_refs(m.dataset, m.experiment, m.filtered.view),
         mint=_cycle_mint(stores, m),
     )
 
@@ -1355,22 +1443,22 @@ class DatasetPipelineResponse(StrictModel):
     )
 
 
-def resolve_pipeline_for_dataset(stores: Stores, dataset_name: str) -> DatasetPipelineResponse:
+async def resolve_pipeline_for_dataset(
+    stores: Stores, dataset_name: str
+) -> DatasetPipelineResponse:
     dataset = resolve_dataset(stores, dataset_name)
     experiment = experiment_outside_run(stores, dataset)
-    raw = dataset_pipeline_declaration(stores, dataset, experiment)
-    if raw is None:
-        raise NotFoundError(f"Dataset '{dataset_name}' declares no pipeline")
+    declared = await dataset_pipeline(stores, dataset, experiment=experiment)
     cfg = load_dataset_campaign_config(dataset.directory)
     _, filtered = _resolve_active_schema(
-        parse_pipeline_response(raw),
+        parse_pipeline_response(declared),
         exclude=list(cfg.exclude_nodes),
         narrowing=cfg.optimizer_narrowing,
         dataset_dir=dataset.directory,
     )
     rows = filtered.node_config_schema()
     return DatasetPipelineResponse(
-        connector=str(raw.get("backend_name", "")),
+        connector=declared["backend_name"],
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),

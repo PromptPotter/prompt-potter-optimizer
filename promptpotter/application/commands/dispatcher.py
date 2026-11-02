@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import inspect
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -99,7 +98,7 @@ class CommandCall[P: CommandPayload]:
         return self.payload.kind
 
 
-def _no_body() -> None:
+async def _no_body() -> None:
     """What a deduped retry answers for a command whose applied form answers nothing either."""
 
 
@@ -107,8 +106,8 @@ def _no_body() -> None:
 class Applier[R]:
     """`replay=None` dedupes nothing; `ack="accepted"` leaves `run` the guard alone, the loop acking `applied`."""
 
-    run: Callable[[], Awaitable[R]] | Callable[[], R]
-    replay: Callable[[], R] | None
+    run: Callable[[], Awaitable[R]]
+    replay: Callable[[], Awaitable[R]] | None
     effect_fn: Callable[[], CommandEffect] | None = None
     ack: CommandAckStatus = "applied"
     # The draft claim this command holds through its ack; a Start hands its claim to the launch.
@@ -116,7 +115,7 @@ class Applier[R]:
 
     @staticmethod
     def silent(
-        run: Callable[[], Awaitable[object]] | Callable[[], object],
+        run: Callable[[], Awaitable[object]],
         *,
         effect_fn: Callable[[], CommandEffect] | None = None,
     ) -> Applier[object]:
@@ -124,7 +123,7 @@ class Applier[R]:
 
     @staticmethod
     def for_loop(refusal: str) -> Applier[object]:
-        def _guard() -> None:
+        async def _guard() -> None:
             if refusal:
                 raise RejectedError(refusal)
 
@@ -132,7 +131,7 @@ class Applier[R]:
 
     @staticmethod
     def refusing(reason: str) -> Applier[object]:
-        def _refuse() -> None:
+        async def _refuse() -> None:
             raise RejectedError(reason)
 
         return Applier(_refuse, replay=None)
@@ -183,14 +182,14 @@ class CommandDispatcher:
     def run_state(self, hop: CycleHop) -> RunState:
         return derive_run_state(self.stores.campaigns.cycle_dir(hop))
 
-    def _applier(self, dispatched: Dispatched[Any]) -> Applier[Any]:
+    async def _applier(self, dispatched: Dispatched[Any]) -> Applier[Any]:
         kind = dispatched.payload.kind
         require_capability(self.stores.identity, kind.capability, subject=f"command {kind.value!r}")
         module, _, name = kind.handler.partition(":")
-        handler: Callable[[Dispatched[Any]], Applier[Any]] = getattr(
+        handler: Callable[[Dispatched[Any]], Awaitable[Applier[Any]]] = getattr(
             importlib.import_module(f"{_HANDLER_PACKAGE}.{module}"), name
         )
-        return handler(dispatched)
+        return await handler(dispatched)
 
     async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[Any]:
         """The payload's address base IS its target ledger."""
@@ -205,21 +204,21 @@ class CommandDispatcher:
                 return await self._on_draft(call)
             case _:
                 ledger = CycleEventLog.open_workspace(self.stores.base_dir)
-                applier = self._applier(Dispatched(self, call.payload))
+                applier = await self._applier(Dispatched(self, call.payload))
                 return await self._record_and_apply(ledger, call, applier)
 
     async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
         own_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
-        applier = self._applier(Dispatched(self, call.payload))
+        applier = await self._applier(Dispatched(self, call.payload))
         return await self._record_and_apply(ledger, call, applier)
 
     async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
         ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(hop)))
-        applier = self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
+        applier = await self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
         return await self._record_and_apply(ledger, call, applier)
 
     async def _on_cycle(self, call: CommandCall[CyclePayload]) -> CommandOutcome[object]:
@@ -245,7 +244,7 @@ class CommandDispatcher:
         # Its apply removes the dir AND its ledger, so the record and ack go on the campaign root's.
         recorded_on = campaign.root_hop if isinstance(payload, DeleteCyclePayload) else hop
         ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(recorded_on)))
-        applier = self._applier(DispatchedToCycle(self, payload, campaign, hop))
+        applier = await self._applier(DispatchedToCycle(self, payload, campaign, hop))
         return await self._record_and_apply(ledger, call, applier)
 
     async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any]:
@@ -254,7 +253,7 @@ class CommandDispatcher:
         owned_draft_data(self.stores, call.payload.draft_id)
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
-            applier = self._applier(DispatchedToDraft(self, call.payload, claim))
+            applier = await self._applier(DispatchedToDraft(self, call.payload, claim))
         except BaseException:
             claim.release()
             raise
@@ -276,7 +275,7 @@ class CommandDispatcher:
             if existing is not None:
                 return CommandOutcome(
                     accepted=CommandAcceptedBody(command_id=existing.command_id),
-                    result=applier.replay(),
+                    result=await applier.replay(),
                     ack=existing.ack,
                 )
 
@@ -294,8 +293,7 @@ class CommandDispatcher:
             ack_status: CommandAckStatus = applier.ack
             ack_detail = ""
             try:
-                ran = applier.run()
-                applied.append(await ran if inspect.isawaitable(ran) else ran)
+                applied.append(await applier.run())
             except RejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason

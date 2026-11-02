@@ -103,6 +103,6 @@ def get_dataset_cells(
 
 
 @datasets_router.get("/{name:path}/cells/{answer}", response_model=Cell)
-def get_dataset_cell(name: str, answer: str, stores: StoresDep) -> Cell:
+async def get_dataset_cell(name: str, answer: str, stores: StoresDep) -> Cell:
     """One answer opened: its row assembled into a trace."""
-    return open_cell(stores, name, answer)
+    return await open_cell(stores, name, answer)

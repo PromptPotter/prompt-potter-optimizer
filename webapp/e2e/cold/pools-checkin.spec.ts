@@ -15,10 +15,6 @@ test.describe.configure({ mode: "serial" });
 
 let draft: Draft | null = null;
 
-// Where a pool lands is the backend's schema: unreachable, no prompt node opens a part to fill. The
-// cold world runs no backend, so a machine without one asserts everything up to the landing.
-const NO_BACKEND = "the dataset's backend is down here, so no prompt node opens a part a pool fills";
-
 async function served(request: APIRequestContext): Promise<DraftCampaignWire> {
   const res = await request.get(`/api/v1/drafts/${draft!.draftId}`);
   expect(res.ok(), `GET /drafts/${draft!.draftId} → ${res.status()}`).toBeTruthy();
@@ -113,7 +109,6 @@ test.describe("the check-in's pools and recombination host", () => {
     const authored = pool?.offered.find((o) => o.path === "instruction/authored");
     expect(authored?.entries, "the pack's two snippets are not offered").toBe(2);
     expect(pool?.packs.find((p) => p.name === PACK)?.on, "the named pack is not served on").toBe(true);
-    test.skip(wire.schema_source === "unreachable", NO_BACKEND);
     expect(
       pool?.fills.find((f) => f.part === "instruction")?.entries,
       "the pack's snippets do not reach the candidate's instruction",

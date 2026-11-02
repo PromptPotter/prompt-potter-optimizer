@@ -789,7 +789,7 @@ async def paid_call(*, stores: Stores, bucket: str) -> AsyncIterator[SpendBook]:
 
 
 def declare_run_budget(
-    config: CampaignConfig,
+    declared: Budget,
     *,
     stores: Stores,
     hop: CycleHop | None,
@@ -808,11 +808,13 @@ def declare_run_budget(
             stores.campaigns.read_standing_budget(hop).budget
         )
     asked = asked.over(requested)
-    return config.optimization.budget.over(seed, asked), asked
+    return declared.over(seed, asked), asked
 
 
 def next_launch_budget(config: CampaignConfig, *, stores: Stores, hop: CycleHop) -> Budget:
-    return declare_run_budget(config, stores=stores, hop=hop, requested=Budget())[0]
+    return declare_run_budget(
+        config.optimization.budget, stores=stores, hop=hop, requested=Budget()
+    )[0]
 
 
 def clamp_budget_change(

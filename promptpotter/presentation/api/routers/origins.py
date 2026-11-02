@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import Field
 
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, read_draft_wire
 from promptpotter.application.datasets.ingest import draft_from_origin
 from promptpotter.application.origin_listing import OriginEntry, list_origins
 from promptpotter.domain.strict_model import StrictModel
@@ -31,4 +31,4 @@ def get_origins(stores: StoresDep) -> OriginListResponse:
 async def post_origin_draft(origin_id: str, stores: StoresDep) -> DraftCampaignWire:
     """Open a prior origin as a prefilled check-in draft; nothing runs until ``/commands/start-checkin``."""
     draft = await draft_from_origin(stores=stores, origin_id=origin_id)
-    return draft_wire(stores, draft)
+    return await read_draft_wire(stores, draft)

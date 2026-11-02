@@ -202,10 +202,9 @@ class Connector:
     completion_check: Callable[[], None] | None = None
     """Run where the table completes, so a raise stops the server at boot and a run at init."""
 
-    pipeline_declaration: (
-        Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, Any]] | None
-    ) = None
-    """The backend's graph, read in place of ``GET /pipeline``; ``dataset.yaml::pipeline`` overlays it."""
+    pipeline_declaration: Callable[[Stores, Mapping[str, Any] | None], dict[str, Any]] | None = None
+    """The backend's graph off the panel's experiment, read in place of ``GET /pipeline``;
+    ``dataset.yaml::pipeline`` overlays it."""
 
     identity_config: (
         Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, dict[str, Any]]]

@@ -13,7 +13,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import GradeBenchPayload, VerifyCandidatePayload
 
 
-def verify_candidate(dispatched: DispatchedToCycle[VerifyCandidatePayload]) -> Applier[object]:
+async def verify_candidate(
+    dispatched: DispatchedToCycle[VerifyCandidatePayload],
+) -> Applier[object]:
     stores, hop, payload = dispatched.dispatcher.stores, dispatched.hop, dispatched.payload
 
     async def _apply_verify() -> verify.VerifyOutcome:
@@ -31,6 +33,6 @@ def verify_candidate(dispatched: DispatchedToCycle[VerifyCandidatePayload]) -> A
     return Applier.silent(_apply_verify)
 
 
-def grade_bench(dispatched: DispatchedToCycle[GradeBenchPayload]) -> Applier[object]:
+async def grade_bench(dispatched: DispatchedToCycle[GradeBenchPayload]) -> Applier[object]:
     stores, hop = dispatched.dispatcher.stores, dispatched.hop
     return Applier.silent(lambda: grade_line_bench(stores=stores, hop=hop))
