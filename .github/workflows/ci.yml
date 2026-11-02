@@ -20,7 +20,7 @@ jobs:
       # `--frozen` is what makes CI reproducible: a dependency moves only when
       # uv.lock is deliberately regenerated, never silently at install time.
       - name: Install uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
 
@@ -50,7 +50,7 @@ jobs:
       # All three jobs sync the same lock into the same cache key, so only `check` saves it;
       # a second save loses the reservation race and warns on every push.
       - name: Install uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           save-cache: false
@@ -116,7 +116,7 @@ jobs:
       # be walked. `--with-deps` because a bare runner has none of Chromium's
       # shared libraries.
       - name: Install uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           save-cache: false
