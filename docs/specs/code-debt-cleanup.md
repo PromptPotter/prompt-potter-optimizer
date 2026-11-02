@@ -131,6 +131,106 @@ acting.
     `_BLOCK`) and classifies failures by regex over stderr. Action: an injected client through the bench's
     admitted send; typed exit data. **Re-test:** `git grep -n "_billed_acompletion" -- promptpotter`.
 
+### The engine swept by shape (debt hunt 2026-11-02)
+
+Grouped by the arc each would ride; workaround comments and dead top-level names came back clean.
+
+**A. The pipeline carrier is typed.** **Rides with:** § Config resolution and run scope #1 (`ParamLayers`).
+- **`pipeline_params` is an untyped `dict[str, Any]`**: engine keys (`model`, `provider`,
+  `route_order`, `max_tokens`, …) are string-read with mixed tolerance (`cfg["model"]`,
+  `cfg.get("model")`, `str(cfg.get("model", ""))`); the reserved `steps` list shares the bag with the
+  node dicts (`pipeline_overlay.py::node_config_items` skips it by `isinstance`, and `"steps"` is
+  spelled again across connectors and domain, past `domain/CLAUDE.md`'s probe); the prompt is split
+  off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Three merges
+  (`campaign_config.py::merge_config_layers` / `merge_node_overlays`, `pipeline_overlay.py::apply_node_overlay`)
+  fold one thing. Action: `PipelineParams(steps, nodes: {name: NodeConfig})` parsed once at the
+  overlay seam, engine keys as fields, the backend's params one dict.
+  **Re-test:** `git grep -c -E 'pipeline_params: (dict|Mapping)\[str, Any\]' -- promptpotter`;
+  `git grep -n '"steps"\|k != "prompt"' -- promptpotter`.
+- **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
+  `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with
+  `.get("questions") or []`). Action: each connector declares its experiment model; the workload
+  carries it parsed. **Re-test:** `git grep -n "parse_resolved(" -- promptpotter`.
+
+**B. Run-data payloads are models.** **Rides with:** § Typed state "Run files read as dicts" and the
+next run-data reshape.
+- **`run_records.py::ResumeCheckpointRecord.inputs_ref` / `data` are `dict[str, Any]` on the ledger**,
+  built by hand (`potter/race.py`, capo's `context`) and read back by string key with casts in each
+  optimizer's replayer; a renamed key surfaces only at resume as `replay_error:`. Action: each
+  `CheckpointKind` declares typed inputs/data. **Re-test:** `git grep -c -E 'inputs_ref\["' -- promptpotter`.
+- **`RaceStandingRecord.paired_breakdown` is an untyped stat bag**: potter (`pobb/checks.py`) and capo
+  write different keys, and `views/readout.py::on_race_standing` reads `.get("p_better", 1.0)` to sort
+  and `.get("p_better", 0.0)` to print. Action: a typed per-prior model. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
+- **`evidence/read.py` reads `campaign.json` as a tolerant dict** (`_dataset_of`, `_at`,
+  `_resolve_head`), and `_dataset_name` accepts a `campaign_config.dataset_name` shape `Campaign` has no
+  field for, while `subject_evidence` beside them loads `Campaign`. Action: `CampaignStore.load_campaign`.
+  **Re-test:** `git grep -n "read_json_tolerant(CampaignLayout" -- promptpotter`.
+- **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
+  returns a step string its one caller drops (`query_loop.py`, `recovered, _step =`), and stamps one of
+  several exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif` chain; the
+  ladder is string-keyed. Action: one outcome enum on the cell, the ladder a `match`.
+  **Re-test:** `git grep -n "recovered, _step" -- promptpotter`.
+
+**C. Served reads fold the ledger.** **Rides with:** § What a cycle writes to disk (`FileSink`) and
+§ One record shape for every scoring pass.
+- **`hard_samples.json` is a checkout read back as served data**: `runner/output.py` writes it under
+  `graceful`, and `scoring/measurement_log.py::_cycle_view` serves the leaderboard order from it, empty
+  when absent (a failed write served as "no scale") and with no `at` (a replay page orders by today's
+  file); the dataset scope derives its view instead (`_dataset_view`). Action: the cycle view derives
+  from the fold. **Re-test:** `git grep -n "read_hard_samples(" -- promptpotter`.
+- **`projections/racing_stream.py::RacingStreamProjection` copies `RaceStandingRecord` into per-round
+  JSONL and swallows `OSError`**; its one reader (`output.py::_load_p_best_trajectory`) walks the copy
+  as dicts. Action: the log folds the ledger records; delete the projection and its `data_root.py` row.
+  **Re-test:** `git grep -n "RacingStreamProjection" -- promptpotter`.
+- **A running verification is orphaned at two seams** (`live_dashboard/projection.py::_handle_run_wiring`,
+  `served_dashboard.py::_serve`) and `orphaned=` computed a third way in `_serve`; `_round_axis` and
+  `_walk` each re-decide whether `current_round` closed, by different predicates. Action: derive it
+  once, from ledger plus producer lock. **Re-test:** `git grep -n 'm.state == "running"' -- promptpotter`.
+
+**D. One LLM-call seam.** **Rides with:** § Config resolution and run scope #4 (`RunScope`) and #7.
+- **The reuse-cache protocol is spelled twice**: `bench/llm_call.py::llm_call` + `_replay` and
+  `scoring/judges/call.py::ask` + `_replay` each key by `hash_call`, read a load's `(OSError,
+  ValueError)` as a re-sample (which re-spends), claim the price, emit `cached=True` usage, and save a
+  non-empty reply; the cache arrives by two carriers (`LLMCallContext.cache`, `bind_cache`). Action:
+  `LLMReuseCache` owns replay, meter and save around the send, behind one carrier.
+  **Re-test:** `git grep -n "def _replay(" -- promptpotter/application/bench/llm_call.py promptpotter/application/scoring/judges/call.py`.
+- **`llm_call` keeps defaults no caller uses**: `node=None` labels the call `"llm_call"`, `config=None`
+  makes the callee read `llm_node_manifest`, `LLMCallContext.cache=None` silently re-spends, while every
+  construction passes a cache. Action: `node`, `context`, `cache` required; `config` deleted.
+  **Re-test:** `git grep -n "LLMCallContext(" -- promptpotter`.
+- **`scoring/evaluators.py::Evaluator` is one class for two contracts** (`per_sample` async vs
+  `per_round` sync, different kwargs) held apart by runtime guards (`_validate_evaluator`,
+  `inspect.isawaitable`); its `Scope` collides with `campaign_config.Scope` and `data_root.Scope`.
+  §0.5-bearing: state the case before acting. Action: two evaluator types.
+  **Re-test:** `git grep -n "isawaitable\|iscoroutinefunction" -- promptpotter/application/scoring/evaluators.py`.
+
+**E. Absent is not zero.** **Rides with:** any pass in the files named; the first item moves what the
+loop decides, so it lands with an offline run.
+- **Two bars for "is this θ lift real"**: `potter/escalation/state.py::_improved` reads
+  `lift > (current.se or 0.0)` (one arm's se, absent as 0) while `potter/election.py::_lift` takes
+  `hypot` of both arms' and says never either alone. Action: one lift test on `AbilityReading`, read by
+  both. **Re-test:** `git grep -n "se or 0.0" -- promptpotter`.
+- **`llm/pricing.py::_models_to_rates` prices a missing side at zero** (`float(in_c or 0.0)`). Action: a
+  row missing either cost is unpriced. **Re-test:** read `_models_to_rates`.
+- **`domain/spend.py::usd_text` is "THE money wording" beside inline `${x:.Nf}` spellings at varying
+  precision** and a verbatim copy, `application/hierarchy.py::_usd`. `panels.py`'s spelling is
+  optimizer-prompt text, so moving it re-keys the digest. Action: money text through `usd_text`.
+  **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
+
+**Singles.**
+- **`identity/default_claim.py::maybe_claim_default` writes the claim marker after a failed rename** of
+  `projects/default` (`renamed=False`, logged only), and never retries, so terminal and browser resolve
+  different tenants. Survivor data; rides with § On the box (one email, two accounts). Action: the
+  marker lands only with the rename. **Re-test:** `git grep -n -A3 "except OSError" -- promptpotter/infrastructure/identity/default_claim.py`.
+- **`initialization/loop_start.py::arm_diagnostic_scoring` binds `unbounded_spend_book()` where no book
+  is bound**: a scoring pass its caller forgot to admit runs with no ceiling instead of raising.
+  Action: every diagnostic entry binds its admitted book (`paid_pass`), and an unbound one raises as
+  a run's does (`telemetry.py::bound_ledger`). **Re-test:** `git grep -n "unbounded_spend_book()" -- promptpotter`.
+- **`ledger_scan.py::StandingProposal.entered_at` has no writer and no reader.** Action: delete.
+  **Re-test:** `git grep -n -w entered_at -- promptpotter`.
+- **`held_out` (`InnerTask`, `domain/cells.py`) and `Sample.bench_only` name one concept**, translated in
+  `ResolvedPanel.samples`. Rides with the "held-out" rename (§ One record shape for every scoring pass).
+
 ### The file layout (import-graph pass 2026-10-31)
 
 **Rides with:** after the config/scope arc above; merges mostly cut duplicated import blocks (whole
@@ -175,8 +275,7 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **Failures dropped to booleans before `FailureLine` can render them**: `useConnector` folds its read
   failure into `schema.status: "error"`, `useTimeRay` serves `failed`, ChannelMap's tree `failed`/`loaded`,
   `OriginChanges` flattens to `message`. `useCommand` `describe` tables (ArchiveCompactionControl,
-  AccountUsageTab, AccountProfileTab) sit beside `operatorMessage`. The protected run card and `chat.css` (`.hsp-note`, `.chat-tools-err`,
-  `.chat-decision-err`) are still on the old form. **Re-test:** every hook carries a failure object.
+  AccountUsageTab, AccountProfileTab) sit beside `operatorMessage`. **Re-test:** every hook carries a failure object.
 - **Wording authored in the browser**: label tables still client-side (`lib/prompt-fields.ts::PROMPT_FIELD`, `lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`,
   `WINDOW_LABEL`, `AccountView::SECTIONS`, …) and the tone vocabularies off `domain/said.py::Tone` (`l4-eff-*`,
   `verdictTone`, PipelineFlow's). Canonical: served label constants, one tone. **Re-test:** each table
@@ -245,6 +344,140 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 - `CostStrip` sizes itself inline (`height: 140`); `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 
+### The webapp swept by shape (debt hunt 2026-11-02)
+
+Grouped by the arc each would ride. Came back clean: dialogs, clipboard, `EventSource`, `<table>`,
+component `fetch(`, `setInterval`, `useEffect` resets, client sorts, unfiled `Record<…, string>` tables,
+fixtures.
+
+**A. One arm shape, served.**
+- **A live arm and a filed arm arrive in two shapes** (`LiveCandidate` flat; `RoundView.arms[key].individual`),
+  so derivations come in pairs (`candidateSearchPoint` / `liveCandidateSearchPoint`, `…Verdicts`,
+  `…ObserveConfig`), `ArmRow.source: "history" | "inflight"` branches in `MeasurementRun` and
+  `SteerForkPanel`, and `round-candidates.ts::roundCandidates` stitches `dash.rounds` with
+  `current_round.candidates`. "Is round N filed" is asked three ways (`useRound.ts::isRoundUnfiled` by
+  membership in `dash.rounds`; `roundCandidates` and `search-point.ts::roundObserveTarget` by
+  `round_axis.completed`). Action: one served arm shape carrying a filed/live state.
+  **Re-test:** `git grep -nE "liveCandidate(SearchPoint|Verdicts|ObserveConfig)|round_axis.completed.includes" -- webapp/lib webapp/components`.
+
+**B. Served words own every wording.**
+- **The scoring-mask scenario sentence is built twice** from `SCENARIO_WORDS` pieces, with "under"/"of"
+  typed at each site: `compare/ComparePane.tsx::Scenarios` and `cli/commands/evidence.py::_scenario_lines`.
+  Action: `application/evidence/subjects.py` serves it as a `Said` row. **Re-test:** `git grep -n "SCENARIO_WORDS" -- promptpotter/presentation webapp/components`.
+- **`lib/lineage.tsx::maskLabel` / `maskActive` word and decide the active re-read client-side**
+  (the badge reads "Showing the Sample set mask"), beside the served `hierarchy_subtree.py::_read_under`
+  line. Action: render `read_under`. **Re-test:** `git grep -n "maskLabel" -- webapp`.
+- **Intervals typed into UI text beside their owners**: `TimeRay.tsx::Gap` "beats every 15 s"
+  (`heartbeat.py::HEARTBEAT_INTERVAL_S` is the owner, and the gap comment disagrees with `RECENT_STEP_S`),
+  `poll.tsx::OFFLINE.statusHint` "every 5 s", `TERMS.brand_live_preview` "every 2s". Action: interpolate
+  the served or `cadence.ts` constant. **Re-test:** `git grep -nE "every (15|5|2) ?s" -- webapp/components webapp/lib`.
+- **`MeasurementRun.tsx` words the served `ArmEnd`** through ``TERMS[`arm_${early}`]`` and
+  `early.replace("_", " ")`, its tone picked locally. Action: an `ArmEnd` row in `_WORD_TABLES`.
+  **Re-test:** `git grep -n 'arm_\${' -- webapp/components`.
+- **`run-phase.ts::phasePauseLabel` covers blank served words** (`DASHBOARD_STATE_PAUSE_WORDS` maps
+  `optimizer_step` and `stopped` to `""`) with a `||` and hand-typed "the current round". Action: the
+  served table words every state. **Re-test:** `git grep -n "the current round" -- webapp/lib`.
+- **Glyph tables over served enums**: `forest-layout.ts::KIND_GLYPH` / `TRIGGER_GLYPH` /
+  `DIRECTION_GLYPH`, `Criterion.tsx::TERM_GLYPHS`, `FitnessRankSummary::MOVE_MARK`, a literal "⑂" in
+  `ForestRows`. Low weight. Action: the glyph rides the served word rows.
+  **Re-test:** `git grep -nE "_GLYPHS?\b|MOVE_MARK" -- webapp/lib webapp/components`.
+- **`chat/HardSamplesPreview.tsx`**: `labelAt` invents `rank ${…at + 1}` on a lookup miss though
+  `hard_sample_rank` is required on the wire; `rateOf` tests "unmeasured" three ways; bucket keys render
+  raw. Action: handle the miss, one served unmeasured state, served bucket words.
+  **Re-test:** `git grep -nE "at \+ 1|hit_spread === \"unmeasured\"" -- webapp/components/chat`.
+- **"Measured in N/M rounds" is counted in the browser** (`sample-set.ts::roundsCoveringSample`, read by
+  `SampleSetControl`), and `fullyCovered` counts rounds with any selection. Action: served per-sample
+  coverage. **Re-test:** `git grep -n "roundsCoveringSample\|fullyCovered" -- webapp`.
+
+**C. Lineage reads the served tree.**
+- **A campaign's short label is parsed three ways**: `format.ts::shortId` (`{dataset}__{rand6}`),
+  `ForestRows::shortOrigin` (`cycle_`), `ids.ts::shortFamilyTail`, used by `ComparePane::channelNames`,
+  `EvidenceCharts::seriesLabel`, `SearchpointPanels`. Action: a served short label per subject and node.
+  **Re-test:** `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
+- **`ids.ts::rootCycleId` regexes `_fork_` / `_diag_`** to give `useLineage::parentId` /
+  `isInheritedSibling` what the served tree carries. Action: read parent and spawn off the tree.
+  **Re-test:** `git grep -n "rootCycleId(" -- webapp/lib webapp/components`.
+- **`SearchpointPanels.tsx::buildSpines` walks `parent_ids[0]`** beside the served `main_line`
+  (`lineage-candidates.ts::mainLineOf` says never walk up). Action: spines from `main_line`.
+  **Re-test:** `git grep -n "parent_ids\[0\]" -- webapp/components`.
+- **`hooks/useLeafDatasetName.ts` reads a campaign pipeline for a `dataset_name`** the viewed subtree's
+  entry already tags (`application/hierarchy.py::_campaign_tags`). Action: read the tag; delete the hook.
+  **Re-test:** `git grep -n "useLeafDatasetName" -- webapp`.
+
+**D. One selection and view store.** Extends § The webapp's vanilla pass "Several doors".
+- **The picked candidate lives in two stores**, `workspace.tsx::viewedCandidateId` and
+  `SelectionContext.candidate`: `useSelectNode.pick` writes both, `MeasurementRun.onSelectCandidate`,
+  `ForestCard`'s ctx and `TimeRay` only the second. Action: one owner.
+  **Re-test:** `git grep -nE "viewedCandidateId|setCandidate\(" -- webapp/lib webapp/components`.
+- **`showForest` / `expandedLanes` sit in `state/candidates.ts` and `view-memory.tsx::CampaignView`**,
+  written together by `hooks/useLineage.ts` and seeded during render by a latch; the hook's name
+  collides with `lib/lineage.tsx`. Action: view memory alone owns them; rename the hook.
+  **Re-test:** `git grep -nE "showForest|expandedLanes" -- webapp/lib`.
+- **`workspace.tsx::WorkspaceState` exposes the viewed address four ways**: `viewedPath`, the root as
+  unqualified `campaignId` / `cycleId`, `leafCampaignId` / `leafCycleId`, and callers running
+  `pathRoot` / `pathLeaf(viewedPath)`. Action: one address value with named root and leaf.
+  **Re-test:** `git grep -nE "leafCampaignId|leafCycleId|path(Root|Leaf)\(viewedPath" -- webapp/components webapp/lib`.
+
+**E. Read discipline.**
+- **Evidence invalidation is built twice with two liveness tests**: `ComparePane`'s
+  `useEffect(() => invalidateReads("evidence"), [moved])` (`phaseWalks`) and `useOriginEvidence`
+  (`producer.appending`), each invalidating every evidence read. Action: one invalidation on one served
+  liveness fact. **Re-test:** `git grep -n 'invalidateReads("evidence")' -- webapp`.
+- **`KnobClashes.tsx::useKnobClashes` and `KnobClashes` each open `configMapRead`**, and the hook reads a
+  failure as `[]`, so `OptimizerCard` says "no clash" when the read failed. Action: one read; a failure
+  stays a failure. **Re-test:** `git grep -n "configMapRead" -- webapp/components`.
+- **`state/auth.tsx::AuthProvider` logs the user out on a transient failure** (any non-auth failure sets
+  `unauthed`, `adopt(null)` clears the cache), against I7; `useAuthGate::onAuthError` tests
+  `status === 401` beside `failureKind`. Action: branch on `failureKind`; transient keeps the session.
+  **Re-test:** `git grep -n "status === 401" -- webapp/lib/state`.
+- **`hooks/useCycleEvents.ts` drops an undecodable frame in a bare `catch`** and guards
+  `env.cycle_id &&` on a required field. Action: report the frame; drop the guard.
+  **Re-test:** `git grep -n "env.cycle_id &&" -- webapp/lib`.
+- **`hooks/useNestedPipelines.ts` words a failed level into `truncated`** (`"<dataset> unavailable (<kind>)"`)
+  instead of the unused `ReadFailure` member of `PipelineStatus`, and walks the nest client-side with its
+  own `MAX_DEPTH`. Action: served nest depth; a failure stays a `ReadFailure`.
+  **Re-test:** `git grep -nE "MAX_DEPTH|unavailable \(" -- webapp/lib/hooks`.
+- **`poll.tsx::useRay::loadOlder` pages through a hand-built `readThrough`** whose failure only reaches
+  `reportIncident`. Action: page through `useRead`. **Re-test:** `git grep -n "readThrough" -- webapp/lib`.
+- **Defaults on an index miss**: `PipelineFlow.tsx`'s `colX` (`offsets[i] ?? 0`, `widths[i] ?? CELL_W`),
+  `L1Variants.tsx` (`variants[idx] ?? variants[0]`). Action: handle the miss.
+  **Re-test:** `git grep -nE "\[(i|idx)\] \?\? " -- webapp/components`.
+- **`ForestRows.tsx` fakes `LOADED = { root: null, loaded: true }`** though `loaded` otherwise equals
+  `root !== null`, and hand-builds loading and failure rows beside `ui/states::ReadState`. Action:
+  delete `loaded`; render through `ReadState`. **Re-test:** `git grep -n "loaded: true" -- webapp/components`.
+- `hooks/useVerify.ts` repeats `poll.tsx::useDashboardAt`'s streamed-path test with its own
+  `dashboardRead`. **Re-test:** `git grep -n "dashboardRead(" -- webapp/lib/hooks`.
+
+**F. The node editor reads served row facts.**
+- **Key-name tests stand in for row facts** (I9): `NodeSurface::onAuthor`, `node-config.ts::effortLadder` /
+  `pickedRoute` / `permittedModels`, `NodeConfigEditor::axisMenu`, `pipeline-nodes.ts` test
+  `reasoning_effort`, `provider`, `model`, `response_format`, `schema_family`. Action: the param schema
+  serves each row's role. **Re-test:** `git grep -nE '\.key (===|!==) "(reasoning_effort|provider|model|response_format|schema_family)"' -- webapp/lib webapp/components`.
+- **Editability is decided client-side**: `SteerForkPanel::canBabysit` tests
+  `me.capabilities.includes("campaign.babysit")`; `permittedModels` re-walks what `configRows` reads;
+  `NodeConfigEditor`'s `schema` is a source prop two hosts fill from different reads. Action: served
+  per-row editability for the account; one schema source.
+  **Re-test:** `git grep -nE "campaign.babysit|permittedModels\(" -- webapp`.
+- **`JobsDock::passMark` / `passLabel` derive running/starting from `started_at === null`** (so does
+  `AccountUsageTab`). Action: a served pass state. **Re-test:** `git grep -n "started_at === null" -- webapp/components`.
+- Hand-built controls beside the primitives: `Criterion::DialRow` commits on pointerup/keyup/blur beside
+  `CommitInput`; raw `<select>` in several surfaces with no `ui/` select; `RunLimitsControl::capInput`
+  and `LimitReconcile::parseCapIn` beside `run-limits.ts::parseCap`. Low weight.
+  **Re-test:** `git grep -nE "<select|parseCapIn|capInput" -- webapp/components`.
+
+**G. Dead and ratchets.**
+- **No reader**: `run-phase.ts::phaseParked` (the last reader of `domain/phases.py::RunPhaseInfo.parked`,
+  which goes with it), `terms.ts::targetNodeIds`, `TERMS.composite`; CSS `.avatar`, `.table-wrap`,
+  `.family-cladogram-head`, `.l4-cell-subject`, `.limit-input-usd`, `.limit-usd-prefix`,
+  `.subject-note`, `.unit-library-id`, `.tag-hit` / `.tag-miss` / `.tag-err`, `.btn-tight` (and the
+  `:not(.btn-tight)` in `responsive.css`), `.hsp-note`, `.chat-tools-err`, `.chat-decision-err`.
+  **Re-test:** `git grep -nE "phaseParked|targetNodeIds|TERMS\.composite" -- webapp`; each class name
+  against `webapp/components` and `webapp/lib`.
+- **Teaching prose in `title=` across many surfaces** beyond § The candidates surface's list. Action: a
+  gate ratchet. **Re-test:** `git grep -cE 'title=("[^"]{60,}|\{\`[^\`]{60,})' -- webapp/components`.
+- Minor: `CandidateRow` re-derives "retired" after `splitRetired`; `reads.ts::filesRead` builds the
+  cycle URL beside `cyclePathUrl`; `useActivePointer` uses `|| null` on ids.
+
 ### What a cycle writes to disk (storage survey 2026-11-01)
 
 - **`tracing/file_sink.py::FileSink`, the local Langfuse shadow, has no reader and runs on every
@@ -279,7 +512,24 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
   declared `HOST_ADMIN_EMAIL`).
 - No verb sets an account's coupon or starts it afresh: `grant.json` is hand-written, and a reset is
   moving `charges.jsonl` aside, which also drops the account's bill. A grant that counts charges from
-  its own `granted_at` would make a re-grant the reset.
+  its own `granted_at` would make a re-grant the reset; today `wallet_store.py::CouponGrant.granted_at`
+  is written and never read.
+- **Left by the payer rule (2026-11-02)**:
+  - `quota.py::sends_on` raises `NoApiKeyError` for a provider no key pays, so `change-run-limits`
+    (`clamp_budget_change`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
+    send's payer is `None`); `launch_refusal` refuses `NO_KEY`, and `coupon.py::keyed_client` is the one
+    raise at send (today `provider_send` spells it again). **Re-test:** `git grep -n "NoApiKeyError(" -- promptpotter/application/jobs`.
+  - `CouponStatus.state` / `.held` / `.left` and `LaunchRefusal.provider` are served with no reader.
+    Action: delete. **Re-test:** grep each in `webapp/components webapp/lib` and `promptpotter/presentation`.
+  - The in-run allowance refusal (`spend_book.py`'s `HostAllowanceExhaustedError`) names no provider
+    though `admitted(…, provider=…)` carries one. Action: pass it.
+  - **An in-process connector whose cells send through `keyed_client` declares a fixed payer**: the L4
+    `promptpotter` connector keeps `Connector.cell_payer = "host"`, so an own-key L4 run is refused on a
+    used-up allowance. Action: an in-process connector's cells are per-provider sends (the target
+    nodes' providers, read through `pipeline_resolve.py::served_pipeline`), read by `sends_on`, the
+    cell reservation and `application/free_tier.py::free_fence`. **Rides with:** the in-process `llm_only` connector
+    (uploads that run without a backend, one node implementation shared with TermNorm's
+    `_step_llm_only`), which needs the same shape and is what lets a BYOK account run an upload.
 
 ### One record shape for every scoring pass (2026-11-01, two independent reads agree)
 
@@ -835,9 +1085,6 @@ word's `git grep -c` for that sense is 0.
 - **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and a knob's `NodeConfigParam` serves neither
   scope nor estimand.
 - **Seen building the setup screen**:
-  - One app-wide `SelectionContext.node` serves the target and the optimizer graphs, and
-    `PipelineSetupInner`'s auto-select races the optimizer graph for it: a global standing in for a keyed
-    subject.
   - `OptimizerSetupInner` reads the optimizer from the draft and from `useConnector().optimizer`, which
     are one value through two doors.
   - An edited optimizer-prompt field cannot be reset: `OptimizerNodePrompt` serves no template text and
