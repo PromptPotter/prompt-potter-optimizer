@@ -15,7 +15,9 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
+from promptpotter.application.free_tier import free_fence
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
     claim_cycle,
@@ -37,7 +39,7 @@ from promptpotter.application.jobs.mint import (
     relabel_minted,
     resolve_cycle_plan,
 )
-from promptpotter.application.jobs.quota import land_job, on_free_tier
+from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
@@ -45,6 +47,7 @@ from promptpotter.application.pipeline_resolve import (
     draft_backend_type,
     draft_budget,
     draft_pipeline,
+    draft_sends,
     draft_served,
 )
 from promptpotter.domain.campaign import Optimize
@@ -104,6 +107,9 @@ class CheckinStart:
     def declared_budget(self, stores: Stores) -> Budget:
         return draft_budget(stores, owned_draft(stores, self.claim.draft_id))
 
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return draft_sends(stores, owned_draft(stores, self.claim.draft_id))
+
 
 def _land_draft(
     stores: Stores,
@@ -143,7 +149,7 @@ def _land_draft(
             rows,
             params,
             chain,
-            free=on_free_tier(stores),
+            fence=free_fence(stores, basis.connector),
             shelf=stores.block_packs,
         )
     commit_upload_definition(stores, draft, basis, source=source, chain=chain)

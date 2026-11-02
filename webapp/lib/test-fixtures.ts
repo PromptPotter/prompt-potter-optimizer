@@ -26,6 +26,7 @@ import type {
   OverlapReading,
   PairedReading,
   ProducerReading,
+  ProviderRoute,
   RoundHealth,
   RoundView,
   RunStanding,
@@ -98,19 +99,28 @@ export function accountKey(provider: string, last4: string): AccountKey {
 }
 
 // A fresh non-host account on a $5 face, nothing drawn, no key held.
+// Paid by the account where it holds a key, else by the host.
+export function providerRoute(provider: string, key: AccountKey | null = null): ProviderRoute {
+  return { provider, payer: key === null ? "host" : "user", key };
+}
+
 export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
   return {
     state: "open",
-    face: { usd: 5, tokens: null },
-    drawn: { usd: 0, tokens: 0 },
+    headline: {
+      key: "allowance:open",
+      tone: "quiet",
+      label: "Host allowance",
+      value: "$0.00 of $5.00",
+      sub: null,
+      detail: null,
+    },
     held: { usd: 0, tokens: 0 },
     left: { usd: 5, tokens: null },
-    binding: "usd",
     used_share: 0,
     host_key_spend: lifetimeSpend(),
     own_key_spend: lifetimeSpend(),
-    keys: [],
-    providers: ["anthropic", "openai"],
+    routes: [providerRoute("anthropic"), providerRoute("openai")],
     ...over,
   };
 }

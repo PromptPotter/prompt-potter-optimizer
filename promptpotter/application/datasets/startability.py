@@ -27,12 +27,12 @@ from promptpotter.application.datasets.loaders import (
 )
 from promptpotter.application.datasets.origin_readiness import columns_confirmed
 from promptpotter.application.datasets.tabular_ingest import read_tabular
-from promptpotter.application.jobs.quota import spends_the_hosts_own_key
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     is_dataset_dir,
@@ -55,7 +55,7 @@ def offered(stores: Stores, name: str) -> bool:
     return (
         offer is None
         or name in offer
-        or spends_the_hosts_own_key(stores)
+        or is_host(stores.identity)
         or stores.tenant_datasets.slug_exists(name)
     )
 

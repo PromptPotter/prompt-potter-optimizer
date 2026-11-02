@@ -254,7 +254,7 @@ surface; model and provider are optimizer-locked.
 - **Run mode** — the same node raises `pause-cycle` / `change-run-limits` / `fork-cycle` over
   `application/datasets/origin_resolve.py`'s `RaisedCommand`. Lands with L4.
 - **The whole setup proposed from the operator's text** — every node's model and effort, rounds and
-  cap — priced against the served menu and `application/jobs/quota.py::AccountWallet.launch_bound`; the host's
+  cap — priced against the served menu and `application/jobs/quota.py::launch_bound`; the host's
   bound outranks the operator's words; an off-menu proposal is dropped at `_coerce`.
 
 ## Embedding (M15)
@@ -504,7 +504,7 @@ root behind a `demo_mode_enabled` reader.
 
 Do not build before the chat backend exists.
 - **Its own issuer sentinel, `is_anonymous` asked before the operator arm** —
-  `quota.py::spends_the_hosts_own_key` reads a missing issuer as the box operator.
+  `default_claim.py::is_host` reads a missing issuer as the box operator.
 - **Empty capability set**: it converses and reads; every action is a sign-in prompt.
 - **One shared tenant** (a tenant per visitor is an unauthenticated directory-creation surface).
 - **A global daily pool is the ceiling**; a per-visitor cap is UX.

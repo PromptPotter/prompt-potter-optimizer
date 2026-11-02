@@ -2,10 +2,9 @@
 import { useEffect, useRef } from "react";
 import { Term } from "@/components/ui";
 import { couponRead } from "@/lib/api";
-import { COUPON_STATE_INFO } from "@/lib/api/types.generated";
 import { COUPON_POLL_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
-import { allowanceCaveats, allowanceText, billText } from "@/lib/derivations";
+import { allowanceCaveats, billText } from "@/lib/derivations";
 import { cssPct } from "@/lib/format";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { invalidateReads } from "@/lib/read-cache";
@@ -39,7 +38,7 @@ export function AccountSpend() {
   const host = data.host_key_spend;
   const own = data.own_key_spend;
   const fill = data.used_share;
-  const words = COUPON_STATE_INFO[data.state];
+  const said = data.headline;
 
   const explain = (
     <div className="account-spend-explain">
@@ -48,7 +47,8 @@ export function AccountSpend() {
         keys and <strong>{billText(own.billed_usd, own.bill_is_floor)}</strong> on your own, across
         every campaign this account has run, deleted ones included.
       </p>
-      <p>{words.lede}</p>
+      {said.detail ? <p>{said.detail}</p> : null}
+      {said.sub ? <p>{said.sub}</p> : null}
       {allowanceCaveats(host).map((line) => (
         <p key={line}>{line}</p>
       ))}
@@ -56,10 +56,10 @@ export function AccountSpend() {
   );
 
   return (
-    <div className={cx("account-spend", words.tone === "warn" && "account-spend-exhausted")}>
-      <span className="account-spend-label">{words.label}</span>
+    <div className={cx("account-spend", said.tone === "warn" && "account-spend-exhausted")}>
+      <span className="account-spend-label">{said.label}</span>
       <Term className="account-spend-reading" content={explain}>
-        <span className="account-spend-value">{allowanceText(data)}</span>
+        <span className="account-spend-value">{said.value}</span>
       </Term>
       {fill !== null ? (
         <span className="account-spend-bar" aria-hidden="true">

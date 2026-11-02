@@ -9,13 +9,19 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.task_context import (
     campaign_framing,
+    checkin_provider,
     commit_task_framing,
     committed_task_context,
 )
 from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
-from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
-from promptpotter.application.jobs.quota import on_free_tier, paid_call
+from promptpotter.application.free_tier import (
+    FreeFence,
+    free_fence,
+    outside_free_tier,
+    refuse_outside_free_tier,
+)
+from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
@@ -105,7 +111,7 @@ def refuse_unrunnable(
     pipeline_params: Mapping[str, Any],
     schema: PipelineSchema,
     *,
-    free: bool,
+    fence: FreeFence | None,
     shelf: PackShelf,
 ) -> BankPartition:
     """Every refusal a run owes, before anything is paid or written; an upload's Start asks it of the draft."""
@@ -123,9 +129,9 @@ def refuse_unrunnable(
         [*node_config_items(dict(pipeline_params)), *optimizer_node_configs(selected)]
     )
     refuse_unpriced(unpriced_routes(campaign_config, selected, pipeline_params, schema))
-    if free:
+    if fence is not None:
         refuse_outside_free_tier(
-            outside_free_tier(campaign_config, selected, pipeline_params, schema)
+            outside_free_tier(campaign_config, selected, pipeline_params, schema, fence)
         )
     return partition
 
@@ -237,7 +243,7 @@ def resolve_cycle_plan(
         dataset,
         pipeline_params,
         configured.pipeline_schema,
-        free=on_free_tier(session.store),
+        fence=free_fence(session.store, declaration.environment.connector),
         shelf=session.store.block_packs,
     )
     seed = (
@@ -649,7 +655,7 @@ async def _mint_after_framing(
     draft_id = mint_draft_id()
     checkin_ledger = CycleEventLog.open(CycleDir(drafts.draft_dir(draft_id)))
     try:
-        async with paid_call(stores=session.store, bucket="checkin"):
+        async with paid_call(stores=session.store, bucket="checkin", provider=checkin_provider()):
             await commit_task_framing(
                 session.store,
                 session.dataset_name,

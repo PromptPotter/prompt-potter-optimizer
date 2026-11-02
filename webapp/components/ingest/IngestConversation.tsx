@@ -5,7 +5,7 @@ import type { StartCheckinOptions } from "@/lib/api";
 import type { SetupStep as Step } from "@/lib/api/types.generated";
 import { backendHealthRead } from "@/lib/api/reads";
 import { CONNECTOR_HEALTH_POLL_MS, ELAPSED_TICK_MS } from "@/lib/cadence";
-import { BACKEND_REACHABILITY_INFO, COUPON_STATE_INFO } from "@/lib/api/types.generated";
+import { BACKEND_REACHABILITY_INFO, LAUNCH_REFUSAL_LABELS } from "@/lib/api/types.generated";
 import { stepAnswer, type FieldSchema } from "@/lib/derivations";
 import { useCollection } from "@/lib/hooks/useCollection";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -306,9 +306,9 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           {refusal ? (
             <li>
               <Said
-                tone={COUPON_STATE_INFO[refusal.state].tone}
-                label={COUPON_STATE_INFO[refusal.state].label}
-                detail={refusal.reason}
+                tone="warn"
+                label={LAUNCH_REFUSAL_LABELS[refusal.reason]}
+                detail={refusal.sentence}
               />
             </li>
           ) : null}

@@ -33,9 +33,10 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.datasets.startability import draft_samples
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
-from promptpotter.application.free_tier import free_task_models, with_free_tier_layer
+from promptpotter.application.free_tier import free_fence, free_task_models, with_free_tier_layer
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.jobs.quota import on_free_tier
+from promptpotter.application.jobs.coupon import Send
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -844,22 +845,29 @@ def draft_config(stores: Stores, draft: DraftCampaign, declared: PipelineSchema)
         # Via `exclude_nodes`: a reused dataset's `pipelines.default` stays the first campaign's.
         excluded = [n for n in declared.active_steps if n not in draft.pipeline_steps]
         config = config.model_copy(update={"exclude_nodes": excluded})
-    if not on_free_tier(stores):
+    fence = free_fence(stores, draft_backend_type(stores, draft))
+    if fence is None:
         return config
     nodes = {
         n.name: {**n.current_config, **config.pipeline_overlay.get(n.name, {})}
         for n in declared.declared_nodes
         if n.is_llm
     }
-    return with_free_tier_layer(config, nodes)
+    return with_free_tier_layer(config, nodes, fence)
 
 
 def draft_budget(stores: Stores, draft: DraftCampaign) -> Budget:
     """The ceiling a Start admits: no node bears on it, so it reads no pipeline."""
     config = _draft_declared(stores, draft)
-    if on_free_tier(stores):
-        config = with_free_tier_layer(config, {})
+    fence = free_fence(stores, draft_backend_type(stores, draft))
+    if fence is not None:
+        config = with_free_tier_layer(config, {}, fence)
     return config.optimization.budget
+
+
+def draft_sends(stores: Stores, draft: DraftCampaign) -> tuple[Send, ...]:
+    """What a Start sends, and who pays each, off its declaration: it reads no pipeline."""
+    return sends_on(stores, _draft_declared(stores, draft), draft_backend_type(stores, draft))
 
 
 def _draft_declared(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
@@ -920,7 +928,7 @@ class _Merge:
     cfg: CampaignConfig
     params: dict[str, Any]
     provenance: dict[str, dict[str, ParamSource]]
-    # The reading account is free: it is offered only the tier's task models.
+    # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
 
 
@@ -974,8 +982,13 @@ def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -
         cfg=cfg,
         params=params,
         provenance=provenance,
-        free=on_free_tier(stores),
+        free=_task_fenced(stores, served.connector),
     )
+
+
+def _task_fenced(stores: Stores, connector: str) -> bool:
+    fence = free_fence(stores, connector)
+    return fence is not None and fence.task
 
 
 def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _CampaignMerge:
@@ -1016,7 +1029,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         cfg=cfg,
         params=params,
         provenance=provenance,
-        free=on_free_tier(stores),
+        free=_task_fenced(stores, campaign.connector),
         dataset=dataset,
         hop=hop,
         declaration=resolved.declaration,

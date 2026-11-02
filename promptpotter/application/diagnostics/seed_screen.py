@@ -18,6 +18,7 @@ from promptpotter.application.initialization.loop_start import (
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import paid_pass
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -29,6 +30,7 @@ from promptpotter.domain.scoring import (
     modal_answer_share,
 )
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.shared.clock import utcnow_iso
@@ -215,7 +217,14 @@ async def screen_inner_seeds(
         raise DiagnosticError(f"--parallel must be at least 1, got {parallel}.")
     if provider and not model:
         raise DiagnosticError("--provider is the gateway a --model is asked through; pass both.")
-    async with paid_pass(stores=stores, verb="seed-screen", hop=None, declared=Budget()):
+    # The pin moves a task node's model, never its payer: the dataset's cells send as declared.
+    dataset = resolve_dataset(stores, dataset_name).directory
+    sends = sends_on(
+        stores, load_dataset_campaign_config(dataset), runnable_definition(dataset).backend_type
+    )
+    async with paid_pass(
+        stores=stores, verb="seed-screen", hop=None, declared=Budget(), sends=sends
+    ):
         return await _screen(
             stores, identity, dataset_name, seeds, n_samples, repeat, parallel, model, provider
         )

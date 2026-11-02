@@ -21,8 +21,10 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
+    campaign_sends,
     claim_cycle,
     release_slot,
 )
@@ -32,7 +34,7 @@ from promptpotter.application.jobs.mint import (
     fresh_campaign_id,
     mint_framed_cycle,
 )
-from promptpotter.application.jobs.quota import land_job
+from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign import Campaign, Optimize
@@ -114,6 +116,9 @@ class FreshMint:
     def declared_budget(self, _stores: Stores) -> Budget:
         return self.campaign_config().optimization.budget
 
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return sends_on(stores, self.campaign_config(), self.backend_type(stores))
+
 
 @dataclass(frozen=True, slots=True)
 class ExistingCycle:
@@ -139,6 +144,9 @@ class ExistingCycle:
 
     def declared_budget(self, stores: Stores) -> Budget:
         return resolve_campaign_config(stores, self.campaign, self.hop).optimization.budget
+
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return campaign_sends(stores, self.hop)
 
 
 async def hold_fresh_mint(

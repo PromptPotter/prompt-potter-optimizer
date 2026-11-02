@@ -2,9 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "@/lib/state/auth";
 import { clearReadCache } from "@/lib/read-cache";
-import { accountKey, couponStatus } from "@/lib/test-fixtures";
+import { accountKey, couponStatus, providerRoute } from "@/lib/test-fixtures";
 import type { CouponStatus } from "@/lib/api";
-import { COUPON_STATE_INFO } from "@/lib/api/types.generated";
 import { ProviderKeys } from "../AccountKeysTab";
 
 interface Sent {
@@ -41,7 +40,11 @@ describe("ProviderKeys", () => {
 
   it("shows a held key by its last four alone, and removing it issues the DELETE", async () => {
     const sent = serve(() => new Response(null, { status: 204 }));
-    view(couponStatus({ keys: [accountKey("anthropic", "ab12")] }));
+    view(
+      couponStatus({
+        routes: [providerRoute("anthropic", accountKey("anthropic", "ab12")), providerRoute("openai")],
+      }),
+    );
 
     expect(screen.getByLabelText("anthropic key ending ab12").textContent).toBe("…ab12");
     // The held provider offers no field to type into; the unheld one does.
@@ -89,11 +92,5 @@ describe("ProviderKeys", () => {
       fireEvent.keyDown(field, { key: "Enter" });
     });
     expect(screen.getByRole("alert").textContent).toBe(message);
-  });
-
-  it("reads a used-up coupon as used up", () => {
-    serve(() => new Response(null, { status: 500 }));
-    view(couponStatus({ state: "used_up", left: { usd: 0 }, used_share: 1 }));
-    expect(screen.getByText(COUPON_STATE_INFO.used_up.lede)).toBeTruthy();
   });
 });

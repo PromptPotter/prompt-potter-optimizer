@@ -187,6 +187,13 @@ if set(SPEND_KIND_LABELS) != set(get_args(TokenUsageKind)):
 
 # Whose wallet a send drew: the box's key under the account's coupon, or the account's own key.
 KeySource = Literal["host", "user"]
+KEY_SOURCE_LABELS: dict[KeySource, str] = {"host": "host key", "user": "own key"}
+
+
+def draws_coupon(paid_by: KeySource | None) -> bool:
+    """THE test of whether a send counts against the host's coupon; ``None`` is a replay no key paid."""
+    return paid_by == "host"
+
 
 # `search_incurred` is a controlled arm's budget: no sibling's cache or bench pass moves it.
 CeilingMeter = Literal["bill", "search_incurred"]

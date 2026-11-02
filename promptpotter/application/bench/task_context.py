@@ -189,6 +189,11 @@ def committed_task_context(stores: Stores, dataset: ResolvedDataset | None) -> T
     return task_context
 
 
+def checkin_provider() -> str:
+    """What a check-in call sends on, which its `quota.py::paid_call` is admitted against."""
+    return str(llm_node_manifest("checkin")[1]["provider"])
+
+
 def _checkin_template() -> OptimizerPromptTemplate:
     """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
     _node, config, manifest = llm_node_manifest("checkin")

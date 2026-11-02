@@ -14,6 +14,7 @@ import httpx
 
 from promptpotter.config.paths import MACHINE_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
+from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -190,6 +191,10 @@ class BackendClient:
     @property
     def cancel_stops_billing(self) -> bool:
         return self._connector.cancel_stops_billing
+
+    @property
+    def cell_payer(self) -> KeySource:
+        return self._connector.cell_payer
 
     @property
     def cell_attempts(self) -> int:
@@ -374,8 +379,9 @@ class BackendClient:
             wait: float | None = None
             unreachable: httpx.TransportError | None = None
             async with self.backpressure.send() as ticket:
-                # A backend sends on the box's keys, whoever holds one of their own.
-                with admitted(CELL, bound, model=None, provider=None, paid_by="host") as admission:
+                with admitted(
+                    CELL, bound, model=None, provider=None, paid_by=self.cell_payer
+                ) as admission:
                     started = time.monotonic()
                     try:
                         # The cell's envelope and the run's wall clock end the wait, as a HALTED cut.
@@ -484,10 +490,10 @@ class BackendClient:
         with contextlib.ExitStack() as hold:
             admission: Admission | None = None
             if bound is not None and self._connector.holds_own_sends:
-                hold.enter_context(reserved(CELL, bound))
+                hold.enter_context(reserved(CELL, bound, paid_by=self.cell_payer))
             elif bound is not None:
                 admission = hold.enter_context(
-                    admitted(CELL, bound, model=None, provider=None, paid_by="host")
+                    admitted(CELL, bound, model=None, provider=None, paid_by=self.cell_payer)
                 )
             started = time.monotonic()
             try:

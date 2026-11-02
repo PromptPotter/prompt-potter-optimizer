@@ -216,28 +216,44 @@ class NoApiKeyError(SendRefusedError, PotterError):
             "and restarts the app."
         )
         SendRefusedError.__init__(self, message, category=ErrorCategory.CLIENT)
+        self.provider = provider
         self.details = {"provider": provider, "key": key}
 
 
+class LaunchRefusalReason(enum.StrEnum):
+    """Why a launch is refused whole: `NO_KEY` is `NoApiKeyError`'s, the rest
+    `HostAllowanceExhaustedError`'s."""
+
+    USED_UP = "used_up"
+    HELD = "held"
+    OVER_DECLARED = "over_declared"
+    NO_KEY = "no_key"
+
+
 class HostAllowanceExhaustedError(SendRefusedError, PotterError):
-    """The host's coupon has nothing left for this account: refused at admission, or at a send in
-    flight, where it ends the run ``host_allowance``."""
+    """The host's coupon refuses a send that draws it: at admission, or at a send in flight, where
+    it ends the run ``host_allowance``."""
 
     http_status = 422
     code = "host_allowance_exhausted"
 
-    def __init__(
-        self, facts: str, *, provider: str | None = None, over_declared: bool = False
-    ) -> None:
-        # THE remedies, said here once: every writer of *facts* states only what binds.
-        lower = "Lower the run's ceiling, or add" if over_declared else "Add"
-        SendRefusedError.__init__(
-            self,
-            f"{facts} {lower} your own key under Account → API keys to send past it on your own "
-            "money.",
-            category=ErrorCategory.HOST_ALLOWANCE,
+    def __init__(self, facts: str, *, reason: LaunchRefusalReason, provider: str | None) -> None:
+        # THE remedies, said here once: every writer of *facts* states only what binds. *provider*
+        # is the one whose own key would pay instead; `None` where no key of the account's would.
+        remedy = (
+            "ask the host to raise this account's allowance."
+            if provider is None
+            else f"add your own {provider} key under Account → API keys to send on your own money."
         )
-        self.details = {} if provider is None else {"provider": provider}
+        said = (
+            f"Lower the run's ceiling, or {remedy}"
+            if reason is LaunchRefusalReason.OVER_DECLARED
+            else f"{remedy[0].upper()}{remedy[1:]}"
+        )
+        SendRefusedError.__init__(self, f"{facts} {said}", category=ErrorCategory.HOST_ALLOWANCE)
+        self.reason = reason
+        self.provider = provider
+        self.details = {"reason": reason, "provider": provider}
 
 
 class ContentTooLargeError(PotterError):

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from promptpotter.application.bench.task_context import (
     CheckinOutput,
     checkin_output,
+    checkin_provider,
     draft_call_context,
     run_checkin,
 )
@@ -154,7 +155,7 @@ async def resolve_origin_turn(
     token = set_cycle_ledger(context.ledger)
     try:
         # No launch admitted this call and no run's book watches it; a check-in has no producer.
-        async with paid_call(stores=stores, bucket="turn"):
+        async with paid_call(stores=stores, bucket="turn", provider=checkin_provider()):
             raw, repair_attempts = await run_checkin(
                 response_model=consultation.response_model,
                 consultation_instruction=consultation.instruction,

@@ -169,7 +169,7 @@ class _CellSends:
                 max_tokens=max_tokens,
             )
             admission = hold.enter_context(
-                admitted(_SEND, bound, model=model, provider=provider, paid_by="host")
+                admitted(_SEND, bound, model=model, provider=provider, paid_by=CONNECTOR.cell_payer)
             )
         except SendRefusedError as refused:
             raise self.end(refused) from None

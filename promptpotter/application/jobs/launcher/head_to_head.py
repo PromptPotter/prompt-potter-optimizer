@@ -27,7 +27,7 @@ from promptpotter.application.jobs.mint import (
     mint_framed_arms,
     standing_arms,
 )
-from promptpotter.application.jobs.quota import land_job
+from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import draft_served
 from promptpotter.domain.campaign import ArmName
@@ -237,10 +237,17 @@ async def admit_head_to_head(
         session.bank.samples,
         origin_override=None if opened is None else opened.origin_override,
     )
+    configs = [
+        (effective_config(plan.declaration), plan.declaration.environment.connector)
+        for plan in plans
+    ]
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
     admitted = await asyncio.to_thread(
         admit_arms,
-        [effective_config(plan.declaration).optimization.budget for plan in plans],
+        [
+            (config.optimization.budget, sends_on(session.store, config, connector))
+            for config, connector in configs
+        ],
         stores=session.store,
         job_registry=job_registry,
         holder=holder,

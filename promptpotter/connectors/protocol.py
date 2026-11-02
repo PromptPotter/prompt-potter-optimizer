@@ -18,6 +18,7 @@ from promptpotter.domain.connector import (
 )
 from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.shared.extras import Extra
@@ -148,6 +149,10 @@ class Connector:
 
     holds_own_sends: bool = False
     """Each paid send is admitted and billed where it is made; ``False``: the cell is ONE send."""
+
+    cell_payer: KeySource = "host"
+    """Whose wallet a cell's sends draw: every built-in backend sends on the box's keys, whatever
+    keys the account holds, so its cells draw the host's coupon."""
 
     sent_spend_bound: SentSpendBound | None = None
     """The bound THIS process sends the backend; answering ``None`` leaves no spend ceiling to hold."""

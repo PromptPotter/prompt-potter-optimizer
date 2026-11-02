@@ -423,10 +423,9 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
 - **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
   model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
-  per-value lists name only values known to fail; the spend ceiling bounds the rest. An account
-  holding a key of its own is still held to this menu (`quota.py::on_free_tier` reads no key), though
-  its own key pays. **Rides with:** the next check-in pass. **Re-test:** a free account's model menu
-  equals `free_tier.yaml::task_models`, and an own-key account is offered every model.
+  per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:**
+  the next check-in pass. **Re-test:** a free account's model menu equals
+  `free_tier.yaml::task_models`.
 - **`application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag**
   (`gpt-oss-20b`, ~1 in 6 LEVI replies), and the INVALID card names potter's `l1_generate`. Action: an
   unclosed block reads to the reply's end; the card names the node that proposed. **Rides with:** the
@@ -915,10 +914,10 @@ word's `git grep -c` for that sense is 0.
   - `quota.py::refuse_read_rate` takes a principal id and meters the host, while the launch, verb and
     write buckets take the identity and exempt it. **Re-test:** `git grep -n "def refuse_.*_rate" -- promptpotter`.
 - **Seen building the host coupon** (2026-10-29):
-  - A backend cell is always the box's to pay (`spend_book.py::_CELL_PAYER`): a connector sends on its
-    own keys, so an own-key account past its coupon stops at its first backend cell, as the reserve
-    binds it. Action: a cell's payer is the connector's key, declared on the connector. **Re-test:** an
-    own-key account at a used-up coupon runs one TermNorm cell.
+  - Every connector declares its cells the box's to pay (`Connector.cell_payer`): none can send on the
+    account's key, so an own-key account past its coupon is refused any run with a backend. Action: a
+    connector that takes the account's key per call declares `"user"`. **Re-test:** an own-key account
+    at a used-up coupon runs one TermNorm cell.
   - `api_keys.json` holds account keys in plaintext at rest, beside `user.json`. Action: encrypt under a
     box secret, or name the file in access-model's at-rest table. **Re-test:** `cat` one.
   - `registry.get_llm_client` caches up to 256 clients by key, so a removed key's secret stays in
@@ -930,7 +929,7 @@ word's `git grep -c` for that sense is 0.
     `off_coupon_usd`.
   - `TokenUsageRecord.cached` and `key_source is None` are two spellings of one fact (a replay no
     wallet paid). Action: one field. **Re-test:** `git grep -n "key_source=None" -- promptpotter`.
-  - `coupon.py::resolve_api_key` folds every account ledger on each send of a non-host account (it reads
+  - `coupon.py::keyed_client` folds the account's charges on each send the box's key pays (it reads
     the remainder fresh). Action: the run's book carries the remainder it was admitted against.
     **Re-test:** time one send on an account with 100 cycles.
   - Restamp drops `User.spend_budget_usd_total` / `token_budget_total`: a hand-raised account must be

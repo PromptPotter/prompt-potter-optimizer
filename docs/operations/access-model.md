@@ -150,8 +150,9 @@ stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
   the host coupon, what the box's keys may pay for an account over its life (`Settings.HOST_COUPON`,
   or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key
-  (`coupon.py::resolve_api_key`, [decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)).
-  Past it the account sends on a key of its own (`/auth/api-keys`) and the box pays nothing.
+  (`coupon.py::keyed_client`, [decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)).
+  A provider the account holds a key for (`/auth/api-keys`) sends on that key and draws none of
+  it; a backend's cells are paid by whom its connector declares (`Connector.cell_payer`).
   **Both units, because the USD one can go blind** on an unpriced call
   (`Settings.UNPRICED_GRACE_USD`). A launch is admitted at its campaign's declared ceiling or
   refused, never clamped, and the coupon holds a reservation for it; a send on the box's key past
@@ -165,7 +166,7 @@ stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
   no session, lands on `/?auth_error=accounts_full`, and is told to the operator-admin channel. With
   the coupon above, it bounds what strangers together spend on the box's keys before any grant.
 - **Who is exempt from the coupon is one definition with two readings** —
-  `identity/default_claim.py::_is_host`, read off a live identity (`quota.py::spends_the_hosts_own_key`)
+  `identity/default_claim.py::_is_host`, read off a live identity (`default_claim.py::is_host`)
   or a directory walk (`default_claim.py::is_host_tenant_dir`). Merging the two detectors would let an
   identity that omits an issuer resolve as the operator.
 - **Who may claim the box is DECLARED, never inferred** — `auth.py::_is_declared_host_admin` reads

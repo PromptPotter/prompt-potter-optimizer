@@ -17,11 +17,17 @@ from promptpotter.application.datasets.origin_readiness import (
     SetupStep,
     origin_readiness,
 )
-from promptpotter.application.jobs.quota import LaunchRefusal, account_wallet, launch_refusal
+from promptpotter.application.jobs.quota import (
+    LaunchRefusal,
+    account_wallet,
+    launch_bound,
+    launch_refusal,
+)
 from promptpotter.application.pipeline_resolve import (
     OptimizerSetup,
     ServedPipeline,
     draft_pipeline,
+    draft_sends,
     draft_served,
     resolve_pipeline_for_draft,
 )
@@ -44,6 +50,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, money_text
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import NoApiKeyError
 
 
 class DraftDependency(PipelineDependency):
@@ -213,7 +220,7 @@ def draft_wire(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> 
     pipeline = draft_pipeline(stores, draft, served)
     declared = pipeline.config.optimization.budget
     active = list(pipeline.chain.active_steps)
-    wallet = account_wallet(stores)
+    refusal, launch = _launch(stores, draft, declared)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,
@@ -246,12 +253,23 @@ def draft_wire(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> 
             for dep in _dependencies(served.connector, active)
         ],
         readiness=origin_readiness(draft, pipeline),
-        launch_refusal=LaunchRefusal.of(
-            wallet, launch_refusal(wallet, declared, stores=stores, refusing=None)
-        ),
+        launch_refusal=refusal,
         recap=_recap(draft, served.connector, declared.rounds),
-        setup_schema=setup_schema(draft, launch=wallet.launch_bound, declared=declared),
+        setup_schema=setup_schema(draft, launch=launch, declared=declared),
     )
+
+
+def _launch(
+    stores: Stores, draft: DraftCampaign, declared: Budget
+) -> tuple[LaunchRefusal | None, Budget]:
+    """``admit_launch``'s refusal of this Start, then the most it may declare."""
+    wallet = account_wallet(stores)
+    try:
+        sends = draft_sends(stores, draft)
+    except NoApiKeyError as unpaid:
+        return LaunchRefusal.of(unpaid), wallet.headroom
+    refused = launch_refusal(wallet, declared, sends, stores=stores, refusing=None)
+    return (None if refused is None else LaunchRefusal.of(refused)), launch_bound(wallet, sends)
 
 
 def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:

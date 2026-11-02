@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, NoReturn, assert_never
 from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.initialization.loop_start import verb_ledger
-from promptpotter.application.jobs.coupon import bind_account
+from promptpotter.application.jobs.coupon import Send, bind_account
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -19,6 +19,7 @@ from promptpotter.application.jobs.quota import (
     move_campaign_money,
     next_launch_budget,
     refuse_verb_rate,
+    sends_on,
     share_campaign_ceiling,
 )
 from promptpotter.application.jobs.registry import JobRegistry
@@ -267,6 +268,7 @@ async def admit_and_hold(
         job=job,
         hop=hop,
         step_rounds=request.step_rounds,
+        sends=request.sends(stores),
     )
     t_caps = time.perf_counter()
 
@@ -290,9 +292,11 @@ def admit_and_share(
     job: Job,
     hop: CycleHop | None,
     step_rounds: int | None,
+    sends: tuple[Send, ...],
     enclosing: Budget | None = None,
 ) -> HeldBudget:
-    """THE admission of every run and pass; an inner run is admitted against its *enclosing* book."""
+    """THE admission of every run and pass, sending *sends*; an inner run is admitted against its
+    *enclosing* book, whose reserve binds what it sends."""
     meter: CeilingMeter = (
         "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
     )
@@ -305,6 +309,7 @@ def admit_and_share(
                 job_registry=job_registry,
                 job_id=job.job_id,
                 hop=hop,
+                sends=sends,
             )
             # The campaign's ceiling as composed, never as a delegate's claim clamped it: the
             # account binds through the reservation.
@@ -343,14 +348,15 @@ def admit_and_share(
 
 
 def admit_arms(
-    declared: Sequence[Budget],
+    declared: Sequence[tuple[Budget, tuple[Send, ...]]],
     *,
     stores: Stores,
     job_registry: JobRegistry,
     holder: CampaignLaunch | EmbeddedRun,
 ) -> list[tuple[Job, HeldBudget]]:
-    """Every arm's job and share, or none, under one gate: never queued, so no arm searches while
-    a sibling waits on another machine. An embedded host holds no slot (`embedded_share`)."""
+    """Every arm's job and share, each at its budget and sends, or none, under one gate: never
+    queued, so no arm searches while a sibling waits on another machine. An embedded host holds
+    no slot (`embedded_share`)."""
     user = account_of(stores)
     admitted: list[tuple[Job, HeldBudget]] = []
     with job_registry.admission_gate():
@@ -364,7 +370,7 @@ def admit_arms(
                     hop=UNRESOLVED_HOP,
                     launches=len(declared),
                 )
-            for budget in declared:
+            for budget, sends in declared:
                 job = _arm_job(stores, job_registry, holder)
                 if job.queued:
                     raise _machine_busy(job_registry)
@@ -376,6 +382,7 @@ def admit_arms(
                     job=job,
                     hop=None,
                     step_rounds=None,
+                    sends=sends,
                 )
                 admitted.append((job, held))
                 job = None
@@ -454,6 +461,7 @@ async def embedded_share(
     hop: CycleHop | None,
     requested: Budget,
     step_rounds: int | None,
+    sends: tuple[Send, ...],
 ) -> AsyncIterator[tuple[str, HeldBudget]]:
     """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
@@ -478,6 +486,7 @@ async def embedded_share(
             job=job,
             hop=hop,
             step_rounds=step_rounds,
+            sends=sends,
         )
         admitted = True
         job_registry.mark_started(job.job_id)
@@ -517,6 +526,7 @@ def inner_share(
             job=job,
             hop=hop,
             step_rounds=None,
+            sends=(),
             enclosing=enclosing.money_left(),
         )
         admitted = True
@@ -536,7 +546,12 @@ class PassStoppedError(ConflictError):
 
 @asynccontextmanager
 async def paid_pass(
-    *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: Budget
+    *,
+    stores: Stores,
+    verb: ScoringVerb,
+    hop: CycleHop | None,
+    declared: Budget,
+    sends: tuple[Send, ...],
 ) -> AsyncIterator[SpendBook]:
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
@@ -576,6 +591,7 @@ async def paid_pass(
             job=job,
             hop=hop,
             step_rounds=None,
+            sends=sends,
         )
         book = open_spend_book(
             held,
@@ -633,3 +649,12 @@ def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
         raise NotFoundError(f"campaign not found: {hop.campaign_id}")
     config = resolve_campaign_config(stores, campaign, hop)
     return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)
+
+
+def campaign_sends(stores: Stores, hop: CycleHop) -> tuple[Send, ...]:
+    """What a run or pass on *hop* sends, under its campaign's resolved config and connector."""
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    if campaign is None:
+        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
+    config = resolve_campaign_config(stores, campaign, hop)
+    return sends_on(stores, config, campaign.connector)

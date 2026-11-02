@@ -624,6 +624,7 @@ class _ScoringPhase[K: Hashable]:
     def __post_init__(self) -> None:
         self.gauge = self.session.state.flight
         self.cancels = self.session.backend_client.cancel_stops_billing
+        self.payer = self.session.backend_client.cell_payer
         self.book = bound_spend_book()
         self.label = filed(CELL)
         # A pass the book's ceilings do not meter is neither admitted against them nor stopped by them.
@@ -634,7 +635,10 @@ class _ScoringPhase[K: Hashable]:
         book, cell, label = self.book, self.cell, self.label
         if book is None or cell is None or self.unbounded:
             return sys.maxsize
-        return book.fits(book.held_at(label, cell), cell, beside=label.kind) - self.out()
+        return (
+            book.fits(book.held_at(label, cell), cell, paid_by=self.payer, beside=label.kind)
+            - self.out()
+        )
 
     def live(self) -> list[Walk]:
         return [walk for walk in self.walks if walk is not None and walk.outcome is None]
@@ -987,6 +991,8 @@ class _ScoringPhase[K: Hashable]:
             cell_usd=(
                 None
                 if book is None or cell is None
-                else book.binding(book.held_at(label, cell), cell, beside=label.kind).usd
+                else book.binding(
+                    book.held_at(label, cell), cell, paid_by=self.payer, beside=label.kind
+                ).usd
             ),
         )

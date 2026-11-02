@@ -1663,7 +1663,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             return cell
 
         async def _bench_pick() -> BenchPasses:
-            async with paid_pass(stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget()):
+            async with paid_pass(
+                stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+            ):
                 return await bench_selection(
                     session,
                     cycle.rounds,

@@ -13,8 +13,12 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
-from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
-from promptpotter.application.jobs.quota import on_free_tier
+from promptpotter.application.free_tier import (
+    FreeFence,
+    free_fence,
+    outside_free_tier,
+    refuse_outside_free_tier,
+)
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
@@ -167,10 +171,12 @@ async def plan_draft_patch(
 
     if changes.keys() & {"pipeline_overlay", "optimization_overrides"}:
         # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
-        free = on_free_tier(stores)
-        was_unpriced, was_outside = _refusals(draft_pipeline(stores, draft, held), free=free)
+        was_unpriced, was_outside = _refusals(
+            draft_pipeline(stores, draft, held), fence=free_fence(stores, held.connector)
+        )
         unpriced, outside = _refusals(
-            draft_pipeline(stores, draft.patch(**changes), served), free=free
+            draft_pipeline(stores, draft.patch(**changes), served),
+            fence=free_fence(stores, served.connector),
         )
         refuse_unpriced([r for r in unpriced if r not in was_unpriced])
         refuse_outside_free_tier([o for o in outside if o not in was_outside])
@@ -193,10 +199,10 @@ def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:
     }
 
 
-def _refusals(pipeline: DraftPipeline, *, free: bool) -> tuple[list[str], list[str]]:
+def _refusals(pipeline: DraftPipeline, *, fence: FreeFence | None) -> tuple[list[str], list[str]]:
     config, params, schema = pipeline.config, pipeline.params, pipeline.chain
     selected = select_optimizer(config.optimization)
-    outside = outside_free_tier(config, selected, params, schema) if free else []
+    outside = [] if fence is None else outside_free_tier(config, selected, params, schema, fence)
     return unpriced_routes(config, selected, params, schema), outside
 
 

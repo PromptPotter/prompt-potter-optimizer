@@ -536,6 +536,17 @@
         "title": "ActivityState",
         "type": "object"
       },
+      "AllowanceState": {
+        "description": "What the host's allowance does for this account's next launch: one closed set, each surface\nreading its words off `ALLOWANCE_STATE_INFO`.",
+        "enum": [
+          "unmetered",
+          "used_up",
+          "held",
+          "open"
+        ],
+        "title": "AllowanceState",
+        "type": "string"
+      },
       "ApiKeyBody": {
         "additionalProperties": false,
         "description": "One provider key, never served back: a read names its last four characters alone.",
@@ -4101,45 +4112,13 @@
         "title": "CostAbsence",
         "type": "string"
       },
-      "CouponState": {
-        "description": "What the host's allowance does for this account's next launch: one closed set, each surface\nreading its words off `COUPON_STATE_INFO`.",
-        "enum": [
-          "unmetered",
-          "retired",
-          "used_up",
-          "held",
-          "open"
-        ],
-        "title": "CouponState",
-        "type": "string"
-      },
       "CouponStatus": {
         "additionalProperties": false,
-        "description": "The host's allowance for this account, and the keys it sends on past it.",
+        "description": "The host's allowance for this account, and who pays a send on each provider.",
         "properties": {
-          "binding": {
-            "anyOf": [
-              {
-                "enum": [
-                  "usd",
-                  "tokens"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The unit drawn nearest its face; null where no unit is bounded.",
-            "title": "Binding"
-          },
-          "drawn": {
-            "$ref": "#/components/schemas/Budget",
-            "description": "What the face is compared against: what the box's keys paid, unreported sends counted at the most they may have cost."
-          },
-          "face": {
-            "$ref": "#/components/schemas/Budget",
-            "description": "What the box's keys may pay for this account over its life; an unnamed or null unit is unbounded."
+          "headline": {
+            "$ref": "#/components/schemas/Said",
+            "description": "The allowance in one line: its state's label, what the box's keys drew of the face on the unit drawn nearest it (else the state's word), and the providers the account's own keys pay."
           },
           "held": {
             "$ref": "#/components/schemas/Budget",
@@ -4149,31 +4128,24 @@
             "$ref": "#/components/schemas/LifetimeSpend",
             "description": "What the box's keys paid for this account."
           },
-          "keys": {
-            "items": {
-              "$ref": "#/components/schemas/AccountKey"
-            },
-            "title": "Keys",
-            "type": "array"
-          },
           "left": {
             "$ref": "#/components/schemas/Budget",
-            "description": "What a new launch may still hold: the face less `drawn` and `held`, at most the unpriced grace while a bill is a floor."
+            "description": "What a new launch may still hold: the face less what is drawn and `held`, at most the unpriced grace while a bill is a floor."
           },
           "own_key_spend": {
             "$ref": "#/components/schemas/LifetimeSpend",
             "description": "What this account's own keys paid."
           },
-          "providers": {
-            "description": "Every provider a key may be held for.",
+          "routes": {
+            "description": "Every provider a node may name.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ProviderRoute"
             },
-            "title": "Providers",
+            "title": "Routes",
             "type": "array"
           },
           "state": {
-            "$ref": "#/components/schemas/CouponState"
+            "$ref": "#/components/schemas/AllowanceState"
           },
           "used_share": {
             "anyOf": [
@@ -4184,22 +4156,19 @@
                 "type": "null"
               }
             ],
-            "description": "`drawn` over `face` on the `binding` unit, at most 1.",
+            "description": "What is drawn over the face on the unit drawn nearest it, at most 1; null where no unit is bounded.",
             "title": "Used Share"
           }
         },
         "required": [
           "state",
-          "face",
-          "drawn",
+          "headline",
           "held",
           "left",
-          "binding",
           "used_share",
           "host_key_spend",
           "own_key_spend",
-          "keys",
-          "providers"
+          "routes"
         ],
         "title": "CouponStatus",
         "type": "object"
@@ -8615,24 +8584,47 @@
       },
       "LaunchRefusal": {
         "additionalProperties": false,
-        "description": "The allowance refusing a launch whole, as ``admit_launch`` raises it.",
+        "description": "A launch refused whole, as ``admit_launch`` raises it.",
         "properties": {
-          "reason": {
-            "description": "What binds and the remedy, in the refusal's own words.",
-            "title": "Reason",
-            "type": "string"
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider whose send is refused; null where a backend's cells, which go out on the box's keys whatever keys the account holds, draw the allowance.",
+            "title": "Provider"
           },
-          "state": {
-            "$ref": "#/components/schemas/CouponState",
-            "description": "Its headline, worded by `COUPON_STATE_INFO`."
+          "reason": {
+            "$ref": "#/components/schemas/LaunchRefusalReason"
+          },
+          "sentence": {
+            "description": "What binds and the remedy, in the refusal's own words.",
+            "title": "Sentence",
+            "type": "string"
           }
         },
         "required": [
-          "state",
-          "reason"
+          "reason",
+          "provider",
+          "sentence"
         ],
         "title": "LaunchRefusal",
         "type": "object"
+      },
+      "LaunchRefusalReason": {
+        "description": "Why a launch is refused whole: `NO_KEY` is `NoApiKeyError`'s, the rest\n`HostAllowanceExhaustedError`'s.",
+        "enum": [
+          "used_up",
+          "held",
+          "over_declared",
+          "no_key"
+        ],
+        "title": "LaunchRefusalReason",
+        "type": "string"
       },
       "Leaf": {
         "description": "Where a campaign file's bytes count in the storage report.",
@@ -13236,6 +13228,50 @@
         ],
         "title": "Provenance",
         "type": "string"
+      },
+      "ProviderRoute": {
+        "additionalProperties": false,
+        "description": "Who pays this account's sends on one provider.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountKey"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account's own key for it, if it holds one."
+          },
+          "payer": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`user` where the account holds a key for it, else `host` where the box does, under the allowance; null where neither does, so a send on it is refused.",
+            "title": "Payer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "payer",
+          "key"
+        ],
+        "title": "ProviderRoute",
+        "type": "object"
       },
       "QuotaStatus": {
         "additionalProperties": false,

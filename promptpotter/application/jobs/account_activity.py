@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from promptpotter.domain.spend import KeySource, bill_is_floor, calls_rate_priced
+from promptpotter.domain.spend import KEY_SOURCE_LABELS, bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import UsageRow, account_usage
 from promptpotter.infrastructure.store.stores import Stores
@@ -78,14 +78,11 @@ class ActivityResponse(StrictModel):
     )
 
 
-_KEY_LABELS: dict[KeySource, str] = {"host": "host key", "user": "own key"}
-
-
 def _series_label(row: UsageRow, group_by: ActivityGroupBy) -> str:
     if group_by == "model":
         base = row.model or "unknown"
     else:
-        base = f"{row.provider or 'unknown'} · {_KEY_LABELS[row.key_source]}"
+        base = f"{row.provider or 'unknown'} · {KEY_SOURCE_LABELS[row.key_source]}"
     # A judge or backend usually shares model and biller with the optimizer: untagged, it sums into that series.
     return base if row.kind == "optimizer" else f"{base} ({row.kind})"
 

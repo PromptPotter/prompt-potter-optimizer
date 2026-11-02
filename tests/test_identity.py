@@ -875,7 +875,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     write_yaml(
         root / DEFINITION_FILE,
         {
-            "pipeline": {"pipelines": dict(schema.pipelines)},
+            "pipeline": {"backend_type": DEFAULT_CONNECTOR, "pipelines": dict(schema.pipelines)},
             "campaign": {"optimization": optimization, "scoring": pinned},
         },
     )
