@@ -30,6 +30,12 @@ def _reject_bool(v: object) -> object:
     return v
 
 
-# `allow_inf_nan=False` refuses `+inf`, which PASSES a bare `ge=` bound and disarms a `spent >= cap` ceiling.
 WireInt = Annotated[int, Field(strict=True)]
-WireFloat = Annotated[float, BeforeValidator(_reject_bool), Field(allow_inf_nan=False)]
+# `allow_inf_nan=False` refuses `+inf`, which PASSES a bare `ge=` bound and disarms a `spent >= cap` ceiling.
+# The bound sits before the validator: after it, pydantic's JSON Schema writes a non-standard `ge`.
+NonNegativeWireFloat = Annotated[
+    float, Field(ge=0.0, allow_inf_nan=False), BeforeValidator(_reject_bool)
+]
+PositiveWireFloat = Annotated[
+    float, Field(gt=0.0, allow_inf_nan=False), BeforeValidator(_reject_bool)
+]

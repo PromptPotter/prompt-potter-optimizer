@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import json
-import math
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -470,6 +469,13 @@ assert not (GRADE_KEYS & _CELL.keys), "a grade is a formula's reading, never a f
 
 #: ERR and UNSC are states of their own, not a bad MISS; a re-grade recovers UNSC.
 SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
+SAMPLE_STATUS_LABELS: dict[SampleStatus, str] = {
+    "HIT": "Hit",
+    "MISS": "Miss",
+    "ERR": "Error",
+    "UNSC": "Unscored",
+}
+assert SAMPLE_STATUS_LABELS.keys() == set(get_args(SampleStatus))
 
 
 @dataclass(frozen=True, slots=True)
@@ -689,21 +695,6 @@ def find_rank(items: Sequence[Any], ground_truth: str) -> int | None:
 def is_hit(fitness: float | None) -> bool:
     """Display and stratification ONLY, never a rate: graded formulas never reach the ceiling."""
     return fitness is not None and fitness >= HIT_THRESHOLD
-
-
-FITNESS_BANDS = 10
-
-
-def fitness_bands(cells: Iterable[GradedCell]) -> list[int]:
-    """Scored rows per tenth of [0, 1], each band closed above and a zero in the first."""
-    bands = [0] * FITNESS_BANDS
-    for cell in cells:
-        fitness = cell.grade.fitness
-        if not cell.scored or fitness is None:
-            continue
-        band = math.ceil(round(fitness * FITNESS_BANDS, 9)) - 1
-        bands[min(FITNESS_BANDS - 1, max(0, band))] += 1
-    return bands
 
 
 class GradeColumn(NamedTuple):

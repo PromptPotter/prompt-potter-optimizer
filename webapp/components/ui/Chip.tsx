@@ -2,8 +2,10 @@ import type { CSSProperties, ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./Chip.module.css";
 
+// A toggle passes `on`; a menu's trigger passes `expanded`, and `on` only lights it; an action, neither.
 export function Chip({
   on,
+  expanded,
   onClick,
   title,
   disabled,
@@ -12,7 +14,8 @@ export function Chip({
   ink,
   children,
 }: {
-  on: boolean;
+  on?: boolean;
+  expanded?: boolean;
   onClick: () => void;
   title?: string | undefined;
   disabled?: boolean;
@@ -22,12 +25,15 @@ export function Chip({
   ink?: string;
   children: ReactNode;
 }) {
+  const trigger = expanded !== undefined;
   return (
     <button
       type="button"
       className={cx(s.chip, icon && s.icon, on && s.on)}
       style={ink ? ({ "--ink": ink } as CSSProperties) : undefined}
-      aria-pressed={on}
+      aria-pressed={trigger ? undefined : on}
+      aria-haspopup={trigger ? "menu" : undefined}
+      aria-expanded={expanded}
       aria-label={ariaLabel}
       title={title}
       disabled={disabled}

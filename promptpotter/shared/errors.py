@@ -226,8 +226,17 @@ class HostAllowanceExhaustedError(SendRefusedError, PotterError):
     http_status = 422
     code = "host_allowance_exhausted"
 
-    def __init__(self, message: str, *, provider: str | None = None) -> None:
-        SendRefusedError.__init__(self, message, category=ErrorCategory.HOST_ALLOWANCE)
+    def __init__(
+        self, facts: str, *, provider: str | None = None, over_declared: bool = False
+    ) -> None:
+        # THE remedies, said here once: every writer of *facts* states only what binds.
+        lower = "Lower the run's ceiling, or add" if over_declared else "Add"
+        SendRefusedError.__init__(
+            self,
+            f"{facts} {lower} your own key under Account → API keys to send past it on your own "
+            "money.",
+            category=ErrorCategory.HOST_ALLOWANCE,
+        )
         self.details = {} if provider is None else {"provider": provider}
 
 

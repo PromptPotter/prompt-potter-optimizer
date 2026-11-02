@@ -1,26 +1,24 @@
 "use client";
 import { useMemo } from "react";
 import type { DraftPatch, NodePrompt, OptimizerNodePrompt } from "@/lib/api";
-import { useSelection, type SelectedNode } from "@/lib/SelectionContext";
+import type { SelectedNode } from "@/lib/address";
+import { useSelection } from "@/lib/SelectionContext";
+import { useIngest } from "@/lib/ingest-flow";
+import { draftPrompts } from "@/lib/prompt-fields";
+import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { NodeBlock } from "@/lib/api/types";
-import type { NodeSchemaReading } from "@/lib/types";
+import { NODE_KIND_INFO } from "@/lib/api/types.generated";
+import type { NodeSchemaReading, PipelineViewNode } from "@/lib/types";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { roundOf, useCycleStream } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
-import {
-  interiorNodes,
-  pipelineReadStatus,
-  type ObserveState,
-  type ObserveSubject,
-} from "@/lib/derivations";
+import { interiorNodes, type ObserveState, type ObserveSubject } from "@/lib/derivations";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
-import { nodeKind } from "@/lib/types";
 import { CopyButton, Empty, Loading, SegmentedControl } from "@/components/ui";
-import { MemberKnobList } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
@@ -35,46 +33,43 @@ function startPrompts(id: string, origin: OptimizerNodePrompt | null): Record<st
   return origin ? { [id]: { fields: origin.fields, shots: [] } } : {};
 }
 
-interface Props {
-  node: SelectedNode;
-  authoring?: NodeAuthoring;
-  onClose: () => void;
-  onPromptApply?: (patch: DraftPatch) => void;
-}
-
-export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }: Props) {
+// The `node` view's pane; under a check-in it authors the draft, under a run it reads what ran.
+export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   const { id, scope } = selected;
   const isOptimizer = scope === "optimizer";
+  const { close } = useWorkspace();
+  const { draft, flow } = useIngest();
+  const onPromptApply = draft ? flow.applyPatch : undefined;
+  const authoring = useMemo<NodeAuthoring | undefined>(
+    () =>
+      draft && !isOptimizer
+        ? { overlay: draft.pipeline_overlay, prompts: draftPrompts(draft.origin_prompts) }
+        : undefined,
+    [draft, isOptimizer],
+  );
 
   const cv = useConnector();
   const { dash, isLive } = useCycleStream();
-  const liveRound = roundOf(dash);
-  const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(
-    isOptimizer ? cv.optimizer : null,
-  );
+  const { doc: optimizer, status: optimizerStatus } = useOptimizerPipeline(isOptimizer);
   const subject = useObserveSubject();
   const observed = useSearchpointRead(!isOptimizer && !authoring ? subject.point : null, id);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
   const servedKind = node?.kind ?? null;
-  const kindInfo = servedKind ? nodeKind(servedKind) : null;
-  const optimizerStatus = pipelineReadStatus({
-    bound: cv.schema.status !== "unbound",
-    loading: pipelineLoading || cv.schema.status === "loading",
-    failed: !optimizer,
-  });
+  // The rows at the viewed config ride `OptimizerSetup`; the manifest read holds only the graph.
+  const optimizerRows = cv.optimizerSetup?.node_config_schema ?? null;
   const schema = useMemo<NodeSchemaReading>(
     () =>
       isOptimizer
         ? {
             status: optimizerStatus,
-            config: optimizer?.node_config_schema ?? null,
+            config: optimizerRows,
             output: optimizer?.node_output_schema ?? null,
             isSingleNode: false,
           }
         : cv.schema,
-    [isOptimizer, optimizerStatus, optimizer, cv.schema],
+    [isOptimizer, optimizerStatus, optimizerRows, optimizer, cv.schema],
   );
   const modelCapabilities = isOptimizer
     ? (optimizer?.model_capabilities ?? {})
@@ -91,7 +86,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   // Under the viewed config, its field edits laid on: what this node runs, not the bare template.
   const origin = (isOptimizer ? cv.optimizerSetup?.prompts[id] : undefined) ?? null;
 
-  const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
+  const identity = { id, scope, kind: servedKind };
   const program = isOptimizer
     ? { ...identity, prompts: startPrompts(id, origin) }
     : authoring
@@ -117,33 +112,31 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   const isLiveNow = isLive && viewingLive && livePhaseNode === id && isOptimizer;
 
   return (
-    <div className={cx("bnode", isOptimizer && "bnode-wide")}>
+    <div className={cx("bnode", "box-full", isOptimizer && "bnode-wide")}>
       <section className="setup-preview">
         <header className="setup-preview-head">
           <span className="setup-preview-title">
-            {kindInfo && <span className={cx("bnode-kind", kindInfo.cls)}>{kindInfo.label}</span>}
-            {node?.label ?? id}
+            {servedKind && (
+              <span className={cx("bnode-kind", `kind-${servedKind}`)}>
+                {NODE_KIND_INFO[servedKind].label}
+              </span>
+            )}
             <code className="opt-detail-id">{id}</code>
           </span>
           {/* A div: `CopyButton`'s choices menu opens a `Popover`, which is flow content. */}
           <div className="setup-preview-side">
+            {/* The round axis sets the round; the dot lights while this node is the one firing. */}
             <span className={cx("opt-detail-status", isLiveNow && "live")}>
-              ● {isLiveNow ? `live · round ${liveRound ?? PLACEHOLDER}` : scopeLabel(isOptimizer)}
+              ●{" "}
+              {isOptimizer && viewedRound != null
+                ? `round ${viewedRound}${viewingLive ? " · live" : ""}`
+                : scopeLabel(isOptimizer)}
             </span>
-            {isOptimizer && viewedRound != null && (
-              <span
-                className="opt-detail-round-tag"
-                title="Round is set by the round axis beside the pipeline picture"
-              >
-                round {viewedRound}
-                {viewingLive ? " · live" : ""}
-              </span>
-            )}
             <CopyButton choices={copyChoices} title="Copy this node as JSON" />
             <button
               type="button"
               className="bnode-close"
-              onClick={onClose}
+              onClick={() => close("node")}
               aria-label="Close detail"
               title="Close"
             >
@@ -152,7 +145,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
           </div>
         </header>
 
-        {kindInfo && <p className="bnode-role">{kindInfo.role}</p>}
+        {node && <p className="bnode-role">{roleLine(node)}</p>}
 
         {isOptimizer ? (
           <OptimizerProgram
@@ -183,7 +176,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             block={block}
             round={viewedRound}
             loading={nodesLoading}
-            kindLoading={pipelineLoading}
+            kindLoading={optimizerStatus === "loading"}
             inFlight={isLiveNow}
           />
         )}
@@ -194,6 +187,11 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
 
 function scopeLabel(isOptimizer: boolean): string {
   return isOptimizer ? "the optimizer's own loop" : "this campaign's pipeline";
+}
+
+// What the manifest says this node does, else what its kind is.
+function roleLine(node: PipelineViewNode): string {
+  return node.description || NODE_KIND_INFO[node.kind].role;
 }
 
 function OptimizerProgram({
@@ -225,8 +223,6 @@ function OptimizerProgram({
         edited={origin?.edited}
         onApply={onPromptApply}
       />
-      {/* `node_config_schema` holds the call config and prompt rows; a member's knobs are served once, in `optimizer_setup`. */}
-      <MemberKnobList node={id} />
       {origin && origin.versions_declared > 1 && (
         <p className="inspector-note">
           Showing prompt {origin.version} of {origin.versions_declared} this node declares.
@@ -318,6 +314,7 @@ function TargetProgram({
 }
 
 // Dispatch on the served `kind`, never block shape: an unfired LLM node has a measurement node's.
+// Only an LLM call leaves an audit block, so any other kind has no run to show.
 function RunSection({
   kind,
   block,
@@ -326,13 +323,14 @@ function RunSection({
   kindLoading,
   inFlight,
 }: {
-  kind: string | null;
+  kind: PipelineViewNode["kind"] | null;
   block: NodeBlock | null;
   round: number;
   loading: boolean;
   kindLoading: boolean;
   inFlight: boolean;
 }) {
+  if (kind != null && kind !== "measurement" && kind !== "llm") return null;
   return (
     <>
       <hr className="setup-preview-divider" />

@@ -13,8 +13,9 @@ import {
   type Segment,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { allowanceCaveats, billText, couponFaceText, couponLeftText } from "@/lib/derivations";
-import { cssPct, fmtAgo } from "@/lib/format";
+import { allowanceCaveats, allowanceText, billText } from "@/lib/derivations";
+import { COUPON_STATE_INFO, SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
+import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
@@ -68,46 +69,24 @@ function Meter({ share, warn = false }: { share: number; warn?: boolean }) {
   );
 }
 
-function allowanceLede(c: CouponStatus): string {
-  if (c.host) {
-    return "This account runs the box, so its sends on the box's own provider keys are not metered.";
-  }
-  if (c.void) {
-    return "Retired: this account holds a key of its own, so the host's keys no longer send for it.";
-  }
-  if (c.exhausted) {
-    return "Used up: nothing more is sent on the host's keys. Add a key of your own to keep running — every result stays readable.";
-  }
-  return "What the host's provider keys may pay for this account over its life. A key of your own sends instead, billed to you, and never draws it.";
-}
-
 function AllowanceSection({ coupon }: { coupon: CouponStatus }) {
-  const { openAccount } = useWorkspace();
-  const host = coupon.host_key_spend;
+  const { open } = useWorkspace();
   const own = coupon.own_key_spend;
-  // A retired coupon serves `exhausted` too, but nothing is wrong: the account sends on its own keys.
-  const spent = !coupon.host && !coupon.void && coupon.exhausted;
   const held = coupon.keys.length;
   return (
     <AccountSection
       title="Host allowance"
-      lede={allowanceLede(coupon)}
-      aside={<Button onClick={() => openAccount("keys")}>API keys</Button>}
+      lede={COUPON_STATE_INFO[coupon.state].lede}
+      aside={<Button onClick={() => open("account", "keys")}>API keys</Button>}
     >
       <div className="account-wallet">
         <div className="account-wallet-cell">
           <span className="account-kicker">On the host&rsquo;s keys</span>
-          <span className="account-figure">
-            {billText(host.billed_usd, host.bill_is_floor)}
-            <span className="account-figure-of"> {couponFaceText(coupon)}</span>
-          </span>
-          {coupon.used_share !== null ? <Meter share={coupon.used_share} warn={spent} /> : null}
-          {coupon.host ? null : (
-            <span className={spent ? "account-warn" : "account-note"}>
-              Left: {couponLeftText(coupon)}
-            </span>
-          )}
-          {allowanceCaveats(host).map((line) => (
+          <span className="account-figure">{allowanceText(coupon)}</span>
+          {coupon.used_share !== null ? (
+            <Meter share={coupon.used_share} warn={COUPON_STATE_INFO[coupon.state].tone === "warn"} />
+          ) : null}
+          {allowanceCaveats(coupon.host_key_spend).map((line) => (
             <span key={line} className="account-warn">
               {line}
             </span>
@@ -205,8 +184,8 @@ function RunsSection({
                 <strong>{machine.occupied}</strong> running ·{" "}
                 <strong>{machine.queued}</strong>{" "}
                 waiting · <strong>{machine.ceiling}</strong> slots
-                {machine.held_back !== null ? (
-                  <span className="account-warn"> — {machine.held_back}</span>
+                {machine.bound !== null ? (
+                  <span className="account-warn"> — {filled(SLOT_BOUND_WORDS[machine.bound], machine)}</span>
                 ) : null}
               </span>
             </>
@@ -235,7 +214,7 @@ function RunsSection({
           </span>
         </div>
       </div>
-      <LimitControl quota={quota} machine={machine} />
+      <LimitControl quota={quota} />
     </AccountSection>
   );
 }
@@ -263,13 +242,7 @@ function refusal(f: CommandFailure): string | null {
     : null;
 }
 
-function LimitControl({
-  quota,
-  machine,
-}: {
-  quota: QuotaStatus;
-  machine: MachineStatusResponse | null;
-}) {
+function LimitControl({ quota }: { quota: QuotaStatus }) {
   const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", { describe: refusal });
   const limit = quota.max_concurrent_cycles;
 
@@ -295,14 +268,12 @@ function LimitControl({
   };
 
   const busy = cmd.pending !== null;
-  const ceiling = machine?.ceiling ?? null;
+  const ceiling = quota.ceiling;
   return (
     <div className="account-limit">
       <div className="account-limit-control">
         <span className="account-kicker">Account limit</span>
-        {ceiling === null ? (
-          <span className="account-note">Waiting for the machine ceiling…</span>
-        ) : ceiling <= SEGMENTED_MAX ? (
+        {ceiling <= SEGMENTED_MAX ? (
           <SegmentedControl
             size="lg"
             ariaLabel="Campaigns this account may hold at once"
@@ -332,8 +303,8 @@ function LimitControl({
         {busy ? <span className="account-note">Saving…</span> : null}
       </div>
       <FailureLine failure={cmd.failure} />
-      {quota.machine_binds !== null ? (
-        <p className="account-warn">{quota.machine_binds}</p>
+      {quota.bound !== null ? (
+        <p className="account-warn">{filled(SLOT_BOUND_WORDS[quota.bound], quota)}</p>
       ) : null}
       <p className="account-note">
         Lowering it stops nothing already running; it refuses the next launch. The machine&rsquo;s

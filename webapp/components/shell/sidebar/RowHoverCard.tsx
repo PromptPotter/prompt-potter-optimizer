@@ -10,9 +10,10 @@ import {
   type HierarchyEntry,
   type UnstartedCampaign,
 } from "@/lib/api";
+import { LeafSplit } from "@/components/account/LeafSplit";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
-import { entryAlone, entryLede } from "@/lib/derivations";
-import { fmtAgo, fmtBytes, fmtDateTime, fmtValue } from "@/lib/format";
+import { entryAlone } from "@/lib/derivations";
+import { fmtAgo, fmtBytes, fmtDateTime, fmtValue, PLACEHOLDER } from "@/lib/format";
 
 // A knob moving several estimands is listed under each, so the path dedupes it.
 function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {
@@ -72,16 +73,6 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
   const knobs = configMap ? declaredKnobs(configMap) : null;
   const runsWith = campaign?.facts.runs_with ?? null;
 
-  const sizes: [string, number | undefined, true?][] = [
-    ["Dataset", data?.dataset_bytes],
-    ["Connector", data?.connector_bytes],
-    ["Loop", data?.loop_bytes],
-    ["State", data?.state_bytes, true],
-    ["Trace", data?.trace_bytes, true],
-    ["History", data?.history_bytes, true],
-    ["Reports", data?.reports_bytes, true],
-  ];
-  const size = (n: number | undefined) => (error ? "—" : n === undefined ? "…" : fmtBytes(n));
   // A round and a candidate have no run of their own, so no span.
   const span = entry.level === "candidate" ? null : entry.span;
   const reading = entry.level === "candidate" ? entry.facts.reading : null;
@@ -91,7 +82,6 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
         ["Opened", fmtDateTime(span.opened_at)],
       ]
     : [];
-  const lede = entryLede(entry);
   if (reading) facts.push(["Round", String(reading.arm.round)]);
   if (reading?.sp_hash) facts.push(["Searchpoint", reading.sp_hash]);
   facts.push(["Address", entry.address]);
@@ -99,12 +89,10 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
   return (
     <div className="rowhover">
       <SummaryBlock
-        facts={entry}
-        lede={lede ? <p className="rowhover-lede">{lede}</p> : null}
+        entry={entry}
         // The served entry alone, one shape whatever the card has opened: a program reads it.
         actions={<CopyButton title="Copy this entry as JSON" data={entryAlone(entry)} />}
       />
-      {entry.caveat && <div className="rowhover-caveat">{entry.caveat}</div>}
       <Facts facts={facts} />
 
       {campaign && (
@@ -158,17 +146,11 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
         <details className="rowhover-fold">
           <summary>
             <span>On disk</span>
-            <span className="rowhover-fold-total">{size(data?.on_disk_bytes)}</span>
+            <span className="rowhover-fold-total">
+              {data ? fmtBytes(data.total) : error ? PLACEHOLDER : "…"}
+            </span>
           </summary>
-          <dl className="rowhover-facts">
-            {sizes.map(([label, n, indent]) => (
-              <Fragment key={label}>
-                <dt data-indent={indent}>{label}</dt>
-                <dd>{size(n)}</dd>
-              </Fragment>
-            ))}
-          </dl>
-          <p className="rowhover-note">delete --keep-results spares Reports + loop trace</p>
+          {data && <LeafSplit bytes={data} />}
         </details>
       )}
     </div>

@@ -4,11 +4,12 @@ import argparse
 import asyncio
 
 from promptpotter.application import health
+from promptpotter.application.jobs.capacity import SLOT_BOUND_WORDS
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.presentation.admin_bot import check_health_and_tell
-from promptpotter.presentation.cli.commands.result import CommandResult
+from promptpotter.presentation.cli.commands.result import CommandResult, said_text
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
 
@@ -21,13 +22,10 @@ async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
         f"running {status.occupied} of {status.capacity} (ceiling {status.ceiling}), "
         f"{status.queued} queued"
     ]
-    if status.held_back is not None:
-        lines.append(status.held_back)
-    if account.machine_binds is not None:
-        lines.append(account.machine_binds)
-    lines.append(
-        f"{status.notice.title} — {status.notice.detail}" if status.notice else "a slot is free"
-    )
+    bounds = [(status.bound, status.model_dump()), (account.bound, account.model_dump())]
+    lines += [SLOT_BOUND_WORDS[bound].format(**said) for bound, said in bounds if bound]
+    notice = status.notice
+    lines.append("a slot is free" if notice is None else said_text(notice))
     lines += [
         f"running: {slot.what} ({slot.user}) since {slot.started_at or 'starting'}"
         for slot in status.running
@@ -41,7 +39,7 @@ async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
         for refusal in status.refused
     ]
     return CommandResult(
-        data={**status.model_dump(mode="json"), "machine_binds": account.machine_binds},
+        data={**status.model_dump(mode="json"), "account_bound": account.bound},
         human="\n".join(lines),
     )
 

@@ -6,14 +6,17 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatus
+from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
+    ErrorRecord,
     RunPhase,
     StopReason,
     run_phase_label,
 )
 from promptpotter.domain.run_records import CycleFinal, ForkSpec, SpawnedBy, sibling_cycle_id
 from promptpotter.domain.run_standing import RunStanding, closed_after_origin
+from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 
 
@@ -22,6 +25,7 @@ class IndexRound(FrozenModel):
 
     round: int
     accuracy: float | None
+    health: RoundHealth
 
 
 class Intervention(FrozenModel):
@@ -47,7 +51,8 @@ class CycleIndex(FrozenModel):
     stop_reason: StopReason | None = None
     finished_at: str | None = None
     interrupted_round: int | None = None
-    crash_traceback: str | None = None
+    # The failed stop's, where the run stands on one.
+    error: ErrorRecord | None = None
     final: CycleFinal | None = None
     superseded_by: str | None = None
     rounds: list[IndexRound] = Field(default_factory=list)
@@ -87,12 +92,10 @@ type StatusMark = Literal[
     "unknown",
 ]
 
-type StatusTone = Literal["live", "attention", "quiet", "success", "warn", "danger"]
-
 
 class StatusMarkInfo(NamedTuple):
     glyph: str
-    tone: StatusTone
+    tone: Tone
 
 
 STATUS_MARK_INFO: dict[StatusMark, StatusMarkInfo] = {
@@ -112,8 +115,7 @@ STATUS_MARK_INFO: dict[StatusMark, StatusMarkInfo] = {
 
 
 class RunStatus(FrozenModel):
-    """How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. Its word
-    is `label`, a lookup every surface makes the same way (`lib/derivations/run-phase.ts::runWord`)."""
+    """How a run stands on a row: its phase, why it stopped, and the mark drawn beside it."""
 
     run_phase: RunPhase
     stop_reason: StopReason | None = Field(description="Null while the run has not stopped.")

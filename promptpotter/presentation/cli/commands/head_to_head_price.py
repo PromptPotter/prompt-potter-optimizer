@@ -13,7 +13,6 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.presentation.cli.commands.new import head_to_head_command
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-from promptpotter.shared.errors import PotterError
 
 
 def _clock(seconds: float | None) -> str:
@@ -67,8 +66,5 @@ def _human(price: HeadToHeadPrice) -> str:
 async def cmd_price_head_to_head(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    try:
-        price = await price_head_to_head(stores, read_head_to_head_plan(Path(args.plan)))
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
+    price = await price_head_to_head(stores, read_head_to_head_plan(Path(args.plan)))
     return CommandResult(data=price.model_dump(mode="json"), human=_human(price))

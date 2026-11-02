@@ -1205,7 +1205,7 @@
               "usd": {
                 "anyOf": [
                   {
-                    "ge": 0.0,
+                    "minimum": 0.0,
                     "type": "number"
                   },
                   {
@@ -1219,7 +1219,7 @@
               "wall_clock_s": {
                 "anyOf": [
                   {
-                    "gt": 0.0,
+                    "exclusiveMinimum": 0.0,
                     "type": "number"
                   },
                   {
@@ -1284,7 +1284,7 @@
               "spend_ceiling_usd": {
                 "anyOf": [
                   {
-                    "ge": 0,
+                    "minimum": 0.0,
                     "type": "number"
                   },
                   {
@@ -1771,7 +1771,7 @@
               "usd": {
                 "anyOf": [
                   {
-                    "ge": 0.0,
+                    "minimum": 0.0,
                     "type": "number"
                   },
                   {
@@ -1785,7 +1785,7 @@
               "wall_clock_s": {
                 "anyOf": [
                   {
-                    "gt": 0.0,
+                    "exclusiveMinimum": 0.0,
                     "type": "number"
                   },
                   {

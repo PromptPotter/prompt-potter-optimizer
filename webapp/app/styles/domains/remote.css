@@ -17,8 +17,6 @@
   color:var(--color-text-secondary);
 }
 
-.remote-control-offline{opacity:.6}
-
 /* It floats and reserves no space: this publishes its height to the spacer shell.css puts at the foot of every pane. */
 .shell:has(> .remote-control){--remote-dock-h:62px}
 @media (max-width:880px){
@@ -38,7 +36,6 @@
     padding-bottom:calc(var(--remote-dock-h) + env(safe-area-inset-bottom,0px));
   }
 }
-.remote-offline{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-text-secondary);font-weight:600}
 
 .remote-btn{
   display:inline-flex;align-items:center;gap:var(--space-4);
@@ -55,6 +52,10 @@
 .remote-btn:disabled{opacity:.5;cursor:not-allowed}
 .remote-skip{color:var(--color-warn)}
 .remote-drill{color:var(--color-accent)}
+.remote-play{color:var(--color-success)}
+.remote-pause{color:var(--color-warn)}
+/* Wraps inside the pill: a note beside the button breaks onto its own line, never clips. */
+.run-ctl{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);min-width:0;max-width:100%}
 .remote-cells-group{display:flex;align-items:center;gap:var(--space-4);width:100%}
 .remote-cells-group .remote-cells{display:flex;flex:1 1 auto;min-width:0}
 .remote-cells-group .remote-cells > button{flex:1 1 0;min-width:0;padding-inline:0;font-variant-numeric:tabular-nums}
@@ -65,27 +66,22 @@
 
 .remote-spend-warn{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
-.remote-spend-cache{color:var(--color-text-secondary);font-weight:400}
 
-.remote-err{max-width:200px}
-
+/* The panel's one door. */
 .remote-readout{
-  display:inline-flex;align-items:center;gap:var(--space-10);
+  display:inline-flex;align-items:center;
   padding:var(--space-4) var(--space-10);
   border:1px solid transparent;border-radius:999px;
   background:transparent;color:var(--color-text-secondary);
-  font-family:inherit;font-size:var(--text-sm);
+  font-family:inherit;font-size:var(--text-sm);cursor:pointer;
   transition:background .15s,border-color .15s,color .15s;
 }
 .remote-readout:hover,
 .remote-readout-on{background:var(--color-background-hover);border-color:var(--color-border);color:var(--color-text-primary)}
 .remote-readout-on{background:var(--color-background-primary)}
-.remote-readout .chip{display:inline-flex;align-items:center;gap:var(--space-6);white-space:nowrap;font-family:var(--font-mono);line-height:1.3}
-.remote-readout .chip strong{color:var(--color-text-primary);font-weight:600}
-.remote-readout-toggle{display:inline-flex;align-items:center;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
-.remote-readout-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent);border-radius:3px}
+.remote-readout:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .remote-readout .chev{transition:transform .15s;flex-shrink:0}
-.remote-readout-toggle[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
+.remote-readout[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
 
 /* Absolute, not a flex child: in flow the centre-anchored pill re-centres its controls under the cursor on open. */
 .remote-panel{

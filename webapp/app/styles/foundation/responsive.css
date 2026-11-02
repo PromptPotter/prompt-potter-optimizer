@@ -11,13 +11,14 @@
   .wf-hero-end .text-col{display:none}
   .wf-hero-node.llm{
     flex:1 1 auto;min-width:0;max-width:min(238px,100%);
-    padding:var(--space-4) var(--space-10);gap:var(--space-8);
-    flex-direction:row;align-items:baseline;
+    padding:var(--space-4) var(--space-10);gap:var(--space-4);
   }
   .wf-hero-node.llm .lbl{font-size:var(--text-md)}
   .wf-hero-node.llm .head{gap:var(--space-6)}
   .wf-hero-node.llm .ico svg{width:18px;height:18px}
-  .wf-hero-sole{flex-direction:row;align-items:baseline;justify-content:center;gap:var(--space-6);width:auto}
+  /* The model wraps at its own width under the node's name, so the hero never outgrows the phone. */
+  .wf-hero-sole{flex-flow:row wrap;align-items:baseline;justify-content:center;gap:0 var(--space-6);width:auto}
+  .wf-hero-node.llm .val{max-width:100%;white-space:normal;overflow-wrap:anywhere}
   .wf-hero-multi-tag{padding-bottom:0}
   .pipeline-stack{padding:0}
   .round-axis-label{display:none}
@@ -26,9 +27,6 @@
   /* `--touch-floor` INHERITS: a container retunes the floor for its subtree without out-specifying the rule that sets it. */
   .run-card,.round-axis{--touch-floor:0px}
   .run-card{font-size:var(--text-sm)}
-  .run-card .subject-flips{display:none}
-  .run-card .subject-head{gap:var(--space-6)}
-  .run-card .subject-diff{margin-top:var(--space-4);font-size:var(--text-xs)}
   .hsp-row{font-size:var(--text-xs);line-height:1.5}
   .hsp-spread{flex-direction:row;align-items:baseline;gap:var(--space-8);width:100%;justify-content:space-between;border-left:0;border-top:1px solid var(--color-border);padding:var(--space-4) 0 0}
   .wf-hero-arrow{flex:0 1 auto;min-width:14px;max-width:32px}
@@ -46,12 +44,9 @@
   .chat-input{font-size:16px;min-height:44px;padding-left:var(--space-8);padding-right:var(--space-8)}
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
   .toggle-row .name{font-size:var(--text-base)}
-  .toggle-row.wand-row{margin:0 -2px;padding:var(--space-10)}
 
-  .account-modal{max-width:none;width:100%;height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
-  .account-modal-auth{height:auto;max-height:calc(var(--vh-full) - 32px)}
+  .account-frame{height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
   .account-pane-body{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
-  .account-pane-body-auth{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
   .login-button{padding:var(--space-14) var(--space-16);min-height:44px;font-size:var(--text-md)}
 }
 
@@ -77,22 +72,4 @@
   textarea{
     font-size:max(16px,1em);
   }
-}
-
-.rotate-prompt-card{display:none}
-@media (orientation:portrait) and (max-width:767px){
-  .rotate-prompt-host > .rotate-prompt-children{display:none}
-  .rotate-prompt-host > .rotate-prompt-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-14);padding:var(--space-40) var(--space-24);min-height:60vh;text-align:center;color:var(--color-text-secondary)}
-  .rotate-prompt-card .rotate-icon{width:48px;height:48px;color:var(--color-accent);animation:rotate-hint 2.4s ease-in-out infinite}
-  .rotate-prompt-card .rotate-title{font-size:var(--text-xl);font-weight:600;color:var(--color-text-primary)}
-  .rotate-prompt-card .rotate-body{font-size:var(--text-md);max-width:280px;line-height:1.5}
-  /* 60vh sizes a whole pane; inside a card row it is half a phone screen of nothing. */
-  .run-card .rotate-prompt-card{min-height:0;padding:var(--space-16) var(--space-12)}
-}
-@keyframes rotate-hint{
-  0%,100%{transform:rotate(0deg)}
-  45%,55%{transform:rotate(90deg)}
-}
-@media (prefers-reduced-motion:reduce){
-  .rotate-prompt-card .rotate-icon{animation:none}
 }

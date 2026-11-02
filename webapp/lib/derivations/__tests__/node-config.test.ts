@@ -12,8 +12,9 @@ import {
   seedOverlayFromRows,
   type ConfigRow,
 } from "../node-config";
-import type { KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
+import type { ModelCapability, NodeConfigParam } from "@/lib/api";
 import { SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
+import { configParam as param } from "@/lib/test-fixtures";
 
 function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRow {
   return {
@@ -89,76 +90,30 @@ describe("nodeOverlayPatch (search-space emit)", () => {
 
 const schema: Record<string, NodeConfigParam[]> = {
   llm_only: [
-    {
+    param({
       key: "model",
       value: "openai/gpt-oss-120b",
       kind: "model",
       options: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
-      description: "",
-      never_axis: "",
       movable_by: ["proposer"],
-      held: false,
       source: "dataset",
       permitted: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
-      permitted_stated: false,
-    },
-    {
+    }),
+    param({
       key: "reasoning_effort",
       value: "low",
       kind: "enum",
       options: ["low", "medium", "high"],
-      description: "",
-      never_axis: "",
       movable_by: ["proposer"],
-      held: false,
       source: "dataset",
       permitted: ["low", "medium", "high"],
-      permitted_stated: false,
-    },
-    {
-      key: "temperature",
-      value: 0,
-      kind: "number",
-      options: [],
-      description: "",
-      never_axis: "",
-      movable_by: ["proposer"],
-      held: false,
-      source: "dataset",
-      permitted: [],
-      permitted_stated: false,
-    },
-    {
-      key: "max_tokens",
-      value: null,
-      kind: "number",
-      options: [],
-      description: "",
-      never_axis: "",
-      movable_by: ["proposer"],
-      held: false,
-      source: "dataset",
-      permitted: [],
-      permitted_stated: false,
-    },
+    }),
+    param({ key: "temperature", value: 0, movable_by: ["proposer"], source: "dataset" }),
+    param({ key: "max_tokens", movable_by: ["proposer"], source: "dataset" }),
   ],
 };
 
 describe("configRows (search-space mode)", () => {
-  const param = (over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam => ({
-    value: null,
-    kind: "number",
-    options: [],
-    description: "",
-    never_axis: "",
-    movable_by: [],
-    held: false,
-    source: "campaign",
-    permitted: [],
-    permitted_stated: false,
-    ...over,
-  });
-
   it("takes lock, value and permitted set from the SERVED row, ignoring the overlay", () => {
     const served = {
       n: [
@@ -230,19 +185,13 @@ describe("configRows (values mode)", () => {
   });
 
   it("round-trips a nested param through JSON, and emits the OBJECT", () => {
-    const nested: NodeConfigParam = {
+    const nested = param({
       key: "layout",
       value: { instruction: ["plan"] },
       kind: "nested",
-      options: [],
-      description: "",
-      never_axis: "",
       movable_by: ["proposer"],
-      held: false,
       source: "dataset",
-      permitted: [],
-      permitted_stated: false,
-    };
+    });
     const withNested = { llm_only: [...schema.llm_only!, nested] };
     const rows = configRows(withNested, {}, "values");
     const drawn = rows.find((r) => r.key === "layout")!;
@@ -257,19 +206,13 @@ describe("configRows (values mode)", () => {
 
   // `schema_owned` fences only the OPTIMIZER, never the operator setting the value.
   it("lets the operator set a schema-owned key, and never makes it an axis", () => {
-    const owned: NodeConfigParam = {
+    const owned = param({
       key: "answer_fields",
       value: ["answer"],
       kind: "nested",
-      options: [],
-      description: "",
       never_axis: "schema_owned",
-      movable_by: [],
-      held: false,
       source: "dataset",
-      permitted: [],
-      permitted_stated: false,
-    };
+    });
     const withOwned = { llm_only: [...schema.llm_only!, owned] };
     const rows = configRows(withOwned, { llm_only: { answer_fields: ["answer"] } }, "values");
     expect(JSON.parse(rows.find((r) => r.key === "answer_fields")!.value)).toEqual(["answer"]);
@@ -292,19 +235,15 @@ describe("configRows (values mode)", () => {
 
   // A row left out of the emission reads as the operator holding it.
   it("carries a prompt field's lock in every emit, and keeps its text out of a fork seed", () => {
-    const prompt = (key: string, open: boolean): NodeConfigParam => ({
-      key,
-      value: "text",
-      kind: "prompt",
-      options: [],
-      description: "",
-      never_axis: "",
-      movable_by: open ? ["proposer"] : [],
-      held: !open,
-      source: "dataset",
-      permitted: [],
-      permitted_stated: false,
-    });
+    const prompt = (key: string, open: boolean): NodeConfigParam =>
+      param({
+        key,
+        value: "text",
+        kind: "prompt",
+        movable_by: open ? ["proposer"] : [],
+        held: !open,
+        source: "dataset",
+      });
     const withPrompt = {
       llm_only: [...schema.llm_only!, prompt("instruction", true), prompt("persona", false)],
     };
@@ -386,20 +325,7 @@ describe("overlayEdits + applyFlatEdits", () => {
 
 describe("permittedModels", () => {
   const modelRow = (over: Partial<NodeConfigParam>): NodeConfigParam[] => [
-    {
-      key: "model",
-      value: null,
-      kind: "model",
-      options: ["a", "b"],
-      description: "",
-      never_axis: "",
-      movable_by: [],
-      held: false,
-      source: "campaign",
-      permitted: [],
-      permitted_stated: false,
-      ...over,
-    },
+    param({ key: "model", kind: "model", options: ["a", "b"], ...over }),
   ];
 
   it("takes the served permitted set where the gate is narrower than the menu", () => {
@@ -476,32 +402,18 @@ describe("descriptionSubtree (one click on a schema-tree row)", () => {
 });
 
 describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
-  const knob = (over: Partial<KnobRow>): KnobRow => ({
-    key: "k",
-    description: "",
-    summary: "",
-    type: "integer",
-    options: null,
-    nullable: false,
-    minimum: null,
-    exclusive_minimum: null,
-    maximum: null,
-    exclusive_maximum: null,
-    declared: 10,
-    value: 10,
-    movable_by: [],
-    ...over,
-  });
+  const knob = (over: Partial<NodeConfigParam>): NodeConfigParam =>
+    param({ key: "k", integer: true, declared: 10, value: 10, ...over });
 
   it("commits only what the served type reads as the typed value", () => {
     expect(parseKnob(knob({}), "4")).toBe(4);
     expect(parseKnob(knob({}), "1.5")).toBeUndefined();
     expect(parseKnob(knob({}), "")).toBeUndefined();
-    expect(parseKnob(knob({ type: "number" }), "0.05")).toBe(0.05);
-    expect(parseKnob(knob({ type: "number", nullable: true }), " ")).toBeNull();
-    expect(parseKnob(knob({ type: "array" }), "[0.3, 1.2]")).toEqual([0.3, 1.2]);
-    expect(parseKnob(knob({ type: "array" }), "[0.3,")).toBeUndefined();
-    const epsilon = knob({ type: "number", exclusive_minimum: 0, exclusive_maximum: 1 });
+    expect(parseKnob(knob({ integer: false }), "0.05")).toBe(0.05);
+    expect(parseKnob(knob({ integer: false, nullable: true }), " ")).toBeNull();
+    expect(parseKnob(knob({ kind: "nested" }), "[0.3, 1.2]")).toEqual([0.3, 1.2]);
+    expect(parseKnob(knob({ kind: "nested" }), "[0.3,")).toBeUndefined();
+    const epsilon = knob({ integer: false, exclusive_minimum: 0, exclusive_maximum: 1 });
     expect(parseKnob(epsilon, "0")).toBeUndefined();
     expect(parseKnob(epsilon, "0.3")).toBe(0.3);
     expect(parseKnob(knob({ minimum: 1 }), "1")).toBe(1);

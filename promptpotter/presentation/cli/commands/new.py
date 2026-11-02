@@ -22,8 +22,7 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.loaders import no_dataset_hint
-from promptpotter.application.datasets.origin_readiness import origin_readiness
-from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
+from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS, origin_readiness
 from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
@@ -36,12 +35,10 @@ from promptpotter.domain.command_kinds import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
-    backend_unreachable_result,
     ctrl_c_pauses,
     cycle_result_command,
     held_run,
@@ -72,9 +69,11 @@ _NODES = "nodes"
 _BUDGET = "budget"
 _SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES, _BUDGET}
 
-_SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(FINDING_PATCH_KEYS.values())) | set(
-    FINDING_PATCH_KEYS
-)
+# A checklist field is set by the name the check-in spells it, never its patch key.
+_PATCH_KEY_OF: dict[str, str] = {
+    field: row.patch_key for field, row in CHECKLIST_FIELDS.items() if row.patch_key is not None
+}
+_SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_PATCH_KEY_OF.values())) | set(_PATCH_KEY_OF)
 _KNOB_COMMA = re.compile(r",(?=[\w.]+=)")
 
 
@@ -117,7 +116,7 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
             config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
             config[knob] = _value(raw)
         elif field in _SET_FIELDS:
-            patch_raw[FINDING_PATCH_KEYS.get(field, field)] = raw
+            patch_raw[_PATCH_KEY_OF.get(field, field)] = raw
         else:
             raise SystemExit(
                 f"ERROR: --set field {field!r} is not settable. One of: {_settable()}."
@@ -131,7 +130,7 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
     if not sets:
         return {}
     patch = _sets_to_patch(sets)
-    spelled = {model: cli for cli, model in FINDING_PATCH_KEYS.items()}
+    spelled = {model: cli for cli, model in _PATCH_KEY_OF.items()}
     fields = patch.model_fields_set - {"optimization_overrides"}
     if stray := sorted(spelled.get(f, f) for f in fields):
         raise SystemExit(
@@ -156,7 +155,7 @@ def _raise_incomplete(
 ) -> NoReturn:
     lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]
     lines += [f"  - {g.field}: {g.hint}" for g in gaps]
-    questions = turn.next_action.questions if turn else []
+    questions = turn.questions if turn else []
     if questions:
         lines += ["", "The resolver asked:"]
         lines += [f"  - {q.prompt}".rstrip() for q in questions]
@@ -274,24 +273,25 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     draft_id = await _ingest_checkin(args, stores)
     try:
         held = await _hold_checkin(args, stores, draft_id, patch)
-    except BackendUnreachableError as exc:
-        logger.info(_draft_kept(draft_id))
-        return backend_unreachable_result(exc)
     except PotterError as exc:
         raise SystemExit(f"ERROR: {exc}\n\n{_draft_kept(draft_id)}") from None
     return await _run_origin(held, diag=args.diag)
 
 
-async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
+async def _dispatch_mint(
+    dispatcher: CommandDispatcher, mint: MintCampaignPayload | MintHeadToHeadPayload
+) -> Any:
     try:
-        outcome = await CommandDispatcher(stores, inline=inline).dispatch(CommandCall(mint))
-    except BackendUnreachableError as exc:
-        return backend_unreachable_result(exc)
+        return (await dispatcher.dispatch(CommandCall(mint))).result
     except DatasetAccessError:
         raise SystemExit(
-            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint(stores)
+            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n"
+            + no_dataset_hint(dispatcher.stores)
         ) from None
-    held = held_run(outcome.result)
+
+
+async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
+    held = held_run(await _dispatch_mint(CommandDispatcher(stores, inline=inline), mint))
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)
 
@@ -377,17 +377,7 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
-    try:
-        outcome = await dispatcher.dispatch(CommandCall(payload))
-    except BackendUnreachableError as exc:
-        return backend_unreachable_result(exc)
-    except DatasetAccessError:
-        raise SystemExit(
-            f"ERROR: no dataset named {payload.dataset_name!r}.\n\n" + no_dataset_hint(stores)
-        ) from None
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
-    launched: HeadToHeadLaunched = outcome.result
+    launched: HeadToHeadLaunched = await _dispatch_mint(dispatcher, payload)
     started = launched.started
     for arm in started.arms:
         cycle_dir = stores.campaigns.cycle_dir(arm.hop).absolute()

@@ -352,10 +352,6 @@ class HeadToHead(StrictModel):
 
     rows: list[HeadToHeadRow]
     covers_selection: bool
-    swapped: list[str] = Field(
-        description="The members some arm's optimizer walks and another's does not: what the "
-        "arms' optimizers differ by. Empty where every arm walks one roster, whatever its knobs."
-    )
     guard: PairGuard
     headline: BenchColumn
     verdict: bool | None
@@ -482,7 +478,6 @@ def head_to_head(
             for g in read
         ],
         covers_selection=set(asked) <= {g.row.subject for g in read},
-        swapped=sorted(frozenset().union(*(g.walks for g in read)) - everywhere),
         guard=guard,
         headline=BENCH_HEADLINE,
         verdict=verdict,

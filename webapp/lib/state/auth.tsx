@@ -10,18 +10,19 @@ import {
   type ReactNode,
 } from "react";
 import { ApiError, failureKind, meRead, type MeResponse } from "@/lib/api";
+import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types.generated";
 import { reportIncident } from "@/lib/diagnostics";
 import { clearReadCache, readThrough } from "@/lib/read-cache";
 
 type AuthStatus = "loading" | "authed" | "unauthed";
+export type SignInRefusal = keyof typeof SIGN_IN_REFUSAL_INFO;
 
-// `code` is non-null only after an OIDC callback bounced back with a failure.
 interface AuthPrompt {
   open: boolean;
-  code: string | null;
+  refusal: SignInRefusal | null;
 }
 
-const PROMPT_CLOSED: AuthPrompt = { open: false, code: null };
+const PROMPT_CLOSED: AuthPrompt = { open: false, refusal: null };
 
 interface AuthCtx {
   status: AuthStatus;
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const openAuthPrompt = useCallback(
-    () => setAuthPrompt({ open: true, code: null }),
+    () => setAuthPrompt({ open: true, refusal: null }),
     [],
   );
   const closeAuthPrompt = useCallback(() => setAuthPrompt(PROMPT_CLOSED), []);
@@ -96,7 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const url = new URL(window.location.href);
     const code = url.searchParams.get("auth_error");
     if (!code) return;
-    setAuthPrompt({ open: true, code });
+    // A code the callback never mints opens the prompt without a line.
+    const minted = Object.hasOwn(SIGN_IN_REFUSAL_INFO, code);
+    setAuthPrompt({ open: true, refusal: minted ? (code as SignInRefusal) : null });
     url.searchParams.delete("auth_error");
     window.history.replaceState({}, "", url.toString());
   }, []);

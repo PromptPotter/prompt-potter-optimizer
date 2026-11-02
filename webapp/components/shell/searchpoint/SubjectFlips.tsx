@@ -53,7 +53,7 @@ function FlipSep() {
   );
 }
 
-type Arms = { before: string | null; after: string | null };
+type FlipArms = { before: string | null; after: string | null };
 
 function FlipKeys({
   label,
@@ -64,16 +64,12 @@ function FlipKeys({
   label: string;
   kind: "gained" | "lost";
   keys: string[];
-  arms: Arms;
+  arms: FlipArms;
 }) {
   return (
     <>
       <FlipSep />
-      <HoverCard
-        className="subject-flip-card"
-        content={<FlipList keys={keys} arms={arms} />}
-        focusable
-      >
+      <HoverCard className="subject-flip-card" content={<FlipList keys={keys} arms={arms} />} focusable>
         <span className={cx("subject-flip-line", `is-${kind}`)}>
           <strong>{keys.length}</strong> {label}
         </span>
@@ -87,7 +83,7 @@ function bySlot(cells: readonly CellRow[]): Map<number, CellRow> {
 }
 
 // Mounted only while the card is open, so the two reads cost nothing until a hover asks.
-function FlipList({ keys, arms }: { keys: string[]; arms: Arms }) {
+function FlipList({ keys, arms }: { keys: string[]; arms: FlipArms }) {
   const was = usePresetCells(arms.before ? { candidateId: arms.before, scope: "cycle" } : null);
   const now = usePresetCells(arms.after ? { candidateId: arms.after, scope: "cycle" } : null);
   const item = new Map([...was.items, ...now.items].map((it) => [it.sample_key, it]));

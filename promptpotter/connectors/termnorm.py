@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -11,6 +11,9 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.shared.tls import tls_context
 
+if TYPE_CHECKING:
+    from promptpotter.domain.sample import Sample
+
 logger = logging.getLogger(__name__)
 
 # One match and its resends, a backend outage's wait included.
@@ -18,10 +21,10 @@ _CELL_ENVELOPE_S = 600.0
 
 
 def termnorm_wire_adapter(
-    query: str,
+    sample: Sample,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"query": query}
+    payload: dict[str, Any] = {"query": sample.query}
 
     _pp = pipeline_params or {}
 

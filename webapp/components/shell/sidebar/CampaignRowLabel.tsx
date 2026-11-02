@@ -1,15 +1,19 @@
 "use client";
 import { VendorLogo } from "@/components/ui";
-import type { ListedCampaign } from "@/lib/api";
-import { STATUS_MARK_INFO, type RunStatus } from "@/lib/api/types.generated";
+import type { HierarchyCampaign, HierarchyCourse, ListedCampaign } from "@/lib/api";
+import { STATUS_MARK_INFO } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import { fmtAgo } from "@/lib/format";
-import { billText, roundsText, runWord, tagLabel } from "@/lib/derivations";
+import { figureOf, tagLabel } from "@/lib/derivations";
 
-export function PhaseMark({ status }: { status: RunStatus }) {
-  const mark = STATUS_MARK_INFO[status.mark];
+export function PhaseMark({ entry }: { entry: HierarchyCampaign | HierarchyCourse }) {
+  const mark = STATUS_MARK_INFO[entry.state.status.mark];
   return (
-    <span className={`unit-library-mark tone-${mark.tone}`} role="img" aria-label={runWord(status)}>
+    <span
+      className={`unit-library-mark tone-${mark.tone}`}
+      role="img"
+      aria-label={figureOf(entry, "state")?.value ?? undefined}
+    >
       {mark.glyph}
     </span>
   );
@@ -19,10 +23,8 @@ export function CampaignRowLabel({ campaign }: { campaign: ListedCampaign }) {
   const vendors = campaign.tags.filter((t) => t.kind === "vendor");
   const started = campaign.level === "campaign" ? campaign : null;
   // An unstarted campaign has no run: its lifecycle word stands where the rounds would.
-  const line = started?.facts.line_course ?? null;
   const rounds =
-    started === null ? tagLabel(campaign, "lifecycle") : line === null ? null : roundsText(line);
-  const spent = campaign.facts.spend_lifetime;
+    started === null ? tagLabel(campaign, "lifecycle") : figureOf(started, "rounds")?.value;
   const sub = [rounds, fmtAgo(campaign.span.last_at)].filter(Boolean).join(" · ");
   return (
     <span className="unit-library-row">
@@ -37,8 +39,8 @@ export function CampaignRowLabel({ campaign }: { campaign: ListedCampaign }) {
         <span className="unit-library-name-head">{campaign.label}</span>
       </span>
       <span className="unit-library-meta unit-library-meta-marked">
-        {started && <PhaseMark status={started.state.status} />}
-        <span className="unit-library-spend">{billText(spent.billed_usd, spent.bill_is_floor)}</span>
+        {started && <PhaseMark entry={started} />}
+        <span className="unit-library-spend">{figureOf(campaign, "spend_lifetime")?.value}</span>
       </span>
       {sub && (
         <span

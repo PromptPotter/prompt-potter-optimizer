@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -30,18 +31,19 @@ def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
 def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
     prefix: list[tuple[Path, int]] = []
     child_dir = Path(cycle_dir)
-    # By resolved dir: two trees can hold the same cycle id.
-    seen = {child_dir.resolve()}
+    # By dir, never id: two trees can hold the same cycle id. A mint names its parent off the
+    # child's own path, so the spelling alone is compared, with no filesystem call per hop.
+    seen = {os.path.normcase(os.path.abspath(child_dir))}
     while (link := _fork_link(child_dir)) is not None:
         minted, parent_dir = link
         cut = minted.forked_at_offset
         assert cut is not None
-        if parent_dir.resolve() in seen:
+        if (spelled := os.path.normcase(os.path.abspath(parent_dir))) in seen:
             raise ValueError(
                 f"{child_dir}: parent {parent_dir} is already on this fork chain — "
                 "the mints describe a cycle, which no walk can resolve."
             )
-        seen.add(parent_dir.resolve())
+        seen.add(spelled)
         child_dir = parent_dir
         prefix.append((CycleLayout(child_dir).ledger, cut))
     return prefix[::-1]

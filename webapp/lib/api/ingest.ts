@@ -1,6 +1,6 @@
 import { API, send, toApiError } from "./client";
 import { mintIdempotencyKey } from "./errors";
-import type { DraftCampaignWire, DraftReopenResponse } from "./types";
+import type { DraftCampaignWire } from "./types";
 
 export async function postIngestDataset(
   file: File,
@@ -61,9 +61,4 @@ export async function postDraftFromOrigin(originId: string): Promise<DraftCampai
   });
   if (!r.ok) throw await toApiError(r);
   return (await r.json()) as DraftCampaignWire;
-}
-export async function getDraft(draftId: string): Promise<DraftReopenResponse> {
-  const r = await send(`${API}/drafts/${encodeURIComponent(draftId)}`);
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as DraftReopenResponse;
 }

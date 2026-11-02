@@ -115,7 +115,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const onFreeHierarchy = useCallback(
     (course: HierarchyCourse) => {
       revealLane(course.address);
-      navigate(pathOfAddress(course.address));
+      navigate({ path: pathOfAddress(course.address) });
     },
     [revealLane, navigate],
   );

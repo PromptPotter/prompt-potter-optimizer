@@ -9,14 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-
-export type MessageTone = "plain" | "warning" | "error";
+import type { Tone } from "@/lib/api/types.generated";
 
 export interface MessageItem {
   id: string;
   kind: "message";
   role: "user" | "assistant";
-  tone: MessageTone;
+  tone: Tone;
   text: string;
 }
 

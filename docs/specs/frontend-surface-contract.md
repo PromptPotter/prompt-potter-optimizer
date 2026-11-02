@@ -106,7 +106,7 @@ invariants:
                       server-owned answer: GET /campaigns/{id}/pipeline?at=<subject>, resolved by
                       application/pipeline_resolve.py::resolve_pipeline_for_campaign. A check-in
                       draft takes its sibling (resolve_pipeline_for_draft), carried on the draft
-                      response, so StaticConnectorProvider and `CampaignFacts.runs_with`
+                      response, so ConnectorProvider's `draft` and `CampaignFacts.runs_with`
                       (campaign_runs_with) are TRANSPORTS of one answer, never sources a row may
                       re-merge or diff. The browser never joins a VALUE from one store onto a
                       SCHEMA from another. Every param carries a served `source`
@@ -144,6 +144,11 @@ invariants:
                       and its members'' `round_facts` (optimizers/nodes.py), its eliminator''s
                       `Elimination.reason` (domain/arms.py::arm_elimination) and its
                       manifest''s node `description`s — rendered as served.'
+  I12_progressive_reveal: 'A view reads at a GLANCE, its PANE and its DETAIL (its keyed view). The
+                      glance is a served `Said` row named by `shell/families.tsx::FAMILIES[f].glance`;
+                      a missing row is composed in `application/hierarchy.py`, never in the browser.
+                      Open views are columns, newest first, that a phone swipes and a wide screen
+                      shows side by side.'
 ```
 
 ## The served hierarchy
@@ -152,17 +157,17 @@ invariants:
 `domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
 `GET /hierarchy` (the webapp's `lib/state/registry.tsx`, the `cycles` verb), discriminated on `level`.
 A level a row or a card renders — campaign, course, candidate — wears the envelope (`label`,
-`caveat`, `tags`) over its typed `facts`; a round and a step are nodes (`address`, `parent`,
+`tags`, `figures`, `lines`) over its typed `facts`; a round and a step are nodes (`address`, `parent`,
 `facts`), since an envelope nothing renders is an empty field on every poll and every generated
 type. A level that gains a row moves under `_HierarchyEntry`. A `facts` field no reader names is
 deleted (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). The address grammar is
 [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address.
 
-- **An entry serves facts, never a worded restatement of them**: a row's numbers are
-  `lib/derivations/hierarchy.ts::entryFigures` over `facts`, its words an exported `*_INFO` /
-  `*_WORDS` table keyed by a served enum (`CANDIDATE_STANDING_INFO`, `ROUNDS_CAP_WORDS`).
-  Grouping, filtering on a tag and formatting are layout; deriving a state survives nowhere in
-  `webapp/lib/derivations`.
+- **Facts for code, said rows for people** (`domain/said.py::Said`): an entry's `figures` and
+  `lines` are composed once in `application/hierarchy.py`, and every medium — the `cycles` verb, a row, a card,
+  the masthead — renders them as served, keyed by `key`. Grouping and filtering on a tag are
+  layout; deriving a state survives nowhere in `webapp/lib/derivations`.
+  <!-- probe: git grep -cE "entryFigures|mastheadFigures|runWord|livesLabel" -- webapp == 0 -->
   <!-- probe: git grep -cE "HierarchyStat\b|BenchStat\b|StatKey|stats: list" -- promptpotter == 0 -->
   <!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
 - **One declared tag exception, `mint`**: code branches on a course's kind exhaustively and a tag's
@@ -174,14 +179,14 @@ deleted (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). Th
   <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 -->
   <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 -->
 - **A run's word is the course's; the dashboard read is run CONTROL.** `state.status` (phase,
-  stop reason, mark — worded by `run-phase.ts::runWord` / `runNextStep`) rides the course entry alone (`lib/lineage.tsx::useViewedCourse`), built off the HEAD index under
+  stop reason, mark — worded by its `state` figure) rides the course entry alone (`lib/lineage.tsx::useViewedCourse`), built off the HEAD index under
   any moment or mask, so it is one value everywhere. `ServedDashboard` does not declare it; it keeps
   what control acts on and only the head measures — `run_phase`, `admission`, `pause`, the clocked
   producer, spend, limits, the walk. Read under a lens, a sample set or a moment, every course
-  carries a `caveat` naming which (`hierarchy_subtree.py::_read_under`). The listing serves
+  carries a line naming which (`hierarchy_subtree.py::_read_under`). The listing serves
   `attached` and no clock: it answers 304 between writes, so a seconds count would freeze.
-- **A campaign is always served**: one whose line course has no `CycleIndex` yet lists with its
-  `caveat` saying so, never dropped.
+- **A campaign is always served**: one whose line course has no `CycleIndex` yet lists with a line
+  saying so, never dropped.
 - **One poll**, over every lifecycle; the sidebar's filter is layout over `facts.lifecycle`.
   <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/state/registry.tsx == 1 -->
 - **The genealogy is the same entry, read deep** — `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`,

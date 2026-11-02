@@ -126,17 +126,25 @@ function onBeat(): void {
   }
 }
 
-// Unnamed, a one-shot read re-asks only where a validator makes that free and identity-stable.
-function revalidates(watch: ReadWatch): boolean {
-  return watch.intervalMs !== null || entries.get(watch.id)?.validator != null;
+// A flight in the air was asked before the change, so the re-ask flies fresh rather than joining it.
+function reask(due: ReadWatch[]): void {
+  for (const watch of due) flights.delete(watch.id);
+  for (const watch of due) watch.fire();
 }
 
+// A change re-asks every mounted read it names, or every one, hidden tab or not: none may stand stale.
 export function invalidateReads(name?: string): void {
+  reask([...watches.keys()].filter((watch) => name === undefined || readName(watch.id) === name));
+}
+
+// On return, a one-shot read is re-asked only where a validator makes that free and identity-stable.
+function revalidateReads(): void {
   if (hidden()) return;
-  for (const watch of [...watches.keys()]) {
-    if (name !== undefined ? readName(watch.id) !== name : !revalidates(watch)) continue;
-    watch.fire();
-  }
+  reask(
+    [...watches.keys()].filter(
+      (watch) => watch.intervalMs !== null || entries.get(watch.id)?.validator != null,
+    ),
+  );
 }
 
 function syncBeat(): void {
@@ -153,9 +161,9 @@ function listen(): void {
   listening = true;
   document.addEventListener("visibilitychange", () => {
     syncBeat();
-    invalidateReads();
+    revalidateReads();
   });
-  window.addEventListener("focus", () => invalidateReads());
+  window.addEventListener("focus", revalidateReads);
 }
 
 // The caller issues its own first read; the clock only re-asks.

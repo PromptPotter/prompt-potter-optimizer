@@ -1,53 +1,43 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Said } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { entryFigures, runWord } from "@/lib/derivations";
 import type { HierarchyEntry, UnstartedCampaign } from "@/lib/api";
+import { Figure, FigureRow } from "./FigureRow";
 
+// An entry's served lines under its title, then its figures.
 export function SummaryBlock({
-  facts,
+  entry,
   dense = false,
-  lede,
   actions,
 }: {
-  facts: HierarchyEntry | UnstartedCampaign;
+  entry: HierarchyEntry | UnstartedCampaign;
   dense?: boolean;
-  lede?: ReactNode;
   actions?: ReactNode;
 }) {
-  const state = "state" in facts ? runWord(facts.state.status) : null;
-  const figures = entryFigures(facts);
   return (
     <div className={cx("summary-block", dense && "is-dense")}>
       <header className="summary-block-head">
         <div className="summary-block-titleline">
-          <span className="summary-block-title">{facts.label}</span>
-          {facts.tags.map((t) => (
+          <span className="summary-block-title">{entry.label}</span>
+          {entry.tags.map((t) => (
             <span key={`${t.kind}:${t.value}`} className="summary-block-tag">
               {t.label}
             </span>
           ))}
-          {state && <span className="summary-block-state">{state}</span>}
         </div>
         {actions}
       </header>
-      {lede}
-      {figures.length > 0 && (
-        <dl className="summary-block-stats">
-          {figures.map((s) => (
-            <div key={s.key} className="summary-block-stat">
-              <dt>{s.label}</dt>
-              <dd className="summary-block-stat-value">{s.value}</dd>
-              {/* Clamped: a served reason can be a provider's whole error; `title` repeats it whole. */}
-              {s.sub && (
-                <dd className="summary-block-stat-sub" title={s.sub}>
-                  {s.sub}
-                </dd>
-              )}
-            </div>
+      {entry.lines.map((row) => (
+        <Said key={row.key} tone={row.tone} label={row.label} sub={row.sub} detail={row.detail} />
+      ))}
+      {entry.figures.length > 0 && (
+        <FigureRow>
+          {entry.figures.map((row) => (
+            <Figure key={row.key} row={row} />
           ))}
-        </dl>
+        </FigureRow>
       )}
     </div>
   );

@@ -8,20 +8,19 @@ import { useIngest } from "@/lib/ingest-flow";
 import { useSidebarCollapsed } from "@/lib/prefs/sidebar";
 import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
-import { Term } from "@/components/ui";
+import { Icon, Term } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
 import { AccountSpend } from "./AccountSpend";
 import { SidebarContent } from "./SidebarContent";
-import { ViewGlyph } from "@/components/shell/ViewTabs";
-import { WORKSPACE_TABS, tabLabel } from "@/lib/view-tab";
+import { FAMILIES } from "@/components/shell/families";
 
 function flipTheme() {
   applyTheme(readStoredTheme() === "light" ? "dark" : "light");
 }
 
 export function Sidebar() {
-  const { tab, openView: onOpenView, openAccount } = useWorkspace();
+  const { views, open } = useWorkspace();
   const { compose: onNewCycle } = useIngest();
   const [collapsed, onToggleCollapse] = useSidebarCollapsed();
 
@@ -66,18 +65,17 @@ export function Sidebar() {
           + New campaign
         </button>
         <div className="sidebar-views">
-          {WORKSPACE_TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              className="sidebar-view"
-              aria-current={tab === t ? "page" : undefined}
-              onClick={() => onOpenView(t)}
-            >
-              <ViewGlyph tab={t} />
-              {tabLabel(t)}
-            </button>
-          ))}
+          <button
+            type="button"
+            className="sidebar-view"
+            aria-current={views.some((v) => v.family === "compare") ? "page" : undefined}
+            onClick={() => open("compare")}
+          >
+            <Icon size={16} viewBox="0 0 16 16" strokeWidth={1.3}>
+              <path d="M4 13V7M8 13V3M12 13V9M2 13h12" />
+            </Icon>
+            {FAMILIES.compare.label}
+          </button>
         </div>
       </div>
       <SidebarContent />
@@ -116,7 +114,7 @@ export function Sidebar() {
               type="button"
               className="account-trigger"
               aria-label="Open account"
-              onClick={() => openAccount()}
+              onClick={() => open("account")}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
                 <circle cx="8" cy="5.5" r="2.5" />

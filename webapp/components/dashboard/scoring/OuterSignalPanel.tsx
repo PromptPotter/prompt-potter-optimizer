@@ -4,12 +4,18 @@ import { memo, useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import type { RoundAdvance, ServedRound } from "@/lib/api/types";
 import { PRECISION_VERDICT_ADVICE, ROUND_ADVANCE_INFO } from "@/lib/api/types.generated";
-import { CardFrame, Badge, Empty, Term } from "@/components/ui";
+import {
+  CardFrame,
+  Badge,
+  Empty,
+  IntervalRow,
+  intervalDomain,
+  Term,
+  type IntervalDomain,
+} from "@/components/ui";
+import { cx } from "@/lib/cx";
 import { liftOf, type LiftSide } from "@/lib/derivations";
-import { fmtInterval, fmtLogits, fmtUnit } from "@/lib/format";
-
-const AXIS_W = 220;
-const ROW_H = 18;
+import { fmtInterval, fmtLogits, fmtUnit, sideTone } from "@/lib/format";
 
 type Lift = {
   round: number;
@@ -47,46 +53,26 @@ function AdvanceBadge({ advance }: { advance: RoundAdvance }) {
   const { label, sentence } = ROUND_ADVANCE_INFO[advance];
   return (
     <Term content={sentence}>
-      <Badge tone={advance === "advanced" ? "success" : "accent"}>{label}</Badge>
+      <Badge tone={advance === "advanced" ? "success" : "attention"}>{label}</Badge>
     </Term>
   );
 }
 
-const STROKE: Record<LiftSide, string> = {
-  above: "var(--color-success)",
-  below: "var(--color-danger)",
-  spans: "var(--color-text-secondary)",
-};
-
-function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
-  const stroke = STROKE[d.side];
+function LiftRow({ d, domain, latest }: { d: Lift; domain: IntervalDomain; latest: boolean }) {
   const value = `${fmtUnit("delta", d.lift)} ${fmtInterval("delta", d.lo, d.hi)}`;
   return (
-    <div className="ov-row">
-      <span className="ov-cell-label" title={`${d.label} — round ${d.round}`}>
-        r{d.round}
-      </span>
-      <svg
-        className="ov-axis"
-        width={AXIS_W}
-        height={ROW_H}
-        viewBox={`0 0 ${AXIS_W} ${ROW_H}`}
-        role="img"
-        aria-label={`Round ${d.round}: ${value}, ${ROUND_ADVANCE_INFO[d.advance].label}`}
-      >
-        <line x1={x(0)} y1={2} x2={x(0)} y2={ROW_H - 2} stroke="var(--color-border)" strokeWidth={1} />
-        <line
-          x1={x(d.lo)}
-          y1={ROW_H / 2}
-          x2={x(d.hi)}
-          y2={ROW_H / 2}
-          stroke={stroke}
-          strokeWidth={1.5}
-        />
-        <circle cx={x(d.lift)} cy={ROW_H / 2} r={3.5} fill={stroke} />
-      </svg>
-      <span className="ov-cell-val">{value}</span>
-    </div>
+    <IntervalRow
+      className={cx(sideTone(d.side), latest && "ov-latest")}
+      label={`r${d.round}`}
+      title={`${d.label} — round ${d.round}`}
+      value={value}
+      domain={domain}
+      point={d.lift}
+      lo={d.lo}
+      hi={d.hi}
+      reference={0}
+      ariaLabel={`Round ${d.round}: ${value}, ${ROUND_ADVANCE_INFO[d.advance].label}`}
+    />
   );
 }
 
@@ -95,15 +81,11 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   const rounds = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
   const lifts = useMemo(() => liftsOf(rounds), [rounds]);
 
-  // ONE axis across rounds: per-round auto-scaling hides the tightening.
-  const x = useMemo(() => {
-    const vals = [0, ...lifts.flatMap((d) => [d.lo, d.hi])];
-    const lo = Math.min(...vals);
-    const hi = Math.max(...vals);
-    const pad = (hi - lo || 1) * 0.1;
-    const [d0, d1] = [lo - pad, hi + pad];
-    return (v: number) => 4 + ((v - d0) / (d1 - d0)) * (AXIS_W - 8);
-  }, [lifts]);
+  // ONE axis across rounds, zero on it: per-round auto-scaling hides the tightening.
+  const domain = useMemo(
+    () => intervalDomain([0, ...lifts.flatMap((d) => [d.lo, d.hi])]),
+    [lifts],
+  );
 
   const latest = lifts.length ? lifts[lifts.length - 1] : null;
   const precise = useMemo(
@@ -118,7 +100,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
 
   return (
     <CardFrame title="Outer signal" headingTag="h2" span="full">
-      {!latest ? (
+      {!latest || domain === null ? (
         <Empty>
           No round&apos;s pick was read against the origin on the origin panel, so no interval can be
           drawn.
@@ -132,7 +114,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
           </p>
           <div className="ov-forest">
             {lifts.map((d) => (
-              <LiftRow key={d.round} d={d} x={x} />
+              <LiftRow key={d.round} d={d} domain={domain} latest={d === latest} />
             ))}
           </div>
           {precision ? (

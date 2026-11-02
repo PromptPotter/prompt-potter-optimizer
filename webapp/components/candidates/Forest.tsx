@@ -1,11 +1,12 @@
 "use client";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { fmtUnit } from "@/lib/format";
+import { useWidth } from "@/lib/hooks/useWidth";
 import type { DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
-import { fmtPaired, livesBar, runWord, tagValue } from "@/lib/derivations";
+import { figureOf, tagValue } from "@/lib/derivations";
 import type { CourseKind, CourseSpawn, HierarchyCourse, SubtreeCampaign } from "@/lib/api";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
@@ -16,7 +17,9 @@ import {
   LANE_H,
   NODE_R,
   TOP_PAD,
+  densityFor,
   extentKeys,
+  forestWidth,
   layout,
   placeNodes,
   type CladogramAnchor,
@@ -177,7 +180,6 @@ export function Forest({
   expanded,
   onLaneActivate,
   ctx,
-  d,
 }: {
   tree: SubtreeCampaign;
   valueByKey: ReadonlyMap<string, number | null>;
@@ -186,8 +188,9 @@ export function Forest({
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
   ctx: CladogramCtx;
-  d: Density;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const boxW = useWidth(boxRef);
   const { viewedKey, isPicked, onPickCandidate, channels, clip } = ctx;
   const valOf = (n: RoundNodePos): number | null =>
     valueByKey.get(n.candKey) ?? null;
@@ -197,6 +200,7 @@ export function Forest({
     () => layout(tree, expanded, clip && extentKeys(tree, clip)),
     [tree, expanded, clip],
   );
+  const d = densityFor(maxCol, boxW);
   const { nodes, segs } = useMemo(() => placeNodes(laneByKey, d), [laneByKey, d]);
   const extents = useMemo(
     () =>
@@ -223,7 +227,7 @@ export function Forest({
     [nodes],
   );
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
-  const width = d.leftPad + (maxCol + 1) * d.colW + d.rightPad;
+  const width = forestWidth(d, maxCol);
 
   const headerCols = Array.from({ length: maxCol }, (_, i) => i + 1);
 
@@ -232,7 +236,7 @@ export function Forest({
   const bandH = (l: LaneLayout): number => l.laneSpan * LANE_H - 4;
 
   return (
-    <div className="family-cladogram-forest">
+    <div ref={boxRef} className="family-cladogram-forest">
         <svg
           width={width}
           height={height}
@@ -295,7 +299,8 @@ export function Forest({
           {/* Painted before the nodes so their clicks win. */}
           {laneList.map((l) => {
             const course = l.course;
-            const { spawn, standing } = course.facts;
+            const { spawn } = course.facts;
+            const selection = figureOf(course, "selection");
             const isEmpty = l.candidates.length === 0;
             const roundCount = new Set(l.candidates.map((c) => c.facts.reading.arm.round)).size;
             const verb = l.expanded ? "Collapse" : "Expand";
@@ -324,10 +329,8 @@ export function Forest({
                   {spawn?.direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {` · ${runWord(course.state.status)}`}
-                  {standing?.selection
-                    ? ` · selection ${standing.selection.label} ${fmtPaired(standing.vs_origin, "rates")}`
-                    : ""}
+                  {` · ${figureOf(course, "state")?.value}`}
+                  {selection ? ` · ${selection.label}: ${selection.value}` : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"
                     : `\n${roundCount} round(s) · click row to ${l.expanded ? "collapse" : "expand"}`}
@@ -344,9 +347,8 @@ export function Forest({
               const nodeCycleId = pathLeaf(n.coursePath).cycleId;
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
-              // Inside an <svg>, so `<Hearts>` can't mount; the bar is the same pips as text.
-              const lives = layoutEntry?.course.facts.standing?.lives ?? null;
-              const laneHearts = lives === null ? "" : livesBar(lives);
+              // Inside an <svg>, so `<Hearts>` can't mount; the served figure is the same pips as text.
+              const laneHearts = figureOf(layoutEntry?.course ?? null, "lives")?.value;
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);

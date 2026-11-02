@@ -2065,7 +2065,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         "the overlay's locus is missing from the variation that proposed it"
     )
     payload = promptpotter_wire_adapter(
-        "justlogic-d234/seed-0", proposals[0].individual.pipeline_params
+        Sample(id=0, query="justlogic-d234/seed-0", ground_truth=None),
+        proposals[0].individual.pipeline_params,
     )
     with binding_prompt_overrides(payload["optimizer_prompt_overrides"]):
         capo_seat = seat(built_stores, optimization={"optimizer": "capo"})

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import Field, JsonValue
 
@@ -11,6 +11,11 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 # Ranks what the operator READS only: the engine's scoring order is `build_round_order`.
 HardSampleOrder = Literal["info_gain", "difficulty"]
+HARD_SAMPLE_ORDER_LABELS: dict[HardSampleOrder, str] = {
+    "info_gain": "Info gain",
+    "difficulty": "Hardness",
+}
+assert HARD_SAMPLE_ORDER_LABELS.keys() == set(get_args(HardSampleOrder))
 
 # How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
 # its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.
@@ -64,6 +69,12 @@ class PinnedCell(FrozenModel):
 
 # The tier stops at dataset: samples differ per dataset, so a workspace scope would mean nothing.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
+HEATMAP_SCOPE_LABELS: dict[HeatmapScope, str] = {
+    "cycle": "This cycle",
+    "campaign": "This campaign",
+    "dataset": "All campaigns",
+}
+assert HEATMAP_SCOPE_LABELS.keys() == set(get_args(HeatmapScope))
 
 
 class SampleDifficulty(StrictModel):
@@ -177,13 +188,6 @@ class CellRow(StrictModel):
     )
     cached: bool = False
     predicted: str = Field(default="", description="Trimmed for display.")
-    seconds: float | None = Field(
-        default=None,
-        description="What producing the cell cost (`MeasuredCell.cost_s`) — the half that survives "
-        "a cache replay. Null where no timing was recorded.",
-    )
-    input_tokens: int | None = None
-    output_tokens: int | None = None
 
 
 class CellSpan(StrictModel):
@@ -248,6 +252,9 @@ class Cell(StrictModel):
     error: str | None = None
     terminal_node: str | None = None
     seconds: float | None = None
+    cached: bool = Field(
+        default=False, description="Replayed: the archive answered, so no provider was reached."
+    )
     spans: list[CellSpan] = Field(
         default_factory=list, description="One per pipeline node, in chain order."
     )

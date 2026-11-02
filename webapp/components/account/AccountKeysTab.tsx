@@ -9,7 +9,7 @@ import {
   type AccountKey,
   type CouponStatus,
 } from "@/lib/api";
-import { couponLeftText } from "@/lib/derivations";
+import { COUPON_STATE_INFO } from "@/lib/api/types.generated";
 import { fmtAgo } from "@/lib/format";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
@@ -33,19 +33,6 @@ function refusal(f: CommandFailure): string | null {
     : null;
 }
 
-function keysLede(c: CouponStatus): string {
-  if (c.host) {
-    return "This account runs the box, so the box's own keys send for it unmetered. A key here sends instead of the box's for its provider.";
-  }
-  if (c.void) {
-    return "The host's allowance is retired while this account holds a key: a provider with no key here cannot send.";
-  }
-  if (c.exhausted) {
-    return "The host's allowance is used up. Add a key for a provider and your runs send on it again, billed to you.";
-  }
-  return `Host allowance: ${couponLeftText(c)}. A key here sends instead of the host's for its provider, billed to you, and never draws the allowance.`;
-}
-
 export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
   // No blanket revalidate: the write re-asks the one read carrying the keys.
   const cmd = useCommand<KeyVerb>("account-keys", { describe: refusal, revalidate: false });
@@ -66,7 +53,7 @@ export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
     );
 
   return (
-    <AccountSection title="Your provider keys" lede={keysLede(coupon)}>
+    <AccountSection title="Your provider keys" lede={COUPON_STATE_INFO[coupon.state].lede}>
       {coupon.providers.length === 0 ? (
         <Empty>This server names no provider a key could be held for.</Empty>
       ) : (

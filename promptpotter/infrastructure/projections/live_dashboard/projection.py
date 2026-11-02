@@ -29,7 +29,7 @@ from promptpotter.domain.phases import (
     RunPhase,
 )
 from promptpotter.domain.results_health import is_degraded
-from promptpotter.domain.round_audit import LoopWarning, NodeBlock
+from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
     ArmRecord,
@@ -49,7 +49,6 @@ from promptpotter.domain.run_records import (
     RoundEnteredRecord,
     RoundRestatedRecord,
     RoundStatement,
-    RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
     SampleScoredRecord,
@@ -57,7 +56,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
+from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, spend_slot
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
@@ -71,7 +70,6 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     CatchUpLogEntry,
     CurrentRound,
-    DashboardError,
     LiveDashboardState,
     WaitingOn,
 )
@@ -103,7 +101,6 @@ _AT_ONCE: frozenset[type[CycleRecord]] = frozenset(
         RoundRestatedRecord,
         PhaseRecord,
         ElectionRecord,
-        RoundWarningRecord,
     }
 )
 
@@ -196,6 +193,9 @@ class LiveDashboardProjection(Projection):
             self.state.stop_reason = record.stop_reason
             self._set_state(DashboardState.STOPPED)
             self.state.measuring_arm = None
+        else:
+            # A run declared again is past its failed stop, as `ledger_scan.py::CycleFacts` folds it.
+            self.state.error = None
 
     def _handle_backend_warning(self, record: BackendWarningRecord) -> None:
         self.state.backend_retry_count += 1
@@ -357,7 +357,6 @@ class LiveDashboardProjection(Projection):
             return r
         return r.model_copy(
             update={
-                "bench": reading,
                 "candidates": [
                     c.model_copy(
                         update={"reading": c.reading.model_copy(update={"bench": reading})}
@@ -437,20 +436,17 @@ class LiveDashboardProjection(Projection):
 
     def _absorb_sample_scored(self, facts: MeasuredCell, *, last_in_candidate: bool) -> None:
         s = self.state
-        query_time = facts.elapsed_s
 
         # The second arm is not redundant: `pipeline.error` is the BACKEND faulting a row PP classified clean.
         if facts.errored or facts.pipeline.error:
             s.error_count += 1
 
-        s.total_queries_scored += 1
         if not facts.cached:
             s.total_backend_calls += 1
             if is_degraded(facts):
                 s.degraded_count += 1
 
         self._refresh_open_sample_markers()
-        s.last_query_elapsed_s = None if query_time is None else round(query_time, 2)
         if not self._in_pass:
             self._set_state(
                 DashboardState.BETWEEN_CANDIDATES
@@ -478,20 +474,7 @@ class LiveDashboardProjection(Projection):
             self._in_flight = None
 
     def _handle_error(self, record: ErrorRecord) -> None:
-        self.state.error = DashboardError(
-            kind=record.kind, message=record.message, stop_reason=record.stop_reason
-        )
-
-    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        warning = LoopWarning(
-            ts=record.timestamp,
-            kind=record.kind,
-            severity=record.severity,
-            message=record.message,
-            round=record.round,
-            detail=dict(record.detail),
-        )
-        self.state.recent_loop_warnings = [*self.state.recent_loop_warnings, warning][-10:]
+        self.state.error = record
 
     def _append_catch_up(self, entry: CatchUpLogEntry) -> None:
         self.state.catch_up_log = [*self.state.catch_up_log, entry][-256:]
@@ -554,11 +537,6 @@ class LiveDashboardProjection(Projection):
             measuring=measuring,
             inner=self._inner,
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
-            fitness_bands=fitness_bands(
-                GradedCell.of(w.facts, w.grade)
-                for walked in self._buffer.samples.values()
-                for w in walked
-            ),
             nodes=self._current_round_nodes(),
             racing=build_racing_block(self._buffer),
         )

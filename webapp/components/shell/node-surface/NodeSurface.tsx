@@ -13,7 +13,7 @@ import {
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
 import type { PipelineViewNode } from "@/lib/types";
-import type { NodeScope } from "@/lib/SelectionContext";
+import type { NodeScope } from "@/lib/address";
 import { PromptWithLibrary } from "./PromptWithLibrary";
 import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";
 import { SchemaTreeEditor } from "./SchemaTreeEditor";

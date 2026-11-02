@@ -31,11 +31,11 @@ BASELINE = {
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 96,
     # `Settings` fields — what the environment can set.
-    "settings_env": 42,
+    "settings_env": 46,
     # Parameters annotated `Any`.
     "any_params": 43,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 65,
+    "domain_any_maps": 67,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 9,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
@@ -51,7 +51,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 177,
+    "p_served": 184,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.
@@ -64,7 +64,7 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 25,
+    "test_functions": 26,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

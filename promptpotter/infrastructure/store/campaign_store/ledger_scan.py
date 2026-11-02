@@ -182,7 +182,7 @@ class CycleFacts(NamedTuple):
     paused: RunPhaseRecord | None = None
     final: CycleFinalRecord | None = None
     superseded_by: str | None = None
-    crash_traceback: str | None = None
+    error: ErrorRecord | None = None
     direction: ForkDirection | None = None
     interventions: tuple[InterventionRecord, ...] = ()
     spawned_by: SpawnedBy | None = None
@@ -241,10 +241,10 @@ class _CycleFacts:
                     paused=record if record.run_phase is RunPhase.PAUSED else None,
                     final=None,
                     superseded_by=None,
-                    crash_traceback=None,
+                    error=None,
                 )
             case ErrorRecord():
-                held = held._replace(crash_traceback=record.traceback)
+                held = held._replace(error=record)
             case CycleFinalRecord():
                 held = held._replace(final=record)
             case CycleSupersededRecord():
@@ -745,19 +745,24 @@ class _Spend:
         self._by_round: dict[int, SpendRollup] = {}
         self._calls = 0
         self._worked_s = 0.0
+        # A copy, since the next feed banks into the live rollups; one per feed, not per read.
+        self._view: _RoundSpend | None = None
 
     def feed(self, usage: TokenUsageRecord) -> None:
+        self._view = None
         spend_slot(self._by_round, usage.spend_round, SpendRollup).bank(usage)
         if not usage.cached:
             self._calls += 1
             self._worked_s += usage.duration_s
 
     def value(self) -> _RoundSpend:
-        return _RoundSpend(
-            {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
-            self._calls,
-            self._worked_s,
-        )
+        if self._view is None:
+            self._view = _RoundSpend(
+                {n: held.model_copy(deep=True) for n, held in self._by_round.items()},
+                self._calls,
+                self._worked_s,
+            )
+        return self._view
 
 
 class _Metered:
@@ -794,6 +799,22 @@ class _Bench:
 
     def value(self) -> list[BenchGradedView]:
         return list(self._graded)
+
+
+class _BenchOpen:
+    """A bench pass's bracket: entered and not yet exited, the dashboard's running bench mark."""
+
+    records: ClassVar[RecordClasses] = (PhaseRecord,)
+
+    def __init__(self) -> None:
+        self._open = False
+
+    def feed(self, record: PhaseRecord) -> None:
+        if record.phase == CampaignPhase.BENCH and record.event in ("enter", "exit"):
+            self._open = record.event == "enter"
+
+    def value(self) -> bool:
+        return self._open
 
 
 class _PricedKeys:
@@ -883,6 +904,7 @@ LEDGER_FOLDS = (
     _Spend,
     _Metered,
     _Bench,
+    _BenchOpen,
     _PricedKeys,
     _Timeline,
 )
@@ -977,6 +999,11 @@ def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, ArmKey],
         for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Bench, span.until)
         if view.reading is not None
     }
+
+
+def scan_bench_open(ledger_path: Path) -> bool:
+    """Own ledger only."""
+    return _view(ledger_path, _BenchOpen)
 
 
 PROGRESS_FOLDS = (_Progress,)

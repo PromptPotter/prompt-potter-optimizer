@@ -9,8 +9,9 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
-from promptpotter.application.served_dashboard import binding_run_limits
-from promptpotter.domain.bench import BenchScore
+from promptpotter.application.served_dashboard import binding_run_limits, run_said
+from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO, ArmReading, level_text
+from promptpotter.domain.bench import BENCH_STATE_INFO, BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
     Campaign,
@@ -20,7 +21,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_index import CycleIndex
+from promptpotter.domain.cycle_index import STATUS_MARK_INFO, CycleIndex, RunStatus
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
@@ -29,10 +30,14 @@ from promptpotter.domain.cycle_paths import (
     hierarchy_address,
 )
 from promptpotter.domain.hierarchy import (
+    CANDIDATE_STANDING_INFO,
     CampaignFacts,
+    CandidateStanding,
     CourseFacts,
     CourseKind,
     CourseSpawn,
+    Figure,
+    FigureKey,
     HierarchyCampaign,
     HierarchyCourse,
     HierarchyResponse,
@@ -43,7 +48,10 @@ from promptpotter.domain.hierarchy import (
     UnstartedCampaign,
     UnstartedFacts,
 )
-from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
+from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading, ReadingState
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO
+from promptpotter.domain.said import Said
+from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import billed_spend, campaign_spend
@@ -68,6 +76,167 @@ def _course_label(mint: CourseKind, cycle_id: str) -> str:
     return f"{_MINT_WORDS[mint]} ·{cycle_id.rpartition('_')[2][:6]}"
 
 
+def _usd(amount: float) -> str:
+    return f"${amount:.4f}" if amount < 1 else f"${amount:.2f}"
+
+
+def _figure(key: FigureKey, label: str, value: str, sub: str | None = None) -> Figure:
+    return Figure(key=key, tone="quiet", label=label, value=value, sub=sub)
+
+
+def caveat_row(key: str, label: str, detail: str | None = None) -> Said:
+    """What an entry could not read, among its lines."""
+    return Said(key=key, tone="warn", label=label, detail=detail)
+
+
+def _rounds_row(closed: int, cap: int | None) -> Figure:
+    value = (
+        "origin only"
+        if cap == 0
+        else f"{closed} · no rounds axis"
+        if cap is None
+        else f"{closed} of {cap}"
+    )
+    return _figure("rounds", "Rounds", value)
+
+
+def _state_row(status: RunStatus) -> Figure:
+    return Figure(
+        key="state", tone=STATUS_MARK_INFO[status.mark].tone, label="State", value=status.label
+    )
+
+
+def _spend_row(
+    key: FigureKey, label: str, spent: MeteredSpend | LifetimeSpend, unreported: float | None
+) -> Figure:
+    return _figure(
+        key,
+        label,
+        f"{'≥' if spent.bill_is_floor else ''}{_usd(spent.billed_usd)}",
+        f"up to {_usd(unreported)} more unreported"
+        if unreported is not None
+        else f"{_usd(spent.rate_priced_usd)} {RATE_PRICED_LABEL}"
+        if spent.calls_rate_priced
+        else None,
+    )
+
+
+def _lifetime_row(spent: LifetimeSpend) -> Figure:
+    return _spend_row(
+        "spend_lifetime", "Spent", spent, spent.unreported_usd if spent.sends_unreported else None
+    )
+
+
+def _lift_row(
+    key: FigureKey, label: str, pair: PairedReading, against: str, notes: list[str]
+) -> Figure:
+    lift = pair.headline
+    if lift is None or pair.coverage is None:
+        return _figure(key, label, READING_STATE_INFO[pair.state].label, " · ".join(notes) or None)
+    est, unit = lift.estimate, lift.measurand.unit
+    return _figure(
+        key,
+        label,
+        f"{est.value:+.3f} [{est.ci_lo:+.3f}, {est.ci_hi:+.3f}]",
+        " · ".join(
+            [f"{against} {level_text(lift.rate_a, unit)} → {level_text(lift.rate_b, unit)}", *notes]
+        ),
+    )
+
+
+def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
+    level = None if bench is None or bench.selected is None else bench.selected.level
+    notes = [BENCH_STATE_INFO[state].sentence]
+    # How far a pass got rides the sentence, where it stopped short of its rows.
+    if (
+        bench is not None
+        and (scored := bench.status.scored) is not None
+        and (expected := bench.status.expected) is not None
+        and scored < expected
+    ):
+        notes.append(f"{scored} of {expected} rows")
+    return _figure(
+        "bench",
+        "Bench",
+        READING_STATE_INFO[state].label
+        if bench is None or level is None
+        else level_text(level.value, DISPLAY_METRIC_INFO[bench.headline].unit),
+        " · ".join(notes),
+    )
+
+
+def _course_figures(
+    status: RunStatus,
+    facts: CourseFacts,
+    cap: int | None,
+    runs_with: CampaignRunsWith | None,
+    *,
+    on_line: bool,
+) -> list[Figure]:
+    bench = facts.bench
+    rows = [_state_row(status)]
+    if runs_with is not None:
+        models = [model for vendor in runs_with.vendors for model in vendor.models]
+        rows.append(_figure("optimizer", "Optimizer", runs_with.optimizer, " · ".join(models)))
+    rows.append(_spend_row("spend", "Spend", facts.spend, None))
+    if not on_line:
+        rows.append(_bench_row(ReadingState.HELD_ELSEWHERE, None))
+    elif bench is not None:
+        rows.append(_bench_row(bench.status.state, bench))
+    rows.append(_rounds_row(facts.rounds_closed, cap))
+    if (standing := facts.standing) is None:
+        return rows
+    rows.append(_figure("candidates", "Candidates", str(standing.candidates)))
+    rows.append(_figure("selection", "Leader", standing.selection_name))
+    on_theta = ["rounds are won on θ"] if facts.elects_on == "ability" else []
+    rows.append(_lift_row("lift", "Lift vs origin", standing.vs_origin, "origin", on_theta))
+    if (lives := standing.lives) is not None:
+        rows.append(_figure("lives", "Lives", lives.bar, lives.label))
+    return rows
+
+
+def _course_lines(runs_with: CampaignRunsWith | None) -> list[Said]:
+    return [] if runs_with is not None else [caveat_row("unresolved", _UNRESOLVED)]
+
+
+def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Said]:
+    lines = [Said(key="standing", tone="quiet", label=CANDIDATE_STANDING_INFO[standing])]
+    if reading.ability is None or (theta := reading.ability.caveat) is None:
+        return lines
+    info = THETA_CAVEAT_INFO[theta]
+    return [*lines, Said(key="theta_caveat", tone=info.tone, label=info.label, detail=info.detail)]
+
+
+def candidate_figures(reading: ArmReading) -> list[Figure]:
+    panel, ability = reading.panel, reading.ability
+    accuracy = None if reading.own is None else reading.own.accuracy
+    rows = [
+        _figure(
+            "accuracy",
+            "Accuracy",
+            level_text(None if accuracy is None else accuracy.value, "rate"),
+            None
+            if panel.scored is None
+            else f"{panel.scored}{'' if panel.expected is None else f' of {panel.expected}'} scored",
+        )
+    ]
+    if ability is not None and (ability.theta is not None or ability.caveat is not None):
+        theta = "—" if ability.theta is None else f"{ability.theta:.2f}"
+        rows.append(
+            _figure(
+                "ability",
+                "Ability θ",
+                theta
+                if ability.se is None or ability.theta is None
+                else f"{theta} ± {ability.se:.2f}",
+                None if ability.caveat is None else "not ability — see below",
+            )
+        )
+    if reading.vs_reference is not None:
+        rows.append(_lift_row("lift", "Lift vs parent", reading.vs_reference, "parent", []))
+    return rows
+
+
 def superseded_tag(successor: str) -> HierarchyTag:
     """Worn by a retired course or candidate: the course that took its place, named as its card."""
     cycle_id = decode_cycle_path(successor)[-1].cycle_id
@@ -83,6 +252,7 @@ def course_entry(
     index: CycleIndex,
     *,
     head: CycleIndex,
+    holder: CycleHop,
     moment: Moment | None,
     runs_with: CampaignRunsWith | None,
     config: CampaignConfig | None,
@@ -128,29 +298,36 @@ def course_entry(
         )
     )
     task = None if index.spawned_by is None else index.spawned_by.task or None
+    # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
+    state = HierarchyState.of(run, head, lifecycle=campaign.lifecycle_status)
+    facts = CourseFacts(
+        mint=mint,
+        spawn=spawn,
+        task=task,
+        standing=index.standing,
+        rounds_closed=index.rounds_closed,
+        elects_on=index.elects_on,
+        spend=spent,
+        bench=bench,
+    )
     return HierarchyCourse(
         address=hierarchy_address(inside, hop.campaign_id, hop.cycle_id),
         parent=hierarchy_address(inside, hop.campaign_id),
         # An inner course is named for the outer panel cell it measures, by its last segment.
         label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
-        caveat=None,
         tags=tags,
-        # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
-        state=HierarchyState.of(run, head, lifecycle=campaign.lifecycle_status),
+        figures=_course_figures(state.status, facts, cap, runs_with, on_line=hop == holder),
+        lines=_course_lines(runs_with),
+        state=state,
         span=HierarchySpan(
             opened_at=index.created_at,
             last_at=index.updated_at,
         ),
-        facts=CourseFacts(
-            mint=mint,
-            spawn=spawn,
-            task=task,
-            standing=index.standing,
-            rounds_closed=index.rounds_closed,
-            rounds_cap=cap,
-            elects_on=index.elects_on,
-            spend=spent,
-            bench=bench,
+        facts=facts,
+        said=run_said(
+            index.error,
+            run.run_phase,
+            index.rounds[-1].health if index.rounds else None,
         ),
     )
 
@@ -243,17 +420,13 @@ def campaign_entry(
             stores.campaigns.cycle_dir(hop),
             index,
             head=now,
+            holder=holder,
             moment=moment,
             runs_with=runs_with,
             config=config if hop == holder else line_config(stores, campaign, hop),
             bench=bench if hop == holder else None,
         )
     line = courses.get(holder.cycle_id)
-    caveats = [
-        text
-        for missing, text in ((line is None, _UNMINTED), (runs_with is None, _UNRESOLVED))
-        if missing
-    ]
     state = (
         HierarchyState.of(
             derive_run_state(stores.campaigns.cycle_dir(holder)),
@@ -268,8 +441,17 @@ def campaign_entry(
         address=hierarchy_address(inside, campaign.campaign_id),
         parent=encode_cycle_path(inside) if inside else None,
         label=campaign.label or campaign.dataset_name,
-        caveat=" ".join(caveats) or None,
         tags=_campaign_tags(campaign, runs_with),
+        # The campaign's row reads its line course's as its own, its bill the campaign's whole life.
+        figures=[_state_row(state.status), _lifetime_row(spend_lifetime)]
+        if line is None
+        else [_lifetime_row(spend_lifetime) if row.key == "spend" else row for row in line.figures],
+        lines=[
+            caveat_row("unminted", _UNMINTED),
+            *([] if runs_with is not None else [caveat_row("unresolved", _UNRESOLVED)]),
+        ]
+        if line is None
+        else line.lines,
         state=state,
         span=HierarchySpan(
             opened_at=campaign.created_at,
@@ -285,7 +467,6 @@ def campaign_entry(
             lifecycle=campaign.lifecycle_status,
             spend_lifetime=spend_lifetime,
             runs_with=runs_with,
-            line_course=None if line is None else line.facts,
         ),
     )
 
@@ -307,11 +488,12 @@ def unstarted_entry(stores: Stores, draft: DraftCampaign, *, queued: bool) -> Un
         address=draft.draft_id,
         parent=None,
         label=draft.slug,
-        caveat=None,
         tags=[
             HierarchyTag(kind="dataset", value=dataset, label=dataset),
             HierarchyTag(kind="lifecycle", value=lifecycle, label=lifecycle),
         ],
+        figures=[_lifetime_row(spend_lifetime)],
+        lines=[],
         span=HierarchySpan(opened_at=draft.created_at, last_at=draft.updated_at),
         facts=UnstartedFacts(spend_lifetime=spend_lifetime),
     )

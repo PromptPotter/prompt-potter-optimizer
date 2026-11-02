@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Page } from "@playwright/test";
-import type { DraftCampaignWire } from "@/lib/api/types.generated";
+import { SETUP_STEP_TITLES, type DraftCampaignWire } from "@/lib/api/types.generated";
 import { promptField } from "@/lib/prompt-fields";
 import { test, expect, open, command, datasetNames, drafts, passConsent, type Draft } from "../harness";
 import { COLD_HOME } from "../world";
@@ -33,7 +33,8 @@ async function optimizerStep(page: Page) {
     .locator(".ingest-picklist-group", { hasText: "Open check-ins" })
     .getByRole("button", { name: new RegExp(`^${draft!.slug}\\b`) })
     .click({ timeout: 60_000 });
-  // The optimizer step leads the check-in and starts open; a knob outside `main` sits under All knobs.
+  // The optimizer step leads the check-in, shut; a knob outside `main` sits under All knobs inside it.
+  await page.locator("summary", { hasText: SETUP_STEP_TITLES.optimizer }).click();
   await page.locator("summary", { hasText: "All knobs" }).click();
 }
 

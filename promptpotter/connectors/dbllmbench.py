@@ -124,8 +124,10 @@ def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str,
     return dict(questions[sample.id])
 
 
-def dbllmbench_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"query": query}
+def dbllmbench_wire_adapter(
+    sample: Sample, pipeline_params: dict[str, Any] | None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"query": sample.query}
     for node, cfg in node_config_items(pipeline_params):
         if node != WRITER_NODE:
             continue

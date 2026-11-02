@@ -80,7 +80,8 @@ takes `cancel-queued <job_id>`), `set-limits`, `submit-arms`, `bench`, `verify`,
 `compact-archive purge-cold --apply` destroys paid spend — always asked for. A dataset's defaults are
 `{dataset}/dataset.yaml::campaign`, never guessed; `new` overwrites the tenant pointer.
 
-**Every ending states its next verb** (`STOP_REASON_INFO::next_step`) — read the readout. Two ways a
+**Every ending states its next verb** (`STOP_REASON_INFO::cli_command`, the readout's `cli:` line;
+`next_step` is the same step as a fact) — read the readout. Two ways a
 raise silently fails: the ceiling is clamped to the account allowance, so read the ARMED value off the
 served dashboard's `run_limits.budget`; and the counter is CUMULATIVE across resumes and cycles, so the
 new ceiling must exceed what the campaign already spent. Only `budget.usd` and `budget.rounds` bind by

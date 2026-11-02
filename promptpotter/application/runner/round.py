@@ -32,18 +32,14 @@ from promptpotter.application.runner.output import (
 from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
+from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.arms import ArmState, Concluded, Measured, Proposal, is_leader_eligible
 from promptpotter.domain.cell_fold import unscoreable_cells
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
-from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
-    CampaignPhase,
-    StopLoop,
-    StopReason,
-)
+from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
@@ -172,8 +168,6 @@ def _round_result(
             results=head_rows.cells,
             prior_healths=assemble_prior_healths(ctx.cycle.rounds, ctx.round_num),
             not_attempted=not_attempted,
-            # Counted off the rows: an ungraded cell is already inside `fold.walked`.
-            unscored=sum(1 for cell in head_rows if cell.grade.unscored is not None),
         ),
         # Until `measure_overlap` lands, after every pick this round makes.
         overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, winner is not None),
@@ -246,7 +240,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
         round_num,
         len(holed),
         round_result.candidates_scored,
-        STOP_REASON_INFO[reason].next_step,
+        " ".join(stop_next_lines(reason)),
     )
     raise StopLoop(reason)
 

@@ -15,13 +15,13 @@ chart theme, vocabulary). A context one surface alone consumes lives in that sur
 
 | Surface | Reached by | Sole source for |
 |---|---|---|
-| `dashboard.json` | `lib/poll.tsx` → `useCycleStream()` | in-flight `current_round` + `rounds[]`: FitnessChart, TrendChart, the masthead's ROUNDS and SPEND (its STATE, BEST, BENCH are `lib/lineage.tsx::useViewedCourse`'s) |
+| `dashboard.json` | `lib/poll.tsx` → `useCycleStream()` | in-flight `current_round` + `rounds[]`: FitnessChart and the SPEND breakdown |
 | `/hierarchy` | `lib/state/registry.tsx` → `useRegistry()` / `useEntry(address)` | every surface that lists, switches, docks or heads a run; tags via `lib/derivations/hierarchy.ts::hasTag` / `tagValue` |
 | `/hierarchy/{address}` | `lib/lineage.tsx` | the genealogy at any depth, indexed once by `lib/derivations/lineage-candidates.ts::indexLineage` |
 | `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts` | the round (`RoundView`); `round_NNNN.json` is shown only as raw text in Files |
 | `…/rounds/{n}/audit` (AUDIT TWIN) | `lib/hooks/useRoundNodes.ts` | per-node LLM I/O |
 | `/datasets/{name}/cells` | `lib/hooks/useCells.ts` via `lib/hard-samples.tsx` / `usePresetCells` | every list of measured cells; one answer opens off `/cells/{answer}` |
-| `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts` → `ConnectorProvider` | every config row, model chip, lock glyph, reach ring, provenance badge; `StaticConnectorProvider` and `CampaignFacts.runs_with` are other transports of the same answer, never a second source (`I9`) |
+| `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts` → `ConnectorProvider` | every config row, model chip, lock glyph, reach ring, provenance badge; a check-in's `draft` and `CampaignFacts.runs_with` are other transports of the same answer, never a second source (`I9`) |
 
 - **No stitch**: never merge in-flight with historical or fall back to a round file; where two are one series the SERVER merges.
 - **Take a WHOLE candidate row from one half**, chosen once, never per field.
@@ -30,7 +30,6 @@ chart theme, vocabulary). A context one surface alone consumes lives in that sur
 - **Join arms on `reading.arm.key`; key entries on `address`, never `facts.individual`** — split with `splitRetired`.
 - **`reading.election.selected: false` alone says nothing** — ask `reading.election.held`; `pickWinner` has no fallback.
 - **The sidebar reads the served `CampaignFacts.line`** and follows no successor pointer. <!-- probe: git grep -cE "superseded_by" -- webapp/lib/state/registry.tsx == 0 -->
-- **NAVIGATION** (`viewedPath` + `viewedCandidateId`) is written only by the sidebar; **INSPECTION** (`SelectionContext.candidate`) by a bar click, minted by `selectedCandidateOf`. A bar click never navigates.
 - **The audit twin selects on `round === current_round.round`**, resolved in `useRoundNodes.ts` alone.
 
 ## A wire shape is GENERATED — never hand-declared
@@ -40,18 +39,18 @@ chart theme, vocabulary). A context one surface alone consumes lives in that sur
 **A closed set belongs on the server** — a union declared only in TypeScript is the bug. **So do its
 words**: a served enum is worded by its exported table (`scripts/build_ts_types.py::_WORD_TABLES`,
 e.g. `STATUS_MARK_INFO`, `STOP_REASON_INFO`), never a local `Record<…, string>` beside it; a served
-model carries the enum and numbers, never the sentence.
+model carries the enum, never an enum's word, and a composed line is a served `Said` row.
 <!-- probe: git grep -cE "^const [A-Z_]+_(LABELS|TONE|ADVICE|NAME): Record" -- webapp/*.ts <= 2 -->
 
 ## Viewed identity — one address (CyclePath)
 
-**"What am I looking at?" is `viewedPath`, a `CyclePath` (`lib/ids.ts`), and no surface keeps a second.** `lib/workspace.tsx` owns it; `drillInto` / `backToOuter` move it. **An unstarted campaign is the one address beside it: `checkin` (`#/d/<draft id>`, `#/new` before one is minted), under which `viewedPath` is null** — `openCheckin` moves there, `navigate` back. **The chat is that subject's**: `lib/chat/thread.ts` keys one thread per subject, and the check-in flow (`lib/ingest-flow.tsx`) holds the viewed check-in's draft alone.
+**"What am I looking at?" is `viewedPath`, a `CyclePath` (`lib/ids.ts`), and no surface keeps a second.** `lib/workspace.tsx` owns it. **An unstarted campaign is the one subject beside it: `checkin` (`#/d/<draft id>`, `#/new` before one is minted), under which `viewedPath` is null.** **The chat is that subject's**: `lib/chat/thread.ts` keys one thread per subject, and the check-in flow (`lib/ingest-flow.tsx`) holds the viewed check-in's draft alone.
 
-**Navigation policy has one entry, `workspace.tsx::navigate(path, opts)`**, and `openView` is the one view switch; a surface reads `useWorkspace()` itself, never a callback handed down.
+**The screen is the viewed subject plus the open views: `workspace.tsx::navigate` moves the one, `open` / `close` the other**; a surface reads `useWorkspace()` itself, never a callback handed down.
 
 **Display re-roots to the LEAF hop** (`pathLeaf`, `useLeafIsL4`); ingest and Files stay on the ROOT. **A command is addressed by the whole path** (`lib/api/commands.ts::cycleAddress`); inner-run refusal is the server's (`CyclePayload.inner_refusal`).
 
-**The deep link is the whole address in the HASH** (`lib/address.ts` syntax, `lib/workspace.tsx` sole reader/writer) — a static export has no SPA fallback. Path, candidate and view are all required; the moment `at` is stamped with its path and read via `useMomentAt`. Malformed leaves the view alone. `ids.ts::encodeCyclePath` is also the server's `?descend=` format: byte-exact.
+**The deep link is the whole address in the HASH** (`lib/address.ts` syntax, `lib/workspace.tsx` sole reader/writer) — a static export has no SPA fallback. Path, candidate, moment and views all ride it; the moment reads via `useMomentAt`. Malformed leaves the view alone. `ids.ts::encodeCyclePath` is also the server's `?descend=` format: byte-exact.
 
 ## Polling shape
 
@@ -66,7 +65,7 @@ model carries the enum and numbers, never the sentence.
 
 **Every read rides `lib/hooks/useRead.ts`, NAMED by one `{ id, load }` descriptor in `lib/api/reads.ts`**; same `id` shares one flight, body and clock. No hand-rolled `useEffect` fetch. <!-- probe: git grep -cE "fetch\(" -- webapp/components/*.tsx == 0 -->
 
-**Every write rides `lib/hooks/useCommand.ts`** (`slot.run`) — never throws, retries or reports gone. The sentence is `operatorMessage(e, kind)` (`lib/api/errors.ts`), rendered by `components/ui/states::FailureLine`; a hook carries the `ReadFailure` / `CommandFailure`, never a string, and a per-surface sentence table violates I2.
+**Every write rides `lib/hooks/useCommand.ts`** (`slot.run`) — never throws, retries or reports gone. The sentence is `operatorMessage(e, kind)` (`lib/api/errors.ts`; a write's is `commandMessage`, which adds what a dropped write may have done), rendered by `components/ui/states::FailureLine`; a hook carries the `ReadFailure` / `CommandFailure`, never a string, and a per-surface sentence table violates I2.
 
 **A bare `catch` is the bug.** `failureKind(err)` (`lib/api/client.ts`) classifies into `transient | auth | gone | denied | invalid | refused`; branch on that, never a status literal. Every answered 4xx is a verdict; `transient` (5xx, network, parse) is the safe default.
 

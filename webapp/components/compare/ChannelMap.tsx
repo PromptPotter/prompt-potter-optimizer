@@ -8,8 +8,8 @@ import {
   type CladogramChannel,
   type CladogramCtx,
 } from "@/components/candidates/Forest";
-import { DENSE, type RoundNodePos } from "@/components/candidates/forest-layout";
-import { Empty, Loading } from "@/components/ui";
+import type { RoundNodePos } from "@/components/candidates/forest-layout";
+import { Empty, FailureLine, Loading } from "@/components/ui";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
@@ -28,7 +28,7 @@ export function ChannelMap({
   own: CladogramChannel | null;
 }) {
   const { tree, selected, setSelected, invalidated, subject } = model;
-  const { root, index, loaded, failed, rootPath } = tree;
+  const { root, index, loaded, failure, rootPath } = tree;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [whole, setWhole] = useState(false);
 
@@ -82,7 +82,7 @@ export function ChannelMap({
   if (rootPath.length === 0) {
     return <Empty>This campaign has no branch in the registry to map.</Empty>;
   }
-  if (failed) return <p className="note-warn">This campaign&rsquo;s lineage could not be read.</p>;
+  if (failure) return <FailureLine failure={failure} lead="This campaign’s lineage could not be read." />;
   if (!root) {
     return loaded ? <Empty>No rounds on disk yet.</Empty> : <Loading>Reading the lineage…</Loading>;
   }
@@ -110,7 +110,6 @@ export function ChannelMap({
         expanded={expanded}
         onLaneActivate={onLaneActivate}
         ctx={ctx}
-        d={DENSE}
       />
     </div>
   );

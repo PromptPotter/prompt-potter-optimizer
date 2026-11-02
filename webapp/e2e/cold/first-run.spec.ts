@@ -8,6 +8,7 @@ import {
   datasetNames,
   noSidewaysScroll,
   passConsent,
+  DASHBOARD_VIEWS,
 } from "../harness";
 
 // ORDER IS LOAD-BEARING: accepting the terms is persisted, so the gate can be met once per reset.
@@ -75,19 +76,19 @@ test.describe("cold start", () => {
     await ready(page);
   });
 
-  test("every tab renders against an empty read", async ({ page }) => {
-    for (const tab of ["", "#/dashboard", "#/compare", "#/files"]) {
-      await open(page, tab);
+  test("every view renders against an empty read", async ({ page }) => {
+    for (const views of ["", `#${DASHBOARD_VIEWS}`, "#/compare", "#/samples/files"]) {
+      await open(page, views);
       await passConsent(page);
       await ready(page);
     }
   });
 
-  test("the account modal works with no history behind it", async ({ page }) => {
-    for (const pane of ["profile", "usage", "keys", "activity", "storage", "preferences", "about"]) {
-      await open(page, `#/account/${pane}`);
+  test("the account view works with no history behind it", async ({ page }) => {
+    for (const section of ["profile", "usage", "keys", "activity", "storage", "preferences", "about"]) {
+      await open(page, `#/account=${section}`);
       await passConsent(page);
-      await expect(page.getByRole("dialog", { name: "Account" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Account" })).toBeVisible();
     }
   });
 

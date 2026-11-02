@@ -14,7 +14,7 @@ from typing import NamedTuple
 from pydantic import Field, SecretStr
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.spend import Budget, LifetimeSpend, PaidSpend, UserSpend
+from promptpotter.domain.spend import Budget, PaidSpend, UserSpend, money_text
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.llm.base import LLMClientBase, ProviderKey
@@ -66,15 +66,21 @@ class Coupon(NamedTuple):
     void: bool
 
     @property
+    def drawn(self) -> Budget:
+        """What the face is compared against: unreported sends counted, since what they may have
+        cost is not the coupon's to give again."""
+        return Budget.amount(self.spent.at_most_usd, self.spent.at_most_tokens)
+
+    @property
     def left(self) -> Budget:
-        """Unreported sends counted: what they may have cost is not the coupon's to give again."""
         if self.void:
             return Budget.amount(0.0, 0)
+        drawn = self.drawn
         return Budget(
-            usd=None if self.face.usd is None else max(0.0, self.face.usd - self.spent.at_most_usd),
+            usd=None if self.face.usd is None else max(0.0, self.face.usd - drawn.usd_amount),
             tokens=None
             if self.face.tokens is None
-            else max(0, self.face.tokens - self.spent.at_most_tokens),
+            else max(0, self.face.tokens - drawn.token_amount),
         )
 
     @property
@@ -88,25 +94,13 @@ class Coupon(NamedTuple):
         on = f" on {provider}" if provider else ""
         if self.void:
             return (
-                "This account holds a key of its own, so the host's allowance is retired. Add "
-                f"your own key{on} under Account → API keys to send on it."
+                "This account holds a key of its own, so the host's allowance is retired and "
+                f"nothing is sent{on} on the box's keys."
             )
         return (
-            f"The host's allowance for this account is used up ({_amounts(self.spent)} of "
-            f"{_face(self.face)} on the box's keys), so nothing further is sent{on} on them. Add "
-            "your own key under Account → API keys to continue on your own money."
+            f"The host's allowance for this account is used up ({money_text(self.drawn, on=self.face)} drawn "
+            f"of {money_text(self.face)}), so nothing further is sent{on} on the box's keys."
         )
-
-
-def _amounts(spent: UserSpend) -> str:
-    unreported = f", up to ${spent.unreported_usd:.2f} unreported" if spent.sends_unreported else ""
-    return f"${spent.sent_usd:.2f} and {spent.used_tokens:,} tokens{unreported}"
-
-
-def _face(face: Budget) -> str:
-    usd = "no USD bound" if face.usd is None else f"${face.usd:.2f}"
-    tokens = "no token bound" if face.tokens is None else f"{face.tokens:,} tokens"
-    return f"{usd} / {tokens}"
 
 
 def read_coupon(stores: Stores, spent: PaidSpend | None = None) -> Coupon:
@@ -179,77 +173,6 @@ class AccountKey(StrictModel):
     provider: str
     last4: str = Field(description="The key's last four characters: all that is ever served back.")
     added_at: str
-
-
-class CouponStatus(StrictModel):
-    """The host's allowance for this account, and the keys it sends on past it."""
-
-    host: bool = Field(
-        description="This account is the box's operator: its sends on the box's keys are unmetered."
-    )
-    face_usd: float | None = Field(
-        description="What the box's keys may pay for this account over its life; null is unbounded."
-    )
-    face_tokens: int | None
-    left_usd: float | None = Field(
-        description="The face less what the box's keys paid, unreported sends counted; null where "
-        "the face is unbounded."
-    )
-    left_tokens: int | None
-    used_share: float | None = Field(
-        description="How full the allowance draws in the unit nearest its face, at most 1; null "
-        "where no unit is bounded."
-    )
-    exhausted: bool = Field(
-        description="Nothing more is sent on the box's keys; a provider this account holds a key "
-        "for still sends on it."
-    )
-    void: bool = Field(
-        description="Retired because this account holds a key of its own "
-        "(`HOST_COUPON.void_on_byo`)."
-    )
-    host_key_spend: LifetimeSpend = Field(description="What the box's keys paid for this account.")
-    own_key_spend: LifetimeSpend = Field(description="What this account's own keys paid.")
-    keys: list[AccountKey]
-    providers: list[str] = Field(description="Every provider a key may be held for.")
-
-
-def _share(spent: float, face: float | None) -> float | None:
-    if face is None:
-        return None
-    return min(1.0, spent / face) if face > 0 else 1.0
-
-
-def coupon_status(stores: Stores) -> CouponStatus:
-    paid = account_spend(stores)
-    coupon = read_coupon(stores, paid)
-    left = coupon.left
-    shares = [
-        s
-        for s in (
-            _share(coupon.spent.at_most_usd, coupon.face.usd),
-            _share(float(coupon.spent.at_most_tokens), _float(coupon.face.tokens)),
-        )
-        if s is not None
-    ]
-    return CouponStatus(
-        host=is_host(stores.identity),
-        face_usd=coupon.face.usd,
-        face_tokens=coupon.face.tokens,
-        left_usd=left.usd,
-        left_tokens=left.tokens,
-        used_share=max(shares) if shares else None,
-        exhausted=coupon.exhausted,
-        void=coupon.void,
-        host_key_spend=LifetimeSpend.of(paid.host),
-        own_key_spend=LifetimeSpend.of(paid.user),
-        keys=account_keys(stores),
-        providers=sorted(providers()),
-    )
-
-
-def _float(value: int | None) -> float | None:
-    return None if value is None else float(value)
 
 
 # Far above any provider's key, far below what a form field should carry.

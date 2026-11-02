@@ -12,7 +12,6 @@ import {
   Toolbar,
   ToolbarSpacer,
 } from "@/components/ui";
-import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { DASHBOARD_PENDING, useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
@@ -21,7 +20,6 @@ import { selectedNodeOf } from "@/lib/derivations";
 import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
-import { ROOMY } from "./forest-layout";
 import { useLineage } from "@/lib/hooks/useLineage";
 import { useViewedCourse } from "@/lib/lineage";
 
@@ -78,7 +76,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
       onPickCandidate: (n) => {
         const own = selectedNodeOf(n.node, pathLeaf(n.coursePath).cycleId);
         if (n.coursePathKey !== (viewedPath ? encodeCyclePath(viewedPath) : null)) {
-          navigate(n.coursePath);
+          navigate({ path: n.coursePath });
         }
         setSelectionForCandidate(
           isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm) ? null : own,
@@ -101,7 +99,6 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
           {cleanup.stubCount !== null && cleanup.stubCount > 0 && (
             <Chip
               icon
-              on={false}
               ariaLabel={`Clean up ${cleanup.stubCount} empty-stub fork${cleanup.stubCount === 1 ? "" : "s"}`}
               title={`Delete ${cleanup.stubCount} empty-stub fork${cleanup.stubCount === 1 ? "" : "s"} from disk`}
               onClick={cleanup.request}
@@ -122,59 +119,56 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
         </Toolbar>
       }
     >
-      <RotatePrompt surfaceName="The lineage forest">
-        <section className="family-cladogram" aria-label="Campaign lineage tree">
-          {/* Keyed on campaignId so the dragged height and scroll reset on a campaign switch. */}
-          <div key={campaignId ?? "none"} className="family-cladogram-viewport">
-            {tree && (
-              <Forest
-                tree={tree}
-                valueByKey={valueByKey}
-                thetaByKey={thetaByKey}
-                metric={metric}
-                expanded={expanded}
-                onLaneActivate={onLaneActivate}
-                ctx={ctx}
-                d={ROOMY}
-              />
-            )}
-          </div>
-          {!viewedHasRounds && (
-            <Empty className="lineage-empty">
-              {isInheritedSibling && parentId ? (
-                <>
-                  inherited from{" "}
-                  {campaignId ? (
-                    <button
-                      type="button"
-                      className="lineage-inherit-link"
-                      onClick={() => navigate([{ campaignId, cycleId: parentId }])}
-                      title={`Switch to ${parentId}`}
-                    >
-                      {shortFamilyTail(parentId) || parentId}
-                    </button>
-                  ) : (
-                    <span>{shortFamilyTail(parentId) || parentId}</span>
-                  )}
-                  {selection ? ` · selection ${selection.label}` : ""}
-                  {" · no new rounds yet"}
-                </>
-              ) : (
-                "No rounds on disk yet — the tree appears once round 1 lands."
-              )}
-            </Empty>
-          )}
-          {cleanup.open && cleanup.stubCount !== null && (
-            <CleanupConfirmModal
-              stubCount={cleanup.stubCount}
-              cleaning={cleanup.cleaning}
-              failure={cleanup.failure}
-              onCancel={cleanup.cancel}
-              onConfirm={cleanup.confirm}
+      <section className="family-cladogram" aria-label="Campaign lineage tree">
+        {/* Keyed on campaignId so the dragged height and scroll reset on a campaign switch. */}
+        <div key={campaignId ?? "none"} className="family-cladogram-viewport">
+          {tree && (
+            <Forest
+              tree={tree}
+              valueByKey={valueByKey}
+              thetaByKey={thetaByKey}
+              metric={metric}
+              expanded={expanded}
+              onLaneActivate={onLaneActivate}
+              ctx={ctx}
             />
           )}
-        </section>
-      </RotatePrompt>
+        </div>
+        {!viewedHasRounds && (
+          <Empty className="lineage-empty">
+            {isInheritedSibling && parentId ? (
+              <>
+                inherited from{" "}
+                {campaignId ? (
+                  <button
+                    type="button"
+                    className="lineage-inherit-link"
+                    onClick={() => navigate({ path: [{ campaignId, cycleId: parentId }] })}
+                    title={`Switch to ${parentId}`}
+                  >
+                    {shortFamilyTail(parentId) || parentId}
+                  </button>
+                ) : (
+                  <span>{shortFamilyTail(parentId) || parentId}</span>
+                )}
+                {selection ? ` · selection ${selection.label}` : ""}
+                {" · no new rounds yet"}
+              </>
+            ) : (
+              "No rounds on disk yet — the tree appears once round 1 lands."
+            )}
+          </Empty>
+        )}
+        {cleanup.open && cleanup.stubCount !== null && (
+          <CleanupConfirmModal
+            stubCount={cleanup.stubCount}
+            cleaning={cleanup.cleaning}
+            failure={cleanup.failure}
+            onCancel={cleanup.cancel}
+            onConfirm={cleanup.confirm}
+          />
+        )}
+      </section>
     </CardFrame>
   );
 }

@@ -1,17 +1,15 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo } from "react";
 import type { Evidence, SubjectReading } from "@/lib/api";
 import { readingPath } from "@/lib/api/reads";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import type { HierarchyEntry } from "@/lib/api";
 import { campaignAt, compareItems } from "@/lib/derivations";
-import { cx } from "@/lib/cx";
 import { encodeCyclePath } from "@/lib/ids";
 import { seriesVar } from "@/lib/theme";
 import { ChannelCard } from "./ChannelCard";
-import { COLUMN_ROWS, ROW_LABEL } from "./ChannelColumn";
 import { HeadToHeadVerdict } from "./HeadToHeadVerdict";
 
 function channelPoints(subjects: readonly SubjectReading[]): CladogramChannel[] {
@@ -36,28 +34,6 @@ export function ChannelCards({
   const listNote = evidence.comparability.roster_note;
   const points = useMemo(() => channelPoints(evidence.subjects), [evidence.subjects]);
   const h2h = evidence.head_to_head;
-  const rows = useMemo(() => {
-    if (!h2h?.covers_selection) return null;
-    const flagged = items.some(
-      ({ headline }) =>
-        headline && (headline.guard.state !== "controlled" || headline.bench_set === null),
-    );
-    return COLUMN_ROWS.filter(
-      (r) => (r !== "optimizer" || h2h.swapped.length > 0) && (r !== "standing" || flagged),
-    );
-  }, [h2h, items]);
-  const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
-  const cards = items.map((item, i) => (
-    <ChannelCard
-      key={item.channel.subject}
-      item={item}
-      ownNote={listNote === null}
-      points={points}
-      spec={evidence.metric.spec}
-      run={campaignAt(byAddress, item.channel.rootCampaignId)}
-      column={rows && { rows, panelHost, order: i }}
-    />
-  ));
   return (
     <>
       {h2h && <HeadToHeadVerdict h2h={h2h} scorerId={evidence.scorer_id} />}
@@ -66,28 +42,18 @@ export function ChannelCards({
           <strong>Every channel below</strong> — {listNote}
         </p>
       )}
-      {rows ? (
-        <>
-          <div
-            className="cmp-cols"
-            style={{ "--cmp-rows": rows.length } as CSSProperties}
-            role="group"
-            aria-label="Campaigns side by side"
-          >
-            <div className="cmp-col">
-              {rows.map((r) => (
-                <div key={r} className={cx("cmp-cell", "cmp-row-label", `is-${r}`)}>
-                  {ROW_LABEL[r]}
-                </div>
-              ))}
-            </div>
-            {cards}
-          </div>
-          <div className="cmp-col-panels" ref={setPanelHost} />
-        </>
-      ) : (
-        <ol className="cmp-channels">{cards}</ol>
-      )}
+      <ol className="cmp-channels">
+        {items.map((item) => (
+          <ChannelCard
+            key={item.channel.subject}
+            item={item}
+            ownNote={listNote === null}
+            points={points}
+            spec={evidence.metric.spec}
+            run={campaignAt(byAddress, item.channel.rootCampaignId)}
+          />
+        ))}
+      </ol>
     </>
   );
 }

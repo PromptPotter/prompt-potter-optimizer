@@ -15,8 +15,6 @@
 .pipeline-stack > .pipeline-stack-note{grid-column:1 / -1}
 
 .wf-hero{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-6) var(--space-10);padding:var(--space-16) var(--space-16) var(--space-18);max-width:var(--reading-measure);margin:0 auto;width:100%}
-/* The whole row: the heat table breaks out full-bleed off its wrap's box, which a shrink-to-fit wrap resolves against nothing. */
-.wf-hero-detail{flex:0 0 100%;min-width:0}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-10) 0}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -179,8 +177,6 @@
 .wf-hero-sole:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow);border-radius:8px}
 /* `max-width` is load-bearing: unbounded, the wrapper squeezes the flanking chips instead of letting the rail scroll. */
 .wf-hero-unit{display:flex;flex-direction:column;min-width:0;max-width:100%;position:relative;z-index:2}
-/* A sole node has no rail to scroll, so it keeps its own width and the arrows give instead. */
-.wf-hero-unit:has(> .wf-hero-node > .wf-hero-sole){flex-shrink:0}
 /* Child combinators: a descendant selector would re-cut every deeper box too. */
 .wf-hero-unit.has-nested{border-radius:12px}
 .wf-hero-unit.has-nested > .wf-hero-node.llm{
@@ -282,15 +278,6 @@
 .ingest-pick-why{margin:var(--space-4) 0 0;padding:0 var(--space-12);font-size:var(--text-sm);line-height:1.45;color:var(--color-text-secondary)}
 .setup-step > summary{padding:var(--space-10) 0}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-12);padding:var(--space-8) 0}
-.row-separator{height:0;border-top:1px solid var(--color-border);margin:var(--space-8) 0 var(--space-10)}
-.toggle-row.wand-row{
-  position:relative;border:1px solid var(--color-accent);border-radius:10px;padding:var(--space-10) var(--space-12);
-  margin:0 calc(-1 * var(--space-6));
-  background:radial-gradient(circle at center,rgba(var(--color-accent-rgb),0.10) 0%,rgba(var(--color-accent-rgb),0.02) 70%,transparent 100%);
-  box-shadow:0 0 10px rgba(var(--color-accent-rgb),0.28),inset 0 0 8px rgba(var(--color-accent-rgb),0.12);
-}
-.toggle-row.wand-row .row-icon{color:var(--color-accent);width:26px;height:26px}
-.toggle-row.wand-row .row-icon svg{width:24px;height:24px}
 .toggle-row .row-text{display:flex;align-items:center;gap:var(--space-10);min-width:0;flex:1}
 .toggle-row .row-icon{flex-shrink:0;color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;width:20px;height:20px}
 .toggle-row .row-body{min-width:0}
@@ -308,9 +295,9 @@
 .chat-activity-icon{flex-shrink:0;width:1.1em;text-align:center;color:var(--color-text-secondary)}
 .chat-activity-label{color:var(--color-text-primary)}
 .chat-activity-detail{color:var(--color-text-secondary)}
-.chat-activity.tone-good .chat-activity-icon{color:var(--color-success)}
+.chat-activity.tone-success .chat-activity-icon{color:var(--color-success)}
 .chat-activity.tone-warn .chat-activity-icon{color:var(--color-accent)}
-.chat-activity.tone-bad .chat-activity-icon{color:var(--color-danger)}
+.chat-activity.tone-danger .chat-activity-icon{color:var(--color-danger)}
 .chat-activity.kind-warning .chat-activity-label,.chat-activity.kind-error .chat-activity-label{color:var(--color-danger)}
 .chat-activity.kind-merge .chat-activity-label{color:var(--color-accent)}
 .chat-activity.kind-progress{opacity:.85}
@@ -335,15 +322,6 @@
 
 .run-card{display:flex;flex-direction:column;gap:var(--space-6);width:100%;align-self:stretch;padding:var(--space-8) var(--space-10);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
 .run-card.is-live{border-color:rgba(var(--color-accent-rgb),0.45)}
-.run-card-axis{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6) var(--space-10);min-width:0}
-.run-card-axis:empty{display:none}
-.run-card-axis .hs-heat-wrap{flex:0 1 auto;width:auto;margin-top:0;padding:0}
-.run-card-axis .hs-heat-wrap:has(.hs-expand-wrap){flex-basis:100%;width:100%;align-items:flex-start}
-.run-card-axis .round-axis-scroll{max-width:260px}
-.trend-glyph{flex:0 0 auto;position:relative;width:78px;height:26px;padding:2px var(--space-4);border-radius:13px;border:1px solid var(--color-border);background:transparent;cursor:pointer;opacity:.7;transition:opacity 100ms,border-color 100ms}
-.trend-glyph:hover,.trend-glyph:focus-visible{opacity:1;border-color:var(--color-text-secondary)}
-.run-card-section{min-width:0;display:flex;flex-direction:column;gap:var(--space-6)}
-.run-card-section+.run-card-section{border-top:1px solid var(--color-border);padding-top:var(--space-6)}
 
 .hsp{display:flex;flex-direction:column;gap:var(--space-4)}
 .hsp-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
@@ -383,7 +361,6 @@
 .hsp-b.is-partly .hsp-dot{background:var(--color-warn)}
 .hsp-b.is-always .hsp-dot{background:var(--color-success)}
 .hsp-of{font-size:var(--text-xs);color:var(--color-text-secondary)}
-.hsp-full{margin-top:var(--space-4)}
 
 .chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:var(--space-4)}
 .run-summary-line{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}

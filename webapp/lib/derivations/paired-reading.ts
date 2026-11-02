@@ -28,8 +28,3 @@ export function fmtLift(lift: MeasuredLift, facet: PairFacet): string {
   const { unit } = lift.measurand;
   return `${fmtUnit(unit, lift.rate_a)} → ${fmtUnit(unit, lift.rate_b)}`;
 }
-
-export function fmtPaired(reading: PairedReading, facet: PairFacet): string {
-  const pair = readPaired(reading);
-  return pair.read ? fmtLift(pair.lift, facet) : pair.label;
-}

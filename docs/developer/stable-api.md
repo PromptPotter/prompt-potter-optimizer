@@ -21,7 +21,7 @@ The object named must be a `Connector`; **its `name` field is the registry key**
 
 **What a plugin is held to, and that it is trusted code, not sandboxed** — [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed. v1 promises those rules do not tighten, and that entry points never lower the trust bar nor become a sandbox. Built-ins are not entry points.
 
-**Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug; the `identity_config` layer is removed before the adapter is called, so none strips it · `extract_experiment` MUST return the panel's rows in panel order.
+**Contracts beyond `protocol.py`:** wire adapters MUST be pure `(sample, pipeline_params) → dict` — no I/O, no logging above debug; the `identity_config` layer is removed before the adapter is called, so none strips it · `extract_experiment` MUST return the panel's rows in panel order.
 
 ---
 

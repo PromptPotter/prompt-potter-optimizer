@@ -83,6 +83,8 @@ def main() -> None:
         result = runner.run(run)
     except (RequestTooLargeError, SendRefusedError, PotterError) as exc:
         runner.close()
+        if args.json_output and isinstance(exc, PotterError):
+            print(json.dumps({"error": exc.code, "message": str(exc), **exc.details}, default=str))
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:

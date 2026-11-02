@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -14,7 +13,12 @@ from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.data_root import PRODUCER_LOCKS, Fate, Kind, classify
 from promptpotter.infrastructure.store.draft_store import DraftStore
-from promptpotter.infrastructure.store.io import iter_files, probe_lock, unlink_robust
+from promptpotter.infrastructure.store.io import (
+    iter_files,
+    probe_lock,
+    prune_empty_dirs,
+    unlink_robust,
+)
 from promptpotter.infrastructure.store.layout import (
     draft_claim_path,
     draft_dirs,
@@ -121,14 +125,6 @@ def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
     )
 
 
-def _prune_empty(root: Path) -> None:
-    """Bottom-up; a sandbox goes whole, a tenant's own directory stays."""
-    for current, _dirs, _files in os.walk(root, topdown=False):
-        if Path(current) != root or in_inner_sandbox(root):
-            with contextlib.suppress(OSError):
-                os.rmdir(current)
-
-
 @contextmanager
 def resetting(plan: ResetPlan) -> Iterator[None]:
     """The plan's drops go as the block ends, once every draft's claim is held and no run is live in
@@ -149,7 +145,11 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
             if drop.path not in claims:
                 unlink_robust(drop.path)
     for root in plan.roots:
-        _prune_empty(root)
+        prune_empty_dirs(root)
+        # A sandbox goes whole; a tenant's own directory stays.
+        if in_inner_sandbox(root):
+            with contextlib.suppress(OSError):
+                root.rmdir()
     logger.info("reset: removed %d file(s), kept %d", len(plan.drops), plan.kept)
 
 

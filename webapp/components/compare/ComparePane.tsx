@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
+import { SCENARIO_WORDS } from "@/lib/api/types.generated";
 import {
   CardFrame,
   DataTable,
@@ -10,6 +11,7 @@ import {
   FailureLine,
   Loading,
   SegmentedControl,
+  Said,
   Toolbar,
   ToolbarSep,
   type Column,
@@ -28,7 +30,6 @@ import {
   fmtUnit,
   PLACEHOLDER,
   shortId,
-  verdictTone,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
 import { PairedLift } from "@/components/shell/PairedLift";
@@ -110,7 +111,7 @@ export function ComparePane() {
   const hasBranch = !!evidence && evidence.branch_subjects > 0;
 
   return (
-    <div className="content" id="content-compare">
+    <div className="box-full">
         <div className="cmp-main">
           {selected.length === 0 ? (
             <CardFrame title="Compare" headingTag="h2">
@@ -180,9 +181,7 @@ export function ComparePane() {
                     onMetric={setMetric}
                   />
                 )}
-                {invalidMetric && !isCustomMetric(metric) && (
-                  <p className="note-warn">{invalidMetric}</p>
-                )}
+                {!isCustomMetric(metric) && <FailureLine failure={invalidMetric} />}
                 {evidence.unread_subjects.length > 0 && (
                   <p className="note-info">
                     Selected but not read: {evidence.unread_subjects.join(", ")}. Each has nothing
@@ -192,11 +191,12 @@ export function ComparePane() {
                 )}
                 {readable ? (
                   <>
-                    {comparability && (
-                      <p className={verdictTone(comparability.verdict)}>
-                        {comparability.note}
-                      </p>
-                    )}
+                    {comparability &&
+                      (comparability.verdict === true ? (
+                        <p className="note-info">{comparability.note}</p>
+                      ) : (
+                        <Said tone="warn" label={comparability.note} />
+                      ))}
                     <EvidenceCharts evidence={evidence} view={view} />
                     <SeriesLegend
                       evidence={evidence}
@@ -278,32 +278,38 @@ export function ComparePane() {
 function Scenarios({ evidence }: { evidence: Evidence }) {
   const masked = evidence.subjects.filter((s) => s.scenario !== null);
   if (masked.length === 0) return null;
+  const w = SCENARIO_WORDS;
   return (
     <CardFrame title="What the scoring mask changed" headingTag="h2">
       {masked.map((s) => {
         const sc = s.scenario;
         if (!sc) return null;
-        return (
-          <div key={s.key}>
-            <p className={sc.first_divergent_round !== null ? "note-warn" : "note-lede"}>
-              <strong>{s.label}</strong> under <code>{s.mask?.lens}</code>:{" "}
-              {sc.winner_changed ? (
-                <>
-                  parts from the record at round {sc.first_divergent_round}, where it would have
-                  crowned <code>{sc.scenario_winner_key?.slice(0, 8)}</code> instead of{" "}
-                  <code>{sc.recorded_winner_key?.slice(0, 8)}</code>.
-                </>
-              ) : (
-                <>never parts from the record.</>
-              )}{" "}
-              {sc.invariant_rounds} of {sc.total_rounds} round
-              {sc.total_rounds === 1 ? "" : "s"} unchanged; the head reads over{" "}
-              {sc.n_samples_scored} sample{sc.n_samples_scored === 1 ? "" : "s"}.
-            </p>
-            <p className="note-info">{sc.note}</p>
-          </div>
+        const line = (
+          <>
+            <strong>{s.label}</strong> under <code>{s.mask?.lens}</code>:{" "}
+            {sc.winner_changed ? (
+              <>
+                {w.parted} {sc.first_divergent_round}, {w.crowned}{" "}
+                <code>{sc.scenario_winner_key?.slice(0, 8)}</code> {w.instead_of}{" "}
+                <code>{sc.recorded_winner_key?.slice(0, 8)}</code>.
+              </>
+            ) : (
+              <>{w.held}.</>
+            )}{" "}
+            {sc.invariant_rounds} of {sc.total_rounds}{" "}
+            {sc.total_rounds === 1 ? w.round : w.rounds} {w.unchanged}; {w.reads_over}{" "}
+            {sc.n_samples_scored} {sc.n_samples_scored === 1 ? w.sample : w.samples}.
+          </>
+        );
+        return sc.first_divergent_round !== null ? (
+          <Said key={s.key} tone="warn" label={line} />
+        ) : (
+          <p key={s.key} className="note-lede">
+            {line}
+          </p>
         );
       })}
+      <p className="note-info">{w.caveat}</p>
     </CardFrame>
   );
 }
@@ -401,20 +407,12 @@ function WinnerChains({
       </p>
     );
   }
-  const parted = evidence.subjects.some((s) => s.scenario?.winner_changed);
   return (
     <p className="note-lede">
       {evidence.chain_points ?? PLACEHOLDER} point(s) across {evidence.branch_subjects} branch(es),
       shown under their heads in the <strong>Merged</strong> view. Each point is read on the cells
       that round actually scored — the subsets move between rounds, so a chain drawn on one shared
       axis would redraw earlier rounds on evidence they never had.
-      {parted ? (
-        <>
-          {" "}
-          A masked chain <strong>ends at the round it parts</strong> from the record: past it the
-          run would have stood on a parent it never had, so there is nothing measured to draw.
-        </>
-      ) : null}
     </p>
   );
 }
@@ -490,19 +488,17 @@ function Readings({ evidence }: { evidence: Evidence }) {
           .
         </p>
       )}
-      {oc?.level_vs_order != null && (
-        <p className={cx("note-lede", oc.order_confounded && "note-warn")}>
-          Run-order confound: value vs order ρ {fmtSigned(oc.level_vs_order, 2)}
-          {oc.order_confounded && (
-            <>
-              {" "}
-              — the roster&rsquo;s ordering is also its chronology, so which subject it is and
-              when it ran cannot be told apart
-            </>
-          )}
-          .
-        </p>
-      )}
+      {oc?.level_vs_order != null &&
+        (oc.order_confounded ? (
+          <Said
+            tone="warn"
+            label={`Run-order confound: value vs order ρ ${fmtSigned(oc.level_vs_order, 2)} — the roster’s ordering is also its chronology, so which subject it is and when it ran cannot be told apart.`}
+          />
+        ) : (
+          <p className="note-lede">
+            Run-order confound: value vs order ρ {fmtSigned(oc.level_vs_order, 2)}.
+          </p>
+        ))}
     </CardFrame>
   );
 }

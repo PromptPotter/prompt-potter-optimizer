@@ -9,6 +9,7 @@ product.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import dataclasses
 import logging
@@ -69,6 +70,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import load_optimizer_prompt
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
@@ -80,6 +82,7 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
@@ -99,7 +102,8 @@ from promptpotter.domain.prompt_block import (
     snippet_id,
 )
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
-from promptpotter.domain.run_records import CommandRecord, RunPhaseRecord
+from promptpotter.domain.run_records import CommandRecord, RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.said import Said, pins
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.validators import ValidatorOutcome
@@ -155,6 +159,8 @@ from promptpotter.presentation.api.middleware.oidc import (
     identity_of_session,
 )
 from promptpotter.presentation.api.routers import auth
+from promptpotter.presentation.cli.commands.cycles import cmd_cycles
+from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
@@ -1036,7 +1042,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
 
 
 async def test_nothing_is_deleted_while_its_owner_still_holds_it(
-    built_stores: Stores, tmp_path: Path
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     campaigns = built_stores.campaigns
     hop = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle-0")
@@ -1075,12 +1081,45 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     )
 
     # Silence never reaps a producer that still holds its cycle.
-    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    running = CycleEventLog.open(CycleDir(cycle_dir))
+    running.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    running.append(
+        RunWiringRecord(
+            round_cells_ceiling=1,
+            display_metric="accuracy",
+            elects_on="accuracy",
+            max_cells_in_flight=1,
+            measured_unit="sample",
+            measurement_node="l1_score",
+            langfuse_trace_url=None,
+            run_limits=RunLimits(),
+            defaults_drift=None,
+            backend_revision=None,
+        )
+    )
+    campaigns.create_campaign(minted_campaign(hop))
     ledger = CycleLayout(cycle_dir).ledger
     hold_cycle(cycle_dir)
     os.utime(ledger, (0, 0))
     quiet = derive_run_state(cycle_dir).producer
     assert (quiet.state, quiet.attached) == (ProducerState.WEDGED, True)
+    # A wedge is read against the clock: the dashboard pins it, the listing a 304 answers never does.
+    dash = served_dashboard(built_stores, hop)
+    said = dash.said if isinstance(dash, ServedDashboard) else None
+    assert said is not None and (said.key, said.tone) == ("producer_wedged", "warn"), (
+        "a wedged run pinned no warning"
+    )
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path))
+    listed = await cmd_cycles(
+        argparse.Namespace(tenant=None, inside=(), campaign=None, attached=False)
+    )
+    assert listed.human is not None and listed.data is not None
+    [course] = listed.data["entries"][0]["children"]
+    assert course["said"] is None, "the listing pinned a line read against the clock"
+    rows = [Said.model_validate(row) for row in [*course["figures"], *course["lines"]]]
+    assert rows and all(said_text(row) in listed.human for row in rows), (
+        "the terminal's cycle list did not say every figure and line the listing serves"
+    )
     assert sweep_dead_cycles(built_stores.projects_root) == 0, "a quiet held producer was reaped"
     assert campaigns.mark_producer_vanished(hop) is False
     with pytest.raises(ConflictError):
@@ -1105,10 +1144,10 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     release_cycle(cycle_dir)
     ended = derive_run_state(cycle_dir)
     assert (ended.run_phase, ended.producer.state) == (RunPhase.TERMINAL, ProducerState.ABSENT)
-    # Only a producer that stopped appending while it still owes the run raises an alert.
+    # Only a producer that stopped appending while it still owes the run pins a line.
     for state in ProducerState:
         raises = state in {ProducerState.WEDGED, ProducerState.SILENT}
-        assert bool(PRODUCER_STATE_INFO[state].alert) == raises, f"{state}: {raises}"
+        assert pins(PRODUCER_STATE_INFO[state].tone) == raises, f"{state}: {raises}"
 
     # Reclaim spares a sandbox whose owner cycle still exists, terminal or not, and one with no
     # `owner.json`: its key is a hash, so no owner derives from it.
@@ -1144,7 +1183,6 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A reset's plan carries its refusal, so a dry run shows it: a draft a Start holds, or a cycle
     # its producer holds, refuses it whole.
-    campaigns.create_campaign(minted_campaign(hop))
     built_stores.drafts.write_draft("held-draft", {})
     data_root = built_stores.projects_root.parent
     written = plan_landing(built_stores.projects_root, reset=False)

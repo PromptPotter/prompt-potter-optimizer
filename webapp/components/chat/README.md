@@ -17,7 +17,7 @@ assistant" endpoint is a deferred Arc 2 —
 The core imports nothing from an optimizer module; each file's import list is the proof.
 
 - **The thread model** — `lib/chat/thread.ts`: one ordered item list behind `ThreadProvider` /
-  `useThread`. `message` and `file` are what the operator and the assistant write, `run` is the
+  `useThreads`. `message` and `file` are what the operator and the assistant write, `run` is the
   frozen values of a task that ended (generic in its payload), and a `block` is an
   always-current region a host mounts into the list and the store never keeps.
 - **The renderer** — `components/chat/Thread.tsx` draws that list and follows its tail;
@@ -29,14 +29,14 @@ The core imports nothing from an optimizer module; each file's import list is th
   ([`event-stream.md`](../../../docs/developer/event-stream.md) § Current state), and every SSE frame
   carries the fold whole as `activity: {status, notices}`. A new kind is one row in that table,
   and any client — this one, an MCP tool, another agent's UI — renders the newest frame.
-- **The SSE client** — `lib/chat/useCycleEvents.ts` (snapshot → tail →
+- **The SSE client** — `lib/hooks/useCycleEvents.ts` (snapshot → tail →
   heartbeat → reconnect), transport only: it keeps the newest `activity` and reads nothing
   else off a frame.
 - **The decision surface** — `components/chat/LiveSegment.tsx`: the live status line, its
   notices and the button-gated agency over the existing `/commands/{kind}` set, mounted as one
   `block` at the thread's tail.
 - **The live-then-frozen shape** — an always-current `block` at the tail while the task runs,
-  snapshotted into the list as a `run` item when it ends (`useThread().appendRun`, idempotent
+  snapshotted into the list as a `run` item when it ends (`useThreads().appendRun`, idempotent
   per key). The *shape* is reusable for any long task; what fills it here is not.
 
 ## Delete to de-PromptPotter
@@ -58,13 +58,11 @@ To strip this down to a generic chat + tool-activity app, remove:
 - **The optimizer-specific decision** — the served `ActivityDecision` (the origin-gate group) and the
   origin-gate verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
   your own gated commands.
-- **The run card** — `components/chat/RunCard.tsx` (the Round row's
-  `<TrendChart density="glyph" />` and the dashboard link live there, and `RunSummaryItem`, which
-  renders the frozen course entry). Keep the `run` item kind and hand `Thread` a `renderRun`
-  for your own task summary.
-- **The optimize row** of `ingest/ComposerTools.tsx` and the `useRunControl` behind it — move
-  the Tools popover and its coming-soon rows, which are the generic composer's, beside
-  `Composer.tsx`, and re-point that one row at your own long-running task's pause/start.
+- **The run card** — `components/chat/RunCard.tsx` (the sample walk, `HardSamplesPreview.tsx`),
+  plus `RunSummaryItem`, which renders the frozen course entry. Keep the
+  `run` item kind and hand `Thread` a `renderRun` for your own task summary.
+- **`ingest/ComposerTools.tsx`** — its Tools popover and coming-soon rows are the generic
+  composer's: move them beside `Composer.tsx`.
 
 What remains is the thread model and its renderer, the composer, the SSE transport and its
 served state, and the button-gated control surface — a generic copilot you

@@ -18,6 +18,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 sys.path.insert(0, str(REPO))
 
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+from promptpotter.domain.said import TONES
 from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.routers.commands import commands_router
 
@@ -202,16 +203,13 @@ def _emit_command_contract() -> str:
 _WORD_TABLES: tuple[tuple[str, str], ...] = (
     ("promptpotter.domain.phases", "STOP_REASON_INFO"),
     ("promptpotter.domain.phases", "RUN_PHASE_INFO"),
-    ("promptpotter.domain.phases", "PRODUCER_STATE_INFO"),
     ("promptpotter.domain.phases", "DASHBOARD_STATE_PAUSE_WORDS"),
     ("promptpotter.domain.paired_reading", "READING_STATE_INFO"),
     ("promptpotter.domain.bench", "BENCH_STATE_INFO"),
     ("promptpotter.domain.bench", "BENCH_REFUSAL_INFO"),
-    ("promptpotter.domain.phases", "RAY_HEAD_WORDS"),
+    ("promptpotter.domain.phases", "WAITING_ON_WORDS"),
     ("promptpotter.application.served_dashboard", "LOOKAHEAD_WORDS"),
     ("promptpotter.domain.run_standing", "LIVES_WORDS"),
-    ("promptpotter.domain.hierarchy", "CANDIDATE_STANDING_INFO"),
-    ("promptpotter.domain.hierarchy", "ROUNDS_CAP_WORDS"),
     ("promptpotter.domain.origin_panel", "ROUND_ADVANCE_INFO"),
     ("promptpotter.domain.ruler", "THETA_CAVEAT_INFO"),
     ("promptpotter.domain.arm_reading", "ARM_VERDICT_LABELS"),
@@ -230,6 +228,22 @@ _WORD_TABLES: tuple[tuple[str, str], ...] = (
     ("promptpotter.application.evidence.head_to_head", "GUARD_STATE_LABELS"),
     ("promptpotter.application.evidence.head_to_head", "GUARD_DIFFERENCE_INFO"),
     ("promptpotter.application.evidence.head_to_head", "VERDICT_ABSENT_INFO"),
+    ("promptpotter.domain.round_health", "HEALTH_CAUSE_INFO"),
+    ("promptpotter.domain.round_health", "HEALTH_GRADE_INFO"),
+    ("promptpotter.domain.connector", "BACKEND_REACHABILITY_INFO"),
+    ("promptpotter.application.jobs.quota", "COUPON_STATE_INFO"),
+    ("promptpotter.application.jobs.capacity", "SLOT_BOUND_WORDS"),
+    ("promptpotter.domain.dataset_start", "START_BLOCK_WORDS"),
+    ("promptpotter.application.datasets.origin_readiness", "SETUP_STEP_TITLES"),
+    ("promptpotter.domain.pipeline_schema", "NODE_KIND_INFO"),
+    ("promptpotter.domain.scoring", "SAMPLE_STATUS_LABELS"),
+    ("promptpotter.domain.cells", "HEATMAP_SCOPE_LABELS"),
+    ("promptpotter.domain.cells", "HARD_SAMPLE_ORDER_LABELS"),
+    ("promptpotter.infrastructure.store.data_root", "LEAF_INFO"),
+    ("promptpotter.application.evidence.subjects", "SCENARIO_WORDS"),
+    ("promptpotter.application.account", "SIGN_IN_REFUSAL_INFO"),
+    ("promptpotter.application.pipeline_resolve", "STEER_OUTSIDE_INFO"),
+    ("promptpotter.domain.spend", "CAP_AXIS_INFO"),
 )
 
 
@@ -442,6 +456,14 @@ def _emit_pipeline_schema_words() -> str:
     )
 
 
+def _emit_tones() -> str:
+    return (
+        "// Every tone, quietest first (domain/said.py::Tone); only `warn` and `danger` pin.\n"
+        f"export const TONES = {json.dumps(list(TONES))} as const;\n"
+        "export type Tone = (typeof TONES)[number];"
+    )
+
+
 def _emit_recent_step() -> str:
     from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
 
@@ -572,6 +594,7 @@ def main() -> int:
         )
     )
     blocks.append(_emit_lifecycle_filter())
+    blocks.append(_emit_tones())
     blocks.append(command_contract)
     emitted = {owner.__name__ for owner in _EXPORTED} | {
         "RunPhase",

@@ -10,10 +10,16 @@ from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     default_campaign_config,
 )
-from promptpotter.application.datasets.origin_readiness import OriginReadiness, origin_readiness
-from promptpotter.application.jobs.quota import launch_usd_bound
+from promptpotter.application.datasets.origin_readiness import (
+    SETUP_STEP_TITLES,
+    OriginReadiness,
+    SetupStep,
+    origin_readiness,
+)
+from promptpotter.application.jobs.quota import LaunchRefusal, account_wallet, launch_refusal
 from promptpotter.application.pipeline_resolve import (
     OptimizerSetup,
+    draft_config,
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
@@ -32,7 +38,7 @@ from promptpotter.domain.pipeline_schema import (
     dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, money_text
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -64,7 +70,10 @@ class DraftCampaignWire(StrictModel):
     scoring_dials: str = Field(
         description="`term=weight` dials joined by commas; empty scores correctness alone."
     )
-    optimization_overrides: OptimizationOverrides
+    optimization_overrides: OptimizationOverrides = Field(
+        description="The draft's overrides, its `budget` the one Start declares: "
+        "`pipeline_resolve.draft_config`'s, a free account's tier laid last."
+    )
     optimizer_setup: OptimizerSetup = Field(
         description="The optimizer as this draft's config runs it, as a campaign serves it."
     )
@@ -106,6 +115,9 @@ class DraftCampaignWire(StrictModel):
     dependencies: list[DraftDependency]
     readiness: OriginReadiness = Field(
         description="The server's mint gate, recomputed on every draft response."
+    )
+    launch_refusal: LaunchRefusal | None = Field(
+        description="`admit_launch`'s refusal of Start at the declared budget; null where it admits."
     )
     recap: str = Field(
         description="One plain sentence restating what this draft would run, for a surface to say."
@@ -160,18 +172,14 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
 def _draft_schema_source(draft: DraftCampaign) -> SchemaSource:
     if draft.backend_nodes:
         return "backend"
-    return (
-        "local"
-        if connectors.CONNECTORS.get(draft.connector).execution == "in_process"
-        else "unreachable"
-    )
+    return "unreachable" if connectors.CONNECTORS.get(draft.connector).serves_pipeline else "local"
 
 
-def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:
+def _wire_overrides(draft: DraftCampaign, declared: Budget) -> OptimizationOverrides:
     """Constructed, not validated: a reused dataset's ``budget.rounds`` may exceed the edit bound."""
     held = draft.optimization_overrides
     return OptimizationOverrides.model_construct(
-        budget=Budget.model_validate(held["budget"]),
+        budget=declared,
         halt_at_accuracy=held["halt_at_accuracy"],
         optimizer=held["optimizer"],
         nodes={
@@ -181,8 +189,6 @@ def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:
     )
 
 
-_SPOKEN_CONNECTOR = {"termnorm": "the TermNorm pipeline"}
-_SPOKEN_MATCHER = {"label_match": "an exact match against the target"}
 _TITLE_MAX_CHARS = 72
 
 
@@ -208,14 +214,16 @@ def _recap(draft: DraftCampaign) -> str:
     )
     return (
         f"PromptPotter will {lead} — "
-        f"running {_SPOKEN_CONNECTOR.get(draft.connector, draft.connector)}, "
-        f"scoring by {_SPOKEN_MATCHER.get(draft.scoring_matcher, draft.scoring_matcher)}, "
+        f"running {draft.connector}, "
+        f"scoring by {draft.scoring_matcher}, "
         f"{over}."
     )
 
 
 def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
     resolution = resolve_pipeline_for_draft(stores, draft)
+    declared = draft_config(stores, draft).optimization.budget
+    wallet = account_wallet(stores)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,
@@ -225,7 +233,7 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         scoring_matcher=draft.scoring_matcher,
         scoring_matchers=sorted(MATCHERS),
         scoring_dials=draft.scoring_dials,
-        optimization_overrides=_wire_overrides(draft),
+        optimization_overrides=_wire_overrides(draft, declared),
         optimizer_setup=resolution.optimizer_setup,
         raw_task_description=draft.raw_task_description,
         pipeline_overlay=dict(draft.pipeline_overlay),
@@ -249,8 +257,11 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
             for dep in draft_pipeline_dependencies(draft)
         ],
         readiness=origin_readiness(draft),
+        launch_refusal=LaunchRefusal.of(
+            wallet, launch_refusal(wallet, declared, stores=stores, refusing=None)
+        ),
         recap=_recap(draft),
-        setup_schema=setup_schema(draft, launch_usd=launch_usd_bound(stores)),
+        setup_schema=setup_schema(draft, launch=wallet.launch_bound, declared=declared),
     )
 
 
@@ -260,9 +271,6 @@ def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
     prop = dict(schema["properties"][name])
     arms = [arm for arm in prop.pop("anyOf", ()) if arm.get("type") != "null"]
     prop = {**(arms[0] if arms else {}), **prop}
-    for loose, standard in (("ge", "minimum"), ("le", "maximum"), ("gt", "exclusiveMinimum")):
-        if loose in prop:
-            prop[standard] = prop.pop(loose)
     if prop.get("default") is None:
         prop.pop("default", None)
     return {**prop, "title": title}
@@ -278,20 +286,22 @@ def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
     }
 
 
-def _usd_cap(budget: dict[str, Any], launch: float | None) -> dict[str, Any]:
+def _cap(budget: dict[str, Any], axis: str, bound: float | None = None) -> dict[str, Any]:
     """Bounded at what admission takes, never defaulted to it: a default below the campaign's own
     ceiling is a clamp, and a clamped run halts mid-campaign."""
-    field = _field(budget, "usd", "Spend cap in USD")
-    if launch is None:
-        return field
-    return {
-        **field,
-        "maximum": launch,
-        "description": f"This account launches at up to ${launch:.2f}.",
-    }
+    field = _field(budget, axis, CAP_AXIS_INFO[axis].title)
+    return field if bound is None else {**field, "maximum": bound}
 
 
-def setup_schema(draft: DraftCampaign, *, launch_usd: float | None) -> dict[str, Any]:
+def _blank_binds(declared: Budget) -> str:
+    """What a blank launch cap leaves binding: the campaign's declared ceiling (a free account's
+    is the tier's), else the account's allowance."""
+    if declared.usd is None and declared.tokens is None:
+        return "Blank: your account's allowance binds this launch."
+    return f"Blank: the campaign's {money_text(declared)} ceiling binds this launch."
+
+
+def setup_schema(draft: DraftCampaign, *, launch: Budget, declared: Budget) -> dict[str, Any]:
     patch = EditDraftPatch.model_json_schema()
     overrides = OptimizationOverrides.model_json_schema()
     budget = Budget.model_json_schema()
@@ -299,9 +309,9 @@ def setup_schema(draft: DraftCampaign, *, launch_usd: float | None) -> dict[str,
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-            "data": {
+            SetupStep.DATA: {
                 "type": "object",
-                "title": "Data",
+                "title": SETUP_STEP_TITLES[SetupStep.DATA],
                 "required": ["slug"],
                 "properties": {
                     "slug": _field(patch, "slug", "Name"),
@@ -309,9 +319,9 @@ def setup_schema(draft: DraftCampaign, *, launch_usd: float | None) -> dict[str,
                     "column_ground_truth": _column(draft, "column.ground_truth", "Target column"),
                 },
             },
-            "run": {
+            SetupStep.RUN: {
                 "type": "object",
-                "title": "Run bounds",
+                "title": SETUP_STEP_TITLES[SetupStep.RUN],
                 "properties": {
                     "optimization_overrides": {
                         "type": "object",
@@ -320,10 +330,7 @@ def setup_schema(draft: DraftCampaign, *, launch_usd: float | None) -> dict[str,
                             "budget": {
                                 "type": "object",
                                 "properties": {
-                                    "rounds": {
-                                        **_field(budget, "rounds", "Rounds cap"),
-                                        "maximum": MAX_EDITED_ROUNDS,
-                                    },
+                                    "rounds": _cap(budget, "rounds", MAX_EDITED_ROUNDS),
                                 },
                             },
                             "halt_at_accuracy": _field(
@@ -334,15 +341,12 @@ def setup_schema(draft: DraftCampaign, *, launch_usd: float | None) -> dict[str,
                     "budget": {
                         "type": "object",
                         "title": "This launch only",
-                        "description": "Blank inherits your account's allowance, which still "
-                        "binds underneath; whichever cap trips first stops the run.",
+                        "description": _blank_binds(declared),
                         "writeOnly": True,
                         "properties": {
-                            "usd": _usd_cap(budget, launch_usd),
-                            "tokens": _field(budget, "tokens", "Token cap"),
-                            "wall_clock_s": _field(
-                                budget, "wall_clock_s", "Wall-clock cap in seconds"
-                            ),
+                            "usd": _cap(budget, "usd", launch.usd),
+                            "tokens": _cap(budget, "tokens", launch.tokens),
+                            "wall_clock_s": _cap(budget, "wall_clock_s"),
                         },
                     },
                 },

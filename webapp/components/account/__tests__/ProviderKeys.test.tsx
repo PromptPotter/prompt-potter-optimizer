@@ -4,6 +4,7 @@ import { AuthProvider } from "@/lib/state/auth";
 import { clearReadCache } from "@/lib/read-cache";
 import { accountKey, couponStatus } from "@/lib/test-fixtures";
 import type { CouponStatus } from "@/lib/api";
+import { COUPON_STATE_INFO } from "@/lib/api/types.generated";
 import { ProviderKeys } from "../AccountKeysTab";
 
 interface Sent {
@@ -92,7 +93,7 @@ describe("ProviderKeys", () => {
 
   it("reads a used-up coupon as used up", () => {
     serve(() => new Response(null, { status: 500 }));
-    view(couponStatus({ left_usd: 0, used_share: 1, exhausted: true }));
-    expect(screen.getByText(/The host's allowance is used up\./)).toBeTruthy();
+    view(couponStatus({ state: "used_up", left: { usd: 0 }, used_share: 1 }));
+    expect(screen.getByText(COUPON_STATE_INFO.used_up.lede)).toBeTruthy();
   });
 });

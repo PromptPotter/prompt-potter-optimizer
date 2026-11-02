@@ -1,92 +1,40 @@
 "use client";
-import { ratePricedText, spendHeadline, type SpendView } from "@/lib/derivations";
-import type { ArmReading, PairedReading } from "@/lib/api/types";
+import type { ArmReading } from "@/lib/api/types";
 import { fmtUnit } from "@/lib/format";
-import { HoverCard, Term } from "@/components/ui";
-import { PairedLift } from "@/components/shell/PairedLift";
-import { SpendBuckets } from "@/components/shell/SpendBuckets";
+import { HoverCard } from "@/components/ui";
 
-export function SubjectHeadline({
-  spend,
-  reading,
-  bench,
-}: {
-  spend: SpendView;
-  reading: ArmReading | null;
-  // served: the course's `facts.bench.vs_origin`, set only where the shown searchpoint is the graded pick.
-  bench: PairedReading | null;
-}) {
-  const { metered } = spend;
-  const priced = metered
-    ? ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced)
-    : null;
-  return (
-    <div className="subject-headline">
-      {metered ? (
-        <>
-          <Term content={<SpendBuckets metered={metered} campaignUsd={spend.campaignUsd} />}>
-            <strong>{spendHeadline(metered)}</strong>
-          </Term>
-          <span className="subject-headline-unit">
-            billed{priced ? ` + ${priced}` : ""}
-          </span>
-        </>
-      ) : (
-        <strong>—</strong>
-      )}
-      <span className="subject-headline-sep" aria-hidden="true">
-        ·
-      </span>
-      <Lift reading={reading} bench={bench} />
-    </div>
-  );
-}
-
-function Lift({ reading, bench }: { reading: ArmReading | null; bench: PairedReading | null }) {
-  const benchLift = bench ? (
-    <>
-      bench lift <PairedLift reading={bench} facet="lift" unread="label" />
-    </>
-  ) : null;
+// The shown searchpoint's own accuracy; the bench and the run's spend are the masthead's alone.
+export function SubjectHeadline({ reading }: { reading: ArmReading | null }) {
   const accuracy = reading?.own?.accuracy?.value;
-  if (reading == null || accuracy == null) {
-    return <span className="subject-headline-lift">{benchLift ?? "bench lift —"}</span>;
-  }
+  if (reading == null || accuracy == null) return null;
   const { scored, expected, cut } = reading.panel;
   return (
-    <HoverCard
-      className="subject-lift-card"
-      focusable
-      content={
-        <>
-          {benchLift ? (
-            <>
-              <p className="subject-lift-bench">{benchLift}</p>
+    <div className="subject-headline">
+      <HoverCard
+        className="subject-lift-card"
+        focusable
+        content={
+          <>
+            <p className="subject-lift-note">This candidate on the rows it measured.</p>
+            {cut ? (
               <p className="subject-lift-note">
-                The pick over the origin in composite fitness, on held-out rows no optimizer node
-                read — the same reading for every optimizer.
+                Measurement stopped at {scored} of the round&rsquo;s {expected} samples — a
+                partial panel, not a verdict.
               </p>
-            </>
-          ) : null}
-          <p className="subject-lift-note">This candidate on the rows it measured.</p>
+            ) : null}
+          </>
+        }
+      >
+        <span className="subject-headline-acc">
+          {fmtUnit("rate", accuracy)}
           {cut ? (
-            <p className="subject-lift-note">
-              Measurement stopped at {scored} of the round&rsquo;s {expected} samples — a
-              partial panel, not a verdict.
-            </p>
+            <span className="subject-headline-cut">
+              {" "}
+              {scored}/{expected}
+            </span>
           ) : null}
-        </>
-      }
-    >
-      <span className="subject-headline-acc">
-        {fmtUnit("rate", accuracy)}
-        {cut ? (
-          <span className="subject-headline-cut">
-            {" "}
-            {scored}/{expected}
-          </span>
-        ) : null}
-      </span>
-    </HoverCard>
+        </span>
+      </HoverCard>
+    </div>
   );
 }

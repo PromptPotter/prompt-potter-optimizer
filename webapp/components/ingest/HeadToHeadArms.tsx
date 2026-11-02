@@ -6,6 +6,7 @@ import {
   type OptimizerSetup,
   type StartCheckinOptions,
 } from "@/lib/api";
+import { knobGroups, type KnobGroup } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { Button, CommitInput, ReadState, SegmentedControl } from "@/components/ui";
 import { KnobItem } from "@/components/dashboard/pipeline/NodeKnobsPanel";
@@ -51,10 +52,10 @@ function nextKey(base: string, arms: ArmDraft[]): string {
 }
 
 // *patch* laid on the arm, kept sparse: a knob set back to the setup's value leaves the arm.
-function moved(arm: ArmDraft, patch: Record<string, ManifestNodeOverlay>, setup: OptimizerSetup) {
+function moved(arm: ArmDraft, patch: Record<string, ManifestNodeOverlay>, groups: KnobGroup[]) {
   let nodes = arm.nodes;
   for (const [node, { config }] of Object.entries(patch)) {
-    const rows = setup.knobs.find((g) => g.node === node)?.knobs;
+    const rows = groups.find((g) => g.node === node)?.knobs;
     const held = Object.entries({ ...nodes[node]?.config, ...config }).filter(([key, value]) => {
       const row = rows?.find((k) => k.key === key);
       return row === undefined || !same(row.value, value);
@@ -77,13 +78,14 @@ function ArmKnobs({
   onArm: (arm: ArmDraft) => void;
 }) {
   const count = Object.values(arm.nodes).reduce((n, o) => n + Object.keys(o.config).length, 0);
+  const groups = knobGroups(setup);
   return (
     <details className="mech-all">
       <summary>
         Knobs <small>{count === 0 ? "as the setup above" : `${count} moved`}</small>
       </summary>
       <ul className="mech-list">
-        {setup.knobs.flatMap((g) =>
+        {groups.flatMap((g) =>
           g.knobs.map((knob) => {
             const own = arm.nodes[g.node]?.config;
             const runs = own !== undefined && knob.key in own ? own[knob.key] : knob.value;
@@ -94,7 +96,7 @@ function ArmKnobs({
                 knob={{ ...knob, declared: knob.value, value: runs }}
                 declaredLabel="the setup's"
                 showNode
-                onChange={(patch) => onArm(moved(arm, patch, setup))}
+                onChange={(patch) => onArm(moved(arm, patch, groups))}
               />
             );
           }),

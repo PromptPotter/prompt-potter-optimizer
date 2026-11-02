@@ -1,13 +1,33 @@
 "use client";
 import { useState } from "react";
-import { cellRead, type Cell, type CellSpan } from "@/lib/api";
-import { RATE_PRICED_LABEL } from "@/lib/api/types.generated";
-import type { CellAddress } from "@/lib/address";
+import { cellRead, type Cell, type CellRow, type CellSpan } from "@/lib/api";
+import { RATE_PRICED_LABEL, SAMPLE_STATUS_LABELS } from "@/lib/api/types.generated";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { fitnessStyle } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
 import { CopyButton, ReadState, SegmentedControl, SidePanel } from "@/components/ui";
+
+export function Fitness({ value }: { value: number | null | undefined }) {
+  if (value == null) return <span className="ms-dim">—</span>;
+  return (
+    <span className="ms-fit" style={fitnessStyle(value)}>
+      {fmtUnit("rate", value)}
+    </span>
+  );
+}
+
+// A row and the opened cell say a cell's verdict one way: its word, then the grade it is the verdict of.
+export function Verdict({ cell }: { cell: Pick<CellRow, "status" | "fitness"> }) {
+  return (
+    <span className="ms-verdict">
+      <span className={cx("ms-status", `is-${cell.status.toLowerCase()}`)}>
+        {SAMPLE_STATUS_LABELS[cell.status]}
+      </span>
+      {cell.fitness != null && <Fitness value={cell.fitness} />}
+    </span>
+  );
+}
 
 type SpanTab = "input" | "output" | "details" | "tokens";
 
@@ -80,14 +100,10 @@ function CellBody({ cell }: { cell: Cell }) {
   return (
     <div className="cell-body">
       <div className="cell-summary">
-        <span className={cx("cell-status", `is-${cell.status.toLowerCase()}`)}>{cell.status}</span>
-        {cell.fitness != null && (
-          <span className="cell-fit" style={fitnessStyle(cell.fitness)}>
-            {fmtUnit("rate", cell.fitness)}
-          </span>
-        )}
-        <span className="cell-dim">{fmtUnit("seconds", cell.seconds)}</span>
-        <span className="cell-dim">{cell.role}</span>
+        <Verdict cell={cell} />
+        <span className="ms-dim">{fmtUnit("seconds", cell.seconds)}</span>
+        {cell.cached && <span className="cell-tag">replayed</span>}
+        <span className="ms-dim">{cell.role}</span>
         <CopyButton data={cell} title="Copy this cell as JSON" />
       </div>
       <div className="cell-answer">
@@ -100,7 +116,12 @@ function CellBody({ cell }: { cell: Cell }) {
           <pre className="cell-pre">{cell.ground_truth_text}</pre>
         </div>
       </div>
-      {cell.error && <p className="note-warn">{cell.error}</p>}
+      {cell.error && (
+        <div>
+          <div className="cell-label">Error</div>
+          <pre className="cell-pre">{cell.error}</pre>
+        </div>
+      )}
       <details className="cell-query">
         <summary className="cell-label">Query</summary>
         <pre className="cell-pre">{cell.query}</pre>
@@ -117,7 +138,7 @@ function CellBody({ cell }: { cell: Cell }) {
                   onClick={() => setSpanIdx(i)}
                 >
                   <span className="cell-span-name">{sp.node}</span>
-                  <span className="cell-dim">
+                  <span className="ms-dim">
                     {sp.model ?? "no model"} · {fmtUnit("seconds", sp.seconds)}
                   </span>
                 </button>
@@ -142,20 +163,20 @@ function CellBody({ cell }: { cell: Cell }) {
 
 export function CellPanel({
   datasetName,
-  cell,
+  answer,
   onClose,
   hasPrev,
   hasNext,
   onStep,
 }: {
   datasetName: string;
-  cell: CellAddress;
+  answer: string;
   onClose: () => void;
   hasPrev: boolean;
   hasNext: boolean;
   onStep: (shift: -1 | 1) => void;
 }) {
-  const read = useRead(cellRead(datasetName, cell.answer));
+  const read = useRead(cellRead(datasetName, answer));
   return (
     <SidePanel
       panelId="cell"
@@ -167,7 +188,7 @@ export function CellPanel({
     >
       <ReadState read={read} subject="this sample">
         {/* Keyed by the address, so a J/K step starts on the first span again. */}
-        {(data) => <CellBody key={cell.answer} cell={data} />}
+        {(data) => <CellBody key={answer} cell={data} />}
       </ReadState>
     </SidePanel>
   );

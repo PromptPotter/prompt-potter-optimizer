@@ -1,32 +1,28 @@
 // A null `health` probe means not probed yet ("probing"), never down.
 
 import type { BackendHealthResponse } from "@/lib/api";
+import { BACKEND_REACHABILITY_INFO } from "@/lib/api/types.generated";
+import { shownData, type ReadResult } from "@/lib/hooks/useRead";
 import type { PipelineStatus } from "@/lib/types";
 
-export function pipelineReadStatus(read: {
-  bound: boolean;
-  loading: boolean;
-  failed: boolean;
-}): PipelineStatus {
-  if (!read.bound) return "unbound";
-  if (read.loading) return "loading";
-  return read.failed ? "error" : "ok";
+// A failed revalidation keeps the body it painted over, so a failure is a read with nothing to show.
+export function pipelineReadStatus(read: ReadResult<unknown>): PipelineStatus {
+  if (read.status === "idle") return "unbound";
+  if (shownData(read) !== null) return "ok";
+  return read.status === "failed" ? read.failure : "loading";
 }
 
 interface ConnectorReachability {
   reachable: boolean;
-  down: boolean;
   stateCls: "live" | "offline" | "idle";
   stateLabel: string;
 }
 
 export function connectorReachability(health: BackendHealthResponse | null): ConnectorReachability {
   const reachable = health?.status === "live";
-  const down = health != null && !reachable;
   return {
     reachable,
-    down,
-    stateCls: reachable ? "live" : down ? "offline" : "idle",
-    stateLabel: reachable ? "reachable" : down ? "unreachable" : "probing…",
+    stateCls: reachable ? "live" : health ? "offline" : "idle",
+    stateLabel: health ? BACKEND_REACHABILITY_INFO[health.status].label : "probing…",
   };
 }

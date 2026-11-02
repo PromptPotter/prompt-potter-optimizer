@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import shutil
@@ -89,6 +88,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
+    prune_empty_dirs,
     read_json_optional,
     read_text_optional,
     rmtree_robust,
@@ -125,14 +125,6 @@ from promptpotter.shared.errors import (
 logger = logging.getLogger(__name__)
 
 
-def _prune_empty_dirs(root: Path) -> None:
-    for d in sorted(
-        (p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
-    ):
-        with contextlib.suppress(OSError):
-            d.rmdir()
-
-
 def _keepsake(path: Path, campaign_dir: Path) -> bool:
     row = campaign_row(PurePosixPath(path.relative_to(campaign_dir).as_posix()))
     return row is not None and row.keepsake
@@ -146,7 +138,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
                 continue
             for p in [f for f, _st in iter_files(cdir) if not _keepsake(f, campaign_dir)]:
                 unlink_robust(p)
-            _prune_empty_dirs(cdir)
+            prune_empty_dirs(cdir)
 
 
 def _ledger_meters(ledgers: Iterable[Path]) -> dict[CeilingMeter, Budget]:

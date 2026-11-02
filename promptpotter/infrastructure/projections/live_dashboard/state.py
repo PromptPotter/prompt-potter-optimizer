@@ -15,12 +15,11 @@ from promptpotter.domain.dashboard_rows import (
     VerificationMark,
 )
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
-from promptpotter.domain.round_audit import LoopWarning, NodeBlock
+from promptpotter.domain.phases import DashboardState, ErrorRecord, RunPhase, StopReason
+from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 
@@ -53,18 +52,10 @@ class BackendWarning(StrictModel):
 
 
 class WaitingOn(StrictModel):
-    """The cell the producer's open call holds — worded `RAY_HEAD_WORDS` on every surface."""
+    """The cell the producer's open call holds — worded `WAITING_ON_WORDS` on every surface."""
 
     label: str | None = Field(description="The owning arm's label; null for a pass no arm owns.")
     position: int
-
-
-class DashboardError(StrictModel):
-    """The structured failure of a stop whose ``STOP_REASON_INFO`` row is FAILED, else absent."""
-
-    kind: str
-    message: str
-    stop_reason: StopReason
 
 
 class RacingBlock(StrictModel):
@@ -96,16 +87,8 @@ class CurrentRound(StrictModel):
         "in this cycle's sandbox; null where no open cell has named one.",
     )
     candidates: list[LiveCandidate] = Field(default_factory=list)
-    fitness_bands: list[int] = Field(
-        description="How many scored rows across `candidates` graded into each tenth of [0, 1], "
-        "lowest first, banded as a closed round's `fitness_bands` is."
-    )
     nodes: dict[str, NodeBlock] = Field(default_factory=dict)
     racing: RacingBlock | None = None
-
-    @classmethod
-    def unentered(cls, measurement_node: str) -> CurrentRound:
-        return cls(measurement_node=measurement_node, fitness_bands=fitness_bands(()))
 
 
 class DashboardFacts(StrictModel):
@@ -141,9 +124,7 @@ class DashboardFacts(StrictModel):
 
     backend_retry_count: int = 0
     recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
-    recent_loop_warnings: list[LoopWarning] = Field(default_factory=list)
 
-    total_queries_scored: int = 0
     total_backend_calls: int = 0
 
     current_query_payload: str | None = None
@@ -153,8 +134,6 @@ class DashboardFacts(StrictModel):
     backpressure: BackpressureReading | None = None
     measured_unit: MeasuredUnit
 
-    # ``None`` = no time recorded; a cached replay's 0.0 is a real reading.
-    last_query_elapsed_s: float | None = None
     # The timestamp of the last record the state took, which `at_offset` may stand past.
     at_time: str
 
@@ -178,12 +157,12 @@ class DashboardFacts(StrictModel):
 
     current_round: CurrentRound
 
-    error: DashboardError | None = None
-
 
 class LiveDashboardState(DashboardFacts):
     # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
     declared_phase: RunPhase = RunPhase.RUNNING
+    # A FAILED stop's failure, else absent: served only as the run's pinned `said` row.
+    error: ErrorRecord | None = None
     # The course entry serves both (`CourseFacts.standing` / `elects_on`); the file keeps them.
     run_standing: RunStanding | None = None
     elects_on: DisplayMetric
@@ -217,7 +196,7 @@ class LiveDashboardState(DashboardFacts):
     def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
         return cls(
             at_time=wiring.timestamp,
-            current_round=CurrentRound.unentered(wiring.measurement_node),
+            current_round=CurrentRound(measurement_node=wiring.measurement_node),
             **cls.launched(wiring),
         )
 

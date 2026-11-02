@@ -20,7 +20,9 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
 3. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
    (1)–(4).
 4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
-   partition. Paid, priced in dollars and wall clock first:
+   partition; anytime-valid confidence sequences as the default stopping rule, with today's PoBB a
+   selectable rule and a replay over banked rounds that reports where the two disagree
+   ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2). Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
 5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A3
    anonymous preview.
@@ -39,6 +41,7 @@ the rest of Lane C.
 
 - **A1** First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit).
 - **A3** Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier).
+- **A4** Arrangeable workspace — panels the operator resizes, collapses, pops out and docks back (§ Arrangeable workspace).
 
 ### Lane C — differentiator and capability
 
@@ -176,7 +179,7 @@ surface; model and provider are optimizer-locked.
 - **Run mode** — the same node raises `pause-cycle` / `change-run-limits` / `fork-cycle` over
   `application/datasets/origin_resolve.py`'s `RaisedCommand`. Lands with L4.
 - **The whole setup proposed from the operator's text** — every node's model and effort, rounds and
-  cap — priced against the served menu and `application/jobs/quota.py::launch_usd_bound`; the host's
+  cap — priced against the served menu and `application/jobs/quota.py::AccountWallet.launch_bound`; the host's
   bound outranks the operator's words; an off-menu proposal is dropped at `_coerce`.
 
 ## Embedding (M15)
@@ -442,10 +445,30 @@ is the smaller change. Reorder re-keys every cell, so order is a searchpoint pro
 `components/ui/` primitive on Pointer Events, keyboard parity (`↑`/`↓` with an `aria-live`
 announcement), commit on drop, the handle the touch target.
 
+## Arrangeable workspace
+
+The dashboard becomes a workspace of panels the operator arranges: resize, collapse, pop out, dock
+back — Claude Code's cloud workspace for the mechanism, Prime Intellect Lab's run page for the card
+look, the operator's Stitch prototype of a draggable heading. On a phone panels stack, resize is
+height alone, and a popped panel is a full-screen sheet. Landed: no canvas paints detail over its
+marks (the canvas rule in `webapp/components/CLAUDE.md`); Grade sits on the Leader
+(`shell/searchpoint/BenchGradeAction`), the masthead's figures read-only. Owed, in order:
+
+1. **One view, one panel.** Each family in `components/dashboard/layout/panes.tsx` renders one frame;
+   Candidates hosts three today (chart, forest, inspector), which become regions of one panel.
+2. **The arrangement is data** — order, size and docked/popped per view ride the address beside the
+   open views (`lib/workspace.tsx`), never a second store.
+3. **Panel chrome is one `components/ui/` primitive**: the header row is the drag handle, an edge
+   resizes, collapse and pop-out sit in the header; Pointer Events with keyboard parity, the same
+   drag surface § Prompt-field order needs.
+4. **The tapped candidate's before/after** — its diff and flips against the origin in the inspector:
+   `SubjectBox` splits into the leader's picker and the subject reading the inspector hosts.
+
+Closes when the operator arranges the dashboard on a phone and a desktop, the arrangement survives a
+reload, and a popped panel docks back.
+
 ## Run card
 
-Collapsed, the run card is the compact card (round axis, trend glyph, heatmap, subject, hardest
-samples); `more` swaps in before/after against the origin, the evolution chart with the lineage, and
-the two-row sample heatmap. Rendered from the served hierarchy (`domain/hierarchy.py`), a fork drawn as
-an event at its spawn point. Owed: the round that changed each key, served ("changed in C7.3").
-Rejected: the round rail of hollow/filled bars and the ring readout.
+The run card is the chat's sample walk alone: the leader and the heatmap are the dashboard's, the target pipeline the chat hero's — no block renders in both views. Owed: the round
+that changed each key, served ("changed in C7.3"), on the leader's diff. Rejected: the round rail of
+hollow/filled bars, the ring readout, and a second card mirroring the dashboard behind `more`.

@@ -15,6 +15,7 @@ from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.phases import PauseReading, RunAdmission, RunState
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.run_standing import RunStanding
+from promptpotter.domain.said import Said
 from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
@@ -55,13 +56,6 @@ CANDIDATE_STANDING_INFO: dict[CandidateStanding, str] = {
     "its place. It stays as the record of what ran, its line as it ran.",
 }
 assert CANDIDATE_STANDING_INFO.keys() == set(CandidateStanding)
-
-# How a rounds count reads where its cap says more than a count: none past the origin, no axis.
-type RoundsCapWord = Literal["origin_only", "no_axis"]
-ROUNDS_CAP_WORDS: dict[RoundsCapWord, str] = {
-    "origin_only": "origin only",
-    "no_axis": "no rounds axis",
-}
 
 # A step window: what one request is served, and the most a store's fold keeps.
 DEFAULT_STEP_LIMIT = 200
@@ -130,10 +124,6 @@ class CampaignFacts(FrozenModel):
     runs_with: CampaignRunsWith | None = Field(
         description="What the root course runs with; null where its pipeline did not resolve."
     )
-    line_course: CourseFacts | None = Field(
-        description="The facts of the course holding the line, which the campaign's row reads "
-        "as its own; null where that course has no mint record."
-    )
 
 
 class UnstartedFacts(FrozenModel):
@@ -166,10 +156,6 @@ class CourseFacts(FrozenModel):
     task: str | None = Field(description="The outer panel cell an L4 inner course measures.")
     standing: RunStanding | None = Field(description="Null before round 0 closes.")
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
-    rounds_cap: int | None = Field(
-        description="The rounds cap that binds it: its wiring's, before its first launch its "
-        "campaign's. 0 runs the origin only; null where it has no rounds axis."
-    )
     elects_on: DisplayMetric | None = Field(
         description="The column the course's newest election elected on; null before its first. "
         "`ability`: its rounds are won on θ, not on accuracy."
@@ -361,12 +347,42 @@ class _HierarchyNode(FrozenModel):
     )
 
 
+type FigureKey = Literal[
+    "state",
+    "optimizer",
+    "spend",
+    "spend_lifetime",
+    "bench",
+    "rounds",
+    "candidates",
+    "selection",
+    "lift",
+    "lives",
+    "accuracy",
+    "ability",
+]
+
+
+class Figure(Said):
+    """An entry's figure: a `Said` row keyed by the closed set code looks a figure up by."""
+
+    key: FigureKey = Field(description="Which figure, for code to look up; never shown.")
+
+
 class _HierarchyEntry(_HierarchyNode):
-    """A level a row or a card renders: named and tagged by the server; its numbers are `facts`."""
+    """A level a row or a card renders: named, tagged and figured by the server; its numbers for
+    code are `facts`."""
 
     label: str = Field(description="The display name.")
-    caveat: str | None = Field(description="What could not be read; null where all was.")
     tags: list[HierarchyTag]
+    figures: list[Figure] = Field(
+        description="Its figures for a person, each composed once with a value, in the order a "
+        "row shows them."
+    )
+    lines: list[Said] = Field(
+        description="Its sentences under the figures, without a value; what could not be read is "
+        "among them."
+    )
 
     def tag(self, kind: TagKind) -> HierarchyTag | None:
         return next((t for t in self.tags if t.kind == kind), None)
@@ -384,6 +400,10 @@ class HierarchyCourse(_RunEntry):
 
     level: Literal["course"] = "course"
     facts: CourseFacts
+    said: Said | None = Field(
+        description="The run's pinned line from what no clock reads (`run_said`): a producer's "
+        "row is its dashboard's alone. Null where nothing needs the operator."
+    )
 
 
 class HierarchyCampaign(_RunEntry):
@@ -419,7 +439,7 @@ class SubtreeCourse(HierarchyCourse):
     children: list[Annotated[HierarchyRound | SubtreeCampaign, Field(discriminator="level")]] = (
         Field(
             description="Its rounds in round order, then any inner campaign its sandbox holds "
-            "that no candidate's spawn stamp names — that one says so in its `caveat`."
+            "that no candidate's spawn stamp names — that one says so among its `lines`."
         )
     )
 

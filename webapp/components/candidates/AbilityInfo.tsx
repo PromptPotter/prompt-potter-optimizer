@@ -2,29 +2,23 @@
 
 import { THETA_CAVEAT_INFO, type AbilityReading } from "@/lib/api/types.generated";
 import type { ThetaCaveat as Caveat } from "@/lib/types";
-import { fmtLogits } from "@/lib/format";
+import { Said } from "@/components/ui";
 
-export function ThetaCaveatNotice({
+// Footnotes under the chart, each one served `Said` row; the all-miss one names its arms.
+export function ThetaCaveats({
   caveat,
-  ability,
+  floorPinned,
 }: {
   caveat: Caveat | null;
-  ability: AbilityReading | null;
+  floorPinned: readonly string[];
 }) {
-  if (!caveat) return null;
-  const { head, body } = THETA_CAVEAT_INFO[caveat];
-  const round = ability?.round_span;
-  const ruler = ability?.ruler_span;
   return (
-    <div className="theta-caveat" role="note">
-      <strong>{head}</strong> {body}
-      {round != null && ruler != null ? (
-        <span className="theta-caveat-spans">
-          {" "}
-          This round&rsquo;s cells span {fmtLogits(round)}; the ruler spans {fmtLogits(ruler)}.
-        </span>
+    <>
+      {caveat && caveat !== "floor_pinned" ? <Said {...THETA_CAVEAT_INFO[caveat]} /> : null}
+      {floorPinned.length > 0 ? (
+        <Said {...THETA_CAVEAT_INFO.floor_pinned} sub={floorPinned.join(", ")} />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -45,8 +39,8 @@ export function AbilityHelp({
       <p>
         So a candidate can win with <em>lower</em> accuracy when it cleared the harder samples —
         and two candidates scored on different sample subsets still compare fairly, which raw
-        accuracy can&rsquo;t do. θ is shown in each candidate&rsquo;s tooltip and the scoring
-        inspector.
+        accuracy can&rsquo;t do. Tap a candidate&rsquo;s bar to read its θ in the detail below
+        the chart.
       </p>
       <p className="ability-help-calib">
         {model === "2PL" ? (
@@ -71,7 +65,7 @@ export function AbilityHelp({
       </p>
       {caveat ? (
         <p className="ability-help-calib">
-          <strong>{THETA_CAVEAT_INFO[caveat].head}</strong> {THETA_CAVEAT_INFO[caveat].body}
+          <strong>{THETA_CAVEAT_INFO[caveat].label}</strong> {THETA_CAVEAT_INFO[caveat].detail}
         </p>
       ) : null}
     </div>

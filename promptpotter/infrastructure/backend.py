@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from promptpotter.config.paths import MACHINE_DIR
-from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -70,15 +70,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _reply_data(resp: httpx.Response) -> dict[str, Any] | None:
+def _reply_data(resp: httpx.Response, read: ReplyReader) -> dict[str, Any] | None:
     try:
         body = resp.json()
     except ValueError:
         return None
     if not isinstance(body, dict):
         return None
-    data = body.get("data")
-    return data if isinstance(data, dict) else {}
+    return read(body)
+
+
+def _clock(data: dict[str, Any], spent_s: float) -> None:
+    data["total_time"] = spent_s
+    data["step_timings"] = {data["terminal_node"]: spent_s}
 
 
 @dataclass
@@ -226,9 +230,10 @@ class BackendClient:
     def http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
             token = self._connector.auth_token() if self._connector.auth_token else None
+            scheme = self._connector.auth_scheme()
             self._http = httpx.AsyncClient(
                 timeout=_HTTP_TIMEOUT_S,
-                headers={"Authorization": f"Bearer {token}"} if token else None,
+                headers={scheme.header: f"{scheme.prefix}{token}"} if token else None,
                 verify=tls_context(),
             )
         return self._http
@@ -285,7 +290,7 @@ class BackendClient:
             raise BackendUnreachableError(
                 self._connector.name, self.base_url, f"GET {url} answered {resp.status_code}."
             )
-        declared = _reply_data(resp) if resp.is_success else None
+        declared = _reply_data(resp, data_envelope) if resp.is_success else None
         if not declared or not isinstance(declared.get("nodes"), dict) or not declared["nodes"]:
             raise PayloadInvalidError(
                 f"GET {url} answered {resp.status_code} with no pipeline declaration: the "
@@ -308,7 +313,7 @@ class BackendClient:
     ) -> tuple[dict[str, Any], S]:
         """Never resends a request the backend may still be working: a read timeout is terminal."""
         query = sample.query
-        payload = self._connector.wire_adapter(query, pipeline_params)
+        payload = self._connector.wire_adapter(sample, pipeline_params)
 
         if self._connector.execution != "remote_http":
             return await self._in_process_until_admitted(
@@ -321,7 +326,7 @@ class BackendClient:
         )
         resp.raise_for_status()
         if data is None:
-            raise ValueError(f"backend answered HTTP {resp.status_code} with no JSON object")
+            raise ValueError(f"backend answered HTTP {resp.status_code} with no answer to read")
         return data, spent
 
     async def _in_process_until_admitted[S](
@@ -371,10 +376,13 @@ class BackendClient:
             async with self.backpressure.send() as ticket:
                 # A backend sends on the box's keys, whoever holds one of their own.
                 with admitted(CELL, bound, model=None, provider=None, paid_by="host") as admission:
+                    started = time.monotonic()
                     try:
                         # The cell's envelope and the run's wall clock end the wait, as a HALTED cut.
                         resp = await client.post(
-                            f"{self.base_url}/matches", json=payload, timeout=None
+                            f"{self.base_url}{self._connector.cell_path}",
+                            json=payload,
+                            timeout=None,
                         )
                     except httpx.TransportError as exc:
                         outcome = failed_send(exc)
@@ -400,7 +408,9 @@ class BackendClient:
                             said=resp.text,
                             answered_on=_ANSWERED_STATUSES,
                         )
-                        data = _reply_data(resp)
+                        data = _reply_data(resp, self._connector.read_reply)
+                        if self._connector.round_trip_is_latency and data and resp.is_success:
+                            _clock(data, time.monotonic() - started)
                         reported, spent = billed(data or {})
                         outcome = outcome._replace(reported=reported)
                         admission.close(outcome)
@@ -496,10 +506,8 @@ class BackendClient:
                         )
                     )
                 raise
-            spent_s = time.monotonic() - started
             data: dict[str, Any] = result["data"]
-            data["total_time"] = spent_s
-            data["step_timings"] = {data["terminal_node"]: spent_s}
+            _clock(data, time.monotonic() - started)
             reported, spent = billed(data)
             if admission is not None:
                 admission.close(SendOutcome(sent=True, may_have_billed=True, reported=reported))

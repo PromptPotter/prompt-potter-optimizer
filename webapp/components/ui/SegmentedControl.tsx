@@ -21,7 +21,8 @@ export function SegmentedControl<T extends string>({
   size = "sm",
 }: {
   options: readonly Segment<T>[];
-  value: T;
+  // Null presses no segment: the view stands outside the set.
+  value: T | null;
   onChange: (value: T) => void;
   ariaLabel: string;
   className?: string;

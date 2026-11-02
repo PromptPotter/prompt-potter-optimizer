@@ -31,7 +31,6 @@ from promptpotter.domain.scoring import (
     CellSheet,
     GradedCell,
     WalkedCell,
-    fitness_bands,
 )
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -303,16 +302,6 @@ class RoundResult(RoundOutcome):
     def headline(self) -> ArmReading | None:
         ended_on = None if self.election is None else self.election.ended_on
         return next((r for r in self.arm_readings() if r.arm.key == ended_on), None)
-
-    @computed_field(  # type: ignore[prop-decorator]
-        description="How many scored rows of the `headline` arm's cells graded into each tenth of "
-        "[0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in "
-        "the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, "
-        "not a low score."
-    )
-    @property
-    def fitness_bands(self) -> list[int]:
-        return fitness_bands(self.results)
 
     def sheet_of(self, individual_id: str) -> CellSheet:
         return InRunCells([self]).sheet(individual_id, RoleScope.DECISION)

@@ -178,7 +178,7 @@ def render_round_verdict(
     for caveat, labels in caveats.items():
         scope = f" ({', '.join(labels)})" if labels else ""
         out.append(
-            f"  {YELLOW}⚠ θ caveat{scope}: {THETA_CAVEAT_INFO[caveat].head}{RESET}"
+            f"  {YELLOW}⚠ θ caveat{scope}: {THETA_CAVEAT_INFO[caveat].label}{RESET}"
             f" {DIM}[{caveat.value}]{RESET}"
         )
     out.extend(f"  {line}" for line in basis)

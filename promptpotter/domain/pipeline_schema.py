@@ -1,6 +1,7 @@
 import enum
+import re
 from collections.abc import Collection, Iterable, Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -232,7 +233,36 @@ class NodePromptInfo(FrozenModel):
 
 
 # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit, plus the two `io` ends.
-ViewKind = Literal["io", "llm", "tool", "retriever", "cache", "measurement"]
+ViewKind = Literal["io", "llm", "tool", "retriever", "cache", "measurement", "member"]
+
+
+class NodeKindInfo(NamedTuple):
+    """``role`` is the line a node reads with where its manifest gives it no ``description``."""
+
+    label: str
+    role: str
+
+
+NODE_KIND_INFO: dict[ViewKind, NodeKindInfo] = {
+    "io": NodeKindInfo("I/O", "Pipeline terminal."),
+    "llm": NodeKindInfo("LLM", "LLM call — runs the prompt below."),
+    "tool": NodeKindInfo("tool", "Tool — a step that runs code, not a prompt."),
+    "retriever": NodeKindInfo(
+        "retriever", "Retriever — ranks candidates from the index by similarity. No prompt."
+    ),
+    "cache": NodeKindInfo(
+        "cache", "Cache — short-circuits the pipeline on a known hit. No prompt."
+    ),
+    "measurement": NodeKindInfo(
+        "system step", "System step — runs a whole pipeline rather than a prompt."
+    ),
+    "member": NodeKindInfo(
+        "member",
+        "Optimizer member — code that samples, cuts, elects or steers the round, set by its "
+        "knobs. No prompt.",
+    ),
+}
+assert set(NODE_KIND_INFO) == set(get_args(ViewKind))
 
 ParamKind = Literal["model", "enum", "number", "bool", "string", "prompt", "description", "nested"]
 
@@ -244,7 +274,6 @@ class PipelineViewNode(FrozenModel):
     """
 
     id: str
-    label: str
     description: str = ""
     kind: ViewKind
     tier: int = 0
@@ -267,6 +296,8 @@ class PipelineView(FrozenModel):
 
     nodes: list[PipelineViewNode] = Field(default_factory=list)
     edges: list[PipelineViewEdge] = Field(default_factory=list)
+    # The steps a round repeats, in flow order: the `loop` edge runs from the last to the first.
+    cycle: list[str] = Field(default_factory=list)
 
 
 def token_bound_of_bytes(utf8_bytes: int) -> int:
@@ -331,6 +362,8 @@ class PipelineNode(FrozenModel):
     tunes_llm: bool
     # `None`: its backend bounds nothing. Rides the schema, never the identity.
     spend_bound: NodeSpendBound | None = None
+    # A member's knob model as JSON Schema, each property's `default` what its manifest declares.
+    knob_schema: dict[str, Any] | None = None
 
     @property
     def output_keys(self) -> list[str]:
@@ -416,9 +449,33 @@ class NodeConfigParam(FrozenModel):
 
     key: str
     value: Any = None
+    declared: Any = Field(
+        default=None, description="The value the manifest declares — a campaign's floor"
+    )
     kind: ParamKind
+    integer: bool = Field(default=False, description="A `number` row takes whole numbers only")
+    nullable: bool = Field(
+        default=False, description="Whether null is a legal value (an opt-in knob, off)"
+    )
+    minimum: float | None = Field(
+        default=None, description="The least legal value, itself legal; null when none"
+    )
+    exclusive_minimum: float | None = Field(
+        default=None, description="A bound every legal value lies strictly above; null when none"
+    )
+    maximum: float | None = Field(
+        default=None, description="The greatest legal value, itself legal; null when none"
+    )
+    exclusive_maximum: float | None = Field(
+        default=None, description="A bound every legal value lies strictly below; null when none"
+    )
     options: list[str] = Field(default_factory=list)
     description: str = ""
+    summary: str = Field(
+        default="",
+        description="The description's first sentence, cut at its first clause where that runs "
+        "long: the one line a setup surface shows before the whole text",
+    )
     never_axis: Literal["", "cost_lever", "schema_owned"] = ""
     movable_by: list[MovableAgent] = Field(default_factory=list)
     held: bool = False
@@ -427,6 +484,72 @@ class NodeConfigParam(FrozenModel):
     # The ticks an axis draws; `[]` on one is "nothing may be picked", never "not stated".
     permitted: list[str] = Field(default_factory=list)
     permitted_stated: bool = False
+
+
+def _knob_kind(json_type: object) -> ParamKind:
+    match json_type:
+        case "boolean":
+            return "bool"
+        case "integer" | "number":
+            return "number"
+        case "string":
+            return "string"
+        case "array" | "object":
+            return "nested"
+        case declared:
+            raise ValueError(f"knob type {declared!r} is no JSON Schema type a knob takes")
+
+
+_RST_LITERAL = re.compile(r"``(.+?)``", re.DOTALL)
+# Read on the marked text: a stop before a capital, a literal or the end ends a sentence; "e.g. x"
+# and "0.15" end none.
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?=\s+[A-Z(`]|\s*$)")
+_CLAUSE_END = re.compile(r"[:;](?=\s)|\s—\s")
+_SUMMARY_CHARS = 120
+# A clause shorter than this is a symbol being named (`T: …`, `b: …`), no summary.
+_CLAUSE_MIN_CHARS = 24
+
+
+def _plain(text: str) -> str:
+    return _RST_LITERAL.sub(r"\1", text)
+
+
+def _summary(marked: str) -> str:
+    first = _plain(_SENTENCE_END.split(marked.strip(), maxsplit=1)[0].strip())
+    if len(first) <= _SUMMARY_CHARS:
+        return first
+    clause = _CLAUSE_END.search(first, _CLAUSE_MIN_CHARS)
+    return first[: clause.start()].rstrip() if clause else first
+
+
+def _knob_row(row: NodeConfigParam, node: "PipelineNode") -> NodeConfigParam:
+    assert node.knob_schema is not None, "only a member with knobs has knob rows"
+    prop = node.knob_schema["properties"][row.key]
+    defs = node.knob_schema.get("$defs") or {}
+    options = [
+        defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
+        for ref in prop.get("anyOf") or [prop]
+    ]
+    kind = next(o for o in options if o.get("type") != "null")
+    enum = [str(v) for v in kind.get("enum") or ([kind["const"]] if "const" in kind else [])]
+    description = str(prop.get("description") or "")
+    json_type = kind.get("type") or ("object" if "properties" in kind else "string")
+    return row.model_copy(
+        update={
+            "declared": prop["default"],
+            "kind": "enum" if enum else _knob_kind(json_type),
+            "integer": kind.get("type") == "integer",
+            "nullable": any(o.get("type") == "null" for o in options),
+            "minimum": kind.get("minimum"),
+            "exclusive_minimum": kind.get("exclusiveMinimum"),
+            "maximum": kind.get("maximum"),
+            "exclusive_maximum": kind.get("exclusiveMaximum"),
+            "options": enum,
+            "permitted": enum,
+            "description": _plain(description),
+            "summary": _summary(description),
+        }
+    )
 
 
 class NodeReach(FrozenModel):
@@ -802,22 +925,23 @@ class PipelineSchema(FrozenModel):
                     if never or self.pinned(n, key)
                     else [a for a in MOVABLE_AGENTS if key in reach[a]]
                 )
-                params.append(
-                    NodeConfigParam(
-                        key=key,
-                        value=resolved.get(key, n.current_config.get(key, unset)),
-                        kind=kind,
-                        options=options,
-                        permitted=permitted,
-                        permitted_stated=stated,
-                        description=n.param_descriptions.get(key, ""),
-                        never_axis=never,
-                        movable_by=movable,
-                        source=stamped.get(key, "unset"),
-                        # A key that could never be an axis is never HELD: there was none to close.
-                        held=not never and key in n.param_keys_held | n.prompt_fields_held,
-                    )
+                row = NodeConfigParam(
+                    key=key,
+                    value=resolved.get(key, n.current_config.get(key, unset)),
+                    kind=kind,
+                    integer=n.param_types.get(key) == "integer",
+                    options=options,
+                    permitted=permitted,
+                    permitted_stated=stated,
+                    description=n.param_descriptions.get(key, ""),
+                    never_axis=never,
+                    movable_by=movable,
+                    source=stamped.get(key, "unset"),
+                    # A key that could never be an axis is never HELD: there was none to close.
+                    held=not never and key in n.param_keys_held | n.prompt_fields_held,
                 )
+                knobs = n.knob_schema
+                params.append(_knob_row(row, n) if knobs and key in knobs["properties"] else row)
             if n.name == model_carrier and self.available_models:
                 # The node never DECLARED a model: plain configuration, so `never_axis` stays empty.
                 menu = list(self.available_models if model_menu is None else model_menu)
@@ -843,7 +967,12 @@ class PipelineSchema(FrozenModel):
         return next((s.name for s in self.nodes if s.tunes_llm), None)
 
     def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
-        return {n.name: n.output_schema for n in self.declared_nodes}
+        """Absent is a node that gives no answer; ``None`` one that answers in free text."""
+        return {
+            n.name: n.output_schema
+            for n in self.declared_nodes
+            if n.kind in THINKING_KINDS or n.output_schema is not None
+        }
 
     def get_node(self, name: str) -> PipelineNode | None:
         return self._node_map.get(name)

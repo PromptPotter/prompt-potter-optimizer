@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
@@ -129,55 +130,59 @@ class ThetaCaveat(StrEnum):
 
 
 class ThetaCaveatInfo(NamedTuple):
-    head: str
-    body: str
+    """One caveat as a `domain/said.py::Said` row, worded for any level: the operator's screen and
+    the L4 optimizer's prompt read the same words."""
+
+    label: str
+    detail: str
+    tone: Tone
 
 
+# A footnote to a θ, never an alarm: the reading stands, read with this in mind.
 THETA_CAVEAT_INFO: Annotated[dict[ThetaCaveat, ThetaCaveatInfo], shapes_optimizer_prompt] = {
     ThetaCaveat.DISJOINT_SCOPES: ThetaCaveatInfo(
-        "θ mixes datasets that share no scale",
-        "These cells measure more than one dataset, and a difficulty is only ever fitted within "
-        "one, so θ here averages scales that never met. Read each dataset's cells on their own; "
-        "a lift paired on the same cells still holds.",
+        "θ mixes datasets",
+        "These samples come from more than one dataset, and difficulty is only rated within one, "
+        "so this θ averages scales that don't compare. Read each dataset on its own; a lift "
+        "against the parent still holds.",
+        "attention",
     ),
     ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
-        "θ is not ability yet",
-        "No difficulty ruler could be fitted from what this account measured before the round, "
-        "so θ is plain accuracy on the logit scale. A candidate and the parent it is judged "
-        "against are read on the cells both answered, so their lift holds; a θ compared across "
-        "rounds or against another candidate's does not.",
+        "θ is plain accuracy so far",
+        "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another "
+        "scale. A lift against the parent holds; θ compared across rounds or candidates does not.",
+        "attention",
     ),
     ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
-        "θ is not ability here",
-        "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy "
-        "plus a constant. That is the instrument, not this round's draw — no round could have "
-        "read wider.",
+        "θ is plain accuracy here",
+        "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as "
+        "accuracy does. No round can change that.",
+        "attention",
     ),
     ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
-        "θ is not ability this round",
-        "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is "
-        "equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument.",
+        "θ is plain accuracy this round",
+        "This round's samples were all about equally hard, so θ ranks candidates exactly as "
+        "accuracy does. A round drawing harder and easier samples reads differently.",
+        "attention",
     ),
     ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
-        "θ is not ability here",
-        "The ruler gave most of this round's cells one shared difficulty, its prior, because "
-        "every candidate that saw them answered the same way. That pinned value moves as the "
-        "ruler takes in new rounds, so a higher θ than before can be the scale shifting, not the "
-        "prompt improving. Compare within a round; don't read the level across rounds.",
+        "θ shifts between rounds",
+        "Most samples this round got the default difficulty, because every candidate answered "
+        "them alike. That default moves as rounds come in, so compare θ within a round, not "
+        "across rounds.",
+        "attention",
     ),
     ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
-        "θ skips some of these cells",
-        "The ruler does not carry some of these cells, because no candidate outside this round's "
-        "judging had answered them when the round opened. θ leaves them out, so it is read on "
-        "fewer cells than the accuracy beside it, and two candidates can be read on different "
-        "ones. A later round reads them once this round's answers have joined the ruler.",
+        "θ leaves some samples out",
+        "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy "
+        "beside it, and two candidates may be read on different ones. A later round includes them.",
+        "attention",
     ),
     ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
-        "θ reads nothing for an all-miss arm",
-        "This arm missed every cell it answered. With no hit the fit has nothing to read: every "
-        "all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken "
-        "from it, is not a measurement. The ruler, the election and the other arms' θ are "
-        "unaffected.",
+        "No θ for an all-wrong candidate",
+        "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift "
+        "taken from it, is a placeholder. Other candidates are unaffected.",
+        "attention",
     ),
 }
 

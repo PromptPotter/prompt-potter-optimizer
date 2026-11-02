@@ -2,39 +2,30 @@
 import { memo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import { useViewedCourse } from "@/lib/lineage";
-import { fmtSecs } from "@/lib/format";
+import { figureOf } from "@/lib/derivations";
 import { Hearts } from "@/components/ui";
 
+// A grid box of its own: with neither hearts nor a trace it renders nothing, and leaves no gap.
 export const TopStrip = memo(function TopStrip() {
   const { dash } = useCycleStream();
-  const lastQuery = dash?.last_query_elapsed_s ?? null;
-  const lives = useViewedCourse()?.facts.standing?.lives ?? null;
+  const lives = figureOf(useViewedCourse(), "lives");
+  const trace = dash?.langfuse_trace_url ?? null;
+  if (!lives && !trace) return null;
 
   return (
-    <div className="topstrip">
-      {lives && (
-        <>
-          <Hearts lives={lives} className="topstrip-hearts" />
-          <span className="topstrip-sep" aria-hidden="true" />
-        </>
-      )}
-      <span className="topstrip-last">
-        <span className="topstrip-label">Last</span>
-        <span className="topstrip-counter-val">{fmtSecs(lastQuery)}</span>
-      </span>
-      {dash?.langfuse_trace_url && (
-        <>
-          <span className="topstrip-sep" aria-hidden="true" />
-          <a
-            className="topstrip-trace"
-            href={dash.langfuse_trace_url}
-            target="_blank"
-            rel="noreferrer"
-            title="Open this cycle's full nested trace in Langfuse"
-          >
-            Trace ↗
-          </a>
-        </>
+    <div className="topstrip box-full">
+      {lives && <Hearts row={lives} className="topstrip-hearts" />}
+      {lives && trace && <span className="topstrip-sep" aria-hidden="true" />}
+      {trace && (
+        <a
+          className="topstrip-trace"
+          href={trace}
+          target="_blank"
+          rel="noreferrer"
+          title="Open this cycle's full nested trace in Langfuse"
+        >
+          Trace ↗
+        </a>
       )}
     </div>
   );

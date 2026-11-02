@@ -5,7 +5,7 @@ import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import {
   candidatesOf,
-  entryFigures,
+  figureOf,
   groupByRoot,
   hasTag,
   type RetiredGroup,
@@ -27,6 +27,7 @@ import { useIngest } from "@/lib/ingest-flow";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { PLACEHOLDER } from "@/lib/format";
+import { FailureLine } from "@/components/ui";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -176,7 +177,7 @@ function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: T
           <button
             type="button"
             className="unit-library-item"
-            onClick={() => navigate(rootPath, { resume: true })}
+            onClick={() => navigate({ path: rootPath }, { resume: true })}
             aria-current={selected ? "true" : undefined}
             disabled={archived}
           >
@@ -203,13 +204,10 @@ function CampaignBody({
   const courses = body ? body.children : [];
   return (
     <ul className="unit-library-children">
-      {!tree.loaded && !tree.failed && <li className="inner-library-empty">Loading…</li>}
-      {tree.failed && (
-        <li
-          className="inner-library-empty"
-          title="The campaign's subtree read failed. Its candidates are unknown, not absent — nothing here claims this campaign produced nothing."
-        >
-          Couldn&apos;t read candidates
+      {!tree.loaded && tree.failure === null && <li className="inner-library-empty">Loading…</li>}
+      {tree.failure !== null && (
+        <li className="inner-library-empty">
+          <FailureLine failure={tree.failure} lead="Candidates unknown, not absent:" />
         </li>
       )}
       {courses.length === 1 ? (
@@ -248,7 +246,7 @@ function CourseRow({
           <button
             type="button"
             className="unit-library-item"
-            onClick={() => navigate(path, { resume: true })}
+            onClick={() => navigate({ path }, { resume: true })}
             aria-current={selected ? "true" : undefined}
           >
             <CourseRowLabel course={course} />
@@ -306,12 +304,12 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
 }
 
 function CourseRowLabel({ course }: { course: SubtreeCourse }) {
-  const lift = entryFigures(course).find((s) => s.key === "lift")?.value ?? PLACEHOLDER;
+  const lift = figureOf(course, "lift")?.value ?? PLACEHOLDER;
   return (
     <span className="unit-library-row">
       <span className="unit-library-name">{course.label}</span>
       <span className="unit-library-meta unit-library-meta-marked">
-        <PhaseMark status={course.state.status} />
+        <PhaseMark entry={course} />
         <span title={lift}>{lift}</span>
       </span>
     </span>
@@ -354,7 +352,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
   const selected = isPicked(cand);
   const retired = tagValue(cand, "superseded") !== null;
   const elected = tagValue(cand, "verdict") === "elected";
-  const [headline] = entryFigures(cand);
+  const [headline] = cand.figures;
   return (
     <>
       <RowHoverCard card={cand}>
@@ -391,7 +389,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
   );
 }
 
-const LOADED: CampaignTree = { root: null, loaded: true, failed: false };
+const LOADED: CampaignTree = { root: null, loaded: true, failure: null };
 
 function InnerCampaignRow({ campaign, ctx }: { campaign: SubtreeCampaign; ctx: TreeCtx }) {
   const { navigate } = useWorkspace();
@@ -405,7 +403,7 @@ function InnerCampaignRow({ campaign, ctx }: { campaign: SubtreeCampaign; ctx: T
           <button
             type="button"
             className="unit-library-item"
-            onClick={() => navigate(rootPath, { resume: true })}
+            onClick={() => navigate({ path: rootPath }, { resume: true })}
           >
             <CampaignRowLabel campaign={campaign} />
           </button>

@@ -1,26 +1,17 @@
 "use client";
-import { useRef, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { useWidth } from "@/lib/hooks/useWidth";
-import {
-  nodeKind,
-  nodeSubLabel,
-  type PipelineView,
-  type PipelineViewEdge,
-  type PipelineViewNode,
-} from "@/lib/types";
+import type { PipelineView, PipelineViewEdge } from "@/lib/types";
 import type { NodeReach } from "@/lib/api";
-import type { NodeScope } from "@/lib/SelectionContext";
+import { nodeKey, type NodeScope } from "@/lib/address";
 import type { PipelineStatus } from "@/lib/types";
 import { useCycleStream } from "@/lib/poll";
-import { useSelection } from "@/lib/SelectionContext";
+import { useViewedNode, useWorkspace } from "@/lib/workspace";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
-import {
-  cycleOf,
-  interiorNodes,
-  layoutGrid,
-  liveObserveConfig,
-} from "@/lib/derivations";
-import { Icon, pressable } from "@/components/ui";
+import { interiorNodes, layoutGrid, nodeModel, rowHopD, wrapAt } from "@/lib/derivations";
+import { getCss } from "@/lib/theme";
+import { FailureLine, Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
 const EDGE_KINDS = Object.keys({
@@ -29,8 +20,6 @@ const EDGE_KINDS = Object.keys({
   alternative: true,
   directive: true,
 } satisfies Record<PipelineViewEdge["kind"], true>) as PipelineViewEdge["kind"][];
-
-const LABEL_BELOW_EXTENT = 38;
 
 const ATTACH_ICON = (
   <Icon size={28} viewBox="0 0 20 20" strokeWidth={1.4}>
@@ -63,12 +52,12 @@ const LLM_ICON = (
 
 // Never fabricate a node here: a failed read would pass for a real single-LLM pipeline.
 function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
-  const [label, value, hint] =
-    status === "error"
-      ? (["Pipeline", "unavailable", "Couldn't read this campaign's dataset."] as const)
-      : status === "loading"
-        ? (["Pipeline", "loading…", undefined] as const)
-        : (["Pipeline", "none", "No dataset bound to this campaign."] as const);
+  const failure = typeof status === "object" ? status : null;
+  const [value, hint] = failure
+    ? (["unavailable", undefined] as const)
+    : status === "loading"
+      ? (["loading…", undefined] as const)
+      : (["none", "No dataset bound to this campaign."] as const);
   return (
     <div
       className="wf-hero-node"
@@ -78,9 +67,10 @@ function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
     >
       <div className="head">
         <div className="ico">{LLM_ICON}</div>
-        <div className="lbl">{label}</div>
+        <div className="lbl">Pipeline</div>
       </div>
       <div className="val">{value}</div>
+      <FailureLine failure={failure} />
     </div>
   );
 }
@@ -101,131 +91,61 @@ interface BoxProps {
   view: PipelineView;
   layer: PipelineLayer;
   compact: boolean;
-  models: { by: Record<string, string | null>; loading: boolean } | null;
 }
 
-function PipelineBox({ view, layer, compact, models }: BoxProps) {
+// One node's mark: where it sits, what it may be tapped over, and the text under it.
+interface Mark {
+  x: number;
+  y: number;
+  muted: boolean;
+  hit: { x: number; y: number; w: number; h: number };
+  label: string[];
+  sub: string[];
+}
+
+function PipelineBox({ view, layer, compact }: BoxProps) {
   const { connector, activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
-  const { node: selected, setSelectionForNode: setSelected } = useSelection();
-  const { dash } = useCycleStream();
+  const selected = useViewedNode();
+  const { open, close } = useWorkspace();
+  const cv = useConnector();
+  // The layer's own served rows at the viewed config: the model a node is configured with, nothing a run reported.
+  const rows =
+    scope === "optimizer"
+      ? (cv.optimizerSetup?.node_config_schema ?? null)
+      : scope === "target"
+        ? cv.schema.config
+        : null;
+  const model = (id: string) => nodeModel(rows, id);
   // The ring folds to the box it sits in, so no node is ever scrolled out of sight.
   const boxRef = useRef<HTMLDivElement>(null);
   const boxW = useWidth(boxRef);
+  const measured = boxW != null;
+  // Read once the box is mounted: every cell is sized off the label font.
+  const fontPx = useMemo(() => (measured ? parseFloat(getCss("--text-xs")) : null), [measured]);
   const interior = interiorNodes(view);
-  const CELL_W = compact ? 44 : models ? 132 : 72;
-  const CELL_W_OPEN = 132;
-  // Not 0: a squashed cell still shows its dot and takes a tap, so the bonus shrinks instead.
-  const CELL_W_MIN = 20;
-  const ROW_H = compact ? 26 : 70;
   const RADIUS = compact ? 5.5 : 7;
-  const cy = compact ? 13 : 14;
-  const LABEL_BLOCK = compact ? RADIUS : 34;
-  const ROW_GAP = compact ? 18 : 38;
+  const GUTTER = compact ? 33 : 14;
   // Per-dot band on a grid: a full-height rect each would leave only the last-drawn reachable.
   const HIT_BAND = compact ? 24 : 40;
   const isSel = (id: string) => scope != null && selected?.scope === scope && selected.id === id;
   const activate = (id: string) => {
     if (scope == null) return;
-    setSelected(isSel(id) ? null : { id, scope });
+    if (isSel(id)) close("node");
+    else open("node", nodeKey({ id, scope }));
   };
-
-  const cycle = cycleOf(interior, view.edges);
-
-  // `derive_pipeline_view` serves a loopless view on tier 0, so `rank` alone columns it.
-  const cols = Math.max(interior.length, 1);
-
-  const others = Math.max(cols - 1, 0);
-  const givable = others * (CELL_W - CELL_W_MIN);
-  const selectedCol = interior.find((n) => isSel(n.id))?.rank ?? -1;
-  const bonus =
-    !compact && selectedCol >= 0 ? Math.min(CELL_W_OPEN - CELL_W, givable) : 0;
-  const shrink = others > 0 ? bonus / others : 0;
-  const widths = Array.from({ length: cols }, (_, i) =>
-    i === selectedCol ? CELL_W + bonus : CELL_W - shrink,
-  );
-  const offsets: number[] = [];
-  widths.reduce((acc, w, i) => {
-    offsets[i] = acc;
-    return acc + w;
-  }, 0);
-  const railW = cols * CELL_W;
-  const colX = (i: number) => (offsets[i] ?? 0) + (widths[i] ?? CELL_W) / 2;
-
-  const ring = cycle.length
-    ? layoutGrid(interior, cycle, {
-        cell: CELL_W,
-        // Two pixels short and the model sublabel is shaved off silently.
-        rowH: compact ? 24 : LABEL_BELOW_EXTENT + 34,
-        padTop: compact ? 13 : 16,
-        padBottom: compact ? 13 : LABEL_BELOW_EXTENT,
-        maxCols: boxW == null ? null : Math.floor(boxW / CELL_W),
-      })
-    : null;
-
-  const totalW = ring ? ring.width : railW;
-  const canvasH = ring ? ring.height : ROW_H;
-  const at = (n: PipelineViewNode) =>
-    ring?.pos.get(n.id) ?? { x: colX(n.rank), y: cy, muted: false };
-  const posOf = new Map(interior.map((n) => [n.id, at(n)] as const));
-
-  const edgeD = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const [x1, y1] = [a.x + (dx / len) * RADIUS, a.y + (dy / len) * RADIUS];
-    const [x2, y2] = [b.x - (dx / len) * RADIUS, b.y - (dy / len) * RADIUS];
-    const mx = (x1 + x2) / 2;
-
-    if (Math.abs(dy) > 1) {
-      const down = a.y < b.y;
-      const [upper, lower] = down ? [a, b] : [b, a];
-      const top = { x: upper.x, y: upper.y + LABEL_BLOCK };
-      const bottom = { x: lower.x, y: lower.y - RADIUS };
-      const [p0, p1] = down ? [top, bottom] : [bottom, top];
-      return `M ${p0.x} ${p0.y} Q ${(p0.x + p1.x) / 2} ${(p0.y + p1.y) / 2} ${p1.x} ${p1.y}`;
-    }
-    // A step BACK bows up into the gap: sagging would cross every spanned label.
-    const rise = Math.min(len * 0.16, ROW_GAP * 0.78);
-    const bow = dx > 0 ? 6 : -rise;
-    return `M ${x1} ${y1} C ${mx} ${y1 + bow} ${mx} ${y2 + bow} ${x2} ${y2}`;
-  };
-
-  const terminalD = (p: { x: number; y: number }) =>
-    `M ${p.x + RADIUS} ${p.y} L ${p.x + CELL_W * 0.5} ${p.y}`;
-
-  const labelLines = (label: string) =>
-    label.includes("_") ? label.split("_") : [label];
-
-  // `active_node` names a node here only on a self-optimizing campaign; the chip then holds unpulsed.
-  const namedHere = isLive && interior.some((n) => n.id === activeNode);
-  const calling = isLive && dash?.current_round.measuring === true && !namedHere;
 
   const sole = interior.length === 1 ? interior[0] : undefined;
-  // The live record alone; never fall back to the config row, which answers for the root.
-  const liveCfg = sole ? liveObserveConfig(dash)?.config[sole.id] : null;
-  const liveModel =
-    liveCfg && typeof liveCfg === "object"
-      ? (liveCfg as Record<string, unknown>).model
-      : null;
-  const soleModel = typeof liveModel === "string" && liveModel ? liveModel : null;
   if (sole) {
     const isSelected = isSel(sole.id);
+    const soleModel = model(sole.id);
     return (
-      <div
-        className={cx(
-          "wf-hero-node",
-          "llm",
-          isSelected && "selected",
-          isLive && "running",
-          calling && "scoring",
-        )}
-      >
+      <div className={cx("wf-hero-node", "llm", isSelected && "selected")}>
         {connector && <div className="wf-hero-multi-tag">{connector}</div>}
         <button
           type="button"
           className="wf-hero-sole"
           aria-pressed={isSelected}
-          aria-label={`Node: ${sole.label}`}
+          aria-label={`Node: ${sole.id}`}
           disabled={scope == null}
           onClick={() => activate(sole.id)}
         >
@@ -234,7 +154,7 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
             <span className="ico">{LLM_ICON}</span>
             {/* A node id wraps at its underscores, never mid-word. */}
             <span className="lbl">
-              {sole.label.split("_").map((part, i) => (
+              {sole.id.split("_").map((part, i) => (
                 <span key={i}>
                   {i > 0 && (
                     <>
@@ -246,11 +166,99 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
               ))}
             </span>
           </span>
-          <span className="val">{calling ? (soleModel ?? "running") : "idle"}</span>
+          {soleModel && <span className="val">{soleModel}</span>}
         </button>
       </div>
     );
   }
+
+  const isRing = view.cycle.length > 0;
+  const ring =
+    isRing && boxW != null && fontPx != null
+      ? layoutGrid(interior, view.edges, view.cycle, {
+          font: compact ? null : { charW: fontPx * 0.6, lineH: fontPx },
+          sub: model,
+          dot: RADIUS * 2,
+          gutter: GUTTER,
+          maxW: boxW,
+        })
+      : null;
+
+  // The rail: one row, `rank` alone columns it, since `derive_pipeline_view` serves a loopless view on tier 0.
+  const anyModel = interior.some((n) => model(n.id) !== "");
+  const CELL_W = compact ? 44 : anyModel ? 132 : 72;
+  const CELL_W_OPEN = 132;
+  // Not 0: a squashed cell still shows its dot and takes a tap, so the bonus shrinks instead.
+  const CELL_W_MIN = 20;
+  const ROW_H = compact ? 26 : 70;
+  const cy = compact ? 13 : 14;
+  const LINE = 11;
+  const cols = Math.max(interior.length, 1);
+  const others = Math.max(cols - 1, 0);
+  const givable = others * (CELL_W - CELL_W_MIN);
+  const selectedCol = interior.find((n) => isSel(n.id))?.rank ?? -1;
+  const bonus = !compact && selectedCol >= 0 ? Math.min(CELL_W_OPEN - CELL_W, givable) : 0;
+  const shrink = others > 0 ? bonus / others : 0;
+  const widths = Array.from({ length: cols }, (_, i) =>
+    i === selectedCol ? CELL_W + bonus : CELL_W - shrink,
+  );
+  const offsets: number[] = [];
+  widths.reduce((acc, w, i) => {
+    offsets[i] = acc;
+    return acc + w;
+  }, 0);
+  const railW = cols * CELL_W;
+  const colX = (i: number) => (offsets[i] ?? 0) + (widths[i] ?? CELL_W) / 2;
+  const labelLines = (label: string) => (label.includes("_") ? label.split("_") : [label]);
+
+  const marks = new Map<string, Mark>();
+  for (const n of interior) {
+    if (ring) {
+      const p = ring.pos.get(n.id);
+      if (!p) continue;
+      marks.set(n.id, {
+        x: p.x,
+        y: p.y,
+        muted: p.muted,
+        hit: { x: -ring.cell / 2, y: p.y - HIT_BAND / 2, w: ring.cell, h: HIT_BAND },
+        label: p.label,
+        sub: p.sub,
+      });
+      continue;
+    }
+    if (isRing) continue;
+    const cellW = widths[n.rank] ?? CELL_W;
+    const shown = !compact && cellW >= 44;
+    const chars = fontPx != null ? Math.floor((cellW - GUTTER) / (fontPx * 0.6)) : Infinity;
+    marks.set(n.id, {
+      x: colX(n.rank),
+      y: cy,
+      muted: false,
+      hit: { x: -cellW / 2, y: 0, w: cellW, h: ROW_H },
+      label: shown ? (isSel(n.id) ? [n.id] : labelLines(n.id)) : [],
+      sub: shown ? wrapAt(model(n.id), "/", chars) : [],
+    });
+  }
+
+  const totalW = ring ? ring.width : isRing ? 0 : railW;
+  const canvasH = ring ? ring.height : isRing ? 0 : ROW_H;
+  // Text sits in the box under its dot: one `pitch` per line, the baseline at 0.8 of it.
+  const textTop = ring ? ring.textTop : RADIUS;
+  const pitch = ring ? ring.lineH : LINE;
+
+  // Only the outgoing end gets a stub; the Input chip owns the incoming one.
+  const terminalD = (p: { x: number; y: number }) =>
+    `M ${p.x + RADIUS} ${p.y} L ${p.x + CELL_W * 0.5} ${p.y}`;
+  const railEdges = ring
+    ? []
+    : view.edges.flatMap((e) => {
+        const a = marks.get(e.from);
+        const b = marks.get(e.to);
+        if (!a) return [];
+        const d = b ? rowHopD(a, b, RADIUS, 0) : terminalD(a);
+        return [{ from: e.from, to: e.to, kind: e.kind, d, muted: false }];
+      });
+  const drawnEdges = ring ? ring.edges : railEdges;
 
   return (
     <div
@@ -258,9 +266,7 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
         "wf-hero-node",
         "llm",
         "wf-hero-node-multi",
-        ring && "is-ring",
-        isLive && "running",
-        calling && "scoring",
+        isRing && "is-ring",
       )}
     >
       {connector && <div className="wf-hero-multi-tag">{connector}</div>}
@@ -291,30 +297,22 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
             </marker>
           ))}
         </defs>
-        {view.edges.map((e) => {
-          const a = posOf.get(e.from);
-          const b = posOf.get(e.to);
-          if (!a && !b) return null;
-          // Only the outgoing end gets a stub; the Input chip owns the incoming one. A ring has no
-          // Output chip to point at: a stub there reads as an edge into its neighbour.
-          if (!a || (!b && ring)) return null;
-          const d = b ? edgeD(a, b) : terminalD(a);
-          return (
-            <path
-              key={`${e.from}>${e.to}`}
-              className={cx("edge", `kind-${e.kind}`, (a.muted || b?.muted) && "muted")}
-              d={d}
-              markerEnd={`url(#wf-arrow-${e.kind})`}
-            />
-          );
-        })}
+        {drawnEdges.map((e) => (
+          <path
+            key={`${e.from}>${e.to}`}
+            className={cx("edge", `kind-${e.kind}`, e.muted && "muted")}
+            d={e.d}
+            markerEnd={`url(#wf-arrow-${e.kind})`}
+          />
+        ))}
         {interior.map((n) => {
+          const m = marks.get(n.id);
+          if (!m) return null;
           const isSelected = isSel(n.id);
           const isActive = isLive && activeNode === n.id;
-          const { x: cxPos, y: nodeY, muted } = at(n);
           const dotCls = cx(
             "node",
-            nodeKind(n.kind).cls,
+            `kind-${n.kind}`,
             isSelected && "selected",
             isActive && "active",
           );
@@ -334,63 +332,46 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
               : reach.open === 0
                 ? `no axis open of ${reach.openable}${reach.held ? " — narrowed at mint" : ""}; open one by forking`
                 : `${reach.open} of ${reach.openable} axes open — ${reach.agents.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")}`;
-          const parts = isSelected || ring ? [n.label] : labelLines(n.label);
-          const cellW = ring ? CELL_W : (widths[n.rank] ?? CELL_W);
-          const showLabel = !compact && cellW >= 44;
-          const labelDy = 16;
-          const sub = models
-            ? nodeSubLabel(n.kind, models.by[n.id] ?? null, models.loading)
-            : "";
-          const subDy = labelDy + parts.length * 11;
+          const baseline = m.y + textTop + pitch * 0.8;
           const inert = scope == null;
           return (
             <g
               key={n.id}
-              className={cx("wf-hero-multi-node", inert && "inert", muted && "muted")}
-              transform={`translate(${cxPos} 0)`}
+              className={cx("wf-hero-multi-node", inert && "inert", m.muted && "muted")}
+              transform={`translate(${m.x} 0)`}
               {...(inert ? {} : pressable(() => activate(n.id)))}
               aria-pressed={inert ? undefined : isSelected}
-              aria-label={reachNote ? `${n.label} — ${reachNote}` : n.label}
+              aria-label={reachNote ? `${n.id} — ${reachNote}` : n.id}
             >
-              <rect
-                x={-cellW / 2}
-                y={ring ? nodeY - HIT_BAND / 2 : 0}
-                width={cellW}
-                height={ring ? HIT_BAND : ROW_H}
-                fill="transparent"
-              />
+              <rect x={m.hit.x} y={m.hit.y} width={m.hit.w} height={m.hit.h} fill="transparent" />
               <title>
-                {[
-                  n.label,
-                  nests ? "runs a whole pipeline of its own" : n.description,
-                  reachNote,
-                ]
+                {[n.id, nests ? "runs a whole pipeline of its own" : n.description, reachNote]
                   .filter(Boolean)
                   .join(" — ")}
               </title>
               {nests ? (
                 <g
                   className={cx("node-nest", isActive && "active")}
-                  transform={`translate(0 ${nodeY})`}
+                  transform={`translate(0 ${m.y})`}
                 >
                   <rect className="frame" x={-8} y={-6} width={16} height={12} rx={2.5} />
                   <rect className="inner" x={-4.5} y={-2.5} width={9} height={5} rx={1.5} />
                 </g>
               ) : (
-                <circle className={dotCls} cx={0} cy={nodeY} r={RADIUS} />
+                <circle className={dotCls} cx={0} cy={m.y} r={RADIUS} />
               )}
               {reached && (
                 <circle
                   className={cx("node-reach", isActive && "active")}
                   cx={0}
-                  cy={nodeY}
+                  cy={m.y}
                   r={RADIUS + 3.5}
                 />
               )}
               {lock && !compact && (
                 <g
                   className={cx("node-lock", `is-${lock}`)}
-                  transform={`translate(${RADIUS + 3.4} ${nodeY - RADIUS - 1.5}) scale(0.78)`}
+                  transform={`translate(${RADIUS + 3.4} ${m.y - RADIUS - 1.5}) scale(0.78)`}
                 >
                   <path
                     className="shackle"
@@ -403,18 +384,27 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
                   <rect className="body" x={-4.6} y={-1.6} width={9.2} height={7.4} rx={1.4} />
                 </g>
               )}
-              {showLabel && (
-                <text className="node-label" x={0} y={nodeY + labelDy} textAnchor="middle">
-                  {parts.map((p, j) => (
-                    <tspan key={j} x={0} dy={j === 0 ? 0 : 11}>
+              {m.label.length > 0 && (
+                <text className="node-label" x={0} y={baseline} textAnchor="middle">
+                  {m.label.map((p, j) => (
+                    <tspan key={j} x={0} dy={j === 0 ? 0 : pitch}>
                       {p}
                     </tspan>
                   ))}
                 </text>
               )}
-              {showLabel && sub && (
-                <text className="node-sub" x={0} y={nodeY + subDy} textAnchor="middle">
-                  {sub}
+              {m.sub.length > 0 && (
+                <text
+                  className="node-sub"
+                  x={0}
+                  y={baseline + m.label.length * pitch}
+                  textAnchor="middle"
+                >
+                  {m.sub.map((p, j) => (
+                    <tspan key={j} x={0} dy={j === 0 ? 0 : pitch}>
+                      {p}
+                    </tspan>
+                  ))}
                 </text>
               )}
             </g>
@@ -432,7 +422,6 @@ interface PipelineFlowProps {
   // Owned by the STACK, never a `useState` here: a zoom re-parents this flow and React drops its state.
   nested?: ReactNode;
   tone: "accent" | "neutral";
-  models?: { by: Record<string, string | null>; loading: boolean } | null;
   bare?: boolean;
 }
 
@@ -450,14 +439,7 @@ function FlowEnd({ icon, lbl, val }: { icon: ReactNode; lbl: string; val: string
   );
 }
 
-export function PipelineFlow({
-  layer,
-  inspector,
-  nested,
-  tone,
-  models = null,
-  bare = false,
-}: PipelineFlowProps) {
+export function PipelineFlow({ layer, inspector, nested, tone, bare = false }: PipelineFlowProps) {
   const { view, status } = layer;
   const { dash } = useCycleStream();
   // The input IS the query in flight, when the run names one.
@@ -467,7 +449,7 @@ export function PipelineFlow({
     view == null || interior.length === 0 ? (
       <PipelinePlaceholder status={status === "ok" ? "unbound" : status} />
     ) : (
-      <PipelineBox view={view} layer={layer} compact={nested != null} models={models} />
+      <PipelineBox view={view} layer={layer} compact={nested != null} />
     );
 
   if (bare) return box;

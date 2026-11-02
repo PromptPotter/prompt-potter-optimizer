@@ -4,6 +4,7 @@ from pathlib import Path
 
 from promptpotter.domain.cycle_index import CycleIndex, IndexRound, Intervention
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
@@ -44,12 +45,14 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
         stop_reason=None if ended is None else ended.stop_reason,
         finished_at=None if ended is None else ended.timestamp,
         interrupted_round=None if final is None else final.interrupted_round,
-        crash_traceback=facts.crash_traceback,
+        error=facts.error,
         final=None if final is None else final.final,
         superseded_by=facts.superseded_by,
         rounds=[
             IndexRound(
-                round=n, accuracy=None if (fold := held.close.fold) is None else fold.accuracy
+                round=n,
+                accuracy=None if (fold := held.close.fold) is None else fold.accuracy,
+                health=RoundHealth.of(n, held.close.health),
             )
             for n, held in standing.rounds.items()
         ],

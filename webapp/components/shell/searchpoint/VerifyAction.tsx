@@ -76,6 +76,7 @@ export function VerifyAction({
             <Chip
               icon
               on={open || strategy !== "random" || samples !== ""}
+              expanded={open}
               ariaLabel="Verify options"
               title="Which cells a verify picks, and how many"
               onClick={toggle}

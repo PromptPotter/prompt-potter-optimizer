@@ -8,9 +8,6 @@ export const TERMS = {
 
   criterion_accuracy: "Whether the answer is right, as the matcher grades it. Every dial below scales this — a dial at 0 is off.",
 
-  stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in measurements/.",
-  stub_score_freq:    "How many scored cells graded into each tenth of 0 to 1. The per-sample scores live in measurements/.",
-  badge_top:          "Page-anchor card — primary signal for round health.",
   brand_live_preview: "This page polls dashboard.json every 2s.",
 
   // The TWO caches share no mechanism and must never share a word.
@@ -18,7 +15,6 @@ export const TERMS = {
   cache_prefix:   "Prefix cache — the PROVIDER served part of a call's input off its own prompt-prefix cache, billed at a discount. The call did happen; part of it was cheaper.",
 
   masthead_best: "The run's selection against its origin: both rates on the ORIGIN's panel, over the cells the two both answered — the one pair the two may be compared on. Where the run stands as of its last closed round, never a high-water mark; a round's own accuracy is read on the subset that round bought, so this can sit above or below every round on the chart. '—' while the selection is the origin, or until it has been read against it.",
-  remote_eff:    "Bench lift per dollar: the selection's lift over the origin, in the bench's headline column, on held-out rows no optimizer node read — the masthead's BENCH lift — divided by what its search incurred, never the bench's own pass; '—' where the search carries tokens no rate priced. The same reading for every optimizer, potter included; θ is potter's election signal and never stands in for it. '—' until the bench grades the pick, when the run ends.",
   arm_broken:     "Its measurements kept failing, so the bench stopped it. That is the candidate's own fault, and it is charged to it.",
   arm_eliminated: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea.",
   arm_locked_in:  "The optimizer's eliminator stopped it far enough ahead to call.",

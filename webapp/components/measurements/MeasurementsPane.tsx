@@ -1,22 +1,38 @@
 "use client";
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import type { CellCandidate, CellRow, CellStatus, DatasetItem } from "@/lib/api";
-import type { CellAddress } from "@/lib/address";
+import { useMemo, useState, type ReactNode } from "react";
+import type {
+  CellCandidate,
+  CellRow,
+  CellStatus,
+  DatasetItem,
+  HardSampleOrder,
+  HardSamplesScope,
+} from "@/lib/api";
+import {
+  HARD_SAMPLE_ORDER_LABELS,
+  HEATMAP_SCOPE_LABELS,
+  SAMPLE_STATUS_LABELS,
+} from "@/lib/api/types.generated";
 import { fmtLogits, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
-import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples, usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useWorkspace } from "@/lib/workspace";
 import {
+  Chip,
   DataTable,
   FailureLine,
+  IconMore,
+  Menu,
+  MenuCheck,
+  MenuRadioGroup,
+  MenuSep,
   SegmentedControl,
   Toolbar,
   ToolbarSpacer,
   type Column,
   type RowGroup,
 } from "@/components/ui";
-import { CellPanel } from "./CellPanel";
+import { CellPanel, Fitness, Verdict } from "./CellPanel";
 
 type GroupBy = "sample" | "candidate" | "none";
 
@@ -31,23 +47,26 @@ const GROUPS = [
 ] as const;
 
 type StatusPick = CellStatus | "all";
-const STATUSES = [
+const STATUSES: { value: StatusPick; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "HIT", label: "Hit" },
-  { value: "MISS", label: "Miss" },
-  { value: "ERR", label: "Error" },
-] as const;
+  ...(Object.keys(SAMPLE_STATUS_LABELS) as CellStatus[]).map((value) => ({
+    value,
+    label: SAMPLE_STATUS_LABELS[value],
+  })),
+];
+
+// The pickable scopes; `cycle` is a preset's alone.
+const SCOPES = (["campaign", "dataset"] as const).map((value) => ({
+  value,
+  label: HEATMAP_SCOPE_LABELS[value],
+}));
+
+const ORDERS = (Object.keys(HARD_SAMPLE_ORDER_LABELS) as HardSampleOrder[]).map((value) => ({
+  value,
+  label: HARD_SAMPLE_ORDER_LABELS[value],
+}));
 
 const cellId = (c: CellRow) => `${c.candidate}\u001f${c.position}`;
-
-function Fitness({ value }: { value: number | null | undefined }) {
-  if (value == null) return <span className="ms-dim">—</span>;
-  return (
-    <span className="ms-fit" style={fitnessStyle(value)}>
-      {fmtUnit("rate", value)}
-    </span>
-  );
-}
 
 function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
   return (
@@ -79,23 +98,21 @@ function CandidateHeader({ c, n }: { c: CellCandidate; n: number }) {
   );
 }
 
+// `cell` is the Samples view's key: that one mount opens a cell, and a row anywhere opens it there.
 export function MeasurementsPane({
   preset = {},
-  claimsAddress = false,
+  cell = null,
   heading,
 }: {
   preset?: MeasurementsPreset;
-  claimsAddress?: boolean;
+  cell?: string | null;
   heading?: ReactNode;
 }) {
   const shared = useHardSamples();
-  const { openCell, openCellOwner, setOpenCell, releaseCell } = useWorkspace();
-  const paneId = useId();
+  const { open: openView } = useWorkspace();
   const [groupBy, setGroupBy] = useState<GroupBy>(preset.groupBy ?? "none");
   const [status, setStatus] = useState<StatusPick>("all");
   const [hideUnmeasured, setHideUnmeasured] = useState(false);
-  const owns = openCellOwner === paneId || (openCellOwner === null && claimsAddress);
-  useEffect(() => () => releaseCell(paneId), [releaseCell, paneId]);
 
   const data = usePresetCells(preset, status === "all" ? undefined : status);
   const { datasetName, failure, stale } = data;
@@ -106,57 +123,30 @@ export function MeasurementsPane({
     return m;
   }, [data.candidates]);
 
-  const columns = useMemo<Column<CellRow>[]>(
-    () => [
-      { id: "sample", label: "Sample", width: "64px", cell: (c) => `s${c.position}` },
+  // A group's header already names what every row under it shares; fixed tracks, so each row's grid
+  // lines up with the header's, and the predicted answer takes what is left, truncated.
+  const columns = useMemo<Column<CellRow>[]>(() => {
+    const all: (Column<CellRow> & { id: GroupBy | "fitness" | "predicted" })[] = [
+      { id: "sample", label: "Sample", width: "5ch", cell: (c) => `s${c.position}` },
       {
         id: "candidate",
         label: "Candidate",
-        width: "minmax(72px, 1fr)",
-        cell: (c) => candidateOf.get(c.candidate)?.label ?? PLACEHOLDER,
+        width: "minmax(0, 10ch)",
+        cell: (c) => {
+          const label = candidateOf.get(c.candidate)?.label ?? PLACEHOLDER;
+          return <span title={label}>{label}</span>;
+        },
       },
-      {
-        id: "status",
-        label: "Mark",
-        width: "56px",
-        cell: (c) => (
-          <span className={cx("ms-status", `is-${c.status.toLowerCase()}`)}>{c.status}</span>
-        ),
-      },
-      {
-        id: "fitness",
-        label: "Fitness",
-        width: "64px",
-        align: "end",
-        cell: (c) => <Fitness value={c.fitness} />,
-      },
+      { id: "fitness", label: "Fitness", width: "6.5rem", cell: (c) => <Verdict cell={c} /> },
       {
         id: "predicted",
         label: "Predicted",
-        width: "minmax(160px, 3fr)",
+        width: "minmax(0, 1fr)",
         cell: (c) => <span title={c.predicted}>{c.predicted || PLACEHOLDER}</span>,
       },
-      {
-        id: "seconds",
-        label: "Seconds",
-        width: "72px",
-        align: "end",
-        cell: (c) => fmtUnit("seconds", c.seconds),
-      },
-      {
-        id: "tokens",
-        label: "Tokens in/out",
-        width: "112px",
-        align: "end",
-        cell: (c) =>
-          c.input_tokens == null && c.output_tokens == null
-            ? PLACEHOLDER
-            : `${c.input_tokens ?? "–"}/${c.output_tokens ?? "–"}`,
-      },
-      { id: "cached", label: "", width: "24px", cell: (c) => (c.cached ? "↺" : "") },
-    ],
-    [candidateOf],
-  );
+    ];
+    return all.filter((c) => c.id !== groupBy);
+  }, [candidateOf, groupBy]);
 
   const groups = useMemo<RowGroup<CellRow>[] | undefined>(() => {
     if (groupBy === "none") return undefined;
@@ -185,19 +175,23 @@ export function MeasurementsPane({
     () => (groups ? groups.flatMap((g) => g.rows) : data.cells),
     [groups, data.cells],
   );
-  const openIdx =
-    owns && openCell
-      ? walk.findIndex((c) => c.answer === openCell.answer)
-      : -1;
+  const openIdx = cell === null ? -1 : walk.findIndex((c) => c.answer === cell);
   const activeRowId = openIdx >= 0 ? cellId(walk[openIdx]!) : null;
 
-  const open = (c: CellRow) => {
-    const addr: CellAddress = { answer: c.answer };
-    setOpenCell(addr, paneId);
-  };
+  const open = (c: CellRow) => openView("samples", c.answer);
+
+  // The key the rows were ranked by, off the server's echo — never the pick, which moves first.
+  const { rankedBy } = data;
+  const scope: HardSamplesScope = preset.scope ?? shared.scope;
+  const ranked = groupBy === "sample" ? rankedBy : null;
 
   const totals = data.totals;
+  // Every choice that moves the numbers below is named here, so none hides behind the ⋯ menu.
   const summary = [
+    datasetName,
+    HEATMAP_SCOPE_LABELS[scope],
+    groupBy === "none" ? null : `by ${groupBy}`,
+    ranked ? `ranked by ${HARD_SAMPLE_ORDER_LABELS[ranked].toLowerCase()}` : null,
     `${data.items.length} samples`,
     totals ? `${totals.total_measurements} graded cells` : null,
     totals?.mean_fitness != null ? `${fmtUnit("rate", totals.mean_fitness)} mean fitness` : null,
@@ -206,53 +200,71 @@ export function MeasurementsPane({
     .filter(Boolean)
     .join(" · ");
 
-  // The key the rows were ranked by, off the server's echo — never the pick, which moves first.
-  const { rankedBy } = data;
-
   return (
     <section className={cx("ms-pane", stale && "is-stale")} aria-label="Measurements">
       {heading}
-      <Toolbar className="ms-toolbar">
-        <SegmentedControl ariaLabel="Group by" value={groupBy} onChange={setGroupBy} options={GROUPS} />
-        <SegmentedControl ariaLabel="Cell mark" value={status} onChange={setStatus} options={STATUSES} />
-        {preset.scope === undefined && (
-          <SegmentedControl
-            ariaLabel="Data scope"
-            value={shared.scope}
-            onChange={shared.setScope}
-            options={[
-              { value: "campaign", label: "This campaign" },
-              { value: "dataset", label: "All campaigns" },
-            ]}
-          />
-        )}
-        {rankedBy && groupBy === "sample" && (
-          <SegmentedControl
-            ariaLabel="Ranking key"
-            value={shared.rankedByPick ?? rankedBy}
-            onChange={shared.setRankedBy}
-            options={[
-              { value: "info_gain", label: "Info gain", title: "Rank by expected decision-information gain." },
-              { value: "difficulty", label: "Hardness", title: "Rank by the ruler's difficulty (δ), hardest first." },
-            ]}
-          />
-        )}
-        {groupBy === "sample" && (
-          <label className="ms-check">
-            <input
-              type="checkbox"
-              checked={hideUnmeasured}
-              onChange={() => setHideUnmeasured((v) => !v)}
-            />
-            Hide unmeasured
-          </label>
-        )}
+      <Toolbar>
+        <SegmentedControl ariaLabel="Cell status" value={status} onChange={setStatus} options={STATUSES} />
         <ToolbarSpacer />
+        <Menu
+          renderTrigger={({ open, toggle }) => (
+            <Chip icon on={open} expanded={open} ariaLabel="More measurement options" onClick={toggle}>
+              <IconMore />
+            </Chip>
+          )}
+        >
+          {({ close }) => (
+            <>
+              <MenuRadioGroup
+                label="Group by"
+                value={groupBy}
+                options={GROUPS}
+                onChange={(v) => {
+                  setGroupBy(v);
+                  close();
+                }}
+              />
+              {preset.scope === undefined && (
+                <>
+                  <MenuSep />
+                  <MenuRadioGroup
+                    label="Data scope"
+                    value={shared.scope}
+                    options={SCOPES}
+                    onChange={(v) => {
+                      shared.setScope(v);
+                      close();
+                    }}
+                  />
+                </>
+              )}
+              {ranked && (
+                <>
+                  <MenuSep />
+                  <MenuRadioGroup
+                    label="Rank samples by"
+                    value={shared.rankedByPick ?? ranked}
+                    options={ORDERS}
+                    onChange={(v) => {
+                      shared.setRankedBy(v);
+                      close();
+                    }}
+                  />
+                </>
+              )}
+              {groupBy === "sample" && (
+                <>
+                  <MenuSep />
+                  <MenuCheck on={hideUnmeasured} onClick={() => setHideUnmeasured((v) => !v)}>
+                    Hide unmeasured
+                  </MenuCheck>
+                </>
+              )}
+            </>
+          )}
+        </Menu>
       </Toolbar>
-      <p className="ms-summary">
-        {datasetName ? `${datasetName} · ` : ""}
-        {summary}
-      </p>
+      <p className="ms-summary">{summary}</p>
       {failure !== null ? (
         <FailureLine failure={failure} lead="Couldn’t read the measurements." />
       ) : (
@@ -268,11 +280,11 @@ export function MeasurementsPane({
           empty={stale ? "Loading…" : "No measured cells here yet."}
         />
       )}
-      {owns && openCell && datasetName && (
+      {cell !== null && datasetName && (
         <CellPanel
           datasetName={datasetName}
-          cell={openCell}
-          onClose={() => setOpenCell(null)}
+          answer={cell}
+          onClose={() => openView("samples", null)}
           hasPrev={openIdx > 0}
           hasNext={openIdx >= 0 && openIdx < walk.length - 1}
           onStep={(shift) => {

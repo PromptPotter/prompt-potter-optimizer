@@ -23,7 +23,7 @@ from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
     PauseCyclePayload,
 )
-from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.phases import GateDecision, stop_reason_outcome
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.shared.errors import PotterError
@@ -71,27 +71,12 @@ def log_startup_summary(
 
 
 def backend_reach_line(backend_type: str, backend_url: str) -> str:
-    """An ``in_process`` connector was never contacted: claim no reachable URL for it."""
+    """Said of a held run, whose admission probed the backend live; an ``in_process`` connector was
+    never contacted, so no URL is claimed for it."""
+    reached = BACKEND_REACHABILITY_INFO["live"].label
     if connectors.CONNECTORS.get(backend_type).execution == "in_process":
-        return f"in-process ({backend_type}) — no wire"
-    return f"reachable at {backend_url}"
-
-
-def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
-    """The connector's own ``detail`` IS the message: a cure hardcoded here fits one backend only."""
-    return CommandResult(
-        data={
-            "error": "backend_unreachable",
-            "backend_url": exc.backend_url,
-            "backend_type": exc.backend_type,
-            "detail": exc.detail,
-        },
-        human=(
-            f"Backend '{exc.backend_type}' is not ready.\n\n{exc.detail}"
-            if exc.detail
-            else f"Backend '{exc.backend_type}' at {exc.backend_url} is not reachable."
-        ),
-    )
+        return f"{reached} in-process ({backend_type}) — no wire"
+    return f"{reached} at {backend_url}"
 
 
 def inline_launch(args: argparse.Namespace) -> Inline:

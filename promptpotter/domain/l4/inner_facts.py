@@ -30,7 +30,7 @@ assert set(SERIES_GAP_HEAD) == set(SeriesGap), "every SeriesGap renders a head"
 @shapes_optimizer_prompt
 def series_reason_head(reason: ThetaCaveat | SeriesGap) -> str:
     if isinstance(reason, ThetaCaveat):
-        return THETA_CAVEAT_INFO[reason].head
+        return THETA_CAVEAT_INFO[reason].label
     return SERIES_GAP_HEAD[reason]
 
 

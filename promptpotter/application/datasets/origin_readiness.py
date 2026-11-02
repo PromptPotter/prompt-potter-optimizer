@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+import re
+from collections.abc import Callable, Iterable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
-from pydantic import Field
+from pydantic import Field, computed_field
 
 from promptpotter import connectors
-from promptpotter.application.bench.task_context import OriginNextAction
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
@@ -17,9 +18,64 @@ from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.task_context import OriginQuestion
     from promptpotter.infrastructure.store.stores import Stores
 
 _LLM_CALL_KEYS: frozenset[str] = WHO_ANSWERS_KEYS | PARAM_SCOPE_KEYS
+
+
+class SetupStep(StrEnum):
+    """The check-in's steps, in the order a check-in shows them: each a fold that sets one part of
+    the campaign, keyed as `setup_schema` keys the steps it serves."""
+
+    OPTIMIZER = "optimizer"
+    DATA = "data"
+    SCORING = "scoring"
+    PIPELINE = "pipeline"
+    HEAD_TO_HEAD = "head_to_head"
+    RUN = "run"
+
+
+SETUP_STEP_TITLES: dict[SetupStep, str] = {
+    SetupStep.OPTIMIZER: "Optimizer",
+    SetupStep.DATA: "Data",
+    SetupStep.SCORING: "Scoring",
+    SetupStep.PIPELINE: "Pipeline",
+    SetupStep.HEAD_TO_HEAD: "Head-to-head",
+    SetupStep.RUN: "Run bounds",
+}
+assert SETUP_STEP_TITLES.keys() == set(SetupStep)
+
+
+class ChecklistField(NamedTuple):
+    # The `EditDraftPatch` key, and `DraftCampaign` attribute, one answer writes; None where no
+    # single value closes it (a node's model lives inside the whole overlay a patch replaces).
+    patch_key: str | None
+    # The step whose fold sets it; None where the chat answers it.
+    step: SetupStep | None
+    # What a proposal of a value reads as.
+    proposal: str
+    # Its answer is one of the upload's headers.
+    of_headers: bool = False
+
+
+#: THE checklist: every field the gate keys a gap by, and what a resolver may propose or ask.
+CHECKLIST_FIELDS: dict[str, ChecklistField] = {
+    "column.query": ChecklistField(
+        "column_query", SetupStep.DATA, "Read the input from “{}”", of_headers=True
+    ),
+    "column.ground_truth": ChecklistField(
+        "column_ground_truth", SetupStep.DATA, "Grade against “{}”", of_headers=True
+    ),
+    "task_description": ChecklistField("raw_task_description", None, "Set the task: “{}”"),
+}
+_NODE_MODEL = re.compile(r"node\.(?P<node>.+)\.model")
+
+
+def checklist_field(field: str) -> ChecklistField | None:
+    if node := _NODE_MODEL.fullmatch(field):
+        return ChecklistField(None, SetupStep.PIPELINE, f"Run {node['node']} on “{{}}”")
+    return CHECKLIST_FIELDS.get(field)
 
 
 class FieldGap(StrictModel):
@@ -28,20 +84,67 @@ class FieldGap(StrictModel):
     field: str = Field(description="Checklist field id, e.g. `column.query`.")
     reason: Literal["unset", "proposed_unconfirmed", "conflict"]
     hint: str = Field(description="One operator-facing line on how to close it.")
+    step: SetupStep | None = Field(
+        description="The step whose fold closes it; null where the chat answers it."
+    )
+
+    @classmethod
+    def of(
+        cls, field: str, reason: Literal["unset", "proposed_unconfirmed", "conflict"], hint: str
+    ) -> FieldGap:
+        row = checklist_field(field)
+        if row is None:
+            raise ValueError(f"{field!r} is no checklist field (`CHECKLIST_FIELDS`)")
+        return cls(field=field, reason=reason, hint=hint, step=row.step)
 
 
 class OriginReadiness(StrictModel):
     """The mint gate's verdict; a surface gates Start on it and never re-derives it."""
 
-    complete: bool = Field(description="True iff no field still blocks mint.")
     gaps: tuple[FieldGap, ...]
+
+    @computed_field(description="True iff no field still blocks mint.")  # type: ignore[prop-decorator]
+    @property
+    def complete(self) -> bool:
+        return not self.gaps
+
+
+class CheckinQuestion(StrictModel):
+    """A resolver question one answer closes, projected through `CHECKLIST_FIELDS`."""
+
+    field: str
+    path: list[str] = Field(description="The `EditDraftPatch` path the answer is written at.")
+    step: SetupStep | None
+    prompt: str
+    options: list[str] = Field(description="The answers it takes; empty is free text.")
+
+
+def checkin_questions(
+    draft: DraftCampaign, asked: Iterable[OriginQuestion]
+) -> list[CheckinQuestion]:
+    """A question on a field no single patch closes is dropped, as `raised_commands` drops a finding."""
+    questions: list[CheckinQuestion] = []
+    for question in asked:
+        row = checklist_field(question.field)
+        if row is None or row.patch_key is None:
+            continue
+        questions.append(
+            CheckinQuestion(
+                field=question.field,
+                path=[row.patch_key],
+                step=row.step,
+                prompt=question.prompt,
+                options=question.options or (list(draft.headers) if row.of_headers else []),
+            )
+        )
+    return questions
 
 
 class OriginLastResolution(StrictModel):
     """One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands."""
 
     assessment: str
-    next_action: OriginNextAction
+    questions: list[CheckinQuestion]
     recap: str = Field(description="Set only on a `ready` turn.")
 
 
@@ -50,6 +153,7 @@ class RaisedCommand(StrictModel):
 
     kind: Literal["edit-draft-campaign"] = "edit-draft-campaign"
     payload: EditDraftCampaignPayload
+    label: str = Field(description="What the proposal does, in `CHECKLIST_FIELDS`' words.")
     evidence: str = Field(description="The citation backing the proposal.")
 
 
@@ -92,10 +196,10 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
     )
     if draft.column_query and draft.column_query == draft.column_ground_truth:
         gaps.append(
-            FieldGap(
-                field="column.ground_truth",
-                reason="conflict",
-                hint="Input and target are the same column, so every answer trivially matches. "
+            FieldGap.of(
+                "column.ground_truth",
+                "conflict",
+                "Input and target are the same column, so every answer trivially matches. "
                 "Pick two different columns.",
             )
         )
@@ -110,7 +214,7 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
 
     _check_node_models(draft, gaps=gaps)
 
-    return OriginReadiness(complete=not gaps, gaps=tuple(gaps))
+    return OriginReadiness(gaps=tuple(gaps))
 
 
 def _check_column(
@@ -126,19 +230,19 @@ def _check_column(
         return
     if provenance is Provenance.PROPOSED:
         gaps.append(
-            FieldGap(
-                field=field_key,
-                reason="proposed_unconfirmed",
-                hint=f"Confirm the {label} column (proposed {value!r}).",
+            FieldGap.of(
+                field_key,
+                "proposed_unconfirmed",
+                f"Confirm the {label} column (proposed {value!r}).",
             )
         )
         return
     headers = ", ".join(draft.headers) or "<none>"
     gaps.append(
-        FieldGap(
-            field=field_key,
-            reason="unset",
-            hint=f"Pick which uploaded column is the {label}. Available: {headers}.",
+        FieldGap.of(
+            field_key,
+            "unset",
+            f"Pick which uploaded column is the {label}. Available: {headers}.",
         )
     )
 
@@ -158,10 +262,10 @@ def _check_confirmed(
     proposed = provenance is Provenance.PROPOSED
     extra = " (proposed — confirm or correct)." if proposed else ""
     gaps.append(
-        FieldGap(
-            field=field_key,
-            reason="proposed_unconfirmed" if proposed else "unset",
-            hint=f"{hint} [{label}]{extra}",
+        FieldGap.of(
+            field_key,
+            "proposed_unconfirmed" if proposed else "unset",
+            f"{hint} [{label}]{extra}",
         )
     )
 
@@ -180,13 +284,11 @@ def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
             continue
         if not config.get("model"):
             gaps.append(
-                FieldGap(
-                    field=f"node.{node_name}.model",
-                    reason="unset",
-                    hint=(
-                        f"Set the model for LLM node {node_name!r} in "
-                        f"backend.node_config — the dataset owns its task model."
-                    ),
+                FieldGap.of(
+                    f"node.{node_name}.model",
+                    "unset",
+                    f"Set the model for LLM node {node_name!r} in the "
+                    f"{SETUP_STEP_TITLES[SetupStep.PIPELINE]} step.",
                 )
             )
 

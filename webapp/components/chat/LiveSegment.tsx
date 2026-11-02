@@ -4,27 +4,20 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { CyclePath } from "@/lib/ids";
-import { FailureLine, Hearts } from "@/components/ui";
-import type {
-  ActivityDecision,
-  ActivityItem,
-  DecisionAction,
-  LivesReading,
-} from "@/lib/api/types";
+import { FailureLine } from "@/components/ui";
+import type { ActivityDecision, ActivityItem, DecisionAction } from "@/lib/api/types";
 
 export function LiveSegment({
   notices,
   status,
   listening,
   decision,
-  lives,
 }: {
   notices: ActivityItem[];
   status: ActivityItem | null;
   // Socket open AND the run in flight: the socket stays open against a finished cycle.
   listening: boolean;
   decision: ActivityDecision | null;
-  lives?: LivesReading | null;
 }) {
   const cmd = useCommand<string>("decision");
   const { viewedPath } = useWorkspace();
@@ -55,13 +48,12 @@ export function LiveSegment({
       ))}
 
       {now ? (
-        <div className="chat-activity tone-muted kind-progress" role="status" aria-live="polite">
+        <div className="chat-activity tone-quiet kind-progress" role="status" aria-live="polite">
           <span className="chat-activity-icon" aria-hidden="true">
             {now.icon}
           </span>
           <span className="chat-activity-label">{now.label}</span>
           {now.detail ? <span className="chat-activity-detail">{now.detail}</span> : null}
-          {lives && <Hearts lives={lives} className="chat-activity-hearts" />}
         </div>
       ) : null}
 
@@ -74,7 +66,7 @@ export function LiveSegment({
               {decision.facts.map((f) => (
                 <div key={f.label}>
                   <dt>{f.label}</dt>
-                  <dd className={cx(f.tone === "bad" && "chat-decision-error")}>{f.value}</dd>
+                  <dd className={cx(f.tone === "danger" && "chat-decision-error")}>{f.value}</dd>
                 </div>
               ))}
             </dl>

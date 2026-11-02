@@ -23,6 +23,7 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 
@@ -36,14 +37,21 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import RoundClosedRecord
 
 
+def stop_next_lines(stop_reason: StopReason) -> list[str]:
+    """The step past a stop and the terminal's command for it: no terminal reader prints one alone."""
+    info = STOP_REASON_INFO[stop_reason]
+    return [
+        *([f"next: {info.next_step}"] if info.next_step else []),
+        *([f"cli:  {info.cli_command}"] if info.cli_command else []),
+    ]
+
+
 def stop_lines(stop_reason: StopReason, *, detail: str = "") -> list[str]:
-    """A stop at every surface that names one: its outcome, its label, what said so, the verb past it."""
+    """A stop at every surface that names one: its outcome, its label, what said so, then
+    ``stop_next_lines``."""
     info = STOP_REASON_INFO[stop_reason]
     said = f" — {detail}" if detail else ""
-    return [
-        f"{info.outcome.value.upper()} · {info.label}{said}",
-        *([f"next: {info.next_step}"] if info.next_step else []),
-    ]
+    return [f"{info.outcome.value.upper()} · {info.label}{said}", *stop_next_lines(stop_reason)]
 
 
 def fmt_elapsed(seconds: float) -> str:
@@ -158,10 +166,11 @@ def render_round_stats(
     )
 
     h = round_result.health
-    if h.grade == "critical":
-        lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
-    elif h.grade == "degraded":
-        lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {h.suggested_action}{RESET}"))
+    if (reading := health_reading(round_result.round, h)) is not None:
+        if h.grade == "critical":
+            lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {reading.advice}{RESET}"))
+        elif h.grade == "degraded":
+            lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {reading.advice}{RESET}"))
 
     # No per-node tally: `terminal_node` is the deepest node each sample REACHED, constant on a healthy round.
     if fold is not None and fold.degraded and fold.walked:
@@ -216,6 +225,8 @@ def render_completion(
     ]
     if result.error is not None:
         fields.append(f"Error        {result.error.kind}: {result.error.message}")
+        if result.error.detail:
+            fields.append(result.error.detail)
     if result.spend is not None:
         fields.append(f"Spend        {result.spend.billed_beside_incurred()}")
     if dataset_name:

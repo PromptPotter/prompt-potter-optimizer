@@ -39,7 +39,7 @@ def get_evidence(
                 "every value to those samples, and `;lens=score:<formula>` (courses only) "
                 "re-decides the branch's elections under another criterion and reads it at the "
                 "winner that would have stood. The response carries what that changed in "
-                "`subjects[].scenario`, caveat included."
+                "`subjects[].scenario`, worded by `SCENARIO_WORDS`, its caveat included."
             )
         ),
     ] = [],  # noqa: B006 -- FastAPI reads the default to type the query, and never mutates it

@@ -9,21 +9,21 @@ import type {
   HealthResponse,
   BackendResponse,
   CampaignPipelineResponse,
-  CampaignStorageResponse,
   ConfigMapResponse,
   CouponStatus,
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
   DatasetIndexResponse,
+  DraftReopenResponse,
   Cell,
   CellsResponse,
-  DatasetStorageResponse,
   FileContentResponse,
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
   SubtreeEntry,
   HierarchyResponse,
+  LeafBytes,
   MachineStatusResponse,
   LibraryResponse,
   OptimizerRoster,
@@ -87,6 +87,10 @@ export function quotaRead(): ReadDescriptor<QuotaStatus> {
 // The account's money: the host's allowance, what each wallet paid, and the keys it holds.
 export function couponRead(): ReadDescriptor<CouponStatus> {
   return once("coupon", `${API}/auth/coupon`);
+}
+
+export function draftRead(draftId: string): ReadDescriptor<DraftReopenResponse> {
+  return once("draft", `${API}/drafts/${enc(draftId)}`);
 }
 
 export function activityRead(
@@ -241,16 +245,12 @@ export function hierarchyRead(): ReadDescriptor<HierarchyResponse> {
   return byEtag("hierarchy", `${API}/hierarchy?depth=1&lifecycle=all`);
 }
 
-export function campaignStorageRead(campaignId: string): ReadDescriptor<CampaignStorageResponse> {
+export function campaignStorageRead(campaignId: string): ReadDescriptor<LeafBytes> {
   return once("campaign-storage", `${API}/campaigns/${enc(campaignId)}/storage`);
 }
 
 export function workspaceStorageRead(): ReadDescriptor<WorkspaceStorageResponse> {
   return once("workspace-storage", `${API}/workspace/storage`);
-}
-
-export function storageByDatasetRead(): ReadDescriptor<DatasetStorageResponse> {
-  return once("storage-by-dataset", `${API}/workspace/storage-by-dataset`);
 }
 
 export function libraryRead(): ReadDescriptor<LibraryResponse> {
