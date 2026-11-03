@@ -435,7 +435,7 @@ This release is a five-week arc, and the order the work landed *is* the story �
 - **Evidence-starvation detection (R-48).** A round that can't gather enough signal to decide anything is now *detected*, routed to L2 for a strategy change, and — if still starved — terminated with a backend-supplied reason rather than emitting a confident-looking non-result. Round-1 critique and `exploration_budget` are seeded so the very first round's escalation signals are real, not placeholders.
 
 **The chat-first front door + one-source lineage** *(Jun 19–20)*
-- **Chat is the front door.** The webapp root is now a live **activity stream** with in-thread loop control — skip a searchpoint, watch babysat provenance land, drive a remote run from the bar — fed by **cross-process SSE via a ledger tail** so a run launched in one process streams live into a browser attached to another, with a running composite updating in place. Contract: `docs/specs/chat-foundation.md`.
+- **Chat is the front door.** The webapp root is now a live **activity stream** with in-thread loop control — skip a searchpoint, watch babysat provenance land, drive a remote run from the bar — fed by **cross-process SSE via a ledger tail** so a run launched in one process streams live into a browser attached to another, with a running composite updating in place.
 - **Live lineage as one source, two slices** — the tree and the data view stop diverging; plus three M10 levers (trace link, ingest auto-skip, origin reuse).
 
 **Durable check-in + security hardening** *(Jun 21)*

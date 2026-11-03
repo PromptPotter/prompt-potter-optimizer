@@ -150,7 +150,7 @@ stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
   the host coupon, what the box's keys may pay for an account over its life (`Settings.HOST_COUPON`,
   or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key
-  (`coupon.py::keyed_client`, [decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)).
+  (`coupon.py::keyed_client`, [decisions.md § 0003](../decisions.md#0003--spend-and-tenancy)).
   A provider the account holds a key for (`/auth/api-keys`) sends on that key and draws none of
   it; a backend's cells are paid by whom its connector declares (`Connector.cell_payer`).
   **Both units, because the USD one can go blind** on an unpriced call
