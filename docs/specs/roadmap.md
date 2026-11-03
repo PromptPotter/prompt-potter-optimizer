@@ -10,6 +10,27 @@ Any new endpoint is multi-tenant by default.
 Every wave pairs $0 code arcs (up to three agents at once) with paid runs supervised beside them, so
 neither waits on the other. A wave's paid runs need only what an earlier wave landed.
 
+0. **Wave 0: urgent, from Wednesday 2026-11-04 morning, in parallel** (operator, 2026-11-02).
+   **First, alone:** merge `checkin-upload-gate` to main and run one full gate on the merge. Every arc branches from that.
+
+   Then the arcs, each on its own branch with its own closing check. Arcs on the same line touch disjoint files and run at once; an arrow waits on what it names.
+
+   | Arc | What | Files it owns | Waits on |
+   |---|---|---|---|
+   | **A1** | `ChatRequest` gains tools and multi-turn messages | `infrastructure/llm/` | — |
+   | **A2** | the read catalogue, and the out-of-dispatcher writes as kinds | `domain/command_kinds.py`, `presentation/api/routers/` | — |
+   | **B** | Turns (§ Turns — the unsupervised limit) | `application/jobs/`, `domain/spend.py`, `webapp/components/shell/remote/`, CLI `resume` | — |
+   | **C** | L2 re-election (§ The right winner, mechanism 1) | `optimizers/potter/dispatch/`, `escalation/`, the layer-control channel | — |
+   | **E** | the phone's doubled figure row | `webapp/components/shell/` (masthead, `Views.tsx`) | — |
+   | **F** | the upload check-in leftovers | `application/datasets/` | — |
+   | **A3** | the registry, served in-process and over MCP stdio | `presentation/mcp/`, an extra | A2 |
+   | **A4** | the host endpoint plus the webapp composer, steps and proposal shape | `application/` host loop, `webapp/components/chat/`, `webapp/components/ingest/` | A1, A2 |
+   | **D** | the election root (§ The right winner, mechanism 2); wipes run data | `optimizers/potter/pobb/`, `race.py`, `runner/measurement.py`, `domain/arms.py` | C |
+   | **A5** | the check-in as a prompt template, and the host spec's delete list | the `checkin` node, `useIngestFlow`, CLI `new` | A3, A4, F |
+
+   - A1–A5 are [`host-assistant.md`](host-assistant.md) § Build order, closed by the line under it.
+   - E and F are [`code-debt-cleanup.md`](code-debt-cleanup.md) § URGENT.
+   - Each arc runs its targeted checks; the full gate runs once, on main, after each merge.
 1. **Trust the instrument.** Code: crossover main/donor; per-account snippet packs; the check-in
    address leftovers; then the inputs that change a run but leave no event, and the three probed
    invariants ([`code-debt-cleanup.md`](code-debt-cleanup.md) § URGENT — shapes that hide the backbone
@@ -45,12 +66,12 @@ the rest of Lane C.
 
 ### Lane C — differentiator and capability
 
-- **C1** Chat-first front door — [`chat-foundation.md`](chat-foundation.md).
+- **C1** Host assistant: the account's one conversation, the check-in its first job, one surface for every host — [`host-assistant.md`](host-assistant.md).
 - **C2** Composite fitness P2–P4 (§ Members the presets need).
 - **C2b** Judged + turn-structured scoring: the per-step ruler (§ Judged and turn-structured scoring).
 - **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
 - **C4** Cross-user measurement panel, after P3.
-- **C5** MCP server mode (§ Agent-tool parity), on R1's credential · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
+- **C5** MCP over streamable HTTP (§ Agent-tool parity), on R1's credential; the surface is C1's · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
 - **C6** Public-service hardening: metrics, billing; the image is R9.
 - **C7** Agent harnesses (§ Evolving agent harnesses); non-prompt targets and multimodal are R5–R7 (§ Embedding (M15)).
 - **C8** Mask abstraction — the sample-set half (§ Lineage mask).
@@ -172,6 +193,60 @@ A probe round spends its budget on ONE narrow question: more candidates on a nar
 relevance to the hypothesis — never by a set that is empty on a healthy run. Re-running warned
 queries is degradation triage, not a search action.
 
+## Turns — the unsupervised limit
+
+**A turn is what the system may spend on its own between two human Plays** — an action budget, not
+a campaign budget (operator, 2026-11-02). Today only two bounds exist: the campaign ceiling
+(`domain/spend.py::Budget`, shared by its live cycles) and the account's granted allowance
+(`application/jobs/coupon.py`). Nothing bounds one unattended stretch, so a run either stops at a
+ceiling the operator must hand-raise, or spends to the allowance.
+
+- **Play buys one turn of the same amount**, drawn from the account's allowance and admitted whole or
+  refused (§ 0003, never clamped). A spent turn PAUSES the run, resumable; it never stops it.
+- **The campaign ceiling is off by default**: the turn is the unattended bound, the allowance the hard
+  one. A ceiling stays an opt-in cap.
+- **The turn count is a fact on disk** (each Play a ledger record), served with what the next turn
+  costs and what the allowance has left, so the Play button reads "turn 3 — $0.03 of your $4.70".
+- Every entry point buys a turn the same way (CLI `resume`, webapp Play, the host assistant's run
+  tool); the host's own paid calls spend the current turn.
+
+- **A Play the next turn cannot use is refused before a job launches**: today a run at its rounds cap
+  launches on Play and ends at once (`SUCCESS · Rounds budget reached`, box, 2026-11-02, three times
+  in a minute), which reads as "it starts, then doesn't".
+
+**Closes when** a run paused at its turn's end resumes on one Play, the ledger counts the turns, and a
+Play the allowance cannot cover is refused naming the allowance.
+
+## The right winner — redundant mechanisms
+
+**Potter elects wrong winners today, and the operator sees it at a glance** (operator, 2026-11-02).
+The evidence is box `gsma_telelogs_5g_root_cause_full__bfdc26` / `cycle_11a2a7f0e73f`, rounds 1–7, with per-round resubset on. Three of four winners were LOCKED IN on part of their panel:
+- C1.2 at 6/15.
+- C2.3 at 7/13. As the parent it later read 8/20, 10/20 and 8/20.
+- C5.6 at 9/12. As the parent it later read 13/20, then 7/20.
+
+Round 4 elected nobody, although C4.4 and C4.3 each read 12/20 against the parent's 10/20 on the full panel (lift/se 0.79, under `theta_election.admission` 0.85). The paper pilot names the cause: PoBB's posterior bar, read after every cell, locks in falsely about four times as often as it states ([`../../paper/notes/stopping-rule-false-stops.md`](../../paper/notes/stopping-rule-false-stops.md)).
+
+**Lock-in stays a goal, past real significance.** Several mechanisms, each catching what another misses:
+
+1. **First: L2 sees the elections and can re-elect.**
+   - A dispatch-hub panel shows L2, per round, who was elected and how: locked in at n cells, or on the full panel. It also shows the pick's later reads as parent, and the near-misses left unelected.
+   - L2 may then name any individual this cycle measured, a previous winner or another arm, as the line's parent, citing those cells.
+   - This rides the layer-control channel behind its own capability bit, as `fork_proposal` and `terminate_proposal` do. Today `fork_proposal` stands only on a promoted individual; widen it before adding a second door.
+   - L2's write set (`optimizers/potter/CLAUDE.md` § L2) grows by exactly this, and each re-election is a ledger event.
+2. **Then, at the root: the election picks the right winner with lock-in on.**
+   - **Lock in only past an anytime-valid bound.** The pilot's rule is a mixture likelihood ratio on θ at level α/K per arm. PoBB's per-cell posterior bar stops being a lock rule. This pulls Sequence item 4's "anytime-valid confidence sequences as the default stopping rule" forward.
+   - **The standing pick's evidence pools across rounds.** Its reads as parent on each round's fresh subset count toward its θ, so a lucky lock-in is dethroned by the same election (C5.6 by round 7).
+   - **A near-miss carries forward.** A round's best challenger that cannot yet be separated from the parent re-enters the next round's panel and accumulates paired cells, instead of being dropped (C4.4 and C4.3 in round 4).
+   - **`early_stop` splits back into its two stops**, elimination and lock-in, each with its own switch. Folding `lock_in` / `leader_lock_in` into it (`24a05c2bf`) hid a selection behind a stop.
+
+Each change moves what the loop decides: diff it with [`../developer/offline-run.md`](../developer/offline-run.md). A changed ledger shape wipes run data (from 2026-11-03).
+
+**Closes when:**
+- an offline replay of that cycle elects no pick that its later reads as parent contradict;
+- the pilot's equal-arms simulation shows false locks at the stated level on the landed rule;
+- L2, shown a contradicted pick, re-elects.
+
 ## Origin-resolution check-in
 
 Invariants: it reuses the `checkin/2` node; `reasoning_floor`/`ceiling` stay off the operator
@@ -179,7 +254,7 @@ surface; model and provider are optimizer-locked.
 - **Run mode** — the same node raises `pause-cycle` / `change-run-limits` / `fork-cycle` over
   `application/datasets/origin_resolve.py`'s `RaisedCommand`. Lands with L4.
 - **The whole setup proposed from the operator's text** — every node's model and effort, rounds and
-  cap — priced against the served menu and `application/jobs/quota.py::AccountWallet.launch_bound`; the host's
+  cap — priced against the served menu and `application/jobs/quota.py::launch_bound`; the host's
   bound outranks the operator's words; an off-menu proposal is dropped at `_coerce`.
 
 ## Embedding (M15)
@@ -429,7 +504,7 @@ root behind a `demo_mode_enabled` reader.
 
 Do not build before the chat backend exists.
 - **Its own issuer sentinel, `is_anonymous` asked before the operator arm** —
-  `quota.py::spends_the_hosts_own_key` reads a missing issuer as the box operator.
+  `default_claim.py::is_host` reads a missing issuer as the box operator.
 - **Empty capability set**: it converses and reads; every action is a sign-in prompt.
 - **One shared tenant** (a tenant per visitor is an unauthenticated directory-creation surface).
 - **A global daily pool is the ceiling**; a per-visitor cap is UX.

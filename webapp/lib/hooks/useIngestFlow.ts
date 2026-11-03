@@ -220,9 +220,19 @@ export function useIngestFlow({
       return;
     }
     say(
-      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Send when ready.`,
+      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Or let me propose it from the rows.`,
     );
     setPhase({ stage: "awaiting-context", draft });
+  };
+
+  // A refusal that kept its draft (a down backend) opens it: its read lands it, or says the failure.
+  const reopenKept = (failure: CommandFailure | null) => {
+    const kept = failure?.details?.draft_id;
+    if (typeof kept !== "string") return false;
+    opening.clear();
+    hold(kept);
+    setPhase({ stage: "reopening" });
+    return true;
   };
 
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
@@ -255,7 +265,7 @@ export function useIngestFlow({
         });
         return;
       }
-      setPhase({ stage: "idle" });
+      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
       return;
     }
     threads.setFileDetail(threadKey.current, id, `${r.value.n_samples} rows`);
@@ -270,7 +280,7 @@ export function useIngestFlow({
     const r = await opening.run("dataset", () => postDraftFromDataset(name));
     if (!alive()) return;
     if (!r.ok) {
-      setPhase({ stage: "idle" });
+      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
       return;
     }
     advance(r.value);
@@ -287,7 +297,7 @@ export function useIngestFlow({
     const r = await opening.run("origin", () => postDraftFromOrigin(entry.origin_id));
     if (!alive()) return;
     if (!r.ok) {
-      setPhase({ stage: "idle" });
+      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
       return;
     }
     hold(r.value.draft_id);
@@ -383,7 +393,8 @@ export function useIngestFlow({
   const submitContext = async () => {
     if (phase.stage !== "awaiting-context") return;
     const text = inputText.trim();
-    if (!text) return;
+    // Without one, the resolver proposes the task from the rows, as `new <file>` lets it.
+    if (!text) return runCheckin(phase.draft);
     const id = phase.draft.draft_id;
     setInputText("");
     echo(text);

@@ -5,7 +5,7 @@ import type { StartCheckinOptions } from "@/lib/api";
 import type { SetupStep as Step } from "@/lib/api/types.generated";
 import { backendHealthRead } from "@/lib/api/reads";
 import { CONNECTOR_HEALTH_POLL_MS, ELAPSED_TICK_MS } from "@/lib/cadence";
-import { BACKEND_REACHABILITY_INFO, COUPON_STATE_INFO } from "@/lib/api/types.generated";
+import { BACKEND_REACHABILITY_INFO, LAUNCH_REFUSAL_LABELS } from "@/lib/api/types.generated";
 import { stepAnswer, type FieldSchema } from "@/lib/derivations";
 import { useCollection } from "@/lib/hooks/useCollection";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -19,7 +19,7 @@ import { familiesNamed } from "@/components/shell/families";
 import { Composer } from "@/components/chat/Composer";
 import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
-import { FailureLine, Loading, Said } from "@/components/ui";
+import { Button, FailureLine, Loading, Said } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { DatasetPreview } from "./DatasetPreview";
 import { SchemaFields, setIn, writeOnlyDefaults, type Commit } from "./SchemaFields";
@@ -118,9 +118,7 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
             cases the model must respect — a few sentences is plenty.
           </p>
           {!flow.inputText.trim() ? (
-            <FailureLine
-              failure={{ message: "Context can’t be empty — the check-in needs it to set things up." }}
-            />
+            <Button onClick={flow.submitContext}>Propose it from the rows</Button>
           ) : null}
         </div>
       ) : null}
@@ -308,9 +306,9 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           {refusal ? (
             <li>
               <Said
-                tone={COUPON_STATE_INFO[refusal.state].tone}
-                label={COUPON_STATE_INFO[refusal.state].label}
-                detail={refusal.reason}
+                tone="warn"
+                label={LAUNCH_REFUSAL_LABELS[refusal.reason]}
+                detail={refusal.sentence}
               />
             </li>
           ) : null}

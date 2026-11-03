@@ -146,7 +146,10 @@ def rmtree_robust(path: Path) -> None:
 def iter_files(
     root: Path, *, skip: frozenset[str] = frozenset()
 ) -> Iterator[tuple[Path, os.stat_result]]:
-    """Every file under *root*, past `MAX_PATH` too; one removed mid-walk is passed over."""
+    """Every file under *root*, past `MAX_PATH` too; one removed mid-walk is passed over.
+
+    No link is entered: a junction reads as a directory, and its target's files are not *root*'s
+    to count or delete."""
     stack = [root]
     first = True
     while stack:
@@ -156,6 +159,8 @@ def iter_files(
                 for entry in it:
                     path = current / entry.name
                     try:
+                        if entry.is_junction():
+                            continue
                         if entry.is_dir(follow_symlinks=False):
                             if not (first and entry.name in skip):
                                 stack.append(path)
@@ -169,12 +174,18 @@ def iter_files(
 
 
 def prune_empty_dirs(root: Path) -> None:
-    """Every empty directory under *root*, deepest first and past `MAX_PATH` too; *root* stays."""
+    """Every empty directory under *root*, deepest first and past `MAX_PATH` too; *root* stays.
+
+    Walked top-down so a junction is cut before it is entered: `os.walk` follows one."""
     top = _long_path(root)
-    for current, _dirs, _files in os.walk(top, topdown=False):
+    below: list[str] = []
+    for current, dirs, _files in os.walk(top):
+        dirs[:] = [d for d in dirs if not os.path.isjunction(os.path.join(current, d))]
         if current != top:
-            with contextlib.suppress(OSError):
-                os.rmdir(current)
+            below.append(current)
+    for current in reversed(below):
+        with contextlib.suppress(OSError):
+            os.rmdir(current)
 
 
 def stat_optional(path: Path) -> os.stat_result | None:

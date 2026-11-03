@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
+from promptpotter import connectors
+from promptpotter.application.jobs.coupon import paying_key
+from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
@@ -12,7 +15,10 @@ from promptpotter.domain.campaign_config import CampaignConfig, merge_config_lay
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, FreeTier
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.spend import draws_coupon
+from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.store.io import read_yaml
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
 
@@ -21,14 +27,41 @@ def free_tier() -> FreeTier:
     return FREE_TIER_ADAPTER.validate_python(read_yaml(free_tier_path()))
 
 
+class FreeFence(NamedTuple):
+    """What the tier binds of a run: only what draws the host's coupon."""
+
+    # The target's nodes, where its connector's cells draw the coupon.
+    task: bool
+    # The providers whose sends draw it: an optimizer node on any other is unfenced.
+    providers: frozenset[str]
+
+
+def free_fence(stores: Stores, connector: str) -> FreeFence | None:
+    """``None`` off the free tier (`quota.py::on_free_tier`)."""
+    if not on_free_tier(stores):
+        return None
+    keys = stores.api_keys.load()
+    return FreeFence(
+        task=draws_coupon(connectors.CONNECTORS.get(connector).cell_payer),
+        providers=frozenset(
+            provider
+            for provider in providers()
+            if (key := paying_key(keys, provider)) is not None and draws_coupon(key.paid_by)
+        ),
+    )
+
+
 def with_free_tier_layer(
-    config: CampaignConfig, task_nodes: Mapping[str, Mapping[str, Any]]
+    config: CampaignConfig, task_nodes: Mapping[str, Mapping[str, Any]], fence: FreeFence
 ) -> CampaignConfig:
-    """The tier's layer, plus per task node its model's bounds: each searched axis narrowed to
-    them, and an unset one launched at the lowest."""
+    """The tier's layer where anything the run sends draws the coupon, plus per fenced task node
+    its model's bounds: each searched axis narrowed to them, and an unset one launched at the
+    lowest."""
+    if not fence.task and not fence.providers:
+        return config
     tier = free_tier()
     merged = merge_config_layers(config.model_dump(mode="json", exclude_unset=True), tier.campaign)
-    for node, cfg in task_nodes.items():
+    for node, cfg in task_nodes.items() if fence.task else ():
         if not (bounds := tier.task_models.get(str(cfg.get("model")))):
             continue
         narrowed = config.optimizer_narrowing.get(node)
@@ -54,12 +87,18 @@ def outside_free_tier(
     selected: SelectedOptimizer,
     pipeline_params: Mapping[str, Any],
     schema: PipelineSchema,
+    fence: FreeFence,
 ) -> list[str]:
-    """What the run could send, at launch or by searching, that the tier does not list."""
+    """What the run could send on the coupon, launched or searched, that the tier does not list."""
     tier = free_tier()
     space = schema.narrow(config.optimizer_narrowing)
-    out = [f"the node {s}" for s in pipeline_params.get("steps", ()) if s not in tier.task_nodes]
-    for node, cfg in node_config_items(dict(pipeline_params)):
+    task = fence.task
+    out = [
+        f"the node {s}"
+        for s in (pipeline_params.get("steps", ()) if task else ())
+        if s not in tier.task_nodes
+    ]
+    for node, cfg in node_config_items(dict(pipeline_params)) if task else ():
         if not (model := cfg.get("model")):
             continue
         declared = space.get_node(node)
@@ -78,6 +117,8 @@ def outside_free_tier(
                 out += [f"{param} {v} on {m}" for v in values if v not in admitted]
     for name in selected.llm_nodes:
         cfg = selected.node_config(name)
+        if cfg["provider"] not in fence.providers:
+            continue
         if (bounds := tier.optimizer_models.get(model := str(cfg.get("model")))) is None:
             out.append(f"the optimizer model {model}")
             continue

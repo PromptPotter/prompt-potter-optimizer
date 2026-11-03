@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
+    UploadBasis,
     default_campaign_config,
 )
 from promptpotter.application.datasets.origin_readiness import (
@@ -16,10 +17,18 @@ from promptpotter.application.datasets.origin_readiness import (
     SetupStep,
     origin_readiness,
 )
-from promptpotter.application.jobs.quota import LaunchRefusal, account_wallet, launch_refusal
+from promptpotter.application.jobs.quota import (
+    LaunchRefusal,
+    account_wallet,
+    launch_bound,
+    launch_refusal,
+)
 from promptpotter.application.pipeline_resolve import (
     OptimizerSetup,
-    draft_config,
+    ServedPipeline,
+    draft_pipeline,
+    draft_sends,
+    draft_served,
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
@@ -41,8 +50,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, money_text
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
-
-SchemaSource = Literal["backend", "local", "unreachable"]
+from promptpotter.shared.errors import NoApiKeyError
 
 
 class DraftDependency(PipelineDependency):
@@ -72,7 +80,7 @@ class DraftCampaignWire(StrictModel):
     )
     optimization_overrides: OptimizationOverrides = Field(
         description="The draft's overrides, its `budget` the one Start declares: "
-        "`pipeline_resolve.draft_config`'s, a free account's tier laid last."
+        "`pipeline_resolve.draft_pipeline`'s config, a free account's tier laid last."
     )
     optimizer_setup: OptimizerSetup = Field(
         description="The optimizer as this draft's config runs it, as a campaign serves it."
@@ -105,10 +113,6 @@ class DraftCampaignWire(StrictModel):
     node_output_schema: dict[str, NodeOutputSchema | None]
     reach: dict[str, NodeReach]
     is_single_node: bool
-    schema_source: SchemaSource = Field(
-        description="WHY the axes read as they do. `unreachable` = the backend probe failed, so "
-        "nothing in the schema is a lock anyone set and an editor draws no padlock off it."
-    )
     model_capabilities: CapabilityMenu = Field(
         description="A null `reasoning_efforts` is UNKNOWN, never unsupported."
     )
@@ -152,27 +156,15 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     return overlay
 
 
-def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
-    active = set(draft.active_steps())
-    return dependencies_from_node_roles(
-        {
-            n: r
-            for n, r in connectors.CONNECTORS.get(draft.connector).node_roles.items()
-            if n in active
-        }
-    )
+def _dependencies(connector: str, active: list[str]) -> tuple[PipelineDependency, ...]:
+    roles = connectors.CONNECTORS.get(connector).node_roles
+    return dependencies_from_node_roles({n: r for n, r in roles.items() if n in active})
 
 
 def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool:
     if dep.kind == CANDIDATE_LIBRARY:
         return bool(draft.candidate_library)
     return False
-
-
-def _draft_schema_source(draft: DraftCampaign) -> SchemaSource:
-    if draft.backend_nodes:
-        return "backend"
-    return "unreachable" if connectors.CONNECTORS.get(draft.connector).serves_pipeline else "local"
 
 
 def _wire_overrides(draft: DraftCampaign, declared: Budget) -> OptimizationOverrides:
@@ -198,7 +190,7 @@ def _task_title(task: str) -> str | None:
     return title if 0 < len(title) <= _TITLE_MAX_CHARS else None
 
 
-def _recap(draft: DraftCampaign) -> str:
+def _recap(draft: DraftCampaign, connector: str, rounds: int | None) -> str:
     title = _task_title(draft.raw_task_description)
     lead = (
         f"evolve a prompt for “{title}”"
@@ -206,7 +198,6 @@ def _recap(draft: DraftCampaign) -> str:
         else f"evolve a prompt that turns each “{draft.column_query or 'your input'}” into "
         f"the right “{draft.column_ground_truth or 'the target'}”"
     )
-    rounds = default_campaign_config(draft).optimization.budget.rounds
     over = (
         "with no rounds cap"
         if rounds is None
@@ -214,22 +205,28 @@ def _recap(draft: DraftCampaign) -> str:
     )
     return (
         f"PromptPotter will {lead} — "
-        f"running {draft.connector}, "
+        f"running {connector}, "
         f"scoring by {draft.scoring_matcher}, "
         f"{over}."
     )
 
 
-def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
-    resolution = resolve_pipeline_for_draft(stores, draft)
-    declared = draft_config(stores, draft).optimization.budget
-    wallet = account_wallet(stores)
+async def read_draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
+    return draft_wire(stores, draft, await draft_served(stores, draft))
+
+
+def draft_wire(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftCampaignWire:
+    resolution = resolve_pipeline_for_draft(stores, draft, served)
+    pipeline = draft_pipeline(stores, draft, served)
+    declared = pipeline.config.optimization.budget
+    active = list(pipeline.chain.active_steps)
+    refusal, launch = _launch(stores, draft, declared)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,
         sample_preview=[dict(row) for row in draft.sample_preview],
         n_samples=draft.n_samples,
-        connector=draft.connector,
+        connector=served.connector,
         scoring_matcher=draft.scoring_matcher,
         scoring_matchers=sorted(MATCHERS),
         scoring_dials=draft.scoring_dials,
@@ -244,25 +241,35 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         origin_prompts={node: dict(fields) for node, fields in draft.origin_prompts.items()},
         candidate_library_size=len(draft.candidate_library),
         created_at=draft.created_at,
-        active_steps=draft.active_steps(),
+        active_steps=active,
         pipeline_view=resolution.view,
         node_config_schema=resolution.node_config_schema,
         node_output_schema=resolution.node_output_schema,
         reach=resolution.reach,
         is_single_node=resolution.is_single_node,
-        schema_source=_draft_schema_source(draft),
         model_capabilities=resolution.model_capabilities,
         dependencies=[
             DraftDependency(**dep.model_dump(), fulfilled=_dependency_fulfilled(dep, draft))
-            for dep in draft_pipeline_dependencies(draft)
+            for dep in _dependencies(served.connector, active)
         ],
-        readiness=origin_readiness(draft),
-        launch_refusal=LaunchRefusal.of(
-            wallet, launch_refusal(wallet, declared, stores=stores, refusing=None)
-        ),
-        recap=_recap(draft),
-        setup_schema=setup_schema(draft, launch=wallet.launch_bound, declared=declared),
+        readiness=origin_readiness(draft, pipeline),
+        launch_refusal=refusal,
+        recap=_recap(draft, served.connector, declared.rounds),
+        setup_schema=setup_schema(draft, launch=launch, declared=declared),
     )
+
+
+def _launch(
+    stores: Stores, draft: DraftCampaign, declared: Budget
+) -> tuple[LaunchRefusal | None, Budget]:
+    """``admit_launch``'s refusal of this Start, then the most it may declare."""
+    wallet = account_wallet(stores)
+    try:
+        sends = draft_sends(stores, draft)
+    except NoApiKeyError as unpaid:
+        return LaunchRefusal.of(unpaid), wallet.headroom
+    refused = launch_refusal(wallet, declared, sends, stores=stores, refusing=None)
+    return (None if refused is None else LaunchRefusal.of(refused)), launch_bound(wallet, sends)
 
 
 def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
@@ -355,9 +362,9 @@ def setup_schema(draft: DraftCampaign, *, launch: Budget, declared: Budget) -> d
     }
 
 
-def default_campaign_block(draft: DraftCampaign) -> dict[str, Any]:
+def default_campaign_block(draft: DraftCampaign, upload: UploadBasis) -> dict[str, Any]:
     """Without the node overlay: the mint splits that onto the per-campaign snapshot."""
-    return default_campaign_config(draft).model_dump(mode="json", exclude_defaults=True)
+    return default_campaign_config(draft, upload).model_dump(mode="json", exclude_defaults=True)
 
 
 def draft_task_context(draft: DraftCampaign) -> TaskDecomposition:

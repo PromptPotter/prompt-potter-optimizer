@@ -18,6 +18,7 @@ from promptpotter.domain.connector import (
 )
 from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.spend import KeySource
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.shared.extras import Extra
@@ -149,6 +150,10 @@ class Connector:
     holds_own_sends: bool = False
     """Each paid send is admitted and billed where it is made; ``False``: the cell is ONE send."""
 
+    cell_payer: KeySource = "host"
+    """Whose wallet a cell's sends draw: every built-in backend sends on the box's keys, whatever
+    keys the account holds, so its cells draw the host's coupon."""
+
     sent_spend_bound: SentSpendBound | None = None
     """The bound THIS process sends the backend; answering ``None`` leaves no spend ceiling to hold."""
 
@@ -202,10 +207,9 @@ class Connector:
     completion_check: Callable[[], None] | None = None
     """Run where the table completes, so a raise stops the server at boot and a run at init."""
 
-    pipeline_declaration: (
-        Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, Any]] | None
-    ) = None
-    """The backend's graph, read in place of ``GET /pipeline``; ``dataset.yaml::pipeline`` overlays it."""
+    pipeline_declaration: Callable[[Stores, Mapping[str, Any] | None], dict[str, Any]] | None = None
+    """The backend's graph off the panel's experiment, read in place of ``GET /pipeline``;
+    ``dataset.yaml::pipeline`` overlays it."""
 
     identity_config: (
         Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, dict[str, Any]]]

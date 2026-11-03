@@ -127,10 +127,10 @@ def _render_install_spend() -> str:
         if r.unreadable:
             lines.append(f"{who}: unreadable — {r.unreadable}")
             continue
-        over = overrun(r.ceilings, r.spent.host)
+        over = overrun(r.face, r.spent.host)
         spent = r.spent.total
         flags = []
-        if r.ceilings.usd is None:
+        if r.face.usd is None:
             flags.append("host, unmetered")
         if spent.unpriced_tokens:
             flags.append(f"{spent.unpriced_tokens:,} unpriced")

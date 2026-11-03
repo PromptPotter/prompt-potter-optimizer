@@ -23,7 +23,7 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
     resolve_resume,
 )
-from promptpotter.application.jobs.quota import land_job
+from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
@@ -46,7 +46,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.sample import Bank
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -89,7 +89,9 @@ async def open_session(
     complete_registries(every_treatment=False)
     if stores is None:
         stores = local_stores(tenant=None)
-    down = await probe_backend(backend_type_of_dataset(stores, dataset_name))
+    down = await probe_backend(
+        runnable_definition(resolve_dataset(stores, dataset_name).directory).backend_type
+    )
     if down is not None:
         raise down
     session = await init_services(
@@ -183,6 +185,7 @@ async def run_campaign(
         resumed = resolve_resume(session, campaign, session.bank.samples)
         campaign_config = resolve_campaign_config(session.store, campaign, session.hop)
         session = configure_and_apply_pipeline(session, campaign_config)
+        connector = campaign.connector
     else:
         if campaign_config is None:
             raise PayloadInvalidError(
@@ -190,6 +193,7 @@ async def run_campaign(
             )
         declaration = declare(session, campaign_config, purpose=Optimize())
         campaign_config = effective_config(declaration)
+        connector = declaration.environment.connector
     # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
     async with embedded_share(
         campaign_config,
@@ -198,6 +202,7 @@ async def run_campaign(
         hop=session.hop if session.cycle_id else None,
         requested=budget,
         step_rounds=step_rounds,
+        sends=sends_on(session.store, campaign_config, connector),
     ) as (job_id, held):
         if declaration is None:
             assert resumed is not None, "a session bound to a campaign resumes it"

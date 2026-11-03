@@ -111,6 +111,7 @@ export type {
   OriginListResponse,
   QuotaStatus,
   CouponStatus,
+  ProviderRoute,
   AccountKey,
   LifetimeSpend,
   UserSettings,

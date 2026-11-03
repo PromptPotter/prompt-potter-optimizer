@@ -56,4 +56,4 @@ version exists.
 
 ## 6. Close out
 
-- [ ] Remove the verify worktree (`git worktree remove`; a long path needs `\\?\` on Windows).
+- [ ] Remove the verify worktree: `python scripts/sweep_worktrees.py <name> --apply`.

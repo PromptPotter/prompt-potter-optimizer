@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.loop_start import open_diagnostic, verb_ledger
 from promptpotter.application.initialization.session import LaunchClock
-from promptpotter.application.jobs.launcher.admission import paid_pass
+from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.bench import bench_selection
@@ -44,7 +44,13 @@ class BenchTriggerError(ConflictError):
 
 async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
     """Admitted exactly where the served status says so (``BenchStatus.can_grade``)."""
-    async with paid_pass(stores=stores, verb="bench", hop=hop, declared=Budget()):
+    async with paid_pass(
+        stores=stores,
+        verb="bench",
+        hop=hop,
+        declared=Budget(),
+        sends=campaign_sends(stores, hop),
+    ):
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
         if campaign is None:
             raise BenchTriggerError(f"campaign {hop.campaign_id!r} has no manifest on disk.")

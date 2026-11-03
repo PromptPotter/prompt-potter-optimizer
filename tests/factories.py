@@ -568,6 +568,22 @@ def minted_campaign(
     )
 
 
+def stored_campaign(stores: Stores, campaign: Campaign) -> None:
+    """Stored as the mint stores it: the root's resolved run lands before the manifest."""
+    node = {"type": "llm", "config": {"model": "m"}}
+    stores.campaigns.write_resolved_run(
+        campaign.root_hop,
+        declaration={
+            "backend_name": "termnorm",
+            "nodes": {"a": node},
+            "pipelines": {"default": ["a"]},
+        },
+        experiment=None,
+        model_capabilities={},
+    )
+    stores.campaigns.create_campaign(campaign)
+
+
 def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
     """A minted cycle a producer holds and has declared running: what a loop command lands on."""
     hop = CycleHop(campaign_id="camp-cmd", cycle_id="cycle_cmd00000000")

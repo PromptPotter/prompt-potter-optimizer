@@ -8,8 +8,9 @@ import {
   putApiKey,
   type AccountKey,
   type CouponStatus,
+  type ProviderRoute,
 } from "@/lib/api";
-import { COUPON_STATE_INFO } from "@/lib/api/types.generated";
+import { KEY_SOURCE_LABELS } from "@/lib/api/types.generated";
 import { fmtAgo } from "@/lib/format";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
@@ -37,7 +38,6 @@ export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
   // No blanket revalidate: the write re-asks the one read carrying the keys.
   const cmd = useCommand<KeyVerb>("account-keys", { describe: refusal, revalidate: false });
   const busy = cmd.pending !== null;
-  const held = new Map(coupon.keys.map((k) => [k.provider, k]));
 
   const save = (provider: string, secret: string) =>
     void cmd.run(
@@ -53,19 +53,23 @@ export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
     );
 
   return (
-    <AccountSection title="Your provider keys" lede={COUPON_STATE_INFO[coupon.state].lede}>
-      {coupon.providers.length === 0 ? (
+    <AccountSection
+      title="Your provider keys"
+      lede="A key you hold pays every send on its provider, and draws nothing from the host's allowance."
+    >
+      {coupon.routes.length === 0 ? (
         <Empty>This server names no provider a key could be held for.</Empty>
       ) : (
         <ul className="account-keys">
-          {coupon.providers.map((provider) => (
+          {coupon.routes.map((route) => (
             <KeyRow
-              key={provider}
-              provider={provider}
-              held={held.get(provider) ?? null}
+              key={route.provider}
+              provider={route.provider}
+              payer={route.payer}
+              held={route.key}
               busy={busy}
-              onSave={(secret) => save(provider, secret)}
-              onRemove={() => remove(provider)}
+              onSave={(secret) => save(route.provider, secret)}
+              onRemove={() => remove(route.provider)}
             />
           ))}
         </ul>
@@ -81,12 +85,14 @@ export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
 
 function KeyRow({
   provider,
+  payer,
   held,
   busy,
   onSave,
   onRemove,
 }: {
   provider: string;
+  payer: ProviderRoute["payer"];
   held: AccountKey | null;
   busy: boolean;
   onSave: (secret: string) => void;
@@ -111,16 +117,21 @@ function KeyRow({
           </Button>
         </>
       ) : (
-        <CommitInput
-          className="account-key-input"
-          type="password"
-          value=""
-          disabled={busy}
-          placeholder="Paste a key, then Enter"
-          aria-label={`${provider} API key`}
-          validate={(draft) => draft !== ""}
-          onCommit={onSave}
-        />
+        <>
+          <span className="account-note">
+            {payer === null ? "No key: nothing sends on it." : `Sends on the ${KEY_SOURCE_LABELS[payer]}.`}
+          </span>
+          <CommitInput
+            className="account-key-input"
+            type="password"
+            value=""
+            disabled={busy}
+            placeholder="Paste a key, then Enter"
+            aria-label={`${provider} API key`}
+            validate={(draft) => draft !== ""}
+            onCommit={onSave}
+          />
+        </>
       )}
     </li>
   );

@@ -34,6 +34,7 @@ from factories import (
     optimizer_state,
     round_result,
     seat,
+    stored_campaign,
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -1070,7 +1071,9 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
         )
     with pytest.raises(CycleBusyError):
-        async with paid_pass(stores=built_stores, verb="bench", hop=hop, declared=Budget()):
+        async with paid_pass(
+            stores=built_stores, verb="bench", hop=hop, declared=Budget(), sends=()
+        ):
             pass
     assert withdraw_queued(built_stores, registry, job.job_id, principal_id=job.principal_id), (
         "the launch's own principal could not withdraw it"
@@ -1097,7 +1100,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
             backend_revision=None,
         )
     )
-    campaigns.create_campaign(minted_campaign(hop))
+    stored_campaign(built_stores, minted_campaign(hop))
     ledger = CycleLayout(cycle_dir).ledger
     hold_cycle(cycle_dir)
     os.utime(ledger, (0, 0))

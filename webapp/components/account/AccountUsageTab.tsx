@@ -13,8 +13,8 @@ import {
   type Segment,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { allowanceCaveats, allowanceText, billText } from "@/lib/derivations";
-import { COUPON_STATE_INFO, SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
+import { allowanceCaveats, billText } from "@/lib/derivations";
+import { SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
 import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -72,19 +72,20 @@ function Meter({ share, warn = false }: { share: number; warn?: boolean }) {
 function AllowanceSection({ coupon }: { coupon: CouponStatus }) {
   const { open } = useWorkspace();
   const own = coupon.own_key_spend;
-  const held = coupon.keys.length;
+  const said = coupon.headline;
+  const held = coupon.routes.filter((r) => r.key !== null).length;
   return (
     <AccountSection
       title="Host allowance"
-      lede={COUPON_STATE_INFO[coupon.state].lede}
+      lede={said.detail}
       aside={<Button onClick={() => open("account", "keys")}>API keys</Button>}
     >
       <div className="account-wallet">
         <div className="account-wallet-cell">
           <span className="account-kicker">On the host&rsquo;s keys</span>
-          <span className="account-figure">{allowanceText(coupon)}</span>
+          <span className="account-figure">{said.value}</span>
           {coupon.used_share !== null ? (
-            <Meter share={coupon.used_share} warn={COUPON_STATE_INFO[coupon.state].tone === "warn"} />
+            <Meter share={coupon.used_share} warn={said.tone === "warn"} />
           ) : null}
           {allowanceCaveats(coupon.host_key_spend).map((line) => (
             <span key={line} className="account-warn">

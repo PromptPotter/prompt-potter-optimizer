@@ -61,9 +61,7 @@ def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerC
     return parse_resolved(experiment).panel.resolve_cells(stores)
 
 
-def _pipeline_declaration(
-    stores: Stores, _dataset: ResolvedDataset, experiment: Mapping[str, Any] | None
-) -> dict[str, Any]:
+def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) -> dict[str, Any]:
     return _inner_cells(stores, experiment).pipeline()
 
 

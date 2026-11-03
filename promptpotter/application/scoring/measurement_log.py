@@ -19,10 +19,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     read_hard_samples,
 )
 from promptpotter.application.intelligence.rasch import Observation
-from promptpotter.application.pipeline_resolve import (
-    dataset_pipeline_declaration,
-    experiment_outside_run,
-)
+from promptpotter.application.pipeline_resolve import dataset_pipeline, experiment_outside_run
 from promptpotter.application.scoring.closed_rounds import (
     campaign_ruler_scope,
     campaign_scorer,
@@ -134,7 +131,7 @@ def _assemble(
     described: ArchiveEntry,
     filed: FiledAnswer,
     cell: GradedCell,
-    schema: PipelineSchema | None,
+    schema: PipelineSchema,
     sid: int,
 ) -> Cell:
     """Spans are READ-TIME assembly: outputs attribute through the dataset's CURRENT schema."""
@@ -147,7 +144,7 @@ def _assemble(
         "ground_truth": facts.ground_truth or None,
         "question": pd.question,
     }
-    outputs_of = {n.name: n.output_keys for n in schema.nodes} if schema is not None else {}
+    outputs_of = {n.name: n.output_keys for n in schema.nodes}
     spans = [
         _span(node, cfg, pd, recorded, variables, outputs_of.get(node, []))
         for node, cfg in described.node_configs
@@ -175,7 +172,7 @@ def _assemble(
     )
 
 
-def open_cell(stores: Stores, name: str, answer: str) -> Cell:
+async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
     """The slot is the answer's own bank's: *name* may label a re-cut that moved or dropped its row."""
     dataset = resolve_dataset(stores, name)
     filed = stores.archive.answer(answer)
@@ -189,10 +186,10 @@ def open_cell(stores: Stores, name: str, answer: str) -> Cell:
         raise NotFoundError(f"Answer '{answer}' is filed under a bank no longer held")
     slot = bank.slot_of[filed.cell.sample_key]
     filed = stores.archive.whole(filed)
-    declared = dataset_pipeline_declaration(
-        stores, dataset, experiment_outside_run(stores, dataset)
+    declared = await dataset_pipeline(
+        stores, dataset, experiment=experiment_outside_run(stores, dataset)
     )
-    schema = parse_pipeline_response(declared) if declared is not None else None
+    schema = parse_pipeline_response(declared)
     return _assemble(
         described, filed, dataset_scorer(dataset.directory).grade(filed.cell), schema, slot
     )

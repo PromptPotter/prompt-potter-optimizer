@@ -16,7 +16,7 @@ ENTRY_POINT_GROUP = "promptpotter.connectors"
 """Published: renaming it un-registers every third-party plugin at once."""
 
 DEFAULT_CONNECTOR = "termnorm"
-"""What a fresh upload drafts against when its ``dataset.yaml::pipeline`` names no connector."""
+"""What a fresh upload drafts against; a check-in edit may name another ``serves_uploads`` one."""
 
 
 def _validate(c: object, origin: str) -> Connector:

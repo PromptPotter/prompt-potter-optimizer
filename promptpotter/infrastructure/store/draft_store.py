@@ -91,27 +91,11 @@ class DraftStore:
     def read_draft(self, draft_id: str) -> dict[str, Any] | None:
         return read_json_optional(self.draft_dir(draft_id) / "draft.json")
 
-    def _patch_checkin(self, draft_id: str, **fields: Any) -> None:
-        path = self.draft_dir(draft_id) / "checkin.json"
-        write_json(path, {**(read_json_optional(path) or {}), **fields})
-
-    def _checkin_field(self, draft_id: str, key: str) -> Any:
-        return (read_json_optional(self.draft_dir(draft_id) / "checkin.json") or {}).get(key)
-
-    def write_upload(self, draft_id: str, upload: str) -> None:
-        """The kept file's name under ``TenantDatasetStore.upload_path``."""
-        self._patch_checkin(draft_id, upload=upload)
-
-    def upload_of(self, draft_id: str) -> str | None:
-        upload = self._checkin_field(draft_id, "upload")
-        return upload if isinstance(upload, str) and upload else None
-
     def write_resolution(self, draft_id: str, resolution: dict[str, Any]) -> None:
-        self._patch_checkin(draft_id, resolution=resolution)
+        write_json(self.draft_dir(draft_id) / "resolution.json", resolution)
 
     def load_resolution(self, draft_id: str) -> dict[str, Any] | None:
-        resolution = self._checkin_field(draft_id, "resolution")
-        return resolution if isinstance(resolution, dict) else None
+        return read_json_optional(self.draft_dir(draft_id) / "resolution.json")
 
     def close(self, draft_id: str) -> None:
         """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing reads."""

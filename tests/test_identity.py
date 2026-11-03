@@ -50,7 +50,7 @@ from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.datasets import ingest, loaders, tabular_ingest
-from promptpotter.application.datasets.draft_campaign import new_draft
+from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
@@ -101,9 +101,11 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
 from promptpotter.application.pipeline_resolve import (
     campaign_admits,
-    dataset_pipeline_declaration,
+    dataset_pipeline,
     defaults_drift,
     draft_config,
+    draft_pipeline,
+    draft_served,
     experiment_outside_run,
     resolve_campaign_config,
     resolve_pipeline_config_params,
@@ -873,7 +875,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     write_yaml(
         root / DEFINITION_FILE,
         {
-            "pipeline": {"pipelines": dict(schema.pipelines)},
+            "pipeline": {"backend_type": DEFAULT_CONNECTOR, "pipelines": dict(schema.pipelines)},
             "campaign": {"optimization": optimization, "scoring": pinned},
         },
     )
@@ -881,41 +883,30 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="ds",
+        basis=DatasetBasis("ds"),
         n_samples=1,
         sample_preview=[],
         headers=[],
-        source_dataset="ds",
     ).patch(optimization_overrides={"optimizer": "capo"})
-    live = [n.name for n in schema.nodes]
     picked = draft.patch(pipeline_steps=["llm_only"])
-    chosen = draft_config(built_stores, picked, session_chain=live)
+    chosen = draft_config(built_stores, picked, schema)
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"], "a picked chain ran whole"
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"], (
         "the excluded complement runs another chain than was picked"
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
-    assert draft_config(built_stores, picked) == chosen, (
-        "what a read serves before Start is not what Start declares"
-    )
     assert chosen.scoring == pinned, "the pinned criterion did not reach the mint"
-    dialled = draft_config(built_stores, picked.patch(scoring_dials="cost=0.1"))
+    dialled = draft_config(built_stores, picked.patch(scoring_dials="cost=0.1"), schema)
     assert dialled.scoring == {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}, (
         "dials froze another criterion than they spell"
     )
-    untouched = draft_config(built_stores, draft, session_chain=live)
+    untouched = draft_config(built_stores, draft, schema)
     assert untouched.exclude_nodes == [], (
         "`pipeline_steps=[]` is untouched: excluding its complement would close the whole pipeline"
     )
     # A draft edit sent as rows freezes the search space the overlay spelled. A REUSED dataset:
     # its file is not the check-in's to write, so the overlay rides the config.
     reused = built_stores.tenant_datasets.dataset_dir("d")
-    write_yaml(
-        reused / DEFINITION_FILE,
-        {
-            "pipeline": {"backend_type": "termnorm"},
-            "campaign": _connector_config().model_dump(mode="json"),
-        },
-    )
     declared_node = {
         "type": "llm",
         "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.2},
@@ -924,19 +915,28 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "param_allowed_values": {"reasoning_effort": ["low", "mid", "high"]},
         },
     }
+    write_yaml(
+        reused / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": "termnorm", "nodes": {"llm_only": declared_node}},
+            "campaign": _connector_config().model_dump(mode="json"),
+        },
+    )
     edited = new_draft(
         tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="d",
+        basis=DatasetBasis("d"),
         n_samples=1,
         sample_preview=[],
         headers=[],
-        source_dataset="d",
-    ).patch(backend_nodes={"llm_only": declared_node})
+    )
 
     def frozen(**patch: Any) -> Any:
-        plan = plan_draft_patch(built_stores, edited, EditDraftPatch.model_validate(patch))
-        return draft_config(built_stores, apply_draft_patch(edited, plan))
+        plan = asyncio.run(
+            plan_draft_patch(built_stores, edited, EditDraftPatch.model_validate(patch))
+        )
+        return draft_pipeline(built_stores, apply_draft_patch(edited, plan), plan.served).config
 
     rows = [
         {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},
@@ -1069,7 +1069,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 "param_allowed_values": {"reasoning_effort": rungs},
             },
         }
-        return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
+        return {"backend_name": "termnorm", "nodes": {"a": node}, "pipelines": {"default": ["a"]}}
 
     steered = minted_campaign(
         CycleHop(campaign_id="fk__000001", cycle_id="cycle_root"),
@@ -1409,11 +1409,13 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # An invented param is rejected, and so is the individual a variation wrote it on.
     outer = _install("promptpotter-self/panel")
     outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
-    declaration = dataset_pipeline_declaration(
-        outer_stores, outer, experiment_outside_run(outer_stores, outer)
+    outer_schema = parse_pipeline_response(
+        asyncio.run(
+            dataset_pipeline(
+                outer_stores, outer, experiment=experiment_outside_run(outer_stores, outer)
+            )
+        )
     )
-    assert declaration is not None, "the outer dataset declared no pipeline"
-    outer_schema = parse_pipeline_response(declaration)
     for overlay, refused_axes in (
         ({"l1_generate": {"invented_knob": 1}}, ["l1_generate.invented_knob"]),
         ({"l1_critique": {"layout": "hdr"}}, ["l1_critique.layout"]),
@@ -1876,7 +1878,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
 
     draft = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name="heldout"))
-    content, _ = build_origin_consultation(draft)
+    served = asyncio.run(draft_served(built_stores, draft))
+    content = build_origin_consultation(
+        draft, draft_pipeline(built_stores, draft, served)
+    ).user_content
     bench_rows = partition_bank(checkin_bank, DatasetSplit(bench=30), seed=0).bench
     assert not [s.id for s in bench_rows if f'"{s.query}"' in content], (
         "a bench row reached the resolver"
@@ -1896,7 +1901,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             optimization_overrides={**uploaded.optimization_overrides, "nodes": starved},
         ).to_disk(),
     )
-    monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft: None)
+    monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
     for attempt in ("first", "retry"):
         with pytest.raises(PayloadInvalidError):
             asyncio.run(
@@ -1909,6 +1914,12 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         assert not built_stores.tenant_datasets.slug_exists(uploaded.slug), (
             f"the {attempt} refused Start committed its dataset"
         )
+    opened = asyncio.run(
+        checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
+    )
+    assert opened.session.pipeline_schema == draft_pipeline(built_stores, draft, served).declared, (
+        "the run inits on another pipeline than the one its Start was checked against"
+    )
 
     # Rewriting the prompt panel cannot accumulate the operator framing.
     upstream = "Raw invoice text is provided directly as the input column."

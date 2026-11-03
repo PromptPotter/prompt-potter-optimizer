@@ -24,6 +24,7 @@ from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draf
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS, origin_readiness
 from promptpotter.application.datasets.tabular_ingest import IngestError
+from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
     ArmRequest,
@@ -200,9 +201,11 @@ async def _hold_checkin(
             CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch)),
         )
     draft = owned_draft(stores, draft_id)
+    # A turn writes no field the pipeline reads, so one read serves both readiness checks.
+    served = await draft_served(stores, draft)
 
     last_turn: OriginLastResolution | None = None
-    if not origin_readiness(draft).complete:
+    if not origin_readiness(draft, draft_pipeline(stores, draft, served)).complete:
         _checkin_line("origin resolver", "running AI check-in")
         # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
         turn = await dispatch_origin_resolution(
@@ -211,7 +214,7 @@ async def _hold_checkin(
         last_turn = turn.resolution.last_resolution
         draft = owned_draft(stores, draft_id)
 
-    readiness = origin_readiness(draft)
+    readiness = origin_readiness(draft, draft_pipeline(stores, draft, served))
     if not readiness.complete:
         _raise_incomplete(readiness.gaps, last_turn, draft_id)
 

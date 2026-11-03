@@ -22,8 +22,6 @@ class HostCoupon(BaseModel):
     usd: float | None = 0.30
     # Sized ABOVE what the USD face buys on the cheapest model: re-derive it whenever that moves.
     tokens: int | None = 5_000_000
-    # Set: an account holding ANY key of its own has no coupon left on any provider.
-    void_on_byo: bool = False
 
 
 def _app_version() -> str:

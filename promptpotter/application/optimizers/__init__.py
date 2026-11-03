@@ -147,11 +147,15 @@ def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str |
     if not any(n.open_prompt_fields for n in prompt_nodes) and not any(
         schema.node_param_keys().values()
     ):
+        prompts = (
+            "every prompt field is held"
+            if prompt_nodes
+            else f"no node of its chain {list(schema.active_steps)} declares a prompt"
+        )
         return (
-            "this campaign leaves its optimizer nothing to edit: every prompt field is held and "
-            "no config axis is open on any node, so each variant would be a no-op. Open a "
-            "prompt field (`prompt_fields_held`) or a config axis (`param_keys`) in "
-            "`optimizer_narrowing`."
+            f"this campaign leaves its optimizer nothing to edit: {prompts} and no config axis is "
+            "open on any node, so each variant would be a no-op. Open a prompt field "
+            "(`prompt_fields_held`) or a config axis (`param_keys`) in `optimizer_narrowing`."
         )
     roster = [node.name for node in prompt_nodes]
     for name in selected.member_nodes:

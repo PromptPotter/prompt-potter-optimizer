@@ -21,7 +21,7 @@ Next.js static export at `out/`, mounted at `/` by FastAPI; **the API is the car
 
 ## The chat thread — rendered, never authored
 
-Positioning is [`../docs/specs/chat-foundation.md`](../docs/specs/chat-foundation.md)'s.
+Positioning is [`../docs/specs/host-assistant.md`](../docs/specs/host-assistant.md)'s.
 
 - **Everything the Potter does is one generic `step`** (icon, label, status, optional duration/cost); a new `ProjectionKind` reads into it, never a new item kind. `candidate` and `round` are the deletable optimizer layer.
 - **Only message items are client-authored.** One crossing: an ENDED run freezes served values into a `run` item, since `resume` rewrites what a pointer would name.

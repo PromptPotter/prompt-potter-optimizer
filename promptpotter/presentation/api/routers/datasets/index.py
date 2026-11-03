@@ -24,6 +24,6 @@ def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
 
 
 @datasets_router.get("/{name:path}/pipeline", response_model=DatasetPipelineResponse)
-def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineResponse:
+async def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineResponse:
     """One dataset's declared pipeline, gated by the resolver every dataset read shares."""
-    return resolve_pipeline_for_dataset(stores, name)
+    return await resolve_pipeline_for_dataset(stores, name)

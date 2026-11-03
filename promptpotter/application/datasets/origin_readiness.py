@@ -7,21 +7,16 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field, computed_field
 
-from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    merge_pipeline_overlay,
-)
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, basis_json
 from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.task_context import OriginQuestion
+    from promptpotter.application.pipeline_resolve import DraftPipeline
     from promptpotter.infrastructure.store.stores import Stores
-
-_LLM_CALL_KEYS: frozenset[str] = WHO_ANSWERS_KEYS | PARAM_SCOPE_KEYS
 
 
 class SetupStep(StrEnum):
@@ -158,12 +153,9 @@ class RaisedCommand(StrictModel):
 
 
 class OriginResolution(StrictModel):
-    """The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it."""
+    """The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the
+    draft's `readiness`, recomputed on every read."""
 
-    complete: bool
-    provenance: dict[str, Provenance]
-    values: dict[str, Any] = Field(description="Each gated field's current value, by field id.")
-    gaps: tuple[FieldGap, ...]
     last_resolution: OriginLastResolution | None = Field(
         default=None, description="Null until a resolver turn ran, and again after a later edit."
     )
@@ -176,10 +168,31 @@ class OriginResolution(StrictModel):
     )
 
 
-def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
-    """Ready is not mintable: a node's required ``{{template vars}}`` are checked only at mint."""
-    gaps: list[FieldGap] = []
+def origin_readiness(draft: DraftCampaign, pipeline: DraftPipeline) -> OriginReadiness:
+    """Over the *pipeline* the draft's declaration resolves to. Ready is not mintable: a node's
+    required ``{{template vars}}`` are checked only at mint."""
+    gaps = _column_gaps(draft)
+    _check_confirmed(
+        draft,
+        field_key="task_description",
+        value=draft.raw_task_description,
+        label="task framing",
+        hint="Describe what the prompt should do.",
+        gaps=gaps,
+    )
 
+    _check_node_models(pipeline, gaps=gaps)
+
+    return OriginReadiness(gaps=tuple(gaps))
+
+
+def columns_confirmed(draft: DraftCampaign) -> bool:
+    """The gate's column clause: only past it may anything cut the upload's rows."""
+    return not _column_gaps(draft)
+
+
+def _column_gaps(draft: DraftCampaign) -> list[FieldGap]:
+    gaps: list[FieldGap] = []
     _check_column(
         draft,
         field_key="column.query",
@@ -203,18 +216,7 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
                 "Pick two different columns.",
             )
         )
-    _check_confirmed(
-        draft,
-        field_key="task_description",
-        value=draft.raw_task_description,
-        label="task framing",
-        hint="Describe what the prompt should do.",
-        gaps=gaps,
-    )
-
-    _check_node_models(draft, gaps=gaps)
-
-    return OriginReadiness(gaps=tuple(gaps))
+    return gaps
 
 
 def _check_column(
@@ -270,24 +272,15 @@ def _check_confirmed(
     )
 
 
-def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
-    try:
-        connector = connectors.CONNECTORS.get(draft.connector)
-    except KeyError:
-        return
-    active = set(draft.pipeline_steps or connector.default_pipeline)
-    merged = merge_pipeline_overlay(draft, connector)
-    for node_name in sorted(active):
-        block = merged.get(node_name)
-        config = block.get("config") if isinstance(block, dict) else None
-        if not isinstance(config, dict) or not (_LLM_CALL_KEYS & config.keys()):
-            continue
-        if not config.get("model"):
+def _check_node_models(pipeline: DraftPipeline, *, gaps: list[FieldGap]) -> None:
+    configs = dict(node_config_items(pipeline.params))
+    for node in pipeline.chain.nodes:
+        if node.is_llm and not configs.get(node.name, {}).get("model"):
             gaps.append(
                 FieldGap.of(
-                    f"node.{node_name}.model",
+                    f"node.{node.name}.model",
                     "unset",
-                    f"Set the model for LLM node {node_name!r} in the "
+                    f"Set the model for LLM node {node.name!r} in the "
                     f"{SETUP_STEP_TITLES[SetupStep.PIPELINE]} step.",
                 )
             )
@@ -304,10 +297,11 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
-    """Not hash-equivalent to the committed origin: a content_hash check runs the real commit."""
+    """The authored prompts, not the committed origin: what a commit derives from the task and the
+    labels moves with fields this projection already holds."""
     projection: dict[str, Any] = {
         "slug": draft.slug,
-        "connector": draft.connector,
+        "basis": basis_json(draft.basis),
         "scoring_matcher": draft.scoring_matcher,
         "pipeline_steps": list(draft.pipeline_steps),
         "pipeline_overlay": draft.pipeline_overlay,
@@ -322,7 +316,7 @@ def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
     ):
         if draft.field_provenance.get(field_key) is Provenance.CONFIRMED:
             projection[field_key] = value
-    for step, fields in draft.committed_prompts().items():
+    for step, fields in draft.origin_prompts.items():
         for name, text in fields.items():
             projection[f"prompt.{step}.{name}"] = text
     return projection
@@ -336,25 +330,15 @@ def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any
     }
 
 
-def resolution_block(draft: DraftCampaign) -> OriginResolution:
-    readiness = origin_readiness(draft)
-    return OriginResolution(
-        complete=readiness.complete,
-        provenance=dict(draft.field_provenance),
-        values=field_values(draft),
-        gaps=readiness.gaps,
-    )
-
-
 def save_checkin_draft(
     stores: Stores, draft: DraftCampaign, *, resolution: OriginResolution | None = None
 ) -> DraftCampaign:
     stores.drafts.write_draft(draft.draft_id, draft.to_disk())
-    block = resolution or resolution_block(draft)
+    block = resolution or OriginResolution()
     stores.drafts.write_resolution(draft.draft_id, block.model_dump(mode="json"))
     return draft
 
 
 def load_resolution(stores: Stores, draft: DraftCampaign) -> OriginResolution:
     block = stores.drafts.load_resolution(draft.draft_id)
-    return OriginResolution.model_validate(block) if block else resolution_block(draft)
+    return OriginResolution.model_validate(block) if block else OriginResolution()

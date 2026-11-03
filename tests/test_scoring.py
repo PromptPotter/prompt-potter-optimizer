@@ -1663,7 +1663,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             return cell
 
         async def _bench_pick() -> BenchPasses:
-            async with paid_pass(stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget()):
+            async with paid_pass(
+                stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+            ):
                 return await bench_selection(
                     session,
                     cycle.rounds,
@@ -4025,7 +4027,7 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
     stores = workspace(tmp_path)
     harness = n8n.CONNECTOR
     assert harness.pipeline_declaration is not None
-    graph = harness.pipeline_declaration(stores, cast("Any", None), None)
+    graph = harness.pipeline_declaration(stores, None)
     session = loop_session(
         stores,
         parse_pipeline_response(graph),

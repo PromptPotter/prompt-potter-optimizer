@@ -8,4 +8,4 @@
 
 ## A schemaless pipeline is a 422
 
-**A missing `backend_type`, no nodes or an unreachable backend raises a typed 422, never a 500** — a 500 reads as `transient` and the webapp retries a config only the operator can fix.
+**A missing `backend_type` or no nodes raises a typed 422, never a 500** — a 500 reads as `transient` and the webapp retries a config only the operator can fix. **An unreachable backend is `BackendUnreachableError`, a 503**: transient, since it heals when the backend is back.

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
-from promptpotter.application.jobs.launcher.admission import withdraw_queued
+from promptpotter.application.jobs.launcher.admission import campaign_sends, withdraw_queued
 from promptpotter.domain.run_records import ArmedCeilingEffect
 from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.shared.errors import NotFoundError
@@ -27,7 +27,9 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 
-def change_run_limits(dispatched: DispatchedToCycle[ChangeRunLimitsPayload]) -> Applier[object]:
+async def change_run_limits(
+    dispatched: DispatchedToCycle[ChangeRunLimitsPayload],
+) -> Applier[object]:
     dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload.budget
     return Applier.silent(
         lambda: _apply_change_run_limits(dispatcher, hop, change),
@@ -50,6 +52,7 @@ def _clamp_to_account_ceilings(
         stores=stores,
         job_registry=dispatcher.job_registry,
         hop=hop,
+        sends=campaign_sends(stores, hop),
     )
 
 
@@ -73,16 +76,22 @@ async def _apply_change_run_limits(
     )
 
 
-def set_concurrent_cycles(dispatched: Dispatched[SetConcurrentCyclesPayload]) -> Applier[object]:
+async def set_concurrent_cycles(
+    dispatched: Dispatched[SetConcurrentCyclesPayload],
+) -> Applier[object]:
     stores, limit = dispatched.dispatcher.stores, dispatched.payload.max_concurrent_cycles
-    return Applier.silent(lambda: quota.set_concurrent_cycles(stores=stores, limit=limit))
+
+    async def _apply() -> None:
+        quota.set_concurrent_cycles(stores=stores, limit=limit)
+
+    return Applier.silent(_apply)
 
 
-def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> Applier[object]:
+async def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> Applier[object]:
     """A queued FORK's stub stays for ``cleanup-empty-cycles``: deleting a cycle is that verb's."""
     dispatcher, job_id = dispatched.dispatcher, dispatched.payload.job_id
 
-    def _apply() -> None:
+    async def _apply() -> None:
         stores = dispatcher.stores
         principal = acting_principal(stores.identity).id
         if not withdraw_queued(stores, dispatcher.job_registry, job_id, principal_id=principal):

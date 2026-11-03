@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.loop_start import diagnostic_trace
-from promptpotter.application.jobs.coupon import keyed_client
+from promptpotter.application.jobs.coupon import keyed_client, provider_send
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.domain.spend import Budget
@@ -79,7 +79,10 @@ async def probe_reasoning(
     # Every send at its cap, every attempt: the prompt's length in chars bounds its tokens from above.
     bound = (len(rungs) + 1) * SEND_ATTEMPTS * (_MAX_TOKENS + len(_PROMPT))
     declared = Budget(tokens=bound)
-    async with paid_pass(stores=stores, verb="probe-reasoning", hop=None, declared=declared):
+    sends = (provider_send(stores.api_keys.load(), provider),)
+    async with paid_pass(
+        stores=stores, verb="probe-reasoning", hop=None, declared=declared, sends=sends
+    ):
         with diagnostic_trace(stores, None):
             client = keyed_client(provider)
             readings = [await _one(client, model, None)]

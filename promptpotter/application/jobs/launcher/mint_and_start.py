@@ -4,7 +4,7 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
@@ -16,12 +16,15 @@ from promptpotter.application.datasets.draft_build import (
 )
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
+    UploadBasis,
     committed_pipeline_json,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
+    campaign_sends,
     claim_cycle,
     release_slot,
 )
@@ -31,7 +34,7 @@ from promptpotter.application.jobs.mint import (
     fresh_campaign_id,
     mint_framed_cycle,
 )
-from promptpotter.application.jobs.quota import land_job
+from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign import Campaign, Optimize
@@ -41,11 +44,15 @@ from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
-    declared_backend_type,
     resolve_dataset,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
+
+if TYPE_CHECKING:
+    from promptpotter.application.pipeline_resolve import DraftPipeline
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +73,8 @@ class OriginIncompleteError(PayloadInvalidError):
         )
 
 
-def assert_origin_ready(draft: DraftCampaign) -> None:
-    readiness = origin_readiness(draft)
+def assert_origin_ready(draft: DraftCampaign, pipeline: DraftPipeline) -> None:
+    readiness = origin_readiness(draft, pipeline)
     if not readiness.complete:
         raise OriginIncompleteError(readiness.gaps)
 
@@ -100,11 +107,17 @@ class FreshMint:
         return None
 
     def backend_type(self, _stores: Stores) -> str:
-        return declared_backend_type(self.dataset.directory)
+        return runnable_definition(self.dataset.directory).backend_type
 
-    def campaign_config(self, _stores: Stores) -> CampaignConfig:
+    def campaign_config(self) -> CampaignConfig:
         declared = self.declared or load_dataset_campaign_config(self.dataset.directory)
         return with_optimization(declared, self.optimization)
+
+    def declared_budget(self, _stores: Stores) -> Budget:
+        return self.campaign_config().optimization.budget
+
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return sends_on(stores, self.campaign_config(), self.backend_type(stores))
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,10 +138,15 @@ class ExistingCycle:
         return None
 
     def backend_type(self, stores: Stores) -> str:
-        return declared_backend_type(resolve_dataset(stores, self.dataset_name).directory)
+        return runnable_definition(
+            resolve_dataset(stores, self.dataset_name).directory
+        ).backend_type
 
-    def campaign_config(self, stores: Stores) -> CampaignConfig:
-        return resolve_campaign_config(stores, self.campaign, self.hop)
+    def declared_budget(self, stores: Stores) -> Budget:
+        return resolve_campaign_config(stores, self.campaign, self.hop).optimization.budget
+
+    def sends(self, stores: Stores) -> tuple[Send, ...]:
+        return campaign_sends(stores, self.hop)
 
 
 async def hold_fresh_mint(
@@ -151,7 +169,7 @@ async def hold_fresh_mint(
 
         minted = await mint_framed_cycle(
             session,
-            declare(session, request.campaign_config(stores), purpose=Optimize()),
+            declare(session, request.campaign_config(), purpose=Optimize()),
             session.bank.samples,
             campaign_id=fresh_campaign_id(session),
             task_text=request.task_text,
@@ -175,18 +193,22 @@ async def hold_fresh_mint(
 
 
 def commit_upload_definition(
-    stores: Stores, draft: DraftCampaign, *, source: dict[str, Any]
+    stores: Stores,
+    draft: DraftCampaign,
+    upload: UploadBasis,
+    *,
+    source: dict[str, Any],
+    chain: PipelineSchema,
 ) -> None:
     """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug."""
-    pipeline = committed_pipeline_json(draft)
     stores.tenant_datasets.write_definition(
         draft.slug,
         source=source,
-        pipeline=pipeline,
-        campaign=default_campaign_block(draft),
+        pipeline=committed_pipeline_json(draft, upload),
+        campaign=default_campaign_block(draft, upload),
         description=draft.raw_task_description,
         framing=draft_task_context(draft),
-        origin=draft.committed_prompts(),
+        origin=draft.committed_prompts(chain),
     )
     persist_origin_candidate_library(stores, draft.slug, draft)
 

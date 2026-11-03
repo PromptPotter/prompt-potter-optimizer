@@ -24,5 +24,5 @@
 ## Backend overlay
 
 - **This layer merges the overlay, never authors one** — owned by [`datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route.
-- **Two moments read the backend schema**: run init (`initialization/wiring.py`) and the check-in (`promptpotter/application/datasets/ingest.py::fetch_backend_nodes`, stored on `DraftCampaign.backend_nodes`), since only the backend declares which params are search axes. An unreachable one is served as `schema_source: unreachable`.
+- **The backend's pipeline is read live through `pipeline_resolve.py::served_pipeline`, at every moment that needs it, and stored on no draft** <!-- probe: git grep -cE "fetch_pipeline\(" -- promptpotter/*.py == 2 -->: it answers the SERVED half only, and each reader lays its own definition on it — run init, a dataset (`dataset_pipeline`), a check-in draft (`draft_served`, read once per Start after its slot is held and handed to run init as `init_services(served=…)`). An unreachable backend raises `BackendUnreachableError`, never a stand-in schema.
 - **Cycle-seed precedence is seed > campaign override > dataset > backend default**, laid last by `configure_and_apply_pipeline`.

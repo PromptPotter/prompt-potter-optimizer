@@ -77,7 +77,7 @@ export function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (canSend && e.key === "Enter" && !e.shiftKey) {
+            if (canSend && value.trim() && e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               onSubmit();
             }

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.pipeline_overlay import normalize_model_id
+from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.llm.anthropic import AnthropicClient
 from promptpotter.infrastructure.llm.base import LLMClientBase, ProviderKey
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
@@ -123,7 +124,7 @@ def default_routes() -> dict[str, dict[str, list[str]]]:
 
 def _rate_caps(provider: str, key: ProviderKey) -> tuple[int | None, int | None]:
     """`RATE_LIMITS` are the box's provider accounts' caps: an account's own key learns its own."""
-    caps = (settings.RATE_LIMITS.get(provider) or []) if key.paid_by == "host" else []
+    caps = (settings.RATE_LIMITS.get(provider) or []) if draws_coupon(key.paid_by) else []
     return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
 
 
@@ -157,7 +158,7 @@ _CLIENTS_HELD = 256
 def get_llm_client(provider: str, key: ProviderKey) -> LLMClientBase:
     """Cached per KEY: rate-limiter state is per provider account and shared across cycles.
 
-    The key is the caller's resolution (`application/jobs/coupon.py::resolve_api_key`), never
+    The key is the caller's resolution (`application/jobs/coupon.py::paying_key`), never
     read here: which wallet a send draws is an account's question, not a provider's."""
     factory = _PROVIDER_FACTORIES.get(provider)
     if factory is None:

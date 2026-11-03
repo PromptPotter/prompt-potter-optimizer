@@ -65,7 +65,7 @@ The decisions the models cannot state:
   moves data. A GATEWAY node (`measurement`) runs another PIPELINE: every tunable it appears to
   have belongs to the pipeline it hands off to, so it carries no config of its own.
 - **`backend_type` is required and is never a `PipelineSchema` field.** The parser drops it, so
-  readers take it off the raw overlay. It picks the connector at init (`dataset_access.py::declared_backend_type`
+  readers take it off the raw overlay. It picks the connector at init (`dataset_access.py::runnable_definition`
   raises when absent). Whether it names the recursion connector — the ONE
   test for a self-optimizing (L4) campaign — is `runner/inner/tasks.py::is_self_optimization`,
   served as the hierarchy entry's `self_optimization` tag so the webapp branches on a tag and never

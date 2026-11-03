@@ -99,7 +99,7 @@ class Session:
     backend_id: str
     backend_client: BackendClient
     pipeline_schema: PipelineSchema
-    # The only copy of the live backend's declaration; `init_cycle` records it. Empty offline.
+    # Run init's read: the served pipeline under the dataset's definition; `init_cycle` records it.
     pipeline_declaration: dict[str, Any] = field(default_factory=dict)
     # What init read of the backend's revision; `None` where its connector checks none.
     backend_revision: BackendRevision | None = None

@@ -2235,7 +2235,8 @@ export interface DraftCampaignWire {
   /** `term=weight` dials joined by commas; empty scores correctness alone. */
   scoring_dials: string;
   /** The draft's overrides, its `budget` the one Start declares:
-   * `pipeline_resolve.draft_config`'s, a free account's tier laid last. */
+   * `pipeline_resolve.draft_pipeline`'s config, a free account's tier laid
+   * last. */
   optimization_overrides: OptimizationOverrides;
   /** The optimizer as this draft's config runs it, as a campaign serves it. */
   optimizer_setup: OptimizerSetup;
@@ -2262,10 +2263,6 @@ export interface DraftCampaignWire {
   node_output_schema: Record<string, NodeOutputSchema | null>;
   reach: Record<string, NodeReach>;
   is_single_node: boolean;
-  /** WHY the axes read as they do. `unreachable` = the backend probe failed, so
-   * nothing in the schema is a lock anyone set and an editor draws no padlock
-   * off it. */
-  schema_source: 'backend' | 'local' | 'unreachable';
   /** A null `reasoning_efforts` is UNKNOWN, never unsupported. */
   model_capabilities: Record<string, Record<string, ModelCapability>>;
   dependencies: DraftDependency[];
@@ -2550,12 +2547,14 @@ export interface FieldGap {
   step: 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run' | null;
 }
 
-/** The allowance refusing a launch whole, as ``admit_launch`` raises it. */
+/** A launch refused whole, as ``admit_launch`` raises it. */
 export interface LaunchRefusal {
-  /** Its headline, worded by `COUPON_STATE_INFO`. */
-  state: 'unmetered' | 'retired' | 'used_up' | 'held' | 'open';
+  reason: 'used_up' | 'held' | 'over_declared' | 'no_key';
+  /** The provider whose send is refused; null where a backend's cells, which go out
+   * on the box's keys whatever keys the account holds, draw the allowance. */
+  provider: string | null;
   /** What binds and the remedy, in the refusal's own words. */
-  reason: string;
+  sentence: string;
 }
 
 /** One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands. */
@@ -3584,7 +3583,7 @@ export interface DatasetIndexEntry {
   /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
    * ``POST /datasets/{name}/draft`` refuses with, worded by
    * `START_BLOCK_WORDS`. */
-  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | null;
+  start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
 }
 
 /** One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology */
@@ -3818,13 +3817,8 @@ export interface ResolveOriginResponse {
   draft: DraftCampaignWire;
 }
 
-/** The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it. */
+/** The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the */
 export interface OriginResolution {
-  complete: boolean;
-  provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
-  /** Each gated field's current value, by field id. */
-  values: Record<string, unknown>;
-  gaps: FieldGap[];
   /** Null until a resolver turn ran, and again after a later edit. */
   last_resolution: OriginLastResolution | null;
   /** Proposals the last turn left unclicked. */
@@ -3975,31 +3969,37 @@ export interface ActivityBucket {
   series_requests: Record<string, number>;
 }
 
-/** The host's allowance for this account, and the keys it sends on past it. */
+/** The host's allowance for this account, and who pays a send on each provider. */
 export interface CouponStatus {
-  state: 'unmetered' | 'retired' | 'used_up' | 'held' | 'open';
-  /** What the box's keys may pay for this account over its life; an unnamed or null
-   * unit is unbounded. */
-  face: Budget;
-  /** What the face is compared against: what the box's keys paid, unreported sends
-   * counted at the most they may have cost. */
-  drawn: Budget;
+  state: 'unmetered' | 'used_up' | 'held' | 'open';
+  /** The allowance in one line: its state's label, what the box's keys drew of the
+   * face on the unit drawn nearest it (else the state's word), and the
+   * providers the account's own keys pay. */
+  headline: Said;
   /** What this account's running campaigns reserve of the face. */
   held: Budget;
-  /** What a new launch may still hold: the face less `drawn` and `held`, at most
-   * the unpriced grace while a bill is a floor. */
+  /** What a new launch may still hold: the face less what is drawn and `held`, at
+   * most the unpriced grace while a bill is a floor. */
   left: Budget;
-  /** The unit drawn nearest its face; null where no unit is bounded. */
-  binding: 'usd' | 'tokens' | null;
-  /** `drawn` over `face` on the `binding` unit, at most 1. */
+  /** What is drawn over the face on the unit drawn nearest it, at most 1; null
+   * where no unit is bounded. */
   used_share: number | null;
   /** What the box's keys paid for this account. */
   host_key_spend: LifetimeSpend;
   /** What this account's own keys paid. */
   own_key_spend: LifetimeSpend;
-  keys: AccountKey[];
-  /** Every provider a key may be held for. */
-  providers: string[];
+  /** Every provider a node may name. */
+  routes: ProviderRoute[];
+}
+
+/** Who pays this account's sends on one provider. */
+export interface ProviderRoute {
+  provider: string;
+  /** `user` where the account holds a key for it, else `host` where the box does,
+   * under the allowance; null where neither does, so a send on it is refused. */
+  payer: 'host' | 'user' | null;
+  /** The account's own key for it, if it holds one. */
+  key: AccountKey | null;
 }
 
 export interface AccountKey {
@@ -4692,14 +4692,14 @@ export type GuardState = 'controlled' | 'uncontrolled' | 'differs';
 // promptpotter.application.evidence.head_to_head::GuardDifference
 export type GuardDifference = 'instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading';
 
-// promptpotter.application.jobs.quota::CouponState
-export type CouponState = 'unmetered' | 'retired' | 'used_up' | 'held' | 'open';
+// promptpotter.shared.errors::LaunchRefusalReason
+export type LaunchRefusalReason = 'used_up' | 'held' | 'over_declared' | 'no_key';
 
 // promptpotter.application.jobs.capacity::SlotBound
 export type SlotBound = 'throttle' | 'machine';
 
 // promptpotter.domain.dataset_start::StartBlock
-export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable';
+export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
 
 // promptpotter.application.datasets.origin_readiness::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -4779,13 +4779,6 @@ export interface HealthGradeInfo {
 
 export interface BackendReachabilityInfo {
   label: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
-}
-
-export interface CouponStateInfo {
-  label: string;
-  left_word: string;
-  lede: string;
   tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
 }
 
@@ -5139,13 +5132,18 @@ export const BACKEND_REACHABILITY_INFO: Record<"live" | "unreachable" | "missing
   "missing_extra": { label: "Python extra not installed", tone: "warn" },
 };
 
-// Mirror of application/jobs/quota.py::COUPON_STATE_INFO.
-export const COUPON_STATE_INFO: Record<CouponState, CouponStateInfo> = {
-  "unmetered": { label: "Spend", left_word: "unmetered", lede: "Nothing meters this account's sends on the host's keys: it runs the box, or its allowance bounds no unit.", tone: "quiet" },
-  "retired": { label: "Allowance retired", left_word: "retired", lede: "Retired: this account holds a key of its own, so the host's keys no longer send for it.", tone: "quiet" },
-  "used_up": { label: "Allowance used up", left_word: "used up", lede: "Used up: the host's keys send nothing more for this account. Every result stays readable.", tone: "warn" },
-  "held": { label: "Allowance held", left_word: "held by your running campaigns", lede: "Held: your running campaigns hold what is left, so a new one starts once one ends.", tone: "warn" },
-  "open": { label: "Allowance", left_word: "left", lede: "What the host's provider keys may pay for this account over its life. A key of your own sends instead, billed to you, and never draws it.", tone: "quiet" },
+// Mirror of application/jobs/quota.py::LAUNCH_REFUSAL_LABELS.
+export const LAUNCH_REFUSAL_LABELS: Record<LaunchRefusalReason, string> = {
+  "used_up": "Allowance used up",
+  "held": "Allowance held",
+  "over_declared": "Ceiling past the allowance",
+  "no_key": "No key for a provider",
+};
+
+// Mirror of domain/spend.py::KEY_SOURCE_LABELS.
+export const KEY_SOURCE_LABELS: Record<"host" | "user", string> = {
+  "host": "host key",
+  "user": "own key",
 };
 
 // Mirror of application/jobs/capacity.py::SLOT_BOUND_WORDS.
@@ -5160,6 +5158,7 @@ export const START_BLOCK_WORDS: Record<StartBlock, string> = {
   "empty": "It holds no row with both a query and an answer.",
   "missing_extra": "It runs through a Python extra this install lacks.",
   "unreadable": "Its samples could not be read on this install.",
+  "backend_unreachable": "Its backend is not answering; it opens once the backend is up.",
 };
 
 // Mirror of application/datasets/origin_readiness.py::SETUP_STEP_TITLES.

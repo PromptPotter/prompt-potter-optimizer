@@ -20,8 +20,7 @@ class AccountUsage(NamedTuple):
     user_id: str
     email: str | None
     spent: PaidSpend
-    # The account's coupon face.
-    ceilings: Budget
+    face: Budget
     campaigns: int
     cycles: int
     # Set means the row could not be summed and every other field is a placeholder.
@@ -49,7 +48,7 @@ def _unreadable_row(tenant_dir: WorkspaceDir, why: str) -> AccountUsage:
         user_id=tenant_dir.name,
         email=None,
         spent=NOTHING_PAID,
-        ceilings=Budget(),
+        face=Budget(),
         campaigns=0,
         cycles=0,
         unreadable=why,
@@ -62,7 +61,7 @@ def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
         user_id=user.user_id,
         email=user.email,
         spent=account_bill(ChargeBook(tenant_dir)),
-        ceilings=face_of(
+        face=face_of(
             GrantStore(tenant_dir).load(),
             host=is_host_tenant_dir(user.user_id),
         ),

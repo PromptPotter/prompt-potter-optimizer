@@ -1093,7 +1093,7 @@ class ResolvedRunRecord(FrozenModel):
     """What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST."""
 
     record_type: Literal["resolved_run"] = "resolved_run"
-    # The backend's axes with every overlay laid on; empty where the run resolved none.
+    # What run init read: the served pipeline with the dataset's definition laid on.
     declaration: dict[str, Any]
     # The roster a connector only NAMES can move under its name; the one every round measured stands.
     experiment: dict[str, Any] | None

@@ -566,8 +566,7 @@ class CampaignStore:
         interrupted_round: int | None = None,
         export: PromptExport | None = None,
     ) -> None:
-        with graceful("Cycle final append failed"):
-            self._append(hop, CycleFinalRecord(final=final, interrupted_round=interrupted_round))
+        self._append(hop, CycleFinalRecord(final=final, interrupted_round=interrupted_round))
         if export is not None:
             with graceful("Export artifact write failed"):
                 self._write_export(hop, export)
@@ -586,8 +585,7 @@ class CampaignStore:
 
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
         # The relation always lands; the ending only where none stands, or it replaces why it ended.
-        with graceful("Supersede relation append failed"):
-            self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
+        self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
         self._declare_ended(hop, StopReason.REBASED)
 
     def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:

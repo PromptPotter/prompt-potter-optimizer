@@ -9,7 +9,7 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
     open_diagnostic,
 )
-from promptpotter.application.jobs.launcher.admission import paid_pass
+from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.diagnostic_run import DiagnosticRunRecord, RescoreCount
@@ -37,7 +37,13 @@ async def measure_noise_floor(
     hop: CycleHop,
     k: RescoreCount,
 ) -> NoiseFloorOutcome:
-    async with paid_pass(stores=stores, verb="noise-floor", hop=hop, declared=Budget()):
+    async with paid_pass(
+        stores=stores,
+        verb="noise-floor",
+        hop=hop,
+        declared=Budget(),
+        sends=campaign_sends(stores, hop),
+    ):
         return await _rescore_origin(stores, hop, k)
 
 

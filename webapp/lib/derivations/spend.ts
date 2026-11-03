@@ -1,14 +1,7 @@
-import type {
-  Budget,
-  CouponStatus,
-  KindSpend,
-  LifetimeSpend,
-  MeteredSpend,
-} from "@/lib/api/types";
+import type { Budget, KindSpend, LifetimeSpend, MeteredSpend } from "@/lib/api/types";
 import type { ServedDashboard } from "@/lib/api";
 import {
   CEILING_METER_LABELS,
-  COUPON_STATE_INFO,
   RATE_PRICED_LABEL,
   SPEND_KINDS,
   type SpendKind,
@@ -42,15 +35,6 @@ export function spendHeadline(m: MeteredSpend): string {
 // Never spent, so it sits beside a bill, never inside one (served: `domain/spend.py::calls_rate_priced`).
 export function ratePricedText(usd: number, callsRatePriced: boolean): string | null {
   return callsRatePriced ? `${fmtUsd(usd)} ${RATE_PRICED_LABEL}` : null;
-}
-
-// What the allowance drew on its binding unit, of its face; a face bounding no unit has the state's word.
-export function allowanceText(c: CouponStatus): string {
-  const drawn = c.binding === null ? null : budgetAxis(c.drawn, c.binding);
-  const face = c.binding === null ? null : budgetAxis(c.face, c.binding);
-  if (drawn === null || face === null) return COUPON_STATE_INFO[c.state].left_word;
-  const fmt = c.binding === "usd" ? fmtUsd : fmtTokens;
-  return `${fmt(drawn)} of ${fmt(face)}`;
 }
 
 // What the allowance draws beyond the box's keys' bill, worded once for every surface that reads `CouponStatus`.

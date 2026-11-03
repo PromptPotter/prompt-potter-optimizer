@@ -293,8 +293,8 @@ def definition_version(stores: Stores, name: str) -> tuple[object, ...]:
     return (name, str(dataset.directory), *(file_sig(path) for path in files))
 
 
-def declared_backend_type(dataset_dir: Path) -> str:
-    """Raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
+def runnable_definition(dataset_dir: Path) -> DatasetDefinition:
+    """One naming its backend; raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
     path = dataset_dir / DEFINITION_FILE
     try:
         definition = read_dataset_definition(dataset_dir)
@@ -310,13 +310,13 @@ def declared_backend_type(dataset_dir: Path) -> str:
             code="pipeline_config_invalid",
             details={"dataset_dir": str(dataset_dir)},
         )
-    return definition.backend_type
+    return definition
 
 
 def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
     """Tolerant, a SURVEY's: a campaign outlives its dataset, and one bad file fails no listing."""
     try:
-        return declared_backend_type(resolve_dataset(stores, dataset_name).directory)
+        return runnable_definition(resolve_dataset(stores, dataset_name).directory).backend_type
     except (DatasetAccessError, PayloadInvalidError, OSError):
         return ""
 
@@ -374,7 +374,7 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
     """``None`` where the definition names no backend; one naming a connector this PROCESS lacks
     raises, since its panel and identity are unreadable, never empty."""
     try:
-        backend_type = declared_backend_type(dataset.directory)
+        backend_type = runnable_definition(dataset.directory).backend_type
     except PayloadInvalidError:
         return None
     connector = connectors.CONNECTORS.table.get(backend_type)

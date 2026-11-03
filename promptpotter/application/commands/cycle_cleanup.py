@@ -12,10 +12,10 @@ if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import CleanupEmptyCyclesPayload, DeleteCyclePayload
 
 
-def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> Applier[object]:
+async def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> Applier[object]:
     campaigns, hop = dispatched.dispatcher.stores.campaigns, dispatched.hop
 
-    def _apply() -> None:
+    async def _apply() -> None:
         deleted, reason = cleanup_stub_fork_if_empty(campaign_store=campaigns, hop=hop)
         if not deleted:
             raise RejectedError(reason)
@@ -23,12 +23,12 @@ def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> Applier[o
     return Applier.silent(_apply)
 
 
-def cleanup_empty_cycles(
+async def cleanup_empty_cycles(
     dispatched: DispatchedToCycle[CleanupEmptyCyclesPayload],
 ) -> Applier[object]:
     campaigns, hop = dispatched.dispatcher.stores.campaigns, dispatched.hop
 
-    def _apply() -> None:
+    async def _apply() -> None:
         for _pass in range(2):
             deleted = [
                 cleanup_stub_fork_if_empty(campaign_store=campaigns, hop=stub)[0]

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
 
-from promptpotter import connectors
 from promptpotter.application.account import record_upload
 from promptpotter.application.datasets.authored import read_authored_dataset
 from promptpotter.application.datasets.draft_build import overlay_from_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
+    DatasetBasis,
     DraftCampaign,
+    UploadBasis,
     default_slug_from_filename,
     new_draft,
     scoring_choice,
@@ -31,42 +31,20 @@ from promptpotter.application.datasets.tabular_ingest import (
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.connectors import DEFAULT_CONNECTOR
-from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import ConflictError, NotFoundError
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 # Enforced by the web boundary only; the CLI relies on the per-row cap in ``read_tabular``.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-
-logger = logging.getLogger(__name__)
-
-
-async def fetch_backend_nodes(stores: Stores, connector_name: str) -> dict[str, Any]:
-    connector = connectors.CONNECTORS.get(connector_name)
-    if not connector.serves_pipeline:
-        return {}
-    client = BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir)
-    try:
-        declared = await client.fetch_pipeline()
-    except BackendUnreachableError as exc:
-        # Served as `schema_source: unreachable`; a backend answering no schema raises past it.
-        logger.info("check-in could not read %s pipeline schema: %s", connector_name, exc)
-        return {}
-    finally:
-        await client.aclose()
-    return dict(declared["nodes"])
 
 
 async def refresh_capabilities(stores: Stores) -> None:
@@ -120,21 +98,20 @@ async def ingest_draft(
     # Raised before the draft is kept, so a collision leaves no orphan.
     if stores.tenant_datasets.slug_exists(base_slug):
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
-    backend_nodes = await fetch_backend_nodes(stores, DEFAULT_CONNECTOR)
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=base_slug,
+        basis=UploadBasis(DEFAULT_CONNECTOR, kept.name),
         n_samples=len(table.rows),
         sample_preview=preview,
         headers=list(table.headers),
         source_file=filename or "",
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
     )
-    stores.drafts.write_upload(draft.draft_id, kept.name)
-    return save_checkin_draft(stores, draft.patch(backend_nodes=backend_nodes))
+    return save_checkin_draft(stores, draft)
 
 
 async def draft_from_dataset(
@@ -149,17 +126,10 @@ async def draft_from_dataset(
     bank = checkin_bank(stores, dataset_name)
     rows = labelled_rows(bank.samples)
 
-    declared = backend_type_of_dataset(stores, dataset_name)
-    # An origin reuse reads the node declaration off ITS connector, not the shared file's.
-    backend_nodes = await fetch_backend_nodes(
-        stores, origin_campaign.connector if origin_campaign is not None else declared
-    )
-
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
     matcher, dials = scoring_choice(cc.scoring)
-    connector = declared or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
     if origin_campaign is not None:
         # A merge, not a replacement: the origin's declaration names only what its layers set.
@@ -184,16 +154,15 @@ async def draft_from_dataset(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=slug,
+        basis=DatasetBasis(dataset_name),
         n_samples=len(rows),
         sample_preview=preview[:PREVIEW_ROWS],
         headers=["query", "ground_truth"],
-        source_dataset=dataset_name,
         column_label_sets=_column_label_sets(["query", "ground_truth"], rows),
     )
     draft = draft.apply_resolution(
         values={
             "raw_task_description": task,
-            "connector": connector,
             "scoring_matcher": matcher,
             "scoring_dials": dials,
             # Not validated: a dataset's ceiling may exceed the bound on the operator edit path.
@@ -208,7 +177,6 @@ async def draft_from_dataset(
             "pipeline_overlay": pipeline_overlay,
             "origin_prompts": authored_prompts,
             "pipeline_steps": authored.active_steps,
-            "backend_nodes": backend_nodes,
             "candidate_library": authored.candidate_library,
         },
         provenance={"task_description": Provenance.CONFIRMED},

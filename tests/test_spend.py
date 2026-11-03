@@ -59,13 +59,14 @@ from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.commands.dispatcher import (
+    Applier,
     CommandCall,
     CommandDispatcher,
     DispatchedToCycle,
 )
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.datasets.draft_campaign import new_draft
+from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
@@ -78,9 +79,13 @@ from promptpotter.application.head_to_head_price import (
 from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.account_activity import account_activity
 from promptpotter.application.jobs.coupon import (
+    AllowanceState,
+    BackendCells,
+    ProviderSend,
     bind_account,
     keyed_client,
-    resolve_api_key,
+    paying_key,
+    provider_send,
 )
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
@@ -93,7 +98,7 @@ from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadStarte
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
-    CouponState,
+    LaunchRefusal,
     QuotaExceededError,
     admit_launch,
     clamp_budget_change,
@@ -103,7 +108,6 @@ from promptpotter.application.jobs.quota import (
     hold_moved,
     on_free_tier,
     paid_call,
-    spends_the_hosts_own_key,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
 from promptpotter.application.jobs.registry import JobRegistry
@@ -214,6 +218,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure.backend import CELL, BackendClient
+from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
@@ -278,6 +283,7 @@ from promptpotter.shared.errors import (
     CycleBusyError,
     ErrorCategory,
     HostAllowanceExhaustedError,
+    LaunchRefusalReason,
     LedgerUnreadableError,
     NoApiKeyError,
     NotFoundError,
@@ -362,14 +368,14 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
-    applier = change_run_limits(DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop))
+    dispatched = DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop)
 
-    async def apply() -> None:
-        ran = applier.run()
-        assert inspect.isawaitable(ran)
-        await ran
+    async def apply() -> Applier[object]:
+        applier = await change_run_limits(dispatched)
+        await applier.run()
+        return applier
 
-    asyncio.run(apply())
+    applier = asyncio.run(apply())
     assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
     effect = applier.effect_fn()
     assert isinstance(effect, ArmedCeilingEffect), f"a limits change acked {effect!r}"
@@ -969,7 +975,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         install_datasets_root=spec.install_datasets_root,
         shared_root=spec.shared_root,
     )
-    assert spends_the_hosts_own_key(rebuilt) is spends_the_hosts_own_key(stores) is False, (
+    assert is_host(rebuilt.identity) is is_host(stores.identity) is False, (
         "a signup's run, rebuilt in its own process, spent the host's own key"
     )
     assert rebuilt.base_dir == stores.base_dir, "the spawned run billed another tenant's tree"
@@ -1474,6 +1480,7 @@ def _token_bills(ledger: CycleEventLog) -> list[TokenUsageRecord]:
     return [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
 
 
+@pytest.mark.usefixtures("offline")
 def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
@@ -1635,6 +1642,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
                 job=job,
                 hop=fork,
                 step_rounds=None,
+                sends=_CELLS,
             )
         except QuotaExceededError as exc:
             shared.release(job.job_id, refusal=str(exc))
@@ -1661,7 +1669,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     beside = _armed(built_stores, fork_b, held_b, shared)
     eighth = SendBound(input_tokens=0, output_tokens=0, usd=0.125)
-    assert beside.fits(eighth, eighth) == 4, (
+    assert beside.fits(eighth, eighth, paid_by="host") == 4, (
         "fork b's book spends what fork a still holds: two forks, two ceilings"
     )
     # A third fork is refused: its siblings hold the ceiling whole.
@@ -1682,6 +1690,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
             hop=fork_c,
             requested=Budget(),
             step_rounds=None,
+            sends=_CELLS,
         ) as (_, held):
             assert held.admitted.usd == pytest.approx(1.0)
             run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
@@ -1716,7 +1725,9 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert (book_a.allotment.usd, share(held_a), share(held_b6)) == (1.0, 1.0, 2.0), (
         "a raised ceiling handed one cycle what its sibling holds: the two may spend past it"
     )
-    assert book_a.fits(eighth, eighth) == 8, "A's live book binds on another share than it holds"
+    assert book_a.fits(eighth, eighth, paid_by="host") == 8, (
+        "A's live book binds on another share than it holds"
+    )
     # One campaign's money axis binds every live cycle or none, whichever arrived first.
     with pytest.raises(QuotaExceededError):
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0003"), None)
@@ -1827,6 +1838,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         job=claim,
         hop=claimed,
         step_rounds=None,
+        sends=_CELLS,
     )
     claim_held = shared.get(claim.job_id)
     assert claim_held is not None and cycle_share(delegate, claim_held).usd == pytest.approx(7.0), (
@@ -1980,13 +1992,13 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
     for reserve, depth in ((0.5, 4), (None, 16), (1.0, 8)):
         own = spend_book(0.5, usd_reserve=reserve)
-        assert own.fits(worst, worst) == 4, (
+        assert own.fits(worst, worst, paid_by="host") == 4, (
             f"reserve {reserve}: nothing billed yet, the bound holds"
         )
         own.learn(cell, Budget.amount(0.03125, 100))
         own.learn(cell, Budget.amount(0.0, 0))
         held = own.held_at(cell, worst)
-        assert own.fits(held, worst) == depth, (
+        assert own.fits(held, worst, paid_by="host") == depth, (
             f"reserve {reserve}: held at its bound against both, a ceiling a few bounds wide "
             "walks one cell at a time"
         )
@@ -2005,12 +2017,14 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         )
     owed = spend_book(0.5)
     owed.usd_unreported = 0.125
-    assert owed.fits(worst, worst) == 3, "a send no bill priced left its room open"
+    assert owed.fits(worst, worst, paid_by="host") == 3, "a send no bill priced left its room open"
     owed.set_aside(0.25, 0)
-    assert owed.fits(worst, worst) == 1, "the search could spend what the bench was set aside"
+    assert owed.fits(worst, worst, paid_by="host") == 1, (
+        "the search could spend what the bench was set aside"
+    )
     assert owed.exhausted() is None, "a set-aside read as spent"
     owed.usd_metered = 0.125
-    assert owed.fits(worst, worst) == 0 and owed.exhausted() is not None, (
+    assert owed.fits(worst, worst, paid_by="host") == 0 and owed.exhausted() is not None, (
         "a send's room is the ceiling less EVERYTHING owed: bills, unpriced sends, the set-aside"
     )
 
@@ -2065,7 +2079,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     with (
         spending_under(fresh),
         telemetry.filed_as("bench"),
-        reserved(CallLabel("cell", "backend"), pass_bound),
+        reserved(CallLabel("cell", "backend"), pass_bound, paid_by="host"),
     ):
         pass
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
@@ -2558,7 +2572,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert whole.usd is not None
     assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
     assert purse.usd_unreported == pytest.approx(out.usd), "the book held another sum than is out"
-    assert purse.fits(whole, whole) == 1, "a cell's bound was not reserved whole"
+    assert purse.fits(whole, whole, paid_by="host") == 1, "a cell's bound was not reserved whole"
     assert purse.held_at(CELL, whole) == whole, "a cut cell taught the book a price"
     cut_short[0] = False
     with _billing_on(turns_ledger, purse):
@@ -2584,6 +2598,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
 _WEB = "https://accounts.google.com"
 _FACE = Budget.amount(settings.HOST_COUPON.usd or 0.0, settings.HOST_COUPON.tokens or 0)
 _HELD_HOP = CycleHop(campaign_id="camp", cycle_id="cycle_x")
+# A backend's cells, which go out on the box's keys whatever the account holds.
+_CELLS = (BackendCells("termnorm", "host"),)
+_OWN_ONLY = (ProviderSend("openrouter", "user"),)
 
 
 def _account_stores(
@@ -2649,13 +2666,20 @@ def _running(registry: JobRegistry, *, admitted: bool, reserve: Budget) -> None:
 async def _paid_door(door: str, stores: Any) -> None:
     match door:
         case "turn":
-            async with paid_call(stores=stores, bucket="turn"):
+            async with paid_call(stores=stores, bucket="turn", provider="openrouter"):
                 keyed_client("openrouter")
         case "bench":
             await grade_line_bench(stores=stores, hop=_HELD_HOP)
         case "noise-floor":
             await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=RescoreCount(2))
         case "seed-screen":
+            write_yaml(
+                stores.tenant_datasets.dataset_dir("d") / DEFINITION_FILE,
+                {
+                    "pipeline": {"backend_type": "termnorm"},
+                    "campaign": {"optimization": {"degradation_threshold": 0.4}},
+                },
+            )
             await screen_inner_seeds(
                 stores=stores, identity=stores.identity, dataset_name="d", seeds=[1], n_samples=1
             )
@@ -2710,12 +2734,26 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     full = Budget(usd=_FACE.usd, tokens=_FACE.tokens)
     hand_set = Budget(usd=50.0, tokens=50_000)
     rows: tuple[tuple[Any, ...], ...] = (
-        # door, issuer, face, own key, declared, delegated, running, spent, admitted, reserve
+        # door, issuer, face, sends (None: a backend's cells), declared, delegated, running,
+        # spent, admitted, reserve
         ("launch", _WEB, None, None, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
         # A USD ceiling holds no tokens: every send under it is priced, so the dollars bound it.
         ("launch", _WEB, None, None, 0.15, None, None, None, (0.15, None), (0.30, None)),
         ("launch", _WEB, None, None, 10.0, None, None, None, HostAllowanceExhaustedError, None),
-        ("launch", _WEB, None, "openrouter", 10.0, None, None, None, (10.0, None), (0.30, None)),
+        # A run none of whose sends the box's keys pay is refused nothing and reserves nothing.
+        ("launch", _WEB, None, _OWN_ONLY, 10.0, None, None, None, (10.0, None), (0.0, 0)),
+        (
+            "launch",
+            _WEB,
+            None,
+            _OWN_ONLY,
+            None,
+            None,
+            {"admitted": False, "reserve": Budget()},
+            None,
+            _UNBOUNDED,
+            (0.0, 0),
+        ),
         (
             "launch",
             _WEB,
@@ -2779,17 +2817,19 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             HostAllowanceExhaustedError,
             None,
         ),
+        ("launch", _WEB, None, _OWN_ONLY, None, None, None, _SPENT_THE_COUPON, _UNBOUNDED, (0, 0)),
+        # An own key frees its provider's sends, never a backend's cells.
         (
             "launch",
             _WEB,
             None,
-            "openai",
+            (*_CELLS, *_OWN_ONLY),
             None,
             None,
             None,
             _SPENT_THE_COUPON,
-            _UNBOUNDED,
-            (0.0, _FACE.token_amount - 1_500),
+            HostAllowanceExhaustedError,
+            None,
         ),
         *(
             (
@@ -2811,7 +2851,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         door,
         issuer,
         face,
-        own_key,
+        sends,
         declared,
         delegated,
         running,
@@ -2823,13 +2863,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         at.mkdir()
         user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
         stores = _account_stores(
-            at,
-            issuer=issuer,
-            user=user,
-            spent=spent,
-            face=face,
-            own_key=own_key,
-            delegated=delegated,
+            at, issuer=issuer, user=user, spent=spent, face=face, delegated=delegated
         )
         registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
         if running is not None:
@@ -2844,6 +2878,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                         job_registry=registry,
                         job_id="job-a",
                         hop=None,
+                        sends=_CELLS if sends is None else sends,
                     )
                 else:
                     asyncio.run(_paid_door(door, stores))
@@ -2855,6 +2890,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             job_registry=registry,
             job_id="job-a",
             hop=None,
+            sends=_CELLS if sends is None else sends,
         )
         assert (knocked.usd, knocked.tokens) == admits, (
             f"door {n}: a launch was admitted under another ceiling than its campaign declared"
@@ -2871,23 +2907,35 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     )
 
     async def _retaken() -> bool:
-        async with paid_pass(stores=killed, verb="bench", hop=_HELD_HOP, declared=Budget()):
+        async with paid_pass(
+            stores=killed, verb="bench", hop=_HELD_HOP, declared=Budget(), sends=_CELLS
+        ):
             return line_run(killed, _HELD_HOP).pass_open
 
     assert not asyncio.run(_retaken()), (
         "a cycle retaken after a killed bench pass read the dead bracket as a pass in flight"
     )
 
-    # The choke point: the account's own key wins unasked, per provider; the box's key only on a live coupon.
+    # The payer rule: the account's own key wins unasked, per provider; the box's key sends only
+    # on a live coupon, and its refusal names the provider an own key would free.
     spent_out = _account_stores(
         tmp_path / "keys", issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter"
     )
-    own = resolve_api_key(spent_out.identity, "openrouter", spent_out)
-    assert (own.paid_by, own.secret.get_secret_value()) == ("user", "sk-own"), (
+    own = paying_key(spent_out.api_keys.load(), "openrouter")
+    assert own is not None and (own.paid_by, own.secret.get_secret_value()) == ("user", "sk-own"), (
         "an account's own key lost to the box's"
     )
-    with pytest.raises(HostAllowanceExhaustedError):
-        resolve_api_key(spent_out.identity, "openai", spent_out)
+    asyncio.run(_paid_door("turn", spent_out))
+    unbind = bind_account(spent_out)
+    try:
+        with pytest.raises(HostAllowanceExhaustedError) as box_paid:
+            keyed_client("openai")
+    finally:
+        unbind()
+    refused = LaunchRefusal.of(box_paid.value)
+    assert (refused.reason, refused.provider) == (LaunchRefusalReason.USED_UP, "openai"), (
+        "a send past the coupon was refused for another cause, or named no provider to key"
+    )
     spent_out.charges.append(
         BilledCharge(
             hold_id="own",
@@ -2901,27 +2949,19 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         )
     )
     status = coupon_status(spent_out)
-    assert (status.left.usd, status.state) == (0.0, CouponState.USED_UP), (
+    assert (status.left.usd, status.state) == (0.0, AllowanceState.USED_UP), (
         "the coupon read another remainder than the box's keys left it"
     )
     assert status.own_key_spend.billed_usd == pytest.approx(5.0), "the own key's spend went unread"
-    fresh = _account_stores(tmp_path / "fresh", issuer=_WEB, user=user, spent=None)
-    assert resolve_api_key(fresh.identity, "openai", fresh).paid_by == "host", (
-        "a live coupon refused the box's key"
+    payers = {route.provider: route.payer for route in status.routes}
+    assert (payers["openrouter"], payers["openai"]) == ("user", "host"), (
+        "the served payer of a provider is not the one its sends go out on"
     )
+    fresh = _account_stores(tmp_path / "fresh", issuer=_WEB, user=user, spent=None)
     with monkeypatch.context() as patched:
         patched.setattr(settings, "GROQ_API_KEY", SecretStr(""))
         with pytest.raises(NoApiKeyError):
-            resolve_api_key(fresh.identity, "groq", fresh)
-        patched.setattr(
-            settings, "HOST_COUPON", settings.HOST_COUPON.model_copy(update={"void_on_byo": True})
-        )
-        fresh.api_keys.put("openrouter", SecretStr("sk-own"))
-        with pytest.raises(HostAllowanceExhaustedError):
-            resolve_api_key(fresh.identity, "openai", fresh)
-    assert resolve_api_key(fresh.identity, "openai", fresh).paid_by == "host", (
-        "a coupon was retired by a key the box does not say retires it"
-    )
+            provider_send(fresh.api_keys.load(), "groq")
 
     # In flight, the reserve binds only a send on the box's key; one on the account's own goes on.
     book = spend_book(None, usd_reserve=0.05)
@@ -2944,6 +2984,22 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         at.mkdir()
         stores = _account_stores(at, issuer=issuer, user=user, spent=None, face=face)
         assert on_free_tier(stores) is on_tier, f"account {n} sits on the wrong side of the tier"
+    # The tier fences only what draws the coupon: an own-keyed provider's optimizer nodes go free.
+    boxed = free_tier.free_fence(
+        _account_stores(tmp_path / "boxed", issuer=_WEB, user=user, spent=None), "termnorm"
+    )
+    keyed = free_tier.free_fence(
+        _account_stores(
+            tmp_path / "keyed", issuer=_WEB, user=user, spent=None, own_key="openrouter"
+        ),
+        "termnorm",
+    )
+    assert boxed is not None and keyed is not None and boxed.task and keyed.task, (
+        "a backend's cells, paid by the box whatever the account holds, left the tier's fence"
+    )
+    assert "openrouter" in boxed.providers and "openrouter" not in keyed.providers, (
+        "the tier fenced a provider the account's own key pays, or freed one the box pays"
+    )
     offline.rates = {"openai/dear": {"input_cost_per_token": 5e-8, "output_cost_per_token": 6e-7}}
     assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
     assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
@@ -2952,7 +3008,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     ), "a dollar ceiling would admit a route no rate prices"
     oss = "openai/gpt-oss-20b:nitro"
     config = _budgeted(Budget(usd=None))
-    layered = free_tier.with_free_tier_layer(config, {"llm_only": {"model": oss}})
+    layered = free_tier.with_free_tier_layer(config, {"llm_only": {"model": oss}}, boxed)
     assert (
         layered.sp_budget_origin,
         layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
@@ -2979,17 +3035,20 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             merge_config_layers(layered.model_dump(mode="json", exclude_unset=True), overlay)
         )
 
-    for run, effort, steps, outside in (
-        (layered, "low", ["llm_only"], 0),
-        (layered, "none", ["llm_only"], 1),
+    for run, effort, steps, fence, outside in (
+        (layered, "low", ["llm_only"], boxed, 0),
+        (layered, "none", ["llm_only"], boxed, 1),
         # The axis left open: the optimizer could search any rung, so Start refuses it.
-        (config, "low", ["llm_only"], 1),
-        (layered, "low", ["web_search", "llm_only"], 1),
-        (optimizer_on("medium"), "low", ["llm_only"], 0),
-        (optimizer_on("high"), "low", ["llm_only"], 1),
+        (config, "low", ["llm_only"], boxed, 1),
+        (layered, "low", ["web_search", "llm_only"], boxed, 1),
+        (optimizer_on("medium"), "low", ["llm_only"], boxed, 0),
+        (optimizer_on("high"), "low", ["llm_only"], boxed, 1),
+        (optimizer_on("high"), "low", ["llm_only"], keyed, 0),
+        (layered, "none", ["llm_only"], keyed, 1),
     ):
         params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
-        off = free_tier.outside_free_tier(run, select_optimizer(run.optimization), params, schema)
+        selected = select_optimizer(run.optimization)
+        off = free_tier.outside_free_tier(run, selected, params, schema, fence)
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)
@@ -3001,7 +3060,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     hold_cycle(cycle_dir)
 
     async def bill_held() -> None:
-        async with paid_pass(stores=held_stores, verb="bench", hop=_HELD_HOP, declared=Budget()):
+        async with paid_pass(
+            stores=held_stores, verb="bench", hop=_HELD_HOP, declared=Budget(), sends=_CELLS
+        ):
             pass
 
     with pytest.raises(CycleBusyError):
@@ -3045,13 +3106,14 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                 job_registry=slots,
                 job_id=launch.job_id,
                 hop=None,
+                sends=_CELLS,
             )[1]
         finally:
             slots.release(launch.job_id)
 
     async def pass_beside() -> None:
         async with paid_pass(
-            stores=passing, verb="verify", hop=None, declared=Budget()
+            stores=passing, verb="verify", hop=None, declared=Budget(), sends=_CELLS
         ) as pass_book:
             assert pass_book.reserve.usd == pytest.approx(1.0), (
                 "a pass declared nothing and did not hold the coupon's headroom"
@@ -3137,6 +3199,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         ),
         job_registry=JobRegistry(tmp_path / "jobs-d", capacity=lambda _live: 1),
         hop=_HELD_HOP,
+        sends=_CELLS,
     )
     assert caps == Budget(tokens=1_000), "a grant became a ceiling on an axis the caller left alone"
 
@@ -3190,6 +3253,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         stores=forker,
         job_registry=registry,
         hop=fork,
+        sends=_CELLS,
     )
     _, relaunched = admit_launch(
         declared=Budget(),
@@ -3198,6 +3262,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
         job_registry=registry,
         job_id=job.job_id,
         hop=fork,
+        sends=_CELLS,
     )
     assert caps.usd == relaunched.usd == pytest.approx(1.0), (
         "$1.00 allowance, $0.50 of it the campaign's own: its ceiling is the whole $1.00, which "
@@ -3508,10 +3573,10 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug="drafted",
+        basis=DatasetBasis("drafted"),
         n_samples=1,
         sample_preview=[],
         headers=[],
-        source_dataset="drafted",
     )
     stores.drafts.write_draft(draft.draft_id, draft.to_disk())
     undrafted = account_usd()

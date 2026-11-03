@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.scoring.formula.compiler import (
@@ -11,11 +11,10 @@ from promptpotter.application.scoring.formula.compiler import (
     spell_dials,
     split_scoring_block,
 )
-from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
+from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, NodeSearchNarrowing
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.infrastructure.store.stores import Stores, owned_draft_data
@@ -24,7 +23,7 @@ from promptpotter.shared.identity import TenantId, safe_name
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
-    from promptpotter.domain.pipeline_schema import PipelineNode
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 DEFAULT_SCORING_MATCHER = "label_match"
 """Only universally-applicable matcher for ``(query, ground_truth)`` shape."""
@@ -42,6 +41,45 @@ def closed_answer_format(labels: tuple[str, ...]) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class UploadBasis:
+    """An uploaded table, run on the connector the operator picked."""
+
+    connector: str
+    # The kept file's name under `TenantDatasetStore.upload_path`.
+    kept: str
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetBasis:
+    """A committed dataset, run on the backend its definition names."""
+
+    dataset: str
+
+
+type DraftBasis = UploadBasis | DatasetBasis
+
+
+def basis_json(basis: DraftBasis) -> dict[str, str]:
+    match basis:
+        case UploadBasis(connector=connector, kept=kept):
+            return {"kind": "upload", "connector": connector, "kept": kept}
+        case DatasetBasis(dataset=dataset):
+            return {"kind": "dataset", "dataset": dataset}
+        case _:
+            assert_never(basis)
+
+
+def _basis_from_disk(data: dict[str, str]) -> DraftBasis:
+    match data["kind"]:
+        case "upload":
+            return UploadBasis(connector=data["connector"], kept=data["kept"])
+        case "dataset":
+            return DatasetBasis(dataset=data["dataset"])
+        case kind:
+            raise ValueError(f"draft basis kind {kind!r} is neither 'upload' nor 'dataset'")
+
+
+@dataclass(frozen=True, slots=True)
 class DraftCampaign:
     draft_id: str
     tenant_id: TenantId
@@ -50,7 +88,7 @@ class DraftCampaign:
     slug: str
     n_samples: int
     sample_preview: tuple[dict[str, str], ...]
-    connector: str
+    basis: DraftBasis
     scoring_matcher: str
     raw_task_description: str
     pipeline_overlay: dict[str, Any]
@@ -62,15 +100,11 @@ class DraftCampaign:
     column_label_sets: dict[str, tuple[str, ...]] = field(default_factory=dict)
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
-    # The committed dataset it was cut from; ``None`` for an upload.
-    source_dataset: str | None = None
     origin_prompts: dict[str, dict[str, str]] = field(default_factory=dict)
     decomposed_task_context: dict[str, Any] = field(default_factory=dict)
     pipeline_steps: list[str] = field(default_factory=list)
     optimization_overrides: dict[str, Any] = field(default_factory=_default_optimization_overrides)
     candidate_library: tuple[str, ...] = ()
-    # Empty = in-process (served `local`) or unreachable (`unreachable`, never "locked").
-    backend_nodes: dict[str, Any] = field(default_factory=dict)
     # Non-empty routes the check-in's Start through the ``origin_override`` seed.
     reused_origin_id: str = ""
     scoring_dials: str = ""
@@ -83,7 +117,7 @@ class DraftCampaign:
             "slug": self.slug,
             "n_samples": self.n_samples,
             "sample_preview": [dict(row) for row in self.sample_preview],
-            "connector": self.connector,
+            "basis": basis_json(self.basis),
             "scoring_matcher": self.scoring_matcher,
             "scoring_dials": self.scoring_dials,
             "raw_task_description": self.raw_task_description,
@@ -96,13 +130,11 @@ class DraftCampaign:
             "column_label_sets": {k: list(v) for k, v in self.column_label_sets.items()},
             "field_provenance": {k: v.value for k, v in self.field_provenance.items()},
             "source_file": self.source_file,
-            "source_dataset": self.source_dataset,
             "origin_prompts": {node: dict(f) for node, f in self.origin_prompts.items()},
             "decomposed_task_context": dict(self.decomposed_task_context),
             "pipeline_steps": list(self.pipeline_steps),
             "optimization_overrides": dict(self.optimization_overrides),
             "candidate_library": list(self.candidate_library),
-            "backend_nodes": dict(self.backend_nodes),
             "reused_origin_id": self.reused_origin_id,
             "resolver_ran": self.resolver_ran,
         }
@@ -117,40 +149,33 @@ class DraftCampaign:
             owner_user_id=data["owner_user_id"],
             slug=data["slug"],
             n_samples=data["n_samples"],
-            sample_preview=tuple(dict(row) for row in data.get("sample_preview", [])),
-            connector=data["connector"],
+            sample_preview=tuple(dict(row) for row in data["sample_preview"]),
+            basis=_basis_from_disk(data["basis"]),
             scoring_matcher=data["scoring_matcher"],
             scoring_dials=data["scoring_dials"],
-            raw_task_description=data.get("raw_task_description", ""),
-            pipeline_overlay=dict(data.get("pipeline_overlay", {})),
+            raw_task_description=data["raw_task_description"],
+            pipeline_overlay=dict(data["pipeline_overlay"]),
             created_at=data["created_at"],
             updated_at=data["updated_at"],
-            headers=tuple(data.get("headers", ())),
-            column_query=data.get("column_query", ""),
-            column_ground_truth=data.get("column_ground_truth", ""),
-            column_label_sets={k: tuple(v) for k, v in data.get("column_label_sets", {}).items()},
-            field_provenance={
-                k: Provenance(v) for k, v in data.get("field_provenance", {}).items()
-            },
-            source_file=data.get("source_file", ""),
-            source_dataset=data.get("source_dataset"),
-            origin_prompts={node: dict(f) for node, f in data.get("origin_prompts", {}).items()},
-            decomposed_task_context=dict(data.get("decomposed_task_context", {})),
-            pipeline_steps=list(data.get("pipeline_steps", [])),
-            optimization_overrides={
-                **_default_optimization_overrides(),
-                **data.get("optimization_overrides", {}),
-            },
-            candidate_library=tuple(data.get("candidate_library", ())),
-            backend_nodes=dict(data.get("backend_nodes", {})),
-            reused_origin_id=data.get("reused_origin_id", ""),
-            resolver_ran=data.get("resolver_ran", False),
+            headers=tuple(data["headers"]),
+            column_query=data["column_query"],
+            column_ground_truth=data["column_ground_truth"],
+            column_label_sets={k: tuple(v) for k, v in data["column_label_sets"].items()},
+            field_provenance={k: Provenance(v) for k, v in data["field_provenance"].items()},
+            source_file=data["source_file"],
+            origin_prompts={node: dict(f) for node, f in data["origin_prompts"].items()},
+            decomposed_task_context=dict(data["decomposed_task_context"]),
+            pipeline_steps=list(data["pipeline_steps"]),
+            optimization_overrides=dict(data["optimization_overrides"]),
+            candidate_library=tuple(data["candidate_library"]),
+            reused_origin_id=data["reused_origin_id"],
+            resolver_ran=data["resolver_ran"],
         )
 
     @property
     def dataset_name(self) -> str:
         """The dataset it runs on: the one it was cut from, or an upload's, minted under its slug."""
-        return self.source_dataset or self.slug
+        return self.basis.dataset if isinstance(self.basis, DatasetBasis) else self.slug
 
     def resolution_pending(self) -> bool:
         """The task is on file and no resolver turn ever set it up: a reopen resolves, while an
@@ -166,23 +191,16 @@ class DraftCampaign:
             return None
         return self.column_label_sets.get(self.column_ground_truth)
 
-    def active_steps(self) -> list[str]:
-        return self.pipeline_steps or list(
-            connectors.CONNECTORS.get(self.connector).default_pipeline
-        )
-
     def authored_prompts(self) -> bool:
         # Wiped strings count as blank, so the fallback is not keyed on the map being empty.
         return any(
             text.strip() for fields in self.origin_prompts.values() for text in fields.values()
         )
 
-    def prompt_nodes(self) -> list[PipelineNode]:
-        return parse_pipeline_response(rendered_pipeline_json(self)).prompt_nodes()
-
-    def committed_prompts(self) -> dict[str, dict[str, str]]:
-        """The raw task and the label enumeration seed a field only on a chain of ONE prompt node."""
-        prompt_nodes = self.prompt_nodes()
+    def committed_prompts(self, chain: PipelineSchema) -> dict[str, dict[str, str]]:
+        """Over the *chain* `pipeline_resolve.draft_pipeline` runs. The raw task and the label
+        enumeration seed a field only on a chain of ONE prompt node."""
+        prompt_nodes = chain.prompt_nodes()
         alone = len(prompt_nodes) == 1
         return {
             node.name: self._committed_fields(node.name, node.prompt_fields if alone else ())
@@ -232,17 +250,13 @@ class DraftCampaign:
 
 
 def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    """No ``backend_nodes`` (they would pin the search space) and no narrowing: ``optimizer_narrowing`` holds it."""
+    """No narrowing: ``optimizer_narrowing`` holds it."""
     declared = {
         node: {k: v for k, v in block.items() if k != "optimizer"}
         for node, block in (draft.pipeline_overlay or {}).items()
         if isinstance(block, dict)
     }
     return merge_node_blocks(dict(connector.default_node_config), declared)
-
-
-def resolved_node_schema(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    return merge_node_blocks(dict(draft.backend_nodes), merge_pipeline_overlay(draft, connector))
 
 
 def owned_draft(stores: Stores, draft_id: str) -> DraftCampaign:
@@ -260,40 +274,20 @@ def owned_drafts(stores: Stores) -> list[DraftCampaign]:
     ]
 
 
-def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str, Any]:
+def committed_pipeline_json(draft: DraftCampaign, upload: UploadBasis) -> dict[str, Any]:
+    """An upload's ``dataset.yaml::pipeline``, which its Start writes."""
+    connector = connectors.CONNECTORS.get(upload.connector)
     pipeline: dict[str, Any] = {
         "name": draft.slug,
-        "backend_type": draft.connector,
-        "backend_name": draft.connector,
-        "nodes": nodes,
+        "backend_type": connector.name,
+        "backend_name": connector.name,
+        "nodes": merge_pipeline_overlay(draft, connector),
     }
-    connector = connectors.CONNECTORS.get(draft.connector)
-    steps = draft.pipeline_steps or list(connector.default_pipeline)
-    if steps:
-        pipeline["pipelines"] = {DEFAULT_PIPELINE: list(steps)}
+    if steps := draft.pipeline_steps or list(connector.default_pipeline):
+        pipeline["pipelines"] = {DEFAULT_PIPELINE: steps}
     if connector.available_models:
         pipeline["available_models"] = list(connector.available_models)
     return pipeline
-
-
-def committed_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    return draft_pipeline_json(
-        draft, merge_pipeline_overlay(draft, connectors.CONNECTORS.get(draft.connector))
-    )
-
-
-def rendered_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    return draft_pipeline_json(
-        draft, resolved_node_schema(draft, connectors.CONNECTORS.get(draft.connector))
-    )
-
-
-def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    """Without the operator's layer: ``narrow`` REPLACES allowed values, so unticking needs this."""
-    connector = connectors.CONNECTORS.get(draft.connector)
-    return draft_pipeline_json(
-        draft, merge_node_blocks(dict(draft.backend_nodes), dict(connector.default_node_config))
-    )
 
 
 def draft_scoring_block(draft: DraftCampaign) -> str | dict[str, str]:
@@ -312,8 +306,8 @@ def scoring_choice(scoring: str | dict[str, str] | None) -> tuple[str, str]:
     return matcher, spell_dials(declared or {name: d.weight for name, d in (pinned or {}).items()})
 
 
-def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
-    connector = connectors.CONNECTORS.get(draft.connector)
+def default_campaign_config(draft: DraftCampaign, upload: UploadBasis) -> CampaignConfig:
+    connector = connectors.CONNECTORS.get(upload.connector)
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {
         "budget": overrides["budget"],
@@ -358,11 +352,11 @@ def new_draft(
     tenant_id: TenantId,
     owner_user_id: str,
     slug: str,
+    basis: DraftBasis,
     n_samples: int,
     sample_preview: list[dict[str, str]],
     headers: list[str],
     source_file: str = "",
-    source_dataset: str | None = None,
     column_label_sets: dict[str, tuple[str, ...]] | None = None,
 ) -> DraftCampaign:
     now = utcnow_iso()
@@ -374,7 +368,7 @@ def new_draft(
         slug=slug,
         n_samples=n_samples,
         sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
-        connector=DEFAULT_CONNECTOR,
+        basis=basis,
         scoring_matcher=DEFAULT_SCORING_MATCHER,
         raw_task_description="",
         pipeline_overlay={},
@@ -386,7 +380,6 @@ def new_draft(
         created_at=now,
         updated_at=now,
         source_file=source_file,
-        source_dataset=source_dataset,
     )
 
 

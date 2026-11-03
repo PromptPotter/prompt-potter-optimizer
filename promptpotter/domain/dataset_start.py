@@ -14,6 +14,7 @@ class StartBlock(StrEnum):
     EMPTY = "empty"
     MISSING_EXTRA = "missing_extra"
     UNREADABLE = "unreadable"
+    BACKEND_UNREACHABLE = "backend_unreachable"
 
 
 START_BLOCK_WORDS: dict[StartBlock, str] = {
@@ -22,6 +23,7 @@ START_BLOCK_WORDS: dict[StartBlock, str] = {
     StartBlock.EMPTY: "It holds no row with both a query and an answer.",
     StartBlock.MISSING_EXTRA: "It runs through a Python extra this install lacks.",
     StartBlock.UNREADABLE: "Its samples could not be read on this install.",
+    StartBlock.BACKEND_UNREACHABLE: "Its backend is not answering; it opens once the backend is up.",
 }
 assert START_BLOCK_WORDS.keys() == set(StartBlock)
 
