@@ -269,7 +269,9 @@ async def callback(
     except account.AccountCeilingError as full:
         bundle.session_store.delete(session_id)
         background.add_task(
-            notify_operator, f"Sign-up refused for {identity.email or 'no email'}: {full.message}"
+            notify_operator,
+            f"Sign-up refused for {identity.email or 'no email'}: {full.message}",
+            ring=True,
         )
         return _redirect_with_error("accounts_full")
     except Exception:
@@ -317,7 +319,9 @@ def _announce_new_account(
         f"New PromptPotter account: {who}\n"
         f"Accounts now: {total}\n"
         f"Access: {access_state}\n"
-        f"Device: {device or 'unknown'}" + (f"\nRevoke it with:  /block {email}" if email else "")
+        f"Device: {device or 'unknown'}" + (f"\nRevoke it with:  /block {email}" if email else ""),
+        # A stranger's arrival is the one decision this channel offers: /block it now, or not.
+        ring=True,
     )
     # Fires regardless of `access_state`: a blocked account is still a contact worth keeping.
     forward_new_account_to_crm(

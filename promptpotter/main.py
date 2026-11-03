@@ -47,6 +47,7 @@ from promptpotter.presentation.api.deps import (
 )
 from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
+from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers.active import active_router
 from promptpotter.presentation.api.routers.auth import auth_flow_router, auth_router
 from promptpotter.presentation.api.routers.backends import backends_router
@@ -76,10 +77,11 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
         interrupted = ", ".join(job.what for job in running)
         notify_operator(
             f"⚠ {settings.BRAND_SERVICE_NAME} stopped with {len(running)} run(s) in flight: "
-            f"{interrupted}\nResume from the campaign once it is back up."
+            f"{interrupted}\nResume from the campaign once it is back up.",
+            ring=True,
         )
     else:
-        notify_operator(f"{settings.BRAND_SERVICE_NAME} stopped (nothing running).")
+        notify_operator(f"{settings.BRAND_SERVICE_NAME} stopped (nothing running).", ring=False)
 
 
 @asynccontextmanager
@@ -359,6 +361,8 @@ app.add_middleware(
 
 # Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.
 install_oidc_middleware(app)
+# Outside the OIDC seam, so it reads the session that seam resolved.
+app.add_middleware(OutsideVisitsMiddleware)
 
 
 WEBAPP_DIR = webapp_static_root()

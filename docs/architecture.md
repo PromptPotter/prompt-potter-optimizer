@@ -206,7 +206,9 @@ deployment mutations ride an outbound operator-admin channel, never a Control-re
 #### Site records — Persistence with an ingress of its own
 
 Not a sixth kind: `/site-records/{table}` opens to one bearer token and appends outside every
-tenant, reaching no ledger and nothing the loop reads (`application/site_records.py`) —
+tenant, reaching no ledger and nothing the loop reads (`application/site_records.py`); the app's
+own record of who reached it from outside lands beside those rows, in-process
+(`application/app_visits.py`) —
 [`operations/access-model.md`](operations/access-model.md) § The perimeter.
 
 ### Everything material lives on disk, in human-readable form

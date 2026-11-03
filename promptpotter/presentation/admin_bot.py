@@ -4,6 +4,7 @@ import asyncio
 import logging
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -20,9 +21,11 @@ from promptpotter.application.account import (
     trails_since,
     unblock_email,
 )
+from promptpotter.application.app_visits import due_digest, mark_told
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
+from promptpotter.application.power import PowerLevel, power_change
 from promptpotter.application.views.trail import trail_fields, trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
@@ -43,7 +46,9 @@ _USAGE = (
 )
 _TELEGRAM_MAX_CHARS = 4096
 _TRAIL_WINDOW_H = 24
-_TRAIL_FORWARD_EVERY_S = 1800
+_HEALTH_EVERY_S = 1800
+_POWER_EVERY_S = 60
+_DIGEST_EVERY_S = 600
 
 
 def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
@@ -189,8 +194,11 @@ def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:
         logger.warning("sendMessage refused: HTTP %d %s", resp.status_code, resp.text[:300])
 
 
-def notify_operator(text: str) -> bool:
-    """Best-effort: ``False`` and never a raise, so a notice cannot fail the request behind it."""
+def notify_operator(text: str, *, ring: bool) -> bool:
+    """Best-effort: ``False`` and never a raise, so a notice cannot fail the request behind it.
+
+    ``ring`` is the sender's call: an alert sounds, a notice for the record arrives silently.
+    """
     token = settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip()
     chat_id = settings.ADMIN_BOT_CHAT_ID.strip()
     if not token or not chat_id:
@@ -200,7 +208,10 @@ def notify_operator(text: str) -> bool:
         with httpx.Client(
             base_url=f"https://api.telegram.org/bot{token}", timeout=10, verify=tls_context()
         ) as client:
-            resp = client.post("/sendMessage", json={"chat_id": chat_id, "text": text})
+            resp = client.post(
+                "/sendMessage",
+                json={"chat_id": chat_id, "text": text, "disable_notification": not ring},
+            )
     except httpx.HTTPError:
         logger.warning("Operator notice failed to send", exc_info=True)
         return False
@@ -215,9 +226,55 @@ def check_health_and_tell() -> list[health.Checked]:
     """Every entry point's health check, each change of state already told. Blocking."""
     checked = asyncio.run(health.check(default_projects_root()))
     for one in checked:
-        if (said := health.notice(one)) is not None:
-            notify_operator(said)
+        if one.change is not None and (said := health.notice(one)) is not None:
+            notify_operator(said, ring=one.change.state == "broken")
     return checked
+
+
+def _tell_power(was: PowerLevel) -> PowerLevel:
+    """The level now; an unheard notice keeps the old one, so it is told again next time."""
+    now, notice = power_change(was)
+    if notice is not None and not notify_operator(notice.text, ring=notice.ring):
+        return was
+    return now
+
+
+def _tell_visits_digest() -> None:
+    digest = due_digest()
+    if digest is not None and notify_operator(digest.text, ring=digest.ring):
+        mark_told(digest)
+
+
+class _Duties:
+    """What the bot does on its own clock; none waits on a command arriving, or on polling at all."""
+
+    def __init__(self) -> None:
+        self._power = PowerLevel.MAINS
+        self._roster: tuple[tuple[float, Callable[[], None]], ...] = (
+            (_HEALTH_EVERY_S, self._health_and_trail),
+            (_POWER_EVERY_S, self._watch_power),
+            (_DIGEST_EVERY_S, _tell_visits_digest),
+        )
+        self._due = [0.0] * len(self._roster)
+
+    def _health_and_trail(self) -> None:
+        # Checked first, so the briefing carries what this check just found.
+        check_health_and_tell()
+        forward_trail_to_briefing()
+
+    def _watch_power(self) -> None:
+        self._power = _tell_power(self._power)
+
+    def run_due(self) -> float:
+        """Every duty that is due runs; the answer is the seconds until the next one."""
+        for index, (every_s, duty) in enumerate(self._roster):
+            if time.monotonic() >= self._due[index]:
+                self._due[index] = time.monotonic() + every_s
+                try:
+                    duty()
+                except Exception:
+                    logger.exception("%s failed; the channel stays up", duty.__name__)
+        return max(1.0, min(self._due) - time.monotonic())
 
 
 def forward_new_account_to_crm(
@@ -229,7 +286,7 @@ def forward_new_account_to_crm(
         return False
     try:
         with httpx.Client(timeout=10, verify=tls_context()) as client:
-            client.post(
+            resp = client.post(
                 url,
                 json={
                     "email": email or "",
@@ -242,6 +299,10 @@ def forward_new_account_to_crm(
             )
     except httpx.HTTPError:
         logger.warning("CRM forward failed for %s", email or user_id, exc_info=True)
+        return False
+    # A refusal is a non-2xx body, not an exception: read as sent, the contact is lost unnoticed.
+    if not resp.is_success:
+        logger.warning("CRM forward refused for %s: HTTP %d", email or user_id, resp.status_code)
         return False
     return True
 
@@ -316,32 +377,30 @@ def _process_update(
 def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
     base_url = f"https://api.telegram.org/bot{token}"
     offset: int | None = None
+    duties = _Duties()
+    polling = True
     logger.info("Admin bot started (outbound long-poll; no inbound port).")
     with httpx.Client(
         base_url=base_url, timeout=_POLL_TIMEOUT_S + 10, verify=tls_context()
     ) as client:
-        forward_due = 0.0
         while True:
-            if time.monotonic() >= forward_due:
-                forward_due = time.monotonic() + _TRAIL_FORWARD_EVERY_S
-                try:
-                    # Checked first, so the briefing carries what this check just found.
-                    check_health_and_tell()
-                    forward_trail_to_briefing()
-                except Exception:
-                    logger.exception("health check or trail forward failed; channel stays up")
+            wait_s = duties.run_due()
+            if not polling:
+                time.sleep(wait_s)
+                continue
             try:
-                params: dict[str, Any] = {"timeout": _POLL_TIMEOUT_S}
+                params: dict[str, Any] = {"timeout": int(min(_POLL_TIMEOUT_S, wait_s))}
                 if offset is not None:
                     params["offset"] = offset
                 resp = client.get("/getUpdates", params=params)
                 if resp.status_code == 409:
-                    # A webhook on the same bot is a CONFIGURATION error: no retry resolves it.
+                    # A CONFIGURATION error no retry resolves, and `channel:telegram` reports it.
                     logger.error(
-                        "getUpdates refused with 409: a webhook is active on this bot, so it cannot "
-                        "also be long-polled. Give the admin channel its OWN bot token."
+                        "getUpdates refused with 409: a webhook holds this bot, so commands cannot "
+                        "arrive. Give the admin channel its OWN bot; its own duties go on."
                     )
-                    return
+                    polling = False
+                    continue
                 resp.raise_for_status()
                 updates = resp.json().get("result", [])
             except httpx.HTTPError:

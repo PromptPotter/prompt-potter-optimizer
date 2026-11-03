@@ -270,10 +270,12 @@ The only recurring admin action is taking access away. The bot long-polls Telegr
 and is a courtesy control, not a boundary: a blocked person can sign up again from another address,
 and the spend ceiling is what bounds a stranger.
 
-**Setup.** Create a bot via [@BotFather](https://t.me/BotFather) (its OWN token — two units polling
-one token fight over the offset), read your `message.chat.id` off `getUpdates`, put the keys in the
-env file, then `./install-admin-bot.sh`. Every key is a `Settings` field read from the environment
-or the install's `.env` (`config/paths.py::env_file_path`).
+**Setup.** Create a bot via [@BotFather](https://t.me/BotFather) for this box alone: Telegram hands a
+bot's messages to ONE reader, so a bot that n8n or anything else also receives on (a webhook, a
+second poller) leaves the admin bot deaf, and `channel:telegram` reads broken. Read your
+`message.chat.id` off `getUpdates`, put the keys in the env file, then `./install-admin-bot.sh`.
+Every key is a `Settings` field read from the environment or the install's `.env`
+(`config/paths.py::env_file_path`).
 
 ```bash
 ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
@@ -285,8 +287,24 @@ HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 
 - **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file** once `BOT_ENV_FILE` is split: a copy in the
   API's environment turns a read of that process into command authority.
-- **Token and chat id stay in BOTH files** — the API sends on the same bot (new sign-ins, sign-ups
-  refused at `MAX_ACCOUNTS`, health changes), and without them `notify_operator` fails silently. `install-admin-bot.sh` warns.
+- **Token and chat id live in the APP's file only** — the API sends on the same bot, and the bot's
+  unit loads the app's file before its own, so one edit reaches both. A copy in the bot's file is a
+  second home: a re-issued token pasted into one leaves the other refused. `install-admin-bot.sh`
+  warns.
+
+**What it tells you, and how loud.** It rings for what wants you now: a health probe turning broken,
+a new account (`/block` it or not), a sign-up refused at `MAX_ACCOUNTS`, the server stopping with
+runs in flight, the box losing power or its battery reaching 15%. It is silent for the record: a
+probe working again, a stop with nothing running, power back, the daily outside-visits digest. The
+bot keeps its own clock whether or not commands can arrive: health and the briefing feed every 30
+minutes, power every minute on a machine with a battery, the digest once a day after 07:00 box time.
+
+**Outside visits.** Every request reaching the app from a public address without a session is kept
+in `site_records/app_visits.jsonl` (`presentation/api/middleware/visits.py`; the query only where
+nothing answered, so a served sign-in code is never written), for 90 days. The digest
+(`application/app_visits.py`) reads them as scanners and what they hunted, crawlers by name, and
+visitors by country, and is kept by date in `site_records/app_visit_digests.jsonl`. It rings only
+when a scanner's probe was answered.
 
 | You send | Effect |
 |---|---|
@@ -312,7 +330,9 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
   (`promptpotter/presentation/admin_bot.py::forward_trail_to_briefing`). Each send is the whole window, so an offline box
   shows as an old `as_of`. The briefing cannot ask — that would be an inbound cross-tenant read.
 - **The box's health** — `promptpotter health` runs every probe (`application/health.py::probes`:
-  remote backends, each sign-in provider's view of `oidc.json`, each LLM key); a state change is
+  remote backends, each sign-in provider's view of `oidc.json`, each LLM key, and the operator
+  channel itself, `channel:telegram`, broken on a refused token or a webhook holding the bot, which
+  no notice can report); a state change is
   recorded on the box's workspace ledger and told to the bot's chat. It runs at app start, before
   each briefing, and in `update.sh`, where a broken probe fails the deploy.
 - **Your website's records** — `SITE_RECORDS_TOKEN` in the **app's** file, then restart. A caller
@@ -323,8 +343,8 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
 ### Secret hygiene
 
 - `.env` is `chmod 600` and never committed.
-- A leaked `ADMIN_BOT_TELEGRAM_TOKEN`: re-issue via @BotFather, paste it into every env file
-  carrying it, restart both units.
+- A leaked `ADMIN_BOT_TELEGRAM_TOKEN`: re-issue via @BotFather, paste it into the app's `.env`,
+  restart both units.
 
 ## Uninstall
 

@@ -14,6 +14,7 @@ import httpx
 from promptpotter import connectors
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.jobs.launcher.admission import probe_backend
+from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import HealthRecord, HealthState
@@ -109,8 +110,39 @@ def _llm_key(provider: str, spec: ProviderSpec, key: str) -> Probe:
     return Probe(f"llm:{provider}", check, fix)
 
 
+def _operator_channel(token: str) -> Probe:
+    """The channel every other notice rides: dead, it says nothing, so its health is checked here."""
+
+    async def check() -> Reading:
+        try:
+            async with httpx.AsyncClient(
+                base_url=f"https://api.telegram.org/bot{token}", timeout=10, verify=tls_context()
+            ) as client:
+                me = await client.get("/getMe")
+                if me.status_code in (401, 404):
+                    return Reading(
+                        "broken", f"Telegram refused the admin bot's token (HTTP {me.status_code})"
+                    )
+                hook = await client.get("/getWebhookInfo")
+        except httpx.HTTPError as exc:
+            return Reading("unverified", f"unreachable: {type(exc).__name__}")
+        if not (me.is_success and hook.is_success):
+            return Reading("unverified", f"HTTP {me.status_code} / {hook.status_code}")
+        if hook.json().get("result", {}).get("url"):
+            # Telegram holds a bot's messages for ONE reader: a webhook takes them from the poll.
+            return Reading("broken", "a webhook holds the admin bot, so commands never arrive")
+        return Reading("held", f"@{me.json().get('result', {}).get('username', '?')}")
+
+    fix = (
+        "give the admin bot a bot of its own, and set its current token (@BotFather, /mybots, "
+        "API Token) as ADMIN_BOT_TELEGRAM_TOKEN in the app's .env; restart the app and the admin bot"
+    )
+    return Probe("channel:telegram", check, fix)
+
+
 def probes() -> list[Probe]:
-    """The roster: every remote backend service, every configured sign-in provider, every LLM key."""
+    """The roster: every remote backend service, every configured sign-in provider, every LLM key,
+    and the operator's channel where one is configured."""
     paths = default_identity_paths()
     bundle = build_identity_bundle(paths)
     redeem = {
@@ -125,6 +157,11 @@ def probes() -> list[Probe]:
         ),
         *(_signin(provider, call, paths.provider_config) for provider, call in redeem.items()),
         *(_llm_key(provider, spec, key) for provider, (spec, key) in keyed_specs().items()),
+        *(
+            [_operator_channel(token)]
+            if (token := settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip())
+            else []
+        ),
     ]
 
 
