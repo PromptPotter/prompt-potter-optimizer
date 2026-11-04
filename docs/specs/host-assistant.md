@@ -31,7 +31,7 @@ A long-running call returns a task handle per MCP's Tasks extension
   `bench/llm_call.py::llm_call`, so it is bound to a ledger and billed like any send.
 - **It acts as the user**: every tool call dispatches under the session's `IdentityContext`, no new credential.
 - **A write fires on the user's click**: a write tool call renders as ONE proposal shape whose click fires
-  the command, replacing `origin_readiness.py::RaisedCommand` and `domain/activity.py::ActivityDecision`.
+  the command, replacing `domain/checkin_draft.py::RaisedCommand` and `domain/activity.py::ActivityDecision`.
   Reads run unasked.
 - **Every tool call is the generic `step`** (icon, label, status, duration, cost), riding the SSE ledger tail.
 - **The composer belongs to the account**, open on every screen; a dropped file calls the ingest tool, and

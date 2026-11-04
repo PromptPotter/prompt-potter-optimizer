@@ -240,10 +240,6 @@ class CycleLayout:
         return cls(ledger.parent.parent)
 
     @property
-    def streams(self) -> Path:
-        return self.runtime / "streams"
-
-    @property
     def audit_rounds(self) -> Path:
         return self.runtime / "cache" / "rounds"
 

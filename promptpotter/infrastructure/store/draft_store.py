@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import BankedSubject
 from promptpotter.infrastructure.store.account_trail import bank_trail
-from promptpotter.infrastructure.store.io import (
-    HeldLock,
-    read_json_optional,
-    rmtree_robust,
-    take_lock,
-    write_json,
-)
+from promptpotter.infrastructure.store.io import HeldLock, rmtree_robust, take_lock, write_bytes
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     draft_claim_path,
@@ -20,8 +14,11 @@ from promptpotter.infrastructure.store.layout import (
     draft_dirs,
     drafts_root_dir_for,
 )
-from promptpotter.infrastructure.store.read_model import file_sig
+from promptpotter.infrastructure.store.read_model import file_sig, read_file
 from promptpotter.shared.errors import ConflictError, NotFoundError
+
+DRAFT_FILE = "draft.json"
+RESOLUTION_FILE = "resolution.json"
 
 
 class DraftClaim:
@@ -54,14 +51,14 @@ class DraftStore:
         return CycleLayout(self.draft_dir(draft_id)).ledger
 
     def draft_ids(self) -> list[str]:
-        return [p.name for p in draft_dirs(self._base_dir) if (p / "draft.json").is_file()]
+        return [p.name for p in draft_dirs(self._base_dir) if (p / DRAFT_FILE).is_file()]
 
     def version(self) -> tuple[object, ...]:
         """Stats only: moves on an open, an edit, a check-in's spend, a Start and a discard."""
         return (
             file_sig(drafts_root_dir_for(self._base_dir)),
             *(
-                (p.name, file_sig(p / "draft.json"), file_sig(CycleLayout(p).ledger))
+                (p.name, file_sig(p / DRAFT_FILE), file_sig(CycleLayout(p).ledger))
                 for p in draft_dirs(self._base_dir)
             ),
         )
@@ -83,19 +80,21 @@ class DraftStore:
             raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
         return claim
 
-    def write_draft(self, draft_id: str, draft: dict[str, Any]) -> Path:
-        path = self.draft_dir(draft_id) / "draft.json"
-        write_json(path, draft)
+    def write_draft(self, draft_id: str, draft: DraftFile) -> Path:
+        path = self.draft_dir(draft_id) / DRAFT_FILE
+        write_bytes(path, draft.model_dump_json(indent=2).encode("utf-8"))
         return path
 
-    def read_draft(self, draft_id: str) -> dict[str, Any] | None:
-        return read_json_optional(self.draft_dir(draft_id) / "draft.json")
+    def read_draft(self, draft_id: str) -> DraftFile | None:
+        return read_file(self.draft_dir(draft_id) / DRAFT_FILE, DraftFile.model_validate_json)
 
-    def write_resolution(self, draft_id: str, resolution: dict[str, Any]) -> None:
-        write_json(self.draft_dir(draft_id) / "resolution.json", resolution)
+    def write_resolution(self, draft_id: str, resolution: OriginResolution) -> None:
+        path = self.draft_dir(draft_id) / RESOLUTION_FILE
+        write_bytes(path, resolution.model_dump_json(indent=2).encode("utf-8"))
 
-    def load_resolution(self, draft_id: str) -> dict[str, Any] | None:
-        return read_json_optional(self.draft_dir(draft_id) / "resolution.json")
+    def load_resolution(self, draft_id: str) -> OriginResolution | None:
+        path = self.draft_dir(draft_id) / RESOLUTION_FILE
+        return read_file(path, OriginResolution.model_validate_json)
 
     def close(self, draft_id: str) -> None:
         """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing reads."""

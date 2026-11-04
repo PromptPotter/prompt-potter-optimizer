@@ -460,14 +460,50 @@ def _write_lock(path: Path) -> AbstractContextManager[None]:
     return held_lock(path.with_name(write_lock_name(path.name)), wait_s=LOCK_TIMEOUT)
 
 
+# Name → (inode, end, mtime) after this process's last append there, which landed whole: an inode
+# number outlives its file, the write time of a re-created one does not. Only a speed-up: a miss
+# costs one read-access open, which Windows' scanner answers by reading the whole file.
+_APPENDED: dict[str, tuple[int, int, int]] = {}
+_APPENDED_HELD = 4096
+
+
 def append_line(path: Path, line: bytes) -> range:
-    """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows."""
+    """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows.
+
+    Under the lock no append is in flight, so an unterminated last line is a crashed one: it is cut
+    back to the last newline before this line lands. No reader counted those bytes (`complete_lines`,
+    `FileMark.end`), and the append that wrote them never returned. A file still ending where this
+    process's last append left it is opened append-only: it ends on a line written whole."""
     data = line + b"\n"
-    with _write_lock(path), open(_long_path(path), "ab") as f:
-        f.write(data)
-        f.flush()
-        end = f.tell()
+    name = _long_path(path)
+    with _write_lock(path):
+        with open(name, "ab") as f:
+            st = os.fstat(f.fileno())
+            if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):
+                return _landed(name, f, data)
+        _cut_unterminated(name)
+        with open(name, "ab") as f:
+            return _landed(name, f, data)
+
+
+def _landed(name: str, f: IO[bytes], data: bytes) -> range:
+    f.write(data)
+    f.flush()
+    end = f.tell()
+    if len(_APPENDED) >= _APPENDED_HELD:
+        _APPENDED.clear()
+    st = os.fstat(f.fileno())
+    _APPENDED[name] = (st.st_ino, end, st.st_mtime_ns)
     return range(end - len(data), end)
+
+
+def _cut_unterminated(name: str) -> None:
+    with open(name, "r+b") as f:
+        size = f.seek(0, os.SEEK_END)
+        if size:
+            f.seek(size - 1)
+            if f.read(1) != b"\n":
+                f.truncate(size - len(_last_line(f, size)))
 
 
 def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
@@ -475,10 +511,29 @@ def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
     return path
 
 
-class _FileMark(NamedTuple):
+class FileMark(NamedTuple):
+    """How far a line file was read, and what says a later handle is still that file."""
+
     end: int
     # `None`: the file was absent, so whatever an append has put there since is all tail.
     inode: int | None
+    # The last line read, ending at `end`: an inode outlives its file, so a delete and a re-mint
+    # pass every stat test, and only the bytes say the file is the one read.
+    last: bytes = b""
+
+
+ABSENT = FileMark(0, None)
+
+
+def holds_mark(fh: IO[bytes], mark: FileMark) -> bool:
+    """The one identity rule: *fh* is the file *mark* read, grown by appends alone."""
+    if mark.inode is None:
+        return True
+    st = os.fstat(fh.fileno())
+    if st.st_ino != mark.inode or st.st_size < mark.end:
+        return False
+    fh.seek(mark.end - len(mark.last))
+    return fh.read(len(mark.last)) == mark.last
 
 
 def complete_lines(fh: IO[bytes]) -> Iterator[bytes]:
@@ -489,29 +544,62 @@ def complete_lines(fh: IO[bytes]) -> Iterator[bytes]:
         yield raw
 
 
-def _read_marked(path: Path) -> tuple[list[str], _FileMark]:
-    lines: list[str] = []
-    end, inode = 0, None
-    with contextlib.suppress(FileNotFoundError), open(_long_path(path), "rb") as f:
-        inode = os.fstat(f.fileno()).st_ino
-        for raw in complete_lines(f):
-            lines.append(raw.decode("utf-8"))
-            end += len(raw)
-    return lines, _FileMark(end, inode)
+class Tail(NamedTuple):
+    lines: list[bytes]
+    mark: FileMark
+    # Read from the start: nothing was read before, or the file read is gone or was rewritten.
+    whole: bool
+
+
+def read_tail(path: Path, mark: FileMark) -> Tail:
+    """Every line past *mark* while the file is the one *mark* read; every line otherwise."""
+    try:
+        with open(_long_path(path), "rb") as f:
+            whole = mark.inode is None or not holds_mark(f, mark)
+            at = FileMark(0, os.fstat(f.fileno()).st_ino) if whole else mark
+            f.seek(at.end)
+            lines: list[bytes] = []
+            for raw in complete_lines(f):
+                lines.append(raw)
+                at = FileMark(at.end + len(raw), at.inode, raw)
+    except FileNotFoundError:
+        return Tail([], ABSENT, whole=True)
+    return Tail(lines, at, whole)
+
+
+def _read_marked(path: Path) -> tuple[list[str], FileMark]:
+    tail = read_tail(path, ABSENT)
+    return [raw.decode("utf-8") for raw in tail.lines], tail.mark
 
 
 def read_lines(path: Path) -> list[str]:
     return _read_marked(path)[0]
 
 
-def _end_mark(path: Path) -> _FileMark:
-    # Locked, so no append is in flight and the whole file is whole lines.
+_TAIL_STEP = 4096
+
+
+def _last_line(f: IO[bytes], end: int) -> bytes:
+    start = max(0, end - _TAIL_STEP)
+    while True:
+        f.seek(start)
+        held = f.read(end - start)
+        cut = held.rfind(b"\n", 0, len(held) - 1)
+        if cut != -1 or start == 0:
+            return held[cut + 1 :]
+        start = max(0, start - _TAIL_STEP)
+
+
+def _end_mark(path: Path) -> FileMark:
+    # Locked, so no append is in flight. A torn fragment a crashed append left is counted in the
+    # mark, so `replace_lines` drops it: only what lands past the mark is carried.
     with _write_lock(path):
         try:
-            st = os.stat(_long_path(path))
+            with open(_long_path(path), "rb") as f:
+                st = os.fstat(f.fileno())
+                return FileMark(st.st_size, st.st_ino, _last_line(f, st.st_size))
         except FileNotFoundError:
-            return _FileMark(0, None)
-    return _FileMark(st.st_size, st.st_ino)
+            return ABSENT
 
 
 class PairWrite(NamedTuple):
@@ -538,14 +626,13 @@ def _put(path: Path, data: bytes | None, *, held: bytes | None) -> None:
         write_bytes(path, data)
 
 
-def _swap(path: Path, mark: _FileMark, lines: Iterable[str], companion: _Companion | None) -> bool:
+def _swap(path: Path, mark: FileMark, lines: Iterable[str], companion: _Companion | None) -> bool:
     data = "".join(lines).encode("utf-8")
     # Only the swap is locked: a big rewrite outlasts `LOCK_TIMEOUT`, where an appender gives up.
     with _write_lock(path):
         try:
             with open(_long_path(path), "rb") as f:
-                st = os.fstat(f.fileno())
-                if mark.inode not in (None, st.st_ino) or st.st_size < mark.end:
+                if not holds_mark(f, mark):
                     return False
                 f.seek(mark.end)
                 tail = f.read()
@@ -568,7 +655,7 @@ _REWRITE_ATTEMPTS = 3
 
 
 class _Attempt[T](NamedTuple):
-    mark: _FileMark
+    mark: FileMark
     lines: Iterable[str] | None
     companion: _Companion | None
     result: T

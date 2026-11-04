@@ -59,10 +59,11 @@ from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError, 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
 
-    from promptpotter.application.datasets.origin_readiness import FieldGap, OriginResolution
+    from promptpotter.application.datasets.origin_readiness import FieldGap
     from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadLaunched
     from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.application.jobs.launcher.run_job import HeldRun
+    from promptpotter.domain.checkin_draft import OriginResolution
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")

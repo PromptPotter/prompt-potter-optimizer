@@ -18,7 +18,7 @@ from promptpotter.domain.prompt_block import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_packs import bank_into_account_pack
-from promptpotter.infrastructure.store.stores import own_campaign, owned_draft_data
+from promptpotter.infrastructure.store.stores import caller_owns, owned_draft_data
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import acting_principal
 
@@ -135,10 +135,11 @@ def library(shelf: PackShelf) -> LibraryResponse:
 
 def _written_in(stores: Stores, experiment: str) -> None:
     """A provenance names a campaign or a draft of the caller's own, never another account's."""
-    if stores.campaigns.campaign_owner(experiment) is not None:
-        own_campaign(stores, experiment)
-    else:
+    campaign = stores.campaigns.load_campaign(experiment)
+    if campaign is None:
         owned_draft_data(stores, experiment)
+    elif not caller_owns(stores, campaign):
+        raise NotFoundError(f"Campaign not found: {experiment}")
 
 
 def bank_snippet(stores: Stores, *, supersedes: str, text: str, experiment: str) -> None:

@@ -12,13 +12,13 @@ from promptpotter.application.datasets.draft_build import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import (
-    OriginResolution,
     load_resolution,
     origin_projection,
     save_checkin_draft,
 )
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
+from promptpotter.domain.checkin_draft import OriginResolution
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import PotterError, ServiceUnavailableError
 

@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import copy
 import json
-import logging
 import re
 import threading
 from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
@@ -16,68 +15,84 @@ from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_
 from pydantic import ValidationError
 
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
-from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    RECORD_KINDS,
+    CycleRecord,
+    SpendHoldRecord,
+    TokenUsageRecord,
+)
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import append_line, complete_lines, open_text_robust
+from promptpotter.infrastructure.store.io import (
+    ABSENT,
+    FileMark,
+    append_line,
+    complete_lines,
+    read_bytes_optional,
+    read_tail,
+)
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import LedgerUnreadableError, validation_reason
+from promptpotter.shared.errors import FileUnreadableError, LedgerUnreadableError, validation_reason
 
-logger = logging.getLogger(__name__)
+# Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
+EVERY_ARM: tuple[type[StrictModel], ...] = get_args(get_args(CycleRecord)[0])
+_EVERY_ARM = frozenset(EVERY_ARM)
+_ARM_KINDS = frozenset(kind.encode() for kind in RECORD_KINDS)
 
 
-def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> list[dict[str, Any]]:
-    probes = tuple(f'"{t}"' for t in record_types) if record_types else ()
-    rows: list[dict[str, Any]] = []
-    try:
-        with open_text_robust(path) as fh:
-            for raw in fh:
-                if probes:
-                    for probe in probes:
-                        if probe in raw:
-                            break
-                    else:
-                        continue
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(row, dict):
-                    rows.append(row)
-    except FileNotFoundError:
-        return []
+# What a line reader raises on a line it cannot take, a model's or a hand-built one's.
+_ROW_ERRORS = (ValueError, KeyError, TypeError)
+
+
+def _reason(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        return validation_reason(exc, shown=1)
+    return " ".join(f"{type(exc).__name__}: {exc}".split())
+
+
+class Rows[R](NamedTuple):
+    rows: list[R]
+    mark: FileMark
+    whole: bool
+
+
+def parse_rows[R](
+    path: Path, lines: Iterable[bytes], read: Callable[[bytes], R], *, at: int = 0
+) -> list[R]:
+    """*path*'s lines from byte *at*, a file that is no ledger: a line *read* refuses refuses them, by name."""
+    rows: list[R] = []
+    for raw in lines:
+        if raw.strip():
+            try:
+                rows.append(read(raw))
+            except _ROW_ERRORS as exc:
+                reason = f"the line at byte {at}: {_reason(exc)}"
+                raise FileUnreadableError(path=str(path), reason=reason) from exc
+        at += len(raw)
     return rows
 
 
-def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for row in iter_jsonl(path):
-        k = row.get(key)
-        if isinstance(k, str):
-            out[k] = row
-    return out
+def read_rows_past[R](path: Path, read: Callable[[bytes], R], mark: FileMark) -> Rows[R]:
+    """A line file that is no ledger, past *mark*."""
+    tail = read_tail(path, mark)
+    rows = parse_rows(path, tail.lines, read, at=0 if tail.whole else mark.end)
+    return Rows(rows, tail.mark, tail.whole)
 
 
-def _complete_lines(path: Path, start: int) -> Iterator[bytes]:
-    with open(path, "rb") as fh:
-        fh.seek(start)
-        yield from complete_lines(fh)
+def read_rows[R](path: Path, read: Callable[[bytes], R]) -> list[R]:
+    return read_rows_past(path, read, ABSENT).rows
 
 
-def read_jsonl_from[R](path: Path, read: Callable[[bytes], R], offset: int) -> tuple[list[R], int]:
-    out: list[R] = []
+def read_file[R](path: Path, read: Callable[[bytes], R]) -> R | None:
+    """A whole file that is no ledger: ``None`` where none is, and refused by name where *read* refuses it."""
+    raw = read_bytes_optional(path)
+    if raw is None:
+        return None
     try:
-        for raw in _complete_lines(path, offset):
-            offset += len(raw)
-            if raw.strip():
-                out.append(read(raw))
-    except FileNotFoundError:
-        return [], offset
-    return out, offset
+        return read(raw)
+    except _ROW_ERRORS as exc:
+        raise FileUnreadableError(path=str(path), reason=_reason(exc)) from exc
 
 
 def append_row(path: Path, *rows: dict[str, Any]) -> range:
@@ -135,8 +150,7 @@ def line_dict(raw: bytes) -> dict[str, Any]:
     return rec
 
 
-def _refusal(ledger: Path, offset: int, exc: ValueError) -> LedgerUnreadableError:
-    reason = validation_reason(exc, shown=1) if isinstance(exc, ValidationError) else str(exc)
+def _refusal(ledger: Path, offset: int, reason: str) -> LedgerUnreadableError:
     cycle_dir = CycleLayout.of_ledger(ledger).cycle_dir
     campaign_dir = cycle_dir.parent.parent
     held = campaign_cycles_dir(campaign_dir) == cycle_dir.parent
@@ -157,15 +171,17 @@ def ledger_record[R](
     try:
         return validate(raw)
     except ValueError as exc:
-        raise _refusal(ledger, offset, exc) from exc
+        raise _refusal(ledger, offset, _reason(exc)) from exc
 
 
 def feed_fold[T](fold: _Feeds[T], record: T, *, ledger: Path, offset: int) -> None:
-    """A fold that raises on a line folds on past it, so a writer's checkout and a refold stay one value."""
+    """A fold that cannot take a line refuses as a line no model takes does: a writer's checkout and a
+    refold then fail at one offset, where folding past it would serve a value missing that line."""
     try:
         fold.feed(record)
-    except Exception:
-        logger.exception("fold %s skipped offset %d of %s", type(fold).__name__, offset, ledger)
+    except Exception as exc:
+        reason = f"{type(fold).__name__} cannot fold it: {_reason(exc)}"
+        raise _refusal(ledger, offset, reason) from exc
 
 
 def _by_record_type(folds: Iterable[LedgerFold[Any, Any]]) -> dict[str, type[StrictModel]]:
@@ -208,63 +224,37 @@ class _LedgerTail(ABC):
 
     def _reset(self) -> None:
         self._sig: Signature | None = None
-        self._bytes = 0
+        # A refusal rides the fold, so the mark's identity rule is what keeps a re-created file from
+        # being read as this one's tail, and served this one's refusal.
+        self._mark = ABSENT
         self._lines = 0
-        # The last line fed, which an append leaves where it was: a refusal rides the fold, so
-        # whatever reads a re-created file as this one's tail serves this one's refusal.
-        self._last = b""
 
     @abstractmethod
     def _feed(self, raw: bytes) -> None: ...
-
-    def _holds_last(self) -> bool:
-        """An inode number outlives its file, so a delete and re-mint passes every stat test."""
-        try:
-            with open(self._path, "rb") as fh:
-                fh.seek(self._bytes - len(self._last))
-                return fh.read(len(self._last)) == self._last
-        except FileNotFoundError:
-            return False
 
     def _refresh(self) -> None:
         sig = file_sig(self._path)
         if sig == self._sig:
             return
-        # A rewrite is always a new inode: every rewriter here goes tmp + `os.replace`.
-        appended = (
-            sig is not None
-            and self._sig is not None
-            and sig[0] == self._sig[0]
-            and sig[1] >= self._bytes
-            and sig[2] >= self._sig[2]
-            and self._holds_last()
-        )
-        if not appended:
+        tail = read_tail(self._path, self._mark)
+        if tail.whole:
             self._reset()
-        if sig is None:
-            return
-        try:
-            for raw in _complete_lines(self._path, self._bytes):
-                self._feed(raw)
-                self._lines += 1
-                self._bytes += len(raw)
-                self._last = raw
-        except FileNotFoundError:
-            self._reset()
-            return
-        self._sig = sig
+        for raw in tail.lines:
+            self._feed(raw)
+            self._lines += 1
+        self._mark = tail.mark
+        self._sig = None if tail.mark.inode is None else sig
 
     def _take(self, raw: bytes, at: range) -> None:
         with self._lock:
-            if self._sig is None or self._bytes != at.start:
+            if self._sig is None or self._mark.end != at.start:
                 return
             self._feed(raw)
             self._lines += 1
-            self._bytes = at.stop
-            self._last = raw + b"\n"
+            self._mark = FileMark(at.stop, self._mark.inode, raw + b"\n")
             sig = file_sig(self._path)
             # Another process may have appended past ours already: a stale signature has the next view read it.
-            if sig is not None and sig[0] == self._sig[0] and sig[1] == at.stop:
+            if sig is not None and sig[0] == self._mark.inode and sig[1] == at.stop:
                 self._sig = sig
 
 
@@ -291,10 +281,12 @@ class _Feeder:
             kind.encode(): model for kind, model in _by_record_type(folds.values()).items()
         }
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
-        # By kind, so the folds that never take a refused line (run state, spend) still read whole:
-        # a reshape of one kind leaves the spend bank readable, so a delete can bank before it wipes.
+        # By what it refuses, so the folds that never take a refused line (run state, spend) still
+        # read whole: a reshape of one kind leaves the spend bank readable, so a delete can bank before
+        # it wipes. Keyed by the model a line failed, by the fold that could not take a line (fed no
+        # line after), or by `None` for a line no `CycleRecord` arm names, which a fold of every arm reads.
         self.refused: dict[
-            type[StrictModel], LedgerUnreadableError | UnregisteredStatePartError
+            type[StrictModel] | _Make | None, LedgerUnreadableError | UnregisteredStatePartError
         ] = {}
 
     def line(self, offset: int, raw: bytes) -> None:
@@ -303,6 +295,9 @@ class _Feeder:
         kind = _RECORD_TYPE.search(raw)
         model = None if kind is None else self._models.get(kind[1])
         if model is None:
+            if raw.strip() and (kind is None or kind[1] not in _ARM_KINDS):
+                reason = "no record_type" if kind is None else f"no arm is {kind[1].decode()!r}"
+                self.refused.setdefault(None, _refusal(self._ledger, offset, reason))
             return
         # The bytes go to pydantic's own parser: a `json.loads` first costs as much again.
         try:
@@ -314,13 +309,18 @@ class _Feeder:
             return
         if record is None:
             return
-        for fold in self.folds.values():
-            if model in fold.records:
-                feed_fold(fold, record, ledger=self._ledger, offset=offset)
+        for make, fold in self.folds.items():
+            if model in fold.records and make not in self.refused:
+                try:
+                    feed_fold(fold, record, ledger=self._ledger, offset=offset)
+                except LedgerUnreadableError as refusal:
+                    self.refused[make] = refusal
 
-    def vouch(self, fold: LedgerFold[Any, Any]) -> None:
-        for model in fold.records:
-            if (refusal := self.refused.get(model)) is not None:
+    def vouch(self, make: _Make) -> None:
+        records = self.folds[make].records
+        keys = (make, *records, *((None,) if set(records) >= _EVERY_ARM else ()))
+        for key in keys:
+            if (refusal := self.refused.get(key)) is not None:
                 raise refusal.with_traceback(None)
 
 
@@ -333,8 +333,9 @@ def _fresh[F](make: Callable[[], F], seed: F | None) -> F:
 
 def _fold_lines(ledger: Path, feeder: _Feeder, until: int | None) -> None:
     try:
-        for offset, raw in enumerate(islice(_complete_lines(ledger, 0), until)):
-            feeder.line(offset, raw)
+        with open(ledger, "rb") as fh:
+            for offset, raw in enumerate(islice(complete_lines(fh), until)):
+                feeder.line(offset, raw)
     except FileNotFoundError:
         return
 
@@ -346,7 +347,7 @@ def folded[F: LedgerFold[Any, Any]](
     made = _fresh(fold, seed)
     feeder = _Feeder(ledger, {fold: made})
     _fold_lines(ledger, feeder, until)
-    feeder.vouch(made)
+    feeder.vouch(fold)
     return made
 
 
@@ -388,9 +389,8 @@ class LedgerIndex(_LedgerTail):
         with self._lock:
             self._open(fold, seed)
             if until is None or until >= self._lines:
-                held = self._feeder.folds[fold]
-                self._feeder.vouch(held)
-                return cast("LedgerFold[Any, V]", held).value()
+                self._feeder.vouch(fold)
+                return cast("LedgerFold[Any, V]", self._feeder.folds[fold]).value()
             return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
 
     def prefix[F: LedgerFold[Any, Any]](
@@ -480,10 +480,13 @@ class LineIndex(_LedgerTail):
         except LedgerUnreadableError as refusal:
             self._refused = self._refused or refusal
             return
-        if line is None:
+        if line is None or self._refused is not None:
             return
-        for fold in self._folds.values():
-            feed_fold(fold, line, ledger=self._path, offset=self._lines)
+        try:
+            for fold in self._folds.values():
+                feed_fold(fold, line, ledger=self._path, offset=self._lines)
+        except LedgerUnreadableError as refusal:
+            self._refused = refusal
 
 
 class _Clock:

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import parent_grades
 from promptpotter.application.intelligence.hard_sample_sorter import (
@@ -30,6 +29,7 @@ from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.run_records import RaceStandingRecord
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
@@ -44,7 +44,7 @@ from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     sibling_kind,
 )
-from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 from promptpotter.infrastructure.tracing.mlflow_server import register_export
 from promptpotter.shared.errors import graceful
 
@@ -80,22 +80,20 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
         )
 
 
-def _load_p_best_trajectory(
-    streams_dir: Path | None, round_num: int
-) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """One stream line is ONE candidate's reading (``current_id``), never fanned across its map."""
-    if streams_dir is None:
-        return {}, {}
-    trajectory: dict[str, list[float]] = {}
-    last_seen: dict[str, int] = {}
-    streams = sorted(streams_dir.glob(f"round_{round_num:04d}_*.jsonl"))
-    for rec in (rec for stream in streams for rec in iter_jsonl(stream)):
-        cid = str(rec.get("current_id") or "")
-        if not cid:
-            continue
-        trajectory.setdefault(cid, []).append(float(rec["p_best"]))
-        last_seen[cid] = int(rec.get("sample_idx", -1))
-    return trajectory, last_seen
+class _PBestTrajectories:
+    """One standing is ONE candidate's reading (``current``), never fanned across its map."""
+
+    records: ClassVar[RecordClasses] = (RaceStandingRecord,)
+
+    def __init__(self) -> None:
+        self._by_round: dict[int, dict[str, list[float]]] = {}
+
+    def feed(self, record: RaceStandingRecord) -> None:
+        held = self._by_round.setdefault(record.round, {})
+        held.setdefault(record.current, []).append(record.p_best)
+
+    def value(self) -> dict[int, dict[str, list[float]]]:
+        return self._by_round
 
 
 def _sample_queries(rounds: list[RoundResult]) -> dict[str, str]:
@@ -115,7 +113,7 @@ def from_disk_log(
     spent: LedgerSpend,
     level_series: LevelSeries | None,
     hard_samples: HardSamples | None = None,
-    streams_dir: Path | None = None,
+    p_best: dict[int, dict[str, list[float]]] | None = None,
     fork_indices: Sequence[CycleIndex] = (),
     hard_sample_order: HardSampleOrder = "info_gain",
 ) -> LogMdView:
@@ -134,7 +132,7 @@ def from_disk_log(
 
     round_views: list[RoundDigestView] = []
     for t in rounds:
-        traj, _ = _load_p_best_trajectory(streams_dir, t.round)
+        traj = {} if p_best is None else p_best.get(t.round, {})
         head, fold, election = t.head, t.fold, t.election
         selected = None if election is None else election.selected
         fit = None if selected is None else t.fit(selected)
@@ -210,6 +208,11 @@ def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:
     return scan_ledger_spend_by_round(ledger_chain(CycleDir(layout.cycle_dir), moment=None))
 
 
+def _p_best(layout: CycleLayout) -> dict[int, dict[str, list[float]]]:
+    """The cycle's own standings: a fork's prefix is its parent's to report."""
+    return LedgerIndex.of(layout.ledger, ()).view(_PBestTrajectories)
+
+
 def _spent(layout: CycleLayout) -> LedgerSpend:
     return scan_ledger_spend(ledger_chain(CycleDir(layout.cycle_dir), moment=None))
 
@@ -227,7 +230,7 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             rounds,
             hop=hop,
             hard_samples=read_hard_samples(layout.hard_samples),
-            streams_dir=layout.streams,
+            p_best=_p_best(layout),
             hard_sample_order=config.hard_sample_order,
             spend_by_round=_spend_by_round(layout),
             spent=_spent(layout),
@@ -252,7 +255,7 @@ def _render_campaign_log_md(session: Session) -> None:
             index,
             _banked_rounds(session, root),
             hop=root,
-            streams_dir=root_layout.streams,
+            p_best=_p_best(root_layout),
             fork_indices=_load_sibling_indices(store, campaign_id, exclude=root.cycle_id),
             spend_by_round=_spend_by_round(root_layout),
             spent=_spent(root_layout),

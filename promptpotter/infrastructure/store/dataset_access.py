@@ -6,9 +6,10 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
+from pydantic import Field, TypeAdapter
 
 from promptpotter import connectors
 from promptpotter.connectors.protocol import Connector
@@ -16,8 +17,8 @@ from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.io import parse_yaml, read_bytes_optional, read_yaml_optional
-from promptpotter.infrastructure.store.read_model import file_sig
+from promptpotter.infrastructure.store.io import parse_yaml, read_bytes_optional
+from promptpotter.infrastructure.store.read_model import file_sig, read_file
 from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -30,6 +31,10 @@ FRAMING_FILE = "task.md"
 ORIGIN_FILE = "origin.yaml"
 README_FILE = "README.md"
 MATERIALIZED_PANEL_FILE = "panel.yaml"
+# A connector panel a source recipe materialized: the experiment the connector resolves.
+MATERIALIZED_PANEL: TypeAdapter[dict[str, Any]] = TypeAdapter(
+    Annotated[dict[str, Any], Field(min_length=1)]
+)
 
 DatasetTier = Literal["yours", "install"]
 
@@ -330,13 +335,12 @@ class PanelRead:
 
 def _declared_panel(stores: Stores, dataset: ResolvedDataset) -> PanelRead | None:
     materialized = stores.tenant_datasets.materialized_panel_dir(dataset.name)
-    if (materialized / MATERIALIZED_PANEL_FILE).is_file():
-        data = read_yaml_optional(materialized / MATERIALIZED_PANEL_FILE)
-        if not isinstance(data, dict) or not data:
-            raise ValueError(
-                f"{materialized / MATERIALIZED_PANEL_FILE} must be a non-empty mapping."
-            )
-        return PanelRead(data, materialized)
+    held = read_file(
+        materialized / MATERIALIZED_PANEL_FILE,
+        lambda raw: MATERIALIZED_PANEL.validate_python(parse_yaml(raw)),
+    )
+    if held is not None:
+        return PanelRead(held, materialized)
     definition = read_dataset_definition(dataset.directory)
     if definition is None or definition.panel is None or definition.panel_dir is None:
         return None

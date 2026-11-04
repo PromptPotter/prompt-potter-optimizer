@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, assert_never
+from dataclasses import dataclass, field, fields, replace
+from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors
 from promptpotter.application.scoring.formula.compiler import (
@@ -12,6 +12,7 @@ from promptpotter.application.scoring.formula.compiler import (
     split_scoring_block,
 )
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftBasis, DraftFile, UploadBasis
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -38,45 +39,6 @@ def _default_optimization_overrides() -> dict[str, Any]:
 
 def closed_answer_format(labels: tuple[str, ...]) -> str:
     return "Choose exactly one of these labels: " + " | ".join(labels)
-
-
-@dataclass(frozen=True, slots=True)
-class UploadBasis:
-    """An uploaded table, run on the connector the operator picked."""
-
-    connector: str
-    # The kept file's name under `TenantDatasetStore.upload_path`.
-    kept: str
-
-
-@dataclass(frozen=True, slots=True)
-class DatasetBasis:
-    """A committed dataset, run on the backend its definition names."""
-
-    dataset: str
-
-
-type DraftBasis = UploadBasis | DatasetBasis
-
-
-def basis_json(basis: DraftBasis) -> dict[str, str]:
-    match basis:
-        case UploadBasis(connector=connector, kept=kept):
-            return {"kind": "upload", "connector": connector, "kept": kept}
-        case DatasetBasis(dataset=dataset):
-            return {"kind": "dataset", "dataset": dataset}
-        case _:
-            assert_never(basis)
-
-
-def _basis_from_disk(data: dict[str, str]) -> DraftBasis:
-    match data["kind"]:
-        case "upload":
-            return UploadBasis(connector=data["connector"], kept=data["kept"])
-        case "dataset":
-            return DatasetBasis(dataset=data["dataset"])
-        case kind:
-            raise ValueError(f"draft basis kind {kind!r} is neither 'upload' nor 'dataset'")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,68 +75,14 @@ class DraftCampaign:
     # A resolver turn has run on it: an edit keeps it, so a reopen reviews, never re-resolves.
     resolver_ran: bool = False
 
-    def to_disk(self) -> dict[str, Any]:
-        return {
-            "owner_user_id": self.owner_user_id,
-            "slug": self.slug,
-            "n_samples": self.n_samples,
-            "sample_preview": [dict(row) for row in self.sample_preview],
-            "basis": basis_json(self.basis),
-            "scoring_matcher": self.scoring_matcher,
-            "scoring_dials": self.scoring_dials,
-            "raw_task_description": self.raw_task_description,
-            "pipeline_overlay": dict(self.pipeline_overlay),
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "headers": list(self.headers),
-            "column_query": self.column_query,
-            "column_ground_truth": self.column_ground_truth,
-            "column_label_sets": {k: list(v) for k, v in self.column_label_sets.items()},
-            "first_blank_row": dict(self.first_blank_row),
-            "field_provenance": {k: v.value for k, v in self.field_provenance.items()},
-            "source_file": self.source_file,
-            "origin_prompts": {node: dict(f) for node, f in self.origin_prompts.items()},
-            "decomposed_task_context": dict(self.decomposed_task_context),
-            "pipeline_steps": list(self.pipeline_steps),
-            "optimization_overrides": dict(self.optimization_overrides),
-            "candidate_library": list(self.candidate_library),
-            "reused_origin_id": self.reused_origin_id,
-            "resolver_ran": self.resolver_ran,
-        }
+    def to_disk(self) -> DraftFile:
+        return DraftFile.model_validate(
+            {name: getattr(self, name) for name in DraftFile.model_fields}
+        )
 
     @classmethod
-    def from_disk(
-        cls, data: dict[str, Any], *, draft_id: str, tenant_id: TenantId
-    ) -> DraftCampaign:
-        return cls(
-            draft_id=draft_id,
-            tenant_id=tenant_id,
-            owner_user_id=data["owner_user_id"],
-            slug=data["slug"],
-            n_samples=data["n_samples"],
-            sample_preview=tuple(dict(row) for row in data["sample_preview"]),
-            basis=_basis_from_disk(data["basis"]),
-            scoring_matcher=data["scoring_matcher"],
-            scoring_dials=data["scoring_dials"],
-            raw_task_description=data["raw_task_description"],
-            pipeline_overlay=dict(data["pipeline_overlay"]),
-            created_at=data["created_at"],
-            updated_at=data["updated_at"],
-            headers=tuple(data["headers"]),
-            column_query=data["column_query"],
-            column_ground_truth=data["column_ground_truth"],
-            column_label_sets={k: tuple(v) for k, v in data["column_label_sets"].items()},
-            first_blank_row=dict(data["first_blank_row"]),
-            field_provenance={k: Provenance(v) for k, v in data["field_provenance"].items()},
-            source_file=data["source_file"],
-            origin_prompts={node: dict(f) for node, f in data["origin_prompts"].items()},
-            decomposed_task_context=dict(data["decomposed_task_context"]),
-            pipeline_steps=list(data["pipeline_steps"]),
-            optimization_overrides=dict(data["optimization_overrides"]),
-            candidate_library=tuple(data["candidate_library"]),
-            reused_origin_id=data["reused_origin_id"],
-            resolver_ran=data["resolver_ran"],
-        )
+    def from_disk(cls, file: DraftFile, *, draft_id: str, tenant_id: TenantId) -> DraftCampaign:
+        return cls(draft_id=draft_id, tenant_id=tenant_id, **dict(file))
 
     @property
     def dataset_name(self) -> str:
@@ -258,6 +166,11 @@ class DraftCampaign:
         return self.patch(field_provenance=merged, **(values or {}))
 
 
+assert {f.name for f in fields(DraftCampaign)} - {"draft_id", "tenant_id"} == set(
+    DraftFile.model_fields
+), "a DraftCampaign field draft.json does not hold, or one it holds no field reads"
+
+
 def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
     """No narrowing: ``optimizer_narrowing`` holds it."""
     declared = {
@@ -278,8 +191,7 @@ def owned_drafts(stores: Stores) -> list[DraftCampaign]:
     return [
         DraftCampaign.from_disk(data, draft_id=draft_id, tenant_id=stores.identity.tenant_id)
         for draft_id in stores.drafts.draft_ids()
-        if (data := stores.drafts.read_draft(draft_id)) is not None
-        and data["owner_user_id"] == user
+        if (data := stores.drafts.read_draft(draft_id)) is not None and data.owner_user_id == user
     ]
 
 

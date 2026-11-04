@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import NamedTuple
-
 from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
@@ -17,24 +15,14 @@ from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 
-class ActivePointer(NamedTuple):
-    """Every field ``None`` where nothing was launched or the workspace was cleared — a steady state."""
-
-    campaign_id: str | None
-    cycle_id: str | None
-
-
-def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> ActivePointer:
-    """Liveness is the entry's ``run_phase``; a pointer outliving its cycle dir names nothing."""
+def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
+    """``None`` where nothing was launched or the workspace was cleared — a steady state. Liveness is
+    the entry's ``run_phase``; a pointer outliving its cycle dir names nothing."""
     stores = descend_store(stores, inside)
-    campaign_id, cycle_id = read_active_pointer(stores.base_dir)
-    if not campaign_id or not cycle_id:
-        return ActivePointer(None, None)
-    if not stores.campaigns.cycle_dir(
-        CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-    ).is_dir():
-        return ActivePointer(None, None)
-    return ActivePointer(campaign_id, cycle_id)
+    hop = read_active_pointer(stores.base_dir)
+    if hop is None or not stores.campaigns.cycle_dir(hop).is_dir():
+        return None
+    return hop
 
 
 class ActiveSessionResponse(StrictModel):
@@ -52,9 +40,11 @@ class ActiveSessionResponse(StrictModel):
 
 
 def active_session(stores: Stores) -> ActiveSessionResponse:
-    pointer = active_pointer(stores)
+    hop = active_pointer(stores)
     return ActiveSessionResponse(
-        tenant_id=stores.tenant_id, campaign_id=pointer.campaign_id, cycle_id=pointer.cycle_id
+        tenant_id=stores.tenant_id,
+        campaign_id=None if hop is None else hop.campaign_id,
+        cycle_id=None if hop is None else hop.cycle_id,
     )
 
 

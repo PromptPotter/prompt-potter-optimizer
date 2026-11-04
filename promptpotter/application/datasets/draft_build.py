@@ -8,15 +8,12 @@ from pydantic import Field
 from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
-    UploadBasis,
     default_campaign_config,
     owned_draft,
 )
 from promptpotter.application.datasets.origin_readiness import (
     SETUP_STEP_TITLES,
     OriginReadiness,
-    OriginResolution,
-    SetupStep,
     load_resolution,
     origin_readiness,
 )
@@ -37,6 +34,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.pipeline_responses import OptimizerSetup
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.checkin_draft import OriginResolution, SetupStep, UploadBasis
 from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.phases import LaunchStage

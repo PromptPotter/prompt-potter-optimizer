@@ -333,7 +333,7 @@ class ManifestUnreadableError(ConflictError):
     def __init__(self, *, path: str, reason: str) -> None:
         super().__init__(
             f"{path} was written in a shape this build does not read ({reason}). No migration "
-            "exists: delete that campaign, or wipe the store.",
+            "exists: `python -m promptpotter reset` wipes it with the rest of the run data.",
             details={"path": path, "reason": reason},
         )
 
@@ -347,6 +347,18 @@ class JobUnreadableError(ConflictError):
         super().__init__(
             f"{path} was written in a shape this build does not read ({reason}). No migration "
             "exists: delete it once no run it names is live.",
+            details={"path": path, "reason": reason},
+        )
+
+
+class FileUnreadableError(ConflictError):
+    """A store file that is not a ledger, refused by name: no reader yields its bytes as a dict or reads past them."""
+
+    code = "file_unreadable"
+
+    def __init__(self, *, path: str, reason: str) -> None:
+        super().__init__(
+            f"{path} is unreadable by this build ({reason}). No reader repairs it.",
             details={"path": path, "reason": reason},
         )
 

@@ -21,11 +21,11 @@ logger = logging.getLogger("promptpotter.presentation.cli.bench")
 
 async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     store = open_stores(args)
-    campaign_id = (
-        resolve_campaign_id_hint(store, args.campaign)
-        if args.campaign
-        else active_pointer(store).campaign_id
-    )
+    if args.campaign:
+        campaign_id: str | None = resolve_campaign_id_hint(store, args.campaign)
+    else:
+        active = active_pointer(store)
+        campaign_id = None if active is None else active.campaign_id
     if not campaign_id:
         raise NotFoundError("No active campaign to bench — name one with --campaign.")
     campaign = store.campaigns.load_campaign(campaign_id)

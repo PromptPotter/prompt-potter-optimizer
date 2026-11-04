@@ -9,20 +9,25 @@ from bisect import bisect_left
 from collections import deque
 from functools import partial
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import ClassVar, NamedTuple
 
 from promptpotter.domain import activity
 from promptpotter.domain.activity import ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path, step_address
 from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
 from promptpotter.domain.projection_envelope import bearing_record
-from promptpotter.domain.run_records import RECORD_ADAPTER, RECORD_KINDS, LLMCallProgressRecord
+from promptpotter.domain.run_records import RECORD_KINDS, CycleRecord, LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     course_validator_ns,
     cycle_dir_for,
 )
 from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
-from promptpotter.infrastructure.store.read_model import LineIndex
+from promptpotter.infrastructure.store.read_model import (
+    EVERY_ARM,
+    LedgerIndex,
+    RecordClasses,
+    folded,
+)
 from promptpotter.shared.clock import epoch_seconds
 
 # `encoded_path`, not the walk's rank: a rank is request-relative, so cursors would not compare.
@@ -56,6 +61,10 @@ class _Tail(NamedTuple):
 
 
 class _RayTail:
+    """Every arm, so every line is validated before it is fed, and one no arm names refuses the ray."""
+
+    records: ClassVar[RecordClasses] = EVERY_ARM
+
     def __init__(
         self, limit: int = MAX_STEP_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None
     ) -> None:
@@ -71,19 +80,18 @@ class _RayTail:
         self._last_ts = ""
         self._heard: float | None = None
 
-    def feed(self, line: dict[str, Any]) -> None:
+    def feed(self, whole: CycleRecord) -> None:
         offset = self.at_offset
-        whole = RECORD_ADAPTER.validate_python(line)
         kind = whole.record_type
         record = bearing_record(whole)
         item = None if record is None else self._feed.read(offset, record)
-        own = epoch_seconds(line.get("timestamp"))
+        own = epoch_seconds(whole.timestamp)
         if own is None or (self._last_epoch is not None and own < self._last_epoch):
             if self._last_epoch is None:
                 # A fabricated epoch would sort below every outstanding cursor and mutate served windows.
                 return
         else:
-            self._last_epoch, self._last_ts = own, str(line.get("timestamp"))
+            self._last_epoch, self._last_ts = own, whole.timestamp
         if item is None:
             # A bare heartbeat takes no slot of a window; it only ends a silence.
             if isinstance(record, LLMCallProgressRecord):
@@ -107,19 +115,16 @@ class _RayTail:
         )
 
 
-_RAY_FOLDS = (_RayTail,)
-
-
 def _read_curated(
     ledger: Path, *, encoded_path: str, depth: int, keep: int, bound: RayCursor | None
 ) -> tuple[list[_Raw], bool]:
-    tail = LineIndex.of(ledger, _RAY_FOLDS).view(_RayTail)[min(depth, 1)]
+    tail = LedgerIndex.of(ledger, ()).view(_RayTail)[min(depth, 1)]
     if bound is not None:
         below = [r for r in tail.rows if (r.epoch, encoded_path, r.offset) < bound]
         if len(below) < keep and tail.total > len(tail.rows):
             window = partial(_RayTail, keep, (encoded_path, bound))
-            older_tail = LineIndex(ledger, (window,)).view(_RayTail)[min(depth, 1)]
-            return older_tail.rows, older_tail.total > keep
+            deeper = folded(ledger, window, seed=None, until=None).value()[min(depth, 1)]
+            return deeper.rows, deeper.total > keep
         older = tail.total - len(tail.rows) + len(below)
         return below[-keep:], older > keep
     return tail.rows[-keep:], tail.total > keep

@@ -38,7 +38,6 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
 )
 from promptpotter.infrastructure.runtime_flags import (
-    armed_run_limits,
     derive_run_state,
     effective_lookahead,
     requested_lookahead,
@@ -387,7 +386,7 @@ def _binding(
         declared = declared.model_copy(
             update={"budget": next_launch_budget(config, stores=stores, hop=hop)}
         )
-    return armed_run_limits(cycle_dir_for(stores.base_dir, hop), declared)
+    return stores.campaigns.armed_run_limits(hop, declared)
 
 
 def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:

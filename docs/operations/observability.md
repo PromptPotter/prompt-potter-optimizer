@@ -16,7 +16,7 @@ An eliminator emits a `race_standing` per candidate naming its manifest `member`
 |---|---|
 | Live dashboard | `dashboard.json::current_round.racing` — top-5, leader first |
 | Run readout | `readout.log` (and stdout for the CLI or a `readout_sink`) — one line per decision-grade reading |
-| Append-only stream | `.runtime/streams/round_NNNN_{member}.jsonl` — canonical replay |
+| Canonical replay | the ledger's `RaceStandingRecord`s |
 | Round digest | `log.md` § P(best) trajectory — derived sparkline |
 
 ## Langfuse

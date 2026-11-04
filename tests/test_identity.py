@@ -51,7 +51,7 @@ from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.datasets import ingest, loaders, tabular_ingest
-from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft, owned_draft
+from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
@@ -138,6 +138,7 @@ from promptpotter.domain.campaign_config import (
     effective_config,
 )
 from promptpotter.domain.cells import Seat
+from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     ForkSeed,
@@ -891,7 +892,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="ds",
-        basis=DatasetBasis("ds"),
+        basis=DatasetBasis(dataset="ds"),
         n_samples=1,
         sample_preview=[],
         headers=[],
@@ -934,7 +935,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="d",
-        basis=DatasetBasis("d"),
+        basis=DatasetBasis(dataset="d"),
         n_samples=1,
         sample_preview=[],
         headers=[],

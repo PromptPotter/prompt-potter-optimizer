@@ -126,10 +126,6 @@ next run-data reshape.
   when absent (a failed write served as "no scale") and with no `at` (a replay page orders by today's
   file); the dataset scope derives its view instead (`_dataset_view`). Action: the cycle view derives
   from the fold. **Re-test:** `git grep -n "read_hard_samples(" -- promptpotter`.
-- **`projections/racing_stream.py::RacingStreamProjection` copies `RaceStandingRecord` into per-round
-  JSONL and swallows `OSError`**; its one reader (`output.py::_load_p_best_trajectory`) walks the copy
-  as dicts. Action: the log folds the ledger records; delete the projection and its `data_root.py` row.
-  **Re-test:** `git grep -n "RacingStreamProjection" -- promptpotter`.
 - **A running verification is orphaned at two seams** (`live_dashboard/projection.py::_handle_run_wiring`,
   `served_dashboard.py::_serve`) and `orphaned=` computed a third way in `_serve`; `_round_axis` and
   `_walk` each re-decide whether `current_round` closed, by different predicates. Action: derive it
@@ -486,38 +482,28 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
 - **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
   session. **Rides with:** that session landing.
-- **A file's identity is tested twice, by two rules**: `store/read_model.py::_LedgerTail._holds_last`
-  re-reads the last fed line, while `store/io.py::_swap` trusts `_FileMark.inode`. An inode
-  outlives its file, so a delete and re-mint between `_read_marked` and the swap passes that test,
-  and the rewrite keeps the new file's bytes past `mark.end` as a tail. Action: one identity check
-  in `io.py`, read by both. **Re-test:** `git grep -n "st_ino" -- promptpotter/infrastructure/store`.
 - **A landing waits on every live producer on another commit, whether or not the ledger shape
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
-- **Run files read as dicts have no shape row**: `data_root.py::KINDS` proves `draft.json`,
-  `resolution.json`, `active_session.json`, `rounds/round_*.json`, `dashboard.json`, `index.json`,
-  `diagnostics/`, `banks/cuts.jsonl`, `rates.json`, the langfuse mirror and the account's
-  `model_capabilities.yaml` by presence alone, because their readers walk `dict`s
-  (`read_json_optional`, `read_json_tolerant`, `read_yaml_optional`, `fold_jsonl`). A reshape there
-  passes `land-data` and is read around. Action: a model per file, its reader's, then its row's
-  shape. **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
-- **`iter_jsonl` reads past a line it cannot decode** (`store/read_model.py`), and `fold_jsonl`,
-  the bank labels and cuts with it, so a torn or reshaped line is silently absent. Action: the
-  complete-line rule and a refusal, as `ledger_record`. **Re-test:** `git grep -n "except json.JSONDecodeError" -- promptpotter/infrastructure/store/read_model.py`.
-- **`CycleEventLog.__init__` counts an unterminated last line as an offset** (`infrastructure/ledger.py`)
-  where `iter` and every tail skip it, so a torn tail shifts the next append's offset by one against
-  a refold. Action: count through `io.py::complete_lines` and decide what an append does past a torn
-  tail. **Re-test:** `git grep -n "for line in fh" -- promptpotter/infrastructure/ledger.py`.
-- **`_Billed` is `_Cost` with a flag flipped** (`store/account_spend.py::_Cost.counts_mirrored`): a
-  flag keeping a bank's spend and a campaign's cost apart over one fold of the same lines. Action:
-  one fold whose value carries both sums, read by `billed_spend` and `ledger_cost`. **Re-test:** `git grep -n "counts_mirrored" -- promptpotter`.
+- **Run files read as dicts outside `store/` have no shape row**: `data_root.py::KINDS` proves
+  `rounds/round_*.json`, the `diagnostics/` sidecar, `rates.json` (`llm/pricing.py`), the langfuse
+  mirror (`tracing/langfuse_sink.py`) and both model-capability files (`llm/capabilities.py`) by
+  presence alone, because their readers walk `dict`s. A reshape there passes `land-data` and is read
+  around. Action: each reader takes its model through `store/read_model.py::read_file`, its row that
+  model's `TypeAdapter`. **Rides with:** § The engine swept by shape B for `evidence/read.py` (its
+  `campaign.json` reads, already an entry there), D for the three `llm/` and `tracing/` readers.
+  **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
+- **`draft_campaign.py::DraftCampaign` is a dataclass twin of `domain/checkin_draft.py::DraftFile`**
+  plus its address, held equal by an import-time assert. Action: one frozen model that `draft.json`
+  holds, the address beside it. **Re-test:** `git grep -n "class DraftCampaign" -- promptpotter`.
+- **`cycle_addressing.py::ActiveSessionResponse` serves two nullable ids for `CycleHop | None`**, so
+  the webapp re-tests a pair. Action: one nullable `hop`. **Rides with:** the next webapp pass.
+  **Re-test:** `git grep -n "class ActiveSessionResponse" -A4 -- promptpotter`.
 - **A ledger subscriber that raises after `Admission._write` lands a charge leaves it in `_unlanded`**
   (`llm/spend_book.py`), so the book counts that part twice until the run ends — conservative, never
   under. Action: the record lands before any subscriber runs. **Re-test:** the outlives journey in
   `tests/test_spend.py` with a raising projection.
-- **`CampaignOwner` reads `campaign.json` beside `Campaign`** (`campaign_store/store.py::campaign_owner`),
-  a second, tolerant model of one file. Action: one model. **Re-test:** `git grep -n "CampaignOwner" -- promptpotter`.
 - **Writers with no reader**: `dashboard.json` and `index.json` (checkouts nothing reads back), and
   `identity/blocklist_audit.jsonl` and `grants_audit.jsonl`. Action: decide whether each earns a
   reader or goes. **Re-test:** `git grep -n "blocklist_audit" -- promptpotter`.
@@ -527,12 +513,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 - **A deleted fork takes its `LeftComparisonRecord` with it**, so its arm reads `controlled` again
   while the fork's spend stays banked. Action: the exit outlives the fork. **Re-test:** delete a
   fork off an arm, then read the arm's `evidence`.
-- **A campaign's root is found two ways**: `ledger_scan.py::scan_campaign_ceiling` parses the
-  directory name (`store/layout.py::root_cycle_id`) where its writer takes `Campaign.root_hop`. Action:
-  the reader takes the root hop. **Re-test:** `git grep -n "root_cycle_id(" -- promptpotter`.
-- **A fold that raises is logged and folded past** (`store/read_model.py::feed_fold`), so a read
-  serves a value missing that line. Action: refuse as `ledger_record` does. **Re-test:**
-  `git grep -n "logger.exception" -- promptpotter/infrastructure/store/read_model.py`.
 - **An unparseable job file is logged and skipped** (`jobs/registry.py::JobRegistry.list_all`), so
   occupancy undercounts a live slot; a parseable one that fails validation raises
   `JobUnreadableError`. Action: one refusal for both. **Re-test:** `git grep -n "logger" -- promptpotter/application/jobs/registry.py`.
@@ -924,7 +904,7 @@ word's `git grep -c` for that sense is 0.
     per column, on one IntersectionObserver, stops them and keeps their state. The fork: a column
     swiped into is blank until its reads land.
   - **Run data past `MAX_PATH` is read only where `store/io.py` reads it**: `io.py` writes through
-    `_long_path`, but `store/read_model.py::file_sig`, `_complete_lines` and `_LedgerTail._holds_last`
+    `_long_path`, but `store/read_model.py::file_sig` and `store/io.py::complete_lines` / `holds_mark`
     (among many: `grep -rnE "\.stat\(\)|[^_.a-z]open\(" promptpotter`) read bare, so a ledger past 260
     characters reads as absent and a deep L4 store lists no course. This desk has long paths off. Root:
     spell the data root once in its long form (`config/paths.py`) so every derived path carries it;
@@ -1038,9 +1018,6 @@ word's `git grep -c` for that sense is 0.
 - **Seen removing the migrations** (2026-10-30):
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
-  - `family_ray_queries.py::_RayTail` gets a line no activity arm accepts as a `feed_fold` log, not a
-    `LedgerUnreadableError`: `LineIndex` validates JSON only. Both tails skip an unknown
-    `record_type` silently.
 
 ## Bypasses — held for one holistic pass
 

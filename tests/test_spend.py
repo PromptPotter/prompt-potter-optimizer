@@ -66,7 +66,7 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft
+from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
@@ -152,6 +152,7 @@ from promptpotter.domain.campaign_config import (
     merge_config_layers,
 )
 from promptpotter.domain.cells import PinnedCell
+from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     ChangeRunLimitsPayload,
@@ -263,11 +264,11 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
-from promptpotter.infrastructure.store.io import write_jsonl, write_yaml
+from promptpotter.infrastructure.store.io import read_lines, write_jsonl, write_yaml
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
-from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
@@ -1315,7 +1316,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         return spend.total_used_usd, calls, None if seeded is None else seeded.seed
 
     def cold() -> tuple[float, int, CycleSeed | None]:
-        rows = iter_jsonl(index.path)
+        rows = [json.loads(line) for line in read_lines(index.path)]
         bills = [row["cost_usd"] for row in rows if row["record_type"] == "token_usage"]
         seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_seed"]
         seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
@@ -1331,7 +1332,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert {r: spent.total_used_usd for r, spent in by_round.items()} == {0: 3.0, 2: 2.0}, (
         "the per-round split is the same bill: a call that carries no round banks at the origin's"
     )
-    write_jsonl(index.path, iter_jsonl(index.path)[:2])
+    write_jsonl(index.path, [json.loads(line) for line in read_lines(index.path)[:2]])
     assert tailed() == cold() == (2.0, 2, None), (
         "a compaction swaps the file for a shorter one; the index kept its old rows"
     )
@@ -3593,7 +3594,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug="drafted",
-        basis=DatasetBasis("drafted"),
+        basis=DatasetBasis(dataset="drafted"),
         n_samples=1,
         sample_preview=[],
         headers=[],

@@ -411,6 +411,13 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert landed == [(w, n) for w in range(4) for n in range(50)], (
         "a concurrent append overwrote another writer's row"
     )
+    # A writer that died mid-append leaves a torn last line: the next append cuts it and lands whole.
+    with cells.open("ab") as torn:
+        torn.write(b'{"sample_key": "k_torn", "predi')
+    _bank(9)
+    assert set(own.advance()) == {"k9"}, "an answer filed past a crashed append was lost"
+    assert cells.read_bytes().endswith(b"}\n"), "the torn bytes merged into the next answer"
+    assert archive.detail_lines(file_key), "the cell file stopped reading after a crash"
 
     # Compaction round-trips every field it moved; TWO filings, so a restore clears each stamp.
     compacted: Configs = [("llm_only", {"model": "C"})]

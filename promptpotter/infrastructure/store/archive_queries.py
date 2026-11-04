@@ -13,7 +13,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, standing
-from promptpotter.infrastructure.store.read_model import LedgerSpan, read_jsonl_from
+from promptpotter.infrastructure.store.read_model import LedgerSpan, read_rows
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -161,7 +161,7 @@ class SampleFoldRow(FrozenModel):
 
 
 def read_sample_fold(path: Path) -> list[SampleFoldRow]:
-    return read_jsonl_from(path, SampleFoldRow.model_validate_json, 0)[0]
+    return read_rows(path, SampleFoldRow.model_validate_json)
 
 
 def sample_fold_rows(stores: Stores, *, dataset_hash: str) -> list[SampleFoldRow]:

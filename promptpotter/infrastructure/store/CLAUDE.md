@@ -2,7 +2,7 @@
 
 ## Stores
 
-- **A new content-addressed cache joins `config/paths.py::SHARED_CACHE_DIRS`** (an L4 inner sandbox isolates campaign state, never a content-keyed cache); a new file joins `data_root.py::KINDS` as one row ([decisions](../../../docs/decisions.md) § 0011).
+- **A new content-addressed cache joins `config/paths.py::SHARED_CACHE_DIRS`** (an L4 inner sandbox isolates campaign state, never a content-keyed cache); a new file joins `data_root.py::KINDS` as one row, its shape its reader's own model ([decisions](../../../docs/decisions.md) § 0011).
 - **`optimizer_reuse` and `judge_reuse` are separate `LLMReuseCache` instances** — a grader reading the loop's cached answers would be a ruler fed by what it measures.
 - **`store/__init__.py` re-exports nothing** — import each leaf, or a leaf import cycles back through `ledger`. <!-- probe: git grep -cE "^(from|import) " -- promptpotter/infrastructure/store/__init__.py == 0 -->
 - **JSON for what code writes, YAML for the operator-authored tier; there is no tolerant YAML reader.** <!-- probe: git grep -cE "read_yaml_tolerant" -- promptpotter/*.py == 0 -->

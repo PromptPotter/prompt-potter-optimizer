@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -70,13 +71,14 @@ class CycleEventLog:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._subscribers: list[Projection] = []
+        # Complete lines alone, as every reader counts them: a torn tail is no offset, and the next
+        # append cuts it away before it lands (`io.py::append_line`).
         self._next_offset = 0
         self._end = 0
-        if path.exists():
-            with path.open("rb") as fh:
-                for line in fh:
-                    self._next_offset += 1
-                    self._end += len(line)
+        with contextlib.suppress(FileNotFoundError), path.open("rb") as fh:
+            for line in complete_lines(fh):
+                self._next_offset += 1
+                self._end += len(line)
         self._inherit_parent: CycleEventLog | None = None
         self._inherit_offset: int = 0
 

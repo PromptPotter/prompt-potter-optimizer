@@ -20,10 +20,11 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
 from promptpotter.infrastructure.store.io import (
+    ABSENT,
+    FileMark,
     HeldLock,
     PairWrite,
     read_bytes_optional,
-    read_json_optional,
     read_lines,
     replace_lines,
     rewrite_pair,
@@ -34,7 +35,8 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.read_model import (
     append_row,
     file_sig,
-    read_jsonl_from,
+    read_file,
+    read_rows_past,
 )
 from promptpotter.shared.hashing import ADDRESS_HEX, CANONICAL_PIN, stable_hash
 
@@ -152,14 +154,6 @@ def index_row(line: str | bytes) -> tuple[str, ArchiveEntry]:
     return row[_INDEX_FOLD_KEY], entry
 
 
-def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
-    if cursor is None:
-        return 0
-    inode, offset = cursor
-    # The size test too: a rewrite swaps the file, and ext4 reuses a freed inode.
-    return offset if st.st_ino == inode and st.st_size >= offset else 0
-
-
 def answer_of(line: str | bytes) -> FiledAnswer:
     row = json.loads(line)
     if not isinstance(row, dict):
@@ -232,7 +226,7 @@ def cold_size(moved: Iterable[MovedFields]) -> int:
 
 class _CellFile:
     def __init__(self) -> None:
-        self._cursor: tuple[int, int] | None = None
+        self._mark = ABSENT
         self._stat: tuple[int, int] | None = None
         self._empty()
 
@@ -249,46 +243,39 @@ class _CellFile:
         try:
             st = path.stat()
         except FileNotFoundError:
-            self._cursor = self._stat = None
+            self._mark, self._stat = ABSENT, None
             self._empty()
             return
         sig = (st.st_mtime_ns, st.st_size)
         if sig == self._stat:
             return
-        start = _tail_from(st, self._cursor)
-        # The read returns the newline-aligned offset, so a torn trailing line stays pending.
-        read, offset = read_jsonl_from(path, answer_of, start)
-        fresh = {answer.answer: answer for answer in read}
-        if start == 0:
+        # Newline-aligned, so a torn trailing line stays pending.
+        read = read_rows_past(path, answer_of, self._mark)
+        fresh = {answer.answer: answer for answer in read.rows}
+        if read.whole:
             self._empty()
         self.rows.extend(fresh.values())
         self.by_id.update(fresh)
-        self._cursor = (st.st_ino, offset)
+        self._mark = read.mark
         self._stat = sig
 
     def append(self, path: Path, answers: list[FiledAnswer]) -> None:
         """Takes *answers* into the tail unread: on Windows, opening a just-appended file waits out a scan."""
         self.refresh(path)
-        held = 0 if self._cursor is None else self._cursor[1]
+        held = self._mark.end
         whole = self._stat is None or self._stat[1] == held
         rows = [answer.wire() for answer in answers]
         landed = append_row(path, *rows)
-        st = path.stat()
-        if not (
-            whole
-            and landed.start == held
-            and st.st_size == landed.stop
-            and _tail_from(st, self._cursor) == held
-        ):
+        if not (whole and landed.start == held):
             return
         # Through JSON, as a reader folds them: a tuple is a list on disk.
-        fresh = [
-            FiledAnswer.from_wire(json.loads(json.dumps(row, ensure_ascii=False))) for row in rows
-        ]
+        lines = [json.dumps(row, ensure_ascii=False) for row in rows]
+        fresh = [FiledAnswer.from_wire(json.loads(line)) for line in lines]
         self.rows.extend(fresh)
         self.by_id.update((answer.answer, answer) for answer in fresh)
-        self._cursor = (st.st_ino, st.st_size)
-        self._stat = (st.st_mtime_ns, st.st_size)
+        # The next refresh asks the mark's identity rule whether the file is still the one appended to.
+        self._mark = FileMark(landed.stop, self._mark.inode, (lines[-1] + "\n").encode("utf-8"))
+        self._stat = None
 
 
 class MeasurementArchive:
@@ -310,7 +297,7 @@ class MeasurementArchive:
         self._lock = threading.RLock()
         self._rows: dict[str, ArchiveEntry] | None = None
         self._stat: tuple[int, int] | None = None
-        self._cursor: tuple[int, int] | None = None
+        self._mark = ABSENT
         self._files: OrderedDict[str, _CellFile] = OrderedDict()
 
     @property
@@ -347,13 +334,12 @@ class MeasurementArchive:
         return self.path(ArchiveFile.CELLS, file_key)
 
     def config(self, key: str) -> ArchiveConfig | None:
-        raw = read_json_optional(self.path(ArchiveFile.CONFIG, key))
-        return None if raw is None else ArchiveConfig.model_validate(raw)
+        return read_file(self.path(ArchiveFile.CONFIG, key), ArchiveConfig.model_validate_json)
 
     def _invalidate(self) -> None:
         self._rows = None
         self._stat = None
-        self._cursor = None
+        self._mark = ABSENT
 
     def _live_rows(self) -> dict[str, ArchiveEntry]:
         """Every read stats the file: an in-process L4 inner cycle appends to the same dir."""
@@ -367,12 +353,11 @@ class MeasurementArchive:
             sig = (st.st_mtime_ns, st.st_size)
             if self._rows is not None and sig == self._stat:
                 return self._rows
-            start = 0 if self._rows is None else _tail_from(st, self._cursor)
-            read, offset = read_jsonl_from(path, index_row, start)
-            fresh = dict(read)
+            read = read_rows_past(path, index_row, ABSENT if self._rows is None else self._mark)
+            fresh = dict(read.rows)
             # A NEW dict per change: a reader still iterating the shared one must not see it grow.
-            self._rows = {**self._rows, **fresh} if start and self._rows is not None else fresh
-            self._cursor = (st.st_ino, offset)
+            self._rows = fresh if read.whole or self._rows is None else {**self._rows, **fresh}
+            self._mark = read.mark
             self._stat = sig
             return self._rows
 

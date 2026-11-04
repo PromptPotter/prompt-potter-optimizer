@@ -48,6 +48,7 @@ from starlette.types import Receive, Scope, Send
 from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import (
@@ -79,6 +80,7 @@ from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
+from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
     CancelQueuedRunPayload,
@@ -1216,7 +1218,16 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A reset's plan carries its refusal, so a dry run shows it: a draft a Start holds, or a cycle
     # its producer holds, refuses it whole.
-    built_stores.drafts.write_draft("held-draft", {})
+    held_draft = new_draft(
+        tenant_id=built_stores.tenant_id,
+        owner_user_id="u",
+        slug="held",
+        basis=DatasetBasis(dataset="held"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    built_stores.drafts.write_draft("held-draft", held_draft.to_disk())
     data_root = built_stores.projects_root.parent
     written = plan_landing(built_stores.projects_root, reset=False)
     assert not written.refused and not written.caches and not written.staged, (

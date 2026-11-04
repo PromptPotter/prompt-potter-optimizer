@@ -16,9 +16,6 @@ from promptpotter.application.bench.task_context import (
 from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import (
     ChecklistField,
-    OriginLastResolution,
-    OriginResolution,
-    RaisedCommand,
     checkin_questions,
     checklist_field,
     field_values,
@@ -26,6 +23,7 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.checkin_draft import OriginLastResolution, OriginResolution, RaisedCommand
 from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS

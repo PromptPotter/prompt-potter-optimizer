@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
-from promptpotter.shared.errors import LedgerUnreadableError, ManifestUnreadableError
+from promptpotter.shared.errors import (
+    FileUnreadableError,
+    LedgerUnreadableError,
+    ManifestUnreadableError,
+)
 
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
@@ -67,6 +71,12 @@ def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:
         return None
     try:
         return read()
-    except (OSError, ValueError, LedgerUnreadableError, ManifestUnreadableError) as exc:
+    except (
+        OSError,
+        ValueError,
+        LedgerUnreadableError,
+        ManifestUnreadableError,
+        FileUnreadableError,
+    ) as exc:
         logger.warning("heartbeat read unavailable — %s: %s", exc.__class__.__name__, exc)
         return None

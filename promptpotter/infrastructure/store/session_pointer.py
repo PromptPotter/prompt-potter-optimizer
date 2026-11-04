@@ -7,12 +7,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.store.io import (
-    read_json_tolerant,
-    validate_path_component,
-    write_json,
-)
+from promptpotter.infrastructure.store.io import validate_path_component, write_bytes
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.errors import LedgerUnreadableError
 
 if TYPE_CHECKING:
@@ -28,21 +25,15 @@ def active_pointer_path(workspace: WorkspaceDir) -> Path:
 def save_active_pointer(workspace: WorkspaceDir, hop: CycleHop) -> None:
     validate_path_component(hop.campaign_id)
     validate_path_component(hop.cycle_id)
-    write_json(
-        active_pointer_path(workspace),
-        {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id},
-    )
+    write_bytes(active_pointer_path(workspace), hop.model_dump_json().encode("utf-8"))
 
 
 def clear_active_pointer(workspace: WorkspaceDir) -> None:
     active_pointer_path(workspace).unlink(missing_ok=True)
 
 
-def read_active_pointer(workspace: WorkspaceDir) -> tuple[str, str]:
-    ptr = read_json_tolerant(active_pointer_path(workspace))
-    if not isinstance(ptr, dict):
-        return "", ""
-    return ptr.get("campaign_id", ""), ptr.get("cycle_id", "")
+def read_active_pointer(workspace: WorkspaceDir) -> CycleHop | None:
+    return read_file(active_pointer_path(workspace), CycleHop.model_validate_json)
 
 
 def active_pointer_exists(workspace: WorkspaceDir) -> bool:
@@ -53,7 +44,7 @@ def cleanup_stub_fork_if_empty(*, campaign_store: CampaignStore, hop: CycleHop) 
     """An active stub hands the pointer to the parent its mint names; one cut from another tree
     names no cycle here, so the pointer is cleared."""
     workspace = campaign_store.workspace
-    was_active = read_active_pointer(workspace) == (hop.campaign_id, hop.cycle_id)
+    was_active = read_active_pointer(workspace) == hop
     index = campaign_store.load(hop, moment=None)
     parent_cycle_id = None if index is None else index.parent_cycle_id
     if was_active:

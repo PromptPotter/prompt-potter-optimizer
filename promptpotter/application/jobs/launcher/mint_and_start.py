@@ -14,11 +14,7 @@ from promptpotter.application.datasets.draft_build import (
     default_campaign_block,
     draft_task_context,
 )
-from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    UploadBasis,
-    committed_pipeline_json,
-)
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, committed_pipeline_json
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
@@ -39,6 +35,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.checkin_draft import UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.spend import Budget

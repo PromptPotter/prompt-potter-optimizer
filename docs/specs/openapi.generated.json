@@ -12103,7 +12103,7 @@
       },
       "OriginResolution": {
         "additionalProperties": false,
-        "description": "The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the\ndraft's `readiness`, recomputed on every read.",
+        "description": "`resolution.json`: the last resolver turn; the mint gate is the draft's `readiness`,\nrecomputed on every read.",
         "properties": {
           "degraded_cause": {
             "anyOf": [

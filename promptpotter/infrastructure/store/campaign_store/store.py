@@ -7,13 +7,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, Unpack, get_args
 
-from pydantic import ValidationError
-
 from promptpotter.domain.bench import BenchScore, PartitionRecord
 from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
-    CampaignOwner,
     Compare,
     HeadToHeadRecord,
     LifecycleFilter,
@@ -23,6 +20,7 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
@@ -93,7 +91,6 @@ from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
     prune_empty_dirs,
-    read_json_optional,
     read_text_optional,
     rmtree_robust,
     unlink_robust,
@@ -111,7 +108,7 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandbox_key,
     root_cycle_id,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig, read_file
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_path,
     clear_active_pointer,
@@ -120,10 +117,9 @@ from promptpotter.infrastructure.store.session_pointer import (
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
-    ManifestUnreadableError,
+    FileUnreadableError,
     NotFoundError,
     graceful,
-    validation_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,25 +182,13 @@ class CampaignStore:
         write_cycle_index(cycle_dir)
         return offset
 
-    def _read_declared[M: (Campaign, CampaignOwner, HeadToHeadRecord)](
+    def _read_declared[M: (Campaign, HeadToHeadRecord)](
         self, path: Path, model: type[M]
     ) -> M | None:
-        data = read_json_optional(path)
-        if data is None:
-            return None
-        try:
-            return model.model_validate(data)
-        except ValidationError as exc:
-            raise ManifestUnreadableError(
-                path=str(path.relative_to(self._base_dir)),
-                reason=validation_reason(exc, shown=1),
-            ) from exc
+        return read_file(path, model.model_validate_json)
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         return self._read_declared(self._manifest_path(campaign_id), Campaign)
-
-    def campaign_owner(self, campaign_id: str) -> CampaignOwner | None:
-        return self._read_declared(self._manifest_path(campaign_id), CampaignOwner)
 
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
@@ -346,7 +330,7 @@ class CampaignStore:
             # A survey: one manifest this build cannot read must not hide the account's others.
             try:
                 campaign = self.load_campaign(cid)
-            except ManifestUnreadableError as exc:
+            except FileUnreadableError as exc:
                 logger.warning("%s", exc)
                 continue
             if campaign is None:
@@ -376,8 +360,8 @@ class CampaignStore:
                 f"refusing to {verb} {campaign_id}: cycle {live[0]} has a live producer "
                 "— pause or stop it first"
             )
-        active_campaign, _ = read_active_pointer(self._base_dir)
-        if active_campaign == campaign_id:
+        active = read_active_pointer(self._base_dir)
+        if active is not None and active.campaign_id == campaign_id:
             clear_active_pointer(self._base_dir)
 
     def _set_lifecycle(
@@ -713,9 +697,7 @@ class CampaignStore:
             index = read_cycle_index(cycle_dir, moment=None)
             if index is None or index.parent_cycle_id != root_id or fork.cycle_id == root_id:
                 continue
-            if (fork.campaign_id, fork.cycle_id) != active and (
-                self._stub_deletion_blocked(fork) is None
-            ):
+            if fork != active and (self._stub_deletion_blocked(fork) is None):
                 stubs.append(fork)
         return stubs
 
@@ -772,8 +754,16 @@ class CampaignStore:
         )
 
     def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
-        """Off any cycle of the campaign: each reads its root's."""
-        return scan_campaign_ceiling(self.cycle_dir(hop))
+        """Off any cycle of the campaign: each reads its root's, which its manifest names."""
+        campaign = self.load_campaign(hop.campaign_id)
+        if campaign is None:
+            raise NotFoundError(f"Campaign not found: {hop.campaign_id}")
+        return scan_campaign_ceiling(self.ledger(campaign.root_hop))
+
+    def armed_run_limits(self, hop: CycleHop, declared: RunLimits) -> RunLimits:
+        standing = standing_budget(self.cycle_dir(hop)).budget
+        armed = declared.budget.over(self.read_campaign_ceiling(hop), standing)
+        return declared.model_copy(update={"budget": armed})
 
     def write_cycle_share(self, hop: CycleHop, allotment: Budget) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(

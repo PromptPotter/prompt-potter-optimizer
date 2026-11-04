@@ -13,9 +13,7 @@ from promptpotter.application.datasets.authored import (
     with_optimization,
 )
 from promptpotter.application.datasets.draft_campaign import (
-    DatasetBasis,
     DraftCampaign,
-    UploadBasis,
     committed_pipeline_json,
     default_campaign_config,
     draft_scoring_block,
@@ -58,6 +56,7 @@ from promptpotter.domain.campaign_config import (
     effective_config,
     scoring_locked,
 )
+from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey

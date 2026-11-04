@@ -31,6 +31,9 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.prompt_blocks import PACK_FILE
 from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
+from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
@@ -50,11 +53,14 @@ from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
+    MATERIALIZED_PANEL,
+    MATERIALIZED_PANEL_FILE,
     ORIGIN_FILE,
     dataset_framing,
     definition_layer,
     origin_layer,
 )
+from promptpotter.infrastructure.store.draft_store import DRAFT_FILE, RESOLUTION_FILE
 from promptpotter.infrastructure.store.io import (
     complete_lines,
     parse_yaml,
@@ -92,6 +98,7 @@ from promptpotter.infrastructure.store.tenant_dataset_store import (
     MATERIALIZED_DIR,
     TASK_CONTEXT_DIR,
     UPLOADS_DIR,
+    BankCut,
     BankLabel,
     read_bank,
     read_task_context,
@@ -311,7 +318,7 @@ LEAF_INFO: dict[Leaf, LeafInfo] = {
         "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
     ),
     Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
-    Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: streams, prompts, the langfuse trace.", True),
+    Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: prompts, the langfuse trace.", True),
     Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
     Leaf.REPORTS: LeafInfo("Reports", "Readable output: manifest, reports, hard samples.", True),
 }
@@ -359,7 +366,6 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
         CampaignRow(f"{where} ledger", at(layout.ledger), Leaf.HISTORY, RECORD_ADAPTER),
         CampaignRow(f"{where} producer lock", at(layout.producer_lock), Leaf.TRACE),
         CampaignRow(f"{where} pass lock", at(layout.pass_lock), Leaf.TRACE),
-        CampaignRow(f"{where} stream", f"{at(layout.streams)}/*.jsonl", Leaf.TRACE),
         CampaignRow(
             f"{where} round audit",
             f"{at(layout.audit_rounds)}/{ROUND_GLOB}",
@@ -406,11 +412,23 @@ _DRAFT_KINDS = _run_rows(_DRAFT, _cycle_rows("draft", Path()))
 WORKSPACE_KINDS: tuple[Kind, ...] = (
     *_CAMPAIGN_KINDS,
     *_DRAFT_KINDS,
-    Kind("draft", _WS, f"{_DRAFT}/draft.json", Fate.RUN),
-    Kind("draft resolution", _WS, f"{_DRAFT}/resolution.json", Fate.RUN),
+    Kind("draft", _WS, f"{_DRAFT}/{DRAFT_FILE}", Fate.RUN, TypeAdapter(DraftFile)),
+    Kind(
+        "draft resolution",
+        _WS,
+        f"{_DRAFT}/{RESOLUTION_FILE}",
+        Fate.RUN,
+        TypeAdapter(OriginResolution),
+    ),
     # Retired by the hold `reset` takes on it, with the draft it claims.
     Kind("draft claim", _WS, f"{DRAFTS_DIR}/.*.claim", Fate.RUN),
-    Kind("active session", _WS, f"{WORKSPACE_STATE_DIR}/active_session.json", Fate.RUN),
+    Kind(
+        "active session",
+        _WS,
+        f"{WORKSPACE_STATE_DIR}/active_session.json",
+        Fate.RUN,
+        TypeAdapter(CycleHop),
+    ),
     Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, RECORD_ADAPTER),
     Kind(
         "head-to-head",
@@ -421,9 +439,22 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     ),
     Kind("ruler", _WS, RULER_FILE, Fate.RUN, TypeAdapter(RulerFold)),
     Kind("diagnostic", _WS, f"{DIAGNOSTICS_DIR}/*.json", Fate.RUN),
-    Kind("diagnostic run", _WS, f"{DIAGNOSTICS_DIR}/runs/*.json", Fate.RUN),
+    Kind(
+        "diagnostic run",
+        _WS,
+        f"{DIAGNOSTICS_DIR}/runs/*.json",
+        Fate.RUN,
+        TypeAdapter(DiagnosticRunRecord),
+    ),
+    Kind(
+        "materialized panel",
+        _WS,
+        f"{MATERIALIZED_DIR}/*/{MATERIALIZED_PANEL_FILE}",
+        Fate.RUN,
+        MATERIALIZED_PANEL,
+    ),
     Kind("materialized dataset", _WS, f"{MATERIALIZED_DIR}/**", Fate.RUN),
-    Kind("bank cuts", _WS, f"{BANKS_DIR}/{CUTS_FILE}", Fate.RUN),
+    Kind("bank cuts", _WS, f"{BANKS_DIR}/{CUTS_FILE}", Fate.RUN, TypeAdapter(BankCut)),
     Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN),
 )
 

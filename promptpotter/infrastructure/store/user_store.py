@@ -8,12 +8,9 @@ from pydantic import Field
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import Device
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import (
-    append_jsonl,
-    read_json_optional,
-    read_lines,
-    write_json,
-)
+from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from promptpotter.infrastructure.store.read_model import read_file, read_rows
+from promptpotter.shared.errors import FileUnreadableError
 
 USER_FILE = "user.json"
 CONSENT_FILE = "consent.jsonl"
@@ -66,10 +63,7 @@ class UserStore:
         return self._base_dir / USER_FILE
 
     def load(self) -> User | None:
-        raw = read_json_optional(self._path())
-        if raw is None:
-            return None
-        return User.model_validate(raw)
+        return read_file(self._path(), User.model_validate_json)
 
     def save(self, user: User) -> None:
         write_json(self._path(), user.model_dump())
@@ -78,10 +72,7 @@ class UserStore:
         append_jsonl(self._base_dir / CONSENT_FILE, line.model_dump(mode="json"))
 
     def consent_trail(self) -> list[ConsentLine]:
-        return [
-            ConsentLine.model_validate_json(raw)
-            for raw in read_lines(self._base_dir / CONSENT_FILE)
-        ]
+        return read_rows(self._base_dir / CONSENT_FILE, ConsentLine.model_validate_json)
 
 
 def account_dirs(projects_root: Path) -> list[WorkspaceDir]:
@@ -114,7 +105,7 @@ def read_accounts(projects_root: Path) -> list[AccountDir]:
     for tenant_dir in account_dirs(projects_root):
         try:
             user = UserStore(tenant_dir).load()
-        except (OSError, ValueError) as exc:
+        except (OSError, FileUnreadableError) as exc:
             accounts.append(AccountDir(tenant_dir, Torn(f"{type(exc).__name__}: {exc}")))
             continue
         # Gone between the listing and the read: an account that is being deleted is not one.

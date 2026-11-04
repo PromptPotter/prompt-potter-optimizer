@@ -82,35 +82,38 @@ def _still_held(open_holds: Iterable[_Hold], unpriced: Iterable[_Hold]) -> PaidS
     return total
 
 
-class _Cost:
-    """What a ledger's subject COST: every answered send, a nested run's included."""
+class _Spent(NamedTuple):
+    # What the ledger's subject COST: every answered send, a nested run's mirrored onto it included.
+    cost: PaidSpend
+    # What its own sends billed: the cost less the mirrored sends a nested run's own ledger bills.
+    billed: PaidSpend
 
+    def plus(self, spent: _Spent, held: PaidSpend) -> _Spent:
+        """*held* is the ledger's own holds, which both sums carry."""
+        return _Spent(
+            self.cost.plus(spent.cost).plus(held), self.billed.plus(spent.billed).plus(held)
+        )
+
+
+class _Spend:
     records: ClassVar[RecordClasses] = HOLD_TRAIL
-    # A nested run's send, mirrored onto its root's ledger, is part of what this subject cost.
-    counts_mirrored: ClassVar[bool] = True
 
     def __init__(self) -> None:
-        self._total = NOTHING_PAID
+        self._cost = self._billed = NOTHING_PAID
         self._held: HeldSends[SpendHoldRecord] = HeldSends()
 
     def feed(self, record: HoldTrailRecord) -> None:
         # A replay names no payer (`key_source` is `None` exactly on one): it cost nothing.
-        if (
-            isinstance(record, TokenUsageRecord)
-            and (paid_by := record.key_source) is not None
-            and (self.counts_mirrored or not record.mirrored)
-        ):
-            self._total = self._total.plus(PaidSpend.of(paid_by, _billed_of(record)))
+        if isinstance(record, TokenUsageRecord) and (paid_by := record.key_source) is not None:
+            spent = PaidSpend.of(paid_by, _billed_of(record))
+            self._cost = self._cost.plus(spent)
+            if not record.mirrored:
+                self._billed = self._billed.plus(spent)
         self._held.track(record)
 
-    def value(self) -> tuple[PaidSpend, PaidSpend]:
-        return self._total, _still_held(self._held.open.values(), self._held.unpriced.values())
-
-
-class _Billed(_Cost):
-    """What a ledger's own sends cost: its cost less the sends a root ledger already carries."""
-
-    counts_mirrored: ClassVar[bool] = False
+    def value(self) -> tuple[_Spent, PaidSpend]:
+        held = _still_held(self._held.open.values(), self._held.unpriced.values())
+        return _Spent(self._cost, self._billed), held
 
 
 class _Tombstones:
@@ -142,7 +145,7 @@ class _Banked(NamedTuple):
     subjects: frozenset[BankedSubject]
 
 
-_SPEND_FOLDS = (_Cost, _Billed, _Tombstones)
+_SPEND_FOLDS = (_Spend, _Tombstones)
 
 
 def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
@@ -153,21 +156,21 @@ def _unreported_once_stopped(ledger: Path, held: PaidSpend) -> PaidSpend:
     return NOTHING_PAID if run.producer.attached else held
 
 
-def _summed(ledgers: Iterable[Path], fold: type[_Cost]) -> PaidSpend:
-    total = NOTHING_PAID
+def _summed(ledgers: Iterable[Path]) -> _Spent:
+    total = _Spent(NOTHING_PAID, NOTHING_PAID)
     for ledger in ledgers:
-        spent, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(fold)
+        spent, held = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Spend)
         # Whether what is held is unreported moves with the run, not the file: asked per read.
-        total = total.plus(spent).plus(_unreported_once_stopped(ledger, held))
+        total = total.plus(spent, _unreported_once_stopped(ledger, held))
     return total
 
 
 def billed_spend(ledgers: Iterable[Path]) -> PaidSpend:
-    return _summed(ledgers, _Billed)
+    return _summed(ledgers).billed
 
 
 def ledger_cost(ledgers: Iterable[Path]) -> PaidSpend:
-    return _summed(ledgers, _Cost)
+    return _summed(ledgers).cost
 
 
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> PaidSpend:

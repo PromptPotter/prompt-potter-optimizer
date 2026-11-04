@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
@@ -78,27 +78,22 @@ class Stores:
         return in_inner_sandbox(self.projects_root)
 
 
-def own_campaign(stores: Stores, campaign_id: str) -> None:
-    """Another user's campaign is NOT FOUND, never forbidden: existence leakage is a violation.
-
-    Asks the owner alone, so a manifest this build cannot read whole is still its owner's to delete."""
-    owner = stores.campaigns.campaign_owner(campaign_id)
-    if owner is None or owner.owner_user_id != str(stores.identity.user_id):
-        raise NotFoundError(f"Campaign not found: {campaign_id}")
-
-
 def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
-    own_campaign(stores, campaign_id)
+    """Another user's campaign is NOT FOUND, never forbidden: existence leakage is a violation."""
     campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
+    if campaign is None or not caller_owns(stores, campaign):
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return campaign
 
 
-def owned_draft_data(stores: Stores, draft_id: str) -> dict[str, Any]:
+def caller_owns(stores: Stores, campaign: Campaign) -> bool:
+    return campaign.owner_user_id == str(stores.identity.user_id)
+
+
+def owned_draft_data(stores: Stores, draft_id: str) -> DraftFile:
     """Asked before a draft's claim is taken: a claim another user holds answers as their draft does."""
     data = stores.drafts.read_draft(draft_id)
-    if data is None or data["owner_user_id"] != str(stores.identity.user_id):
+    if data is None or data.owner_user_id != str(stores.identity.user_id):
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
     return data
 

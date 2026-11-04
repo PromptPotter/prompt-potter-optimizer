@@ -29,8 +29,11 @@ def resolve_target(args: argparse.Namespace, store: Stores) -> CycleHop:
         campaign_id = resolve_campaign_id_hint(store, campaign_id)
         cycle_id = cycle_id or resolve_cycle_id(store, campaign_id, None)
     else:
-        pointer = active_pointer(store)
-        campaign_id, cycle_id = pointer.campaign_id or "", cycle_id or pointer.cycle_id or ""
+        hop = active_pointer(store)
+        if hop is None:
+            campaign_id, cycle_id = "", cycle_id or ""
+        else:
+            campaign_id, cycle_id = hop.campaign_id, cycle_id or hop.cycle_id
     if not (campaign_id and cycle_id):
         raise NotFoundError(
             "No active cycle — name one with --campaign/--cycle, or start one with `new`."

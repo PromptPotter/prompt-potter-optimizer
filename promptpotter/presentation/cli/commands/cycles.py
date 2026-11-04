@@ -44,12 +44,8 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
         attached_only=args.attached,
         depth=1,
     )
-    pointer = active_pointer(stores, inside=args.inside)
-    active = (
-        hierarchy_address(args.inside, pointer.campaign_id, pointer.cycle_id)
-        if pointer.campaign_id and pointer.cycle_id
-        else None
-    )
+    hop = active_pointer(stores, inside=args.inside)
+    active = None if hop is None else hierarchy_address(args.inside, hop.campaign_id, hop.cycle_id)
     lines: list[str] = []
     for campaign in listing.entries:
         if not isinstance(campaign, HierarchyCampaign):

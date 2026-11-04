@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import DatasetBasis, UploadBasis
 from promptpotter.application.datasets.loaders import (
     cut_bank,
     fetch_bank,
@@ -29,6 +28,7 @@ from promptpotter.application.datasets.origin_readiness import columns_confirmed
 from promptpotter.application.datasets.tabular_ingest import read_tabular
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
+from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.scoring import all_verifier_graded

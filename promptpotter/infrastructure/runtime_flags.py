@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
     GateKind,
     LaunchStage,
@@ -23,7 +22,6 @@ from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_hel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     Controls,
     Progress,
-    scan_campaign_ceiling,
     scan_last,
     scan_launch_claim,
     scan_ledger_controls,
@@ -58,16 +56,6 @@ def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
     # No record stands no axis, which the empty record says.
     held = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], StandingBudgetRecord)
     return held or StandingBudgetRecord()
-
-
-def armed_run_limits(cycle_dir: Path, declared: RunLimits) -> RunLimits:
-    return declared.model_copy(
-        update={
-            "budget": declared.budget.over(
-                scan_campaign_ceiling(cycle_dir), standing_budget(cycle_dir).budget
-            )
-        }
-    )
 
 
 def _campaign_dir(cycle_dir: Path) -> Path:

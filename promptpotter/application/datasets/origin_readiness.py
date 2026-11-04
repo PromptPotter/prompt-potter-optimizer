@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field, computed_field
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, basis_json
-from promptpotter.domain.command_kinds import EditDraftCampaignPayload
+from promptpotter.application.datasets.draft_campaign import DraftCampaign
+from promptpotter.domain.checkin_draft import (
+    CheckinQuestion,
+    OriginResolution,
+    SetupStep,
+)
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.strict_model import StrictModel
@@ -17,18 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.task_context import OriginQuestion
     from promptpotter.application.pipeline_resolve import DraftPipeline
     from promptpotter.infrastructure.store.stores import Stores
-
-
-class SetupStep(StrEnum):
-    """The check-in's steps, in the order a check-in shows them: each a fold that sets one part of
-    the campaign, keyed as `setup_schema` keys the steps it serves."""
-
-    OPTIMIZER = "optimizer"
-    DATA = "data"
-    SCORING = "scoring"
-    PIPELINE = "pipeline"
-    HEAD_TO_HEAD = "head_to_head"
-    RUN = "run"
 
 
 SETUP_STEP_TITLES: dict[SetupStep, str] = {
@@ -104,16 +95,6 @@ class OriginReadiness(StrictModel):
         return not self.gaps
 
 
-class CheckinQuestion(StrictModel):
-    """A resolver question one answer closes, projected through `CHECKLIST_FIELDS`."""
-
-    field: str
-    path: list[str] = Field(description="The `EditDraftPatch` path the answer is written at.")
-    step: SetupStep | None
-    prompt: str
-    options: list[str] = Field(description="The answers it takes; empty is free text.")
-
-
 def checkin_questions(
     draft: DraftCampaign, asked: Iterable[OriginQuestion]
 ) -> list[CheckinQuestion]:
@@ -133,39 +114,6 @@ def checkin_questions(
             )
         )
     return questions
-
-
-class OriginLastResolution(StrictModel):
-    """One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands."""
-
-    assessment: str
-    questions: list[CheckinQuestion]
-    recap: str = Field(description="Set only on a `ready` turn.")
-
-
-class RaisedCommand(StrictModel):
-    """One proposal, already the command a click fires. The assistant offers it and never fires it."""
-
-    kind: Literal["edit-draft-campaign"] = "edit-draft-campaign"
-    payload: EditDraftCampaignPayload
-    label: str = Field(description="What the proposal does, in `CHECKLIST_FIELDS`' words.")
-    evidence: str = Field(description="The citation backing the proposal.")
-
-
-class OriginResolution(StrictModel):
-    """The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the
-    draft's `readiness`, recomputed on every read."""
-
-    last_resolution: OriginLastResolution | None = Field(
-        default=None, description="Null until a resolver turn ran, and again after a later edit."
-    )
-    raised: list[RaisedCommand] = Field(
-        default_factory=list, description="Proposals the last turn left unclicked."
-    )
-    degraded_cause: str | None = Field(
-        default=None,
-        description="Why the last turn came back thin or empty; null where it did not.",
-    )
 
 
 def origin_readiness(draft: DraftCampaign, pipeline: DraftPipeline) -> OriginReadiness:
@@ -303,7 +251,7 @@ def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
     labels moves with fields this projection already holds."""
     projection: dict[str, Any] = {
         "slug": draft.slug,
-        "basis": basis_json(draft.basis),
+        "basis": draft.basis.model_dump(mode="json"),
         "scoring_matcher": draft.scoring_matcher,
         "pipeline_steps": list(draft.pipeline_steps),
         "pipeline_overlay": draft.pipeline_overlay,
@@ -336,11 +284,9 @@ def save_checkin_draft(
     stores: Stores, draft: DraftCampaign, *, resolution: OriginResolution | None = None
 ) -> DraftCampaign:
     stores.drafts.write_draft(draft.draft_id, draft.to_disk())
-    block = resolution or OriginResolution()
-    stores.drafts.write_resolution(draft.draft_id, block.model_dump(mode="json"))
+    stores.drafts.write_resolution(draft.draft_id, resolution or OriginResolution())
     return draft
 
 
 def load_resolution(stores: Stores, draft: DraftCampaign) -> OriginResolution:
-    block = stores.drafts.load_resolution(draft.draft_id)
-    return OriginResolution.model_validate(block) if block else OriginResolution()
+    return stores.drafts.load_resolution(draft.draft_id) or OriginResolution()

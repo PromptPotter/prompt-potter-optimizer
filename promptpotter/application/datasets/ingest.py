@@ -12,9 +12,7 @@ from promptpotter.application.datasets.draft_build import (
 )
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
-    DatasetBasis,
     DraftCampaign,
-    UploadBasis,
     default_slug_from_filename,
     new_draft,
     scoring_choice,
@@ -37,6 +35,7 @@ from promptpotter.application.pipeline_resolve import cycle_config, draft_served
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
@@ -123,7 +122,7 @@ async def ingest_draft(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=base_slug,
-        basis=UploadBasis(DEFAULT_CONNECTOR, kept.name),
+        basis=UploadBasis(connector=DEFAULT_CONNECTOR, kept=kept.name),
         n_samples=len(table.rows),
         sample_preview=preview,
         headers=list(table.headers),
@@ -174,7 +173,7 @@ async def draft_from_dataset(
         tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=slug,
-        basis=DatasetBasis(dataset_name),
+        basis=DatasetBasis(dataset=dataset_name),
         n_samples=len(rows),
         sample_preview=preview[:PREVIEW_ROWS],
         headers=["query", "ground_truth"],

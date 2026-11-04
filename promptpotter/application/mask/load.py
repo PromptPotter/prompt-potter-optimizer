@@ -62,7 +62,7 @@ def _dial_anchors(config: CampaignConfig, origin_rows: list[GradedCell]) -> dict
     return {**origin_anchors(origin_rows), **locked}
 
 
-def read_rows(sheet: CellSheet, scorer: Scorer) -> MaskReading | None:
+def mask_reading(sheet: CellSheet, scorer: Scorer) -> MaskReading | None:
     """``None`` where no row carries a verdict: no reading, never a 0.0 floor."""
     graded = sheet if sheet.scorer_id == scorer.id else scorer.sheet(cell.facts for cell in sheet)
     folded = fold_cells(graded)
@@ -159,7 +159,7 @@ def _mask_candidate(
 ) -> MaskCandidate:
     return MaskCandidate(
         key=key,
-        reading=read_rows(sheet, scorer),
+        reading=mask_reading(sheet, scorer),
         is_selected=key == crowned,
         is_eligible=_mask_eligible(arm, sheet),
         abort=_abort_contributor(arm),
@@ -246,7 +246,7 @@ def load_mask_record(
                     cycle_id=cid,
                     round=rn,
                     candidates=candidates,
-                    parent=None if parent_rows is None else read_rows(parent_rows, scorer),
+                    parent=None if parent_rows is None else mask_reading(parent_rows, scorer),
                     round_data=round_file if with_replay else None,
                     decisions=lines[cid].decisions.get(rn, []) if with_replay else [],
                 )

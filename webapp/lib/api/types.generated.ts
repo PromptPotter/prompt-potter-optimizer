@@ -2567,7 +2567,7 @@ export interface LaunchRefusal {
   sentence: string;
 }
 
-/** The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the */
+/** `resolution.json`: the last resolver turn; the mint gate is the draft's `readiness`, */
 export interface OriginResolution {
   /** Null until a resolver turn ran, and again after a later edit. */
   last_resolution: OriginLastResolution | null;
@@ -4762,7 +4762,7 @@ export type SlotBound = 'throttle' | 'machine';
 // promptpotter.domain.dataset_start::StartBlock
 export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
 
-// promptpotter.application.datasets.origin_readiness::SetupStep
+// promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
 
 // promptpotter.infrastructure.store.data_root::Leaf
@@ -5298,7 +5298,7 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "dataset": { label: "Dataset", description: "The input data's mirror: langfuse ground truth.", loop: false },
   "connector": { label: "Connector", description: "What the backend produced: node-I/O cache and per-sample arrays.", loop: false },
   "state": { label: "State", description: "Round checkouts, less their per-sample rows.", loop: true },
-  "trace": { label: "Trace", description: "Loop telemetry: streams, prompts, the langfuse trace.", loop: true },
+  "trace": { label: "Trace", description: "Loop telemetry: prompts, the langfuse trace.", loop: true },
   "history": { label: "History", description: "The loop's event spine: its ledger.", loop: true },
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
 };

@@ -22,7 +22,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import (
     parse_yaml,
     read_bytes_optional,
-    read_lines,
     validate_path_component,
     write_bytes,
     write_json,
@@ -30,7 +29,7 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
-from promptpotter.infrastructure.store.read_model import append_row, derived, file_sig, fold_jsonl
+from promptpotter.infrastructure.store.read_model import append_row, derived, file_sig, read_rows
 from promptpotter.shared.clock import utcnow_iso
 
 # Panels a definition's `source:` built for this tenant, and the task directories they name.
@@ -52,6 +51,13 @@ class BankLabel(FrozenModel):
     label: str
     dataset_hash: str
     labelled_at: str
+
+
+class BankCut(FrozenModel):
+    """A line of `cuts.jsonl`: the fetched `source:` recipe *source* cut the bank *dataset_hash*."""
+
+    source: str
+    dataset_hash: str
 
 
 class TenantDatasetStore:
@@ -118,7 +124,7 @@ class TenantDatasetStore:
         """The last line naming a label is where it stands."""
         return {
             row.label: row.dataset_hash
-            for row in map(BankLabel.model_validate_json, read_lines(self._labels_path()))
+            for row in read_rows(self._labels_path(), BankLabel.model_validate_json)
         }
 
     def hash_of(self, label: str) -> str | None:
@@ -154,14 +160,14 @@ class TenantDatasetStore:
 
     def record_cut(self, source: str, bank: Bank) -> None:
         self.put_bank(bank)
-        append_row(
-            self._base_dir / BANKS_DIR / CUTS_FILE,
-            {"source": source, "dataset_hash": bank.dataset_hash},
-        )
+        cut = BankCut(source=source, dataset_hash=bank.dataset_hash)
+        append_row(self._base_dir / BANKS_DIR / CUTS_FILE, cut.model_dump())
 
     def cut(self, source: str) -> Bank | None:
-        row = fold_jsonl(self._base_dir / BANKS_DIR / CUTS_FILE, "source").get(source)
-        return None if row is None else self.bank(str(row["dataset_hash"]))
+        """The last line naming *source* is its cut."""
+        cuts = read_rows(self._base_dir / BANKS_DIR / CUTS_FILE, BankCut.model_validate_json)
+        held = {row.source: row.dataset_hash for row in cuts}.get(source)
+        return None if held is None else self.bank(held)
 
     def banks_sharing(self, keys: frozenset[str]) -> frozenset[str]:
         """Every held bank measuring any of *keys*: a re-cut shares its rows' history by content."""

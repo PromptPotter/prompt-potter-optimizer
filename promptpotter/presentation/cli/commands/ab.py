@@ -34,19 +34,17 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
         if campaign is None:
             raise SystemExit(f"ERROR: campaign {campaign_id!r} has no manifest on disk.")
         return campaign.root_hop
-    pointer = active_pointer(stores)
-    if pointer.campaign_id is None or pointer.cycle_id is None:
+    hop = active_pointer(stores)
+    if hop is None:
         raise SystemExit(
             "ERROR: no active campaign — pass --campaign, or start one:\n\n"
             + no_dataset_hint(stores)
         )
+    if not args.cycle:
+        return hop
     return CycleHop(
-        campaign_id=pointer.campaign_id,
-        cycle_id=(
-            resolve_cycle_id(stores, pointer.campaign_id, args.cycle)
-            if args.cycle
-            else pointer.cycle_id
-        ),
+        campaign_id=hop.campaign_id,
+        cycle_id=resolve_cycle_id(stores, hop.campaign_id, args.cycle),
     )
 
 

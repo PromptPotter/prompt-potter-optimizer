@@ -82,7 +82,6 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
         .runtime/
           ledger.jsonl                  # append-only spine
           producer.lock                 # what "attached" means
-          streams/round_NNNN_{member}.jsonl
           cache/rounds/
     measurements/                       # PAID; rooted at `Stores.archive_home`
       index.jsonl  configs/  cells/  cold/  claims/  sample_folds/

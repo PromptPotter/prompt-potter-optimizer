@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from contextvars import Token
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.initialization.session import Session
@@ -43,8 +42,6 @@ from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjec
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
-from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
-from promptpotter.infrastructure.runtime_flags import armed_run_limits
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.measurement_context import instrument_depth
@@ -131,8 +128,8 @@ def declare_run_stop(
     interrupted_by: PauseCause,
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
-    budget = armed_run_limits(
-        Path(observers.cycle_dir), observers.dashboard.state.run_limits
+    budget = session.store.campaigns.armed_run_limits(
+        session.hop, observers.dashboard.state.run_limits
     ).budget
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
@@ -196,7 +193,6 @@ class RunObservers:
     callbacks: RunCallbacks
     audit: AuditTrailProjection
     dashboard: DashboardCheckout
-    racing: RacingStreamProjection
     readout: ReadoutProjection
     tracing: TracingProjection
     _ledger_token: Token[CycleEventLog | None] | None = None
@@ -232,7 +228,6 @@ class RunObservers:
     def _drain(self, *, interrupted: bool) -> None:
         self.audit.drain(interrupted=interrupted)
         self.dashboard.drain()
-        self.racing.drain()
         self.tracing.drain()
         # The SSE stream is no subscriber — it tails the on-disk ledger — so nothing drains here.
         if self._ledger_token is not None:
@@ -288,7 +283,6 @@ def _bind_observers(
 ) -> RunObservers:
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
-    racing = RacingStreamProjection.from_cycle_dir(cycle_dir)
     readout = (
         ReadoutProjection.for_campaign(session, campaign_config, sink=readout_sink)
         if forked_from is None
@@ -306,7 +300,6 @@ def _bind_observers(
     ledger.bind(audit)
     readout.open_readout(cycle_dir)
     ledger.bind(readout)
-    ledger.bind(racing)
     ledger.bind(CycleIndexProjection(cycle_dir))
     ledger.bind(RoundFileProjection(session.store, session.hop, session.state))
     tracing = (
@@ -332,7 +325,6 @@ def _bind_observers(
         callbacks=callbacks,
         audit=audit,
         dashboard=dashboard,
-        racing=racing,
         readout=readout,
         tracing=tracing,
         _ledger_token=ledger_token,

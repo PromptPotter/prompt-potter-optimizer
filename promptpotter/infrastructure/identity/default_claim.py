@@ -64,7 +64,7 @@ def is_host_tenant_dir(user_id: str) -> bool:
 def _rebind_campaigns(campaigns: CampaignStore, user_id: str) -> None:
     """Any OTHER owner is left alone: a multi-user install holds campaigns that are someone else's."""
     for campaign_id in campaigns.list_campaign_ids():
-        owner = campaigns.campaign_owner(campaign_id)
-        if owner is not None and owner.owner_user_id == "default":
+        campaign = campaigns.load_campaign(campaign_id)
+        if campaign is not None and campaign.owner_user_id == "default":
             campaigns.update_campaign(campaign_id, owner_user_id=user_id)
             logger.info("Rebound campaign %s to user %s", campaign_id, user_id)

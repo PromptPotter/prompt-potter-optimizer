@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import (
-    DatasetBasis,
-    UploadBasis,
-    owned_draft,
-)
+from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.free_tier import (
@@ -29,6 +24,7 @@ from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import merge_config_layers
+from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
@@ -93,7 +89,7 @@ async def plan_draft_patch(
         and isinstance(draft.basis, UploadBasis)
         and patch.connector != draft.basis.connector
     ):
-        changes["basis"] = replace(draft.basis, connector=patch.connector)
+        changes["basis"] = draft.basis.model_copy(update={"connector": patch.connector})
     served = (
         await draft_served(stores, draft.patch(basis=changes["basis"]))
         if "basis" in changes

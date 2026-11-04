@@ -8,11 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import Field, JsonValue
 
 from promptpotter.application.datasets.authored import with_optimization
-from promptpotter.application.datasets.draft_campaign import (
-    DatasetBasis,
-    DraftCampaign,
-    owned_draft,
-)
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
 from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.free_tier import free_fence
@@ -51,6 +47,7 @@ from promptpotter.application.pipeline_resolve import (
     draft_served,
 )
 from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt

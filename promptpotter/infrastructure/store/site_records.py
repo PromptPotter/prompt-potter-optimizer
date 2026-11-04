@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from promptpotter.config.paths import user_data_root
-from promptpotter.infrastructure.store.io import append_jsonl, read_lines, rewrite_lines
+from promptpotter.infrastructure.store.io import append_jsonl, rewrite_lines
+from promptpotter.infrastructure.store.read_model import parse_rows, read_rows
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import NotFoundError
 
@@ -28,15 +29,13 @@ class SiteRecord(NamedTuple):
     row: dict[str, Any]
 
 
-def site_record(line: str | bytes) -> SiteRecord:
+def site_record(line: bytes) -> SiteRecord:
     return SiteRecord(**json.loads(line))
 
 
-def _latest(lines: list[str]) -> list[SiteRecord]:
-    """Complete lines only (`read_lines`): a crash tears just the last, and every other one reads."""
+def _latest(records: list[SiteRecord]) -> list[SiteRecord]:
     latest: dict[str | int, SiteRecord] = {}
-    for number, line in enumerate(lines):
-        record = site_record(line)
+    for number, record in enumerate(records):
         latest[record.key or number] = record
     return list(latest.values())
 
@@ -57,19 +56,20 @@ class SiteRecordStore:
         append_jsonl(self._path(table), record._asdict())
 
     def kept(self, table: str) -> list[SiteRecord]:
-        return _latest(read_lines(self._path(table)))
+        return _latest(read_rows(self._path(table), site_record))
 
     def drop_before(self, table: str, before: float) -> int:
         """A keyed row is the newest word on its subject and has no age: only added rows go."""
+        path = self._path(table)
 
         def dropped(lines: list[str]) -> tuple[Iterator[str] | None, int]:
-            records = _latest(lines)
+            records = _latest(parse_rows(path, (ln.encode("utf-8") for ln in lines), site_record))
             staying = [r for r in records if r.key or (epoch_seconds(r.at) or 0.0) >= before]
             gone = len(records) - len(staying)
             out = (json.dumps(r._asdict(), ensure_ascii=False) + "\n" for r in staying)
             return (out if gone else None), gone
 
-        return rewrite_lines(self._path(table), dropped)
+        return rewrite_lines(path, dropped)
 
 
 SITE_RECORDS_DIR = "site_records"
