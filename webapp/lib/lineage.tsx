@@ -1,4 +1,3 @@
-"use client";
 // A remembered individual id resolves through `answers_for_id`, never the first row holding it.
 
 import { createContext, useContext, useMemo, useState } from "react";

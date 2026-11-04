@@ -76,9 +76,10 @@ else
     esac
 fi
 
-# --- 3. Node (CI's major) ------------------------------------------------
+# --- 3. Node (CI's major; Vite 8 and @rolldown/plugin-babel need >= 22.12.0) ---
 NODE_MAJOR=22
-if command -v node >/dev/null 2>&1 && [[ "$(node -v | cut -dv -f2 | cut -d. -f1)" -ge "$NODE_MAJOR" ]]; then
+NODE_MIN=22.12.0
+if command -v node >/dev/null 2>&1 && [[ "$(printf '%s\n%s\n' "$NODE_MIN" "$(node -v | cut -dv -f2)" | sort -V | head -n1)" == "$NODE_MIN" ]]; then
     say "node $(node -v) already installed"
 else
     case "$PKG" in
@@ -171,8 +172,8 @@ else
 fi
 
 # --- 6. webapp build -----------------------------------------------------
-say "building webapp (static export → $WEBAPP_DIR/out/)"
-brand_export_webapp   # Next inlines NEXT_PUBLIC_* at build time — the rebuild IS the rename
+say "building webapp (Vite →$WEBAPP_DIR/out/)"
+brand_export_webapp   # Vite inlines VITE_* at build time — the rebuild IS the rename
 cd "$WEBAPP_DIR"
 npm ci
 npm run build

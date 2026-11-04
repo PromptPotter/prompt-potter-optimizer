@@ -1,4 +1,3 @@
-"use client";
 // The disabled footer search icon is an INTENTIONAL placeholder: never sweep it as non-functional.
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/state/auth";

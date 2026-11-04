@@ -1,4 +1,3 @@
-"use client";
 import { useCallback, useMemo, useState } from "react";
 import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";

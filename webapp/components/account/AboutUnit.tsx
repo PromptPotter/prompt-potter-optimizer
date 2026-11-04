@@ -1,9 +1,8 @@
-"use client";
-
 import { useState } from "react";
 import { PotterMark } from "@/components/brand/PotterMark";
 import { CopyButton } from "@/components/ui";
-import { BRAND, softwareApplicationLd } from "@/lib/brand";
+import { BRAND } from "@/lib/brand";
+import { softwareApplicationLd } from "@/lib/brand-of";
 import { healthRead } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
@@ -19,7 +18,7 @@ export function AboutUnit() {
   const incidents = useIncidents();
 
   const verified = BRAND.verification === "verified";
-  const raw = JSON.stringify(softwareApplicationLd(), null, 2);
+  const raw = JSON.stringify(softwareApplicationLd(BRAND), null, 2);
 
   return (
     <>

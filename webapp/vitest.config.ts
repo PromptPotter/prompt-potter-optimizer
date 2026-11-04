@@ -1,11 +1,10 @@
-import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 // Neither project isolates: files share module state, so a test that writes a module-level store or a global resets it itself.
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname),
+      "@": import.meta.dirname,
     },
   },
   test: {

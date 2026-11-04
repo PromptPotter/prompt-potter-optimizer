@@ -1,4 +1,3 @@
-"use client";
 import { Icon, SegmentedControl } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace";
 import { PRESETS } from "./families";

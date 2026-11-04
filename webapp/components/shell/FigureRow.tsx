@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { Term } from "@/components/ui";
 import type { Said } from "@/lib/api/types.generated";

@@ -1,4 +1,3 @@
-"use client";
 import { optimizerRosterRead, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRead } from "@/lib/hooks/useRead";

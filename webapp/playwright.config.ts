@@ -1,10 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
-import { COLD_HOME } from "./e2e/world";
+import { COLD_HOME, WALK_HOME } from "./e2e/world";
 
-// Two servers: cold and spend share a throwaway PROMPTPOTTER_HOME, which binds at import; walk reads the operator's workspace.
+// Two servers: cold and spend share a throwaway PROMPTPOTTER_HOME, which binds at import; walk reads a
+// copy of PP_E2E_WALK_WORLD (a run such as `scripts/offline_run.py` makes), else the operator's workspace.
 
 const WALK_PORT = process.env.PP_E2E_PORT || "8123";
 const COLD_PORT = process.env.PP_E2E_COLD_PORT || "8124";
+const WALK_WORLD = process.env.PP_E2E_WALK_WORLD;
 
 // Set to walk a server already up; the walk server then never starts.
 const WALK_URL = process.env.PP_E2E_BASE_URL || `http://127.0.0.1:${WALK_PORT}`;
@@ -29,9 +31,15 @@ function runs(project: string) {
 }
 
 // `spend` measures against the real backend, so a run holding it serves the throwaway world live.
-function server(port: string, backend: "offline" | "live", env: Record<string, string>, reusable: boolean) {
+function server(
+  port: string,
+  backend: "offline" | "live",
+  env: Record<string, string>,
+  reusable: boolean,
+  world?: string,
+) {
   return {
-    command: `node e2e/serve.mjs --auth=off --backend=${backend}`,
+    command: `node e2e/serve.mjs --auth=off --backend=${backend}${world ? ` --world=${JSON.stringify(world)}` : ""}`,
     url: `http://127.0.0.1:${port}/api/v1/health`,
     // The COLD server is never reused: `serve.mjs` resets the workspace at startup, and adopting a running one silently skips it.
     reuseExistingServer: reusable && !process.env.CI,
@@ -76,7 +84,14 @@ export default defineConfig({
     },
   ],
   webServer: [
-    ...(runs("walk") && !process.env.PP_E2E_BASE_URL ? [server(WALK_PORT, "live", {}, true)] : []),
+    ...(runs("walk") && !process.env.PP_E2E_BASE_URL
+      ? [
+          // A named world is synthetic, so its backend is too; a server already up may serve another one.
+          WALK_WORLD
+            ? server(WALK_PORT, "offline", { PROMPTPOTTER_HOME: WALK_HOME }, false, WALK_WORLD)
+            : server(WALK_PORT, "live", {}, true),
+        ]
+      : []),
     ...(runs("cold") || runs("spend")
       ? [
           server(

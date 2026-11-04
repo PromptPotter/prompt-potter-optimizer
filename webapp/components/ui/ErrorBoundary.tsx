@@ -1,5 +1,3 @@
-"use client";
-
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { buildIsStale } from "@/lib/api";
 import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
@@ -16,7 +14,7 @@ interface State {
   reload: ReloadOutcome | null;
 }
 
-const MISSING_CHUNK = /ChunkLoadError|Failed to load chunk|Loading chunk \S+ failed|dynamically imported module|Importing a module script failed/i;
+const MISSING_CHUNK = /dynamically imported module|Importing a module script failed/i;
 
 // Two faces of one cause: a piece of the old build is gone from disk, or the old build read an answer the new API shaped.
 function fromStaleBuild(error: Error): boolean {
@@ -38,6 +36,11 @@ function reloadOnceForStaleBuild(): ReloadOutcome {
   window.location.reload();
   return "reloading";
 }
+
+// Vite raises this when a lazy chunk's preload fails because the old build left the disk.
+window.addEventListener("vite:preloadError", () => {
+  reloadOnceForStaleBuild();
+});
 
 export class ErrorBoundary extends Component<Props, State> {
   override state: State = { error: null, reload: null };

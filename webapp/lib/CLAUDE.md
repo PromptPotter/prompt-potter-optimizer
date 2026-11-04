@@ -79,4 +79,4 @@ model carries the enum, never an enum's word, and a composed line is a served `S
 
 ## Brand identity / "About this unit"
 
-`lib/brand.ts` is the single brand source (`NEXT_PUBLIC_*`-overridable). **Never render "verified" while `BRAND.verification` says `self-declared`.**
+`lib/brand.ts::BRAND` is the single brand source (`VITE_*`-overridable, each read a literal `import.meta.env.VITE_X`; `brand-of.ts` holds the defaults, which `vite.config.ts` also imports). **Never render "verified" while `BRAND.verification` says `self-declared`.**

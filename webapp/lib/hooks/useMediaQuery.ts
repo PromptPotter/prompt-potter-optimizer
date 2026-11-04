@@ -1,4 +1,3 @@
-"use client";
 // Only for when the component TREE must branch; responsive styling stays in `@media`.
 
 import { useCallback, useSyncExternalStore } from "react";
@@ -20,6 +19,5 @@ export function useMediaQuery(query: string): boolean {
     [query],
   );
   const getSnapshot = useCallback(() => getMatch(query), [query]);
-  const getServerSnapshot = useCallback(() => false, []);
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

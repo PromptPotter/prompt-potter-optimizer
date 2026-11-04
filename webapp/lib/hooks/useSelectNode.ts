@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";

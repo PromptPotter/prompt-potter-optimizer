@@ -1,4 +1,3 @@
-"use client";
 import { useMemo } from "react";
 import { renderMarkdownSafe } from "@/lib/markdown";
 import { cycleFileRead, type FileContentResponse } from "@/lib/api";

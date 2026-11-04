@@ -1,5 +1,3 @@
-"use client";
-
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import type { CladogramChannel } from "@/components/candidates/Forest";

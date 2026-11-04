@@ -1,5 +1,3 @@
-"use client";
-
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { useCompareWithOrigin } from "@/lib/hooks/useCompareWithOrigin";

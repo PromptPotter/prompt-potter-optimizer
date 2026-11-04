@@ -1,5 +1,3 @@
-"use client";
-
 import type { LibrarySnippet } from "@/lib/api";
 import { createModuleStore } from "@/lib/state/module-store";
 

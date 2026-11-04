@@ -1,5 +1,3 @@
-"use client";
-
 import { CommitInput, FailureLine, Menu, MenuRadioGroup } from "@/components/ui";
 import type { MetricReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";

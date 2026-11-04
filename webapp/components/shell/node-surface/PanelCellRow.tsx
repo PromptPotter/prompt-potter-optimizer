@@ -1,5 +1,3 @@
-"use client";
-
 import { figureOf, panelCellLabel, phaseIs, phaseWalks } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import type { HierarchyCourse } from "@/lib/api";

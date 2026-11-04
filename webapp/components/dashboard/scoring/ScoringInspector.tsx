@@ -1,4 +1,3 @@
-"use client";
 import { useRound } from "@/lib/hooks/useRound";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";

@@ -1,5 +1,3 @@
-"use client";
-
 import { CommitInput } from "@/components/ui";
 import { childOf as child, type FieldSchema } from "@/lib/derivations";
 import { CAP_AXIS_INFO } from "@/lib/api/types.generated";

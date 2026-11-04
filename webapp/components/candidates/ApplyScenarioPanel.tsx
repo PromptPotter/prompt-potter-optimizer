@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";

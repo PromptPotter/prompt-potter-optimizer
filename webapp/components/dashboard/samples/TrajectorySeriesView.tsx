@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo, useState } from "react";
 import { pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";

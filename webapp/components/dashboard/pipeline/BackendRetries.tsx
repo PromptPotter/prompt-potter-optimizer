@@ -1,4 +1,3 @@
-"use client";
 import { useCycleStream } from "@/lib/poll";
 import { fmtClock, fmtUnit } from "@/lib/format";
 

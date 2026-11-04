@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { CardFrame, DataTable, Empty, Said, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";

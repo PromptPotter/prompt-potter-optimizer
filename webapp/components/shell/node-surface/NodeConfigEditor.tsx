@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useState } from "react";
 import type { CapabilityMenu, DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
 import type { ParamIntent } from "@/lib/api/types";

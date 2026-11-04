@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import type { ArmReading, VerificationMark } from "@/lib/api/types";
 import { READING_STATE_INFO } from "@/lib/api/types.generated";

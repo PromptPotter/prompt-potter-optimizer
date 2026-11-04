@@ -1,4 +1,3 @@
-"use client";
 import type { ServedBackpressure } from "@/lib/api";
 import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";

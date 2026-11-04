@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { sidePanelKey, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { Button } from "./Button";

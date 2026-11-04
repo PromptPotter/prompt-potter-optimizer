@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useState } from "react";
 import type { DatasetItem } from "@/lib/api";
 import { useHardSamples } from "@/lib/hard-samples";

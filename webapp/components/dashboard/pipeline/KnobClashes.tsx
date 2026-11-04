@@ -1,5 +1,3 @@
-"use client";
-
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { configMapRead, type ConfigCoupling } from "@/lib/api";
 import { COUPLING_SEVERITY_INFO } from "@/lib/api/types.generated";

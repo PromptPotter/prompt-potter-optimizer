@@ -110,7 +110,7 @@ jobs:
           key: eslint-${{ github.sha }}
           restore-keys: eslint-
 
-      # The `playwright` check walks the built export against the REAL API, which
+      # The `playwright` check walks the built app against the REAL API, which
       # `e2e/serve.mjs` runs out of `.venv` — so this job needs the engine after
       # all. Same extras as the `check` job: the app has to import before it can
       # be walked. `--with-deps` because a bare runner has none of Chromium's

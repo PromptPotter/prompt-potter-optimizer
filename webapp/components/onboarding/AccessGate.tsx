@@ -1,4 +1,3 @@
-"use client";
 // Takes precedence over ConsentGate: a blocked account cannot submit, so has nothing to consent to.
 
 import { useAuth } from "@/lib/state/auth";

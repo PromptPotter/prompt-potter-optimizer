@@ -1,4 +1,3 @@
-"use client";
 import { metricInkToken } from "./series";
 import { AbilityHelp } from "./AbilityInfo";
 import type { CandidatesModel } from "./useCandidatesModel";

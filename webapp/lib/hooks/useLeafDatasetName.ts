@@ -1,4 +1,3 @@
-"use client";
 // Only a drill-in reads the pipeline: an inner cycle's `.inner/` sandbox is absent from `/hierarchy`.
 
 import type { CyclePath } from "../ids";

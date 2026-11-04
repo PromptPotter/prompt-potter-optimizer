@@ -1,4 +1,3 @@
-"use client";
 // Consent attaches only to someone about to submit data: anon visitors and non-active accounts are never gated.
 
 import { useState } from "react";

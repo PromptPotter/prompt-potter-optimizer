@@ -1,4 +1,3 @@
-"use client";
 // Update profile, remove account and connect account are INTENTIONAL placeholders: never hide them.
 
 import type { ComponentType } from "react";

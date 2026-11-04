@@ -1,5 +1,3 @@
-"use client";
-
 import { useImperativeHandle, useMemo, useRef, useState, type DragEvent, type Ref } from "react";
 import { libraryRead, postCommand, type DraftPatch, type NodePrompt } from "@/lib/api";
 import { cx } from "@/lib/cx";

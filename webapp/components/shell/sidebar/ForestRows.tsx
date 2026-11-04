@@ -1,5 +1,3 @@
-"use client";
-
 import { type ReactNode, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";

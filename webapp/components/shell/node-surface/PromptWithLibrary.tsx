@@ -1,5 +1,3 @@
-"use client";
-
 import { useRef, useState, type ComponentProps } from "react";
 import { PromptFieldsEditor, type PromptFieldsHandle } from "./PromptFieldsEditor";
 import { SnippetLibrary } from "./SnippetLibrary";

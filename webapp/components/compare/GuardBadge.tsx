@@ -1,5 +1,3 @@
-"use client";
-
 import type { PairGuard } from "@/lib/api/types";
 import { GUARD_STATE_LABELS } from "@/lib/api/types.generated";
 import { Badge, Term } from "@/components/ui";

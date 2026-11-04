@@ -1,4 +1,3 @@
-"use client";
 import { useState, type ReactNode } from "react";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useCycleStream } from "@/lib/poll";

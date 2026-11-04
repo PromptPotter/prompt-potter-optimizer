@@ -1,5 +1,3 @@
-"use client";
-
 import type { MeasuredUnit, VerifyReading as Reading } from "@/lib/api/types";
 import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";

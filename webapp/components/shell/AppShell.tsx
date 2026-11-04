@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useMemo, type CSSProperties } from "react";
 import { subjectKey } from "@/lib/api";
 import { CycleStreamProvider } from "@/lib/poll";

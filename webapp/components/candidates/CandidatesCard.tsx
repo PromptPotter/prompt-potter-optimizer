@@ -1,4 +1,3 @@
-"use client";
 import type { CSSProperties } from "react";
 import type { ServedDashboard } from "@/lib/api";
 import { FitnessChart } from "./FitnessChart";

@@ -1,5 +1,3 @@
-"use client";
-
 import type { ButtonHTMLAttributes } from "react";
 import { cx } from "@/lib/cx";
 import s from "./Button.module.css";

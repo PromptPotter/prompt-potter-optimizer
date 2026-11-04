@@ -1,5 +1,3 @@
-"use client";
-
 import { invalidateReads } from "@/lib/read-cache";
 import { AccountSection } from "./AccountSection";
 import {

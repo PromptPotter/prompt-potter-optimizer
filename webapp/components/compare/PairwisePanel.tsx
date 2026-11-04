@@ -1,5 +1,3 @@
-"use client";
-
 import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
 import type {
   MeasuredLift,

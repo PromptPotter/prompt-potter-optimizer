@@ -1,5 +1,3 @@
-"use client";
-
 import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";

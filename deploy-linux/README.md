@@ -40,7 +40,7 @@ Do them in order, and **verify sign-in end to end between 2 and 3** — tier 2 i
 round trip, and tier 3 makes that breakage much harder to attribute.
 
 **Tier 1.** The `--- brand ---` block is the ONE declaration: `brand-env.sh` writes the engine's copy
-into `.env` and exports the webapp's `NEXT_PUBLIC_*` twins before the build, on both `bootstrap.sh`
+into `.env` and exports the webapp's `VITE_*` twins before the build, on both `bootstrap.sh`
 and `update.sh` — so editing the block and re-deploying repaints the install, and an update never
 repaints it back. An unset value is never written, so a half-filled block leaves upstream defaults
 standing. Three rules the fields encode: **`PUBLISHER_*` is yours, the provider is not** (the

@@ -1,5 +1,3 @@
-"use client";
-
 import { DataTable, type Column } from "@/components/ui";
 import type { DraftCampaignWire } from "@/lib/api";
 import { PLACEHOLDER } from "@/lib/format";

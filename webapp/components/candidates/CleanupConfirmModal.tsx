@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Dialog, FailureLine } from "@/components/ui";
 import type { CommandFailure } from "@/lib/hooks/useCommand";
 

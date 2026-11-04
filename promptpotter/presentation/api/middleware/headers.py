@@ -9,16 +9,20 @@ from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 _API = "/api/v1/"
-# A build names these files by their content, so one that was served never changes.
-_CONTENT_NAMED = "/_next/static/"
-_SERVED = (200, 206, 304)
+# The build (`webapp/vite.config.ts`) names these files by their content, so one that was served never changes.
+_CONTENT_NAMED = "/assets/"
 _API_CSP = "default-src 'none'; frame-ancestors 'none'"
-# 'unsafe-inline': the export inlines per-page RSC scripts, and a 304 revalidation carries no body to hash.
+# No inline script: the theme stamp is a file. Styles stay 'unsafe-inline' for React's `style=` props.
 _WEBAPP_CSP = (
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
     "form-action 'self'"
 )
+
+
+def served_build_file(path: str, status: int) -> bool:
+    """A content-named file actually served: a 404 for a chunk asked mid-build is not one."""
+    return path.startswith(_CONTENT_NAMED) and status in (200, 206, 304)
 
 
 def cache_policy(*, api: bool, path: str, status: int) -> str:
@@ -30,7 +34,7 @@ def cache_policy(*, api: bool, path: str, status: int) -> str:
     """
     if api:
         return "no-store"
-    if path.startswith(_CONTENT_NAMED) and status in _SERVED:
+    if served_build_file(path, status):
         return "public, max-age=31536000, immutable"
     return "no-cache"
 

@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { Empty, ReadState } from "@/components/ui";
 import { billText, ratePricedText } from "@/lib/derivations";

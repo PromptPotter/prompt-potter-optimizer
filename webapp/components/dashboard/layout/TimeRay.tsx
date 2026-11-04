@@ -1,5 +1,3 @@
-"use client";
-
 import { memo, useEffect, useMemo, useRef } from "react";
 import { cx } from "@/lib/cx";
 import { fmtGap } from "@/lib/format";

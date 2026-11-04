@@ -1,4 +1,3 @@
-"use client";
 import { memo, useCallback, useMemo, useRef } from "react";
 import { fmtUnit } from "@/lib/format";
 import { useWidth } from "@/lib/hooks/useWidth";

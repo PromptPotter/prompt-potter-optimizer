@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, type ReactNode } from "react";
 import { SETUP_STEP_TITLES, type SetupStep as Step } from "@/lib/api/types.generated";
 

@@ -6,8 +6,7 @@ import path from "node:path";
 
 // `--auth=on` closes `deps.py::auth_is_open`; a session is a file minted directly.
 
-// `__dirname`, not `import.meta.url`: Playwright's loader compiles this file to CommonJS.
-const WEBAPP = path.resolve(__dirname, "..");
+const WEBAPP = path.resolve(import.meta.dirname, "..");
 
 export type FakeIssuer = {
   baseURL: string;

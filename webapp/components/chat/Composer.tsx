@@ -1,5 +1,3 @@
-"use client";
-
 import { useRef, useState, type ReactNode } from "react";
 import { cx } from "@/lib/cx";
 

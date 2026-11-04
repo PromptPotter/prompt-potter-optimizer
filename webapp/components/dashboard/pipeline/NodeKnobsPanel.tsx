@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import {

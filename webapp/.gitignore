@@ -13,10 +13,8 @@
 # testing
 /coverage
 
-# next.js
-/.next/
+# the build
 /out/
-/public/build-id.txt
 
 # production
 /build
@@ -34,12 +32,8 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
 # eslint
 .eslintcache

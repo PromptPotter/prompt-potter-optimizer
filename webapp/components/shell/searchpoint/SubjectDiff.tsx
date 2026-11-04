@@ -1,4 +1,3 @@
-"use client";
 import type { ReactNode } from "react";
 import type { ObserveConfig } from "@/lib/derivations";
 import type { OriginChanges } from "@/lib/hooks/useOriginEvidence";

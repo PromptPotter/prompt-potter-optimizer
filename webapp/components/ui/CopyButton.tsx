@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { failureKind, operatorMessage } from "@/lib/api";
 import { COPIED_FLASH_MS, COPY_FAILURE_NOTICE_MS } from "@/lib/cadence";

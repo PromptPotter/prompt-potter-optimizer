@@ -1,4 +1,3 @@
-"use client";
 import { useMemo } from "react";
 import type { DraftPatch, NodePrompt, OptimizerNodePrompt } from "@/lib/api";
 import type { SelectedNode } from "@/lib/address";

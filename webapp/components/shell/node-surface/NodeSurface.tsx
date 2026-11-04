@@ -1,4 +1,3 @@
-"use client";
 import type { CapabilityMenu, DraftPatch, NodeOutputSchema } from "@/lib/api";
 import type { ParamIntent } from "@/lib/api/types";
 import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";

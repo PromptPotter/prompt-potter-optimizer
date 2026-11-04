@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useMemo, useState } from "react";
 import { Empty, FailureLine, Loading, SignInPrompt } from "@/components/ui";
 import { useAuth } from "@/lib/state/auth";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useId, useRef, useState } from "react";
 import type { StartCheckinOptions } from "@/lib/api";
 import type { SetupStep as Step } from "@/lib/api/types.generated";

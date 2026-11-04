@@ -1,4 +1,3 @@
-"use client";
 import { FailureLine, Said } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useRunControl } from "@/lib/hooks/useRunControl";

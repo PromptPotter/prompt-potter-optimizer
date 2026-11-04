@@ -1,4 +1,3 @@
-"use client";
 import { memo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import { useViewedCourse } from "@/lib/lineage";

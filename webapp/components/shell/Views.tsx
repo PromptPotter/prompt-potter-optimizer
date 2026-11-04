@@ -1,4 +1,3 @@
-"use client";
 import { useEffect } from "react";
 import { Button, IconClose, Said } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";

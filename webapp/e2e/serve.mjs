@@ -32,7 +32,7 @@ if (BACKEND !== "offline" && BACKEND !== "live") {
 
 for (const [what, where, remedy] of [
   ["venv interpreter", PYTHON, "python scripts/gate.py"],
-  ["static export", path.join(WEBAPP, "out", "index.html"), "npm run build"],
+  ["built app", path.join(WEBAPP, "out", "index.html"), "npm run build"],
 ]) {
   if (!existsSync(where)) {
     console.error(`[e2e] no ${what} at ${where} — run \`${remedy}\``);
@@ -53,6 +53,17 @@ if (home && process.env.PP_E2E_RESET === "1" && process.env.PP_E2E_KEEP !== "1")
     env: { ...process.env, PYTHONUTF8: "1" },
   });
   if (reset.status !== 0) process.exit(reset.status ?? 2);
+}
+
+// `--world=` names a run's workspace this home becomes a copy of (`walk_world.py`); never served itself.
+const WORLD = process.argv.find((arg) => arg.startsWith("--world="))?.slice("--world=".length);
+if (home && WORLD) {
+  const world = spawnSync(PYTHON, [path.join(WEBAPP, "e2e", "walk_world.py"), WORLD], {
+    cwd: REPO,
+    stdio: "inherit",
+    env: { ...process.env, PYTHONUTF8: "1" },
+  });
+  if (world.status !== 0) process.exit(world.status ?? 2);
 }
 
 // TEED so `harness.ts` fails on faults the server swallows, which the browser's console guard never sees.

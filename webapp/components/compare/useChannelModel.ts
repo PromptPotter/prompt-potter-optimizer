@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useMemo, useState } from "react";
 import type { HierarchyCandidate, SubjectReading } from "@/lib/api";
 import type { NodeSchemaReading } from "@/lib/types";

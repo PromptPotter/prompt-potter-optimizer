@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import type { MeasuredUnit, OverlapReading, ServedRound } from "@/lib/api/types";
 import { unitCount } from "@/lib/format";

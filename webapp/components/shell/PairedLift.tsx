@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import type { MeasuredLift, PairedReading } from "@/lib/api/types";
 import { fmtLift, readPaired, type PairFacet } from "@/lib/derivations";

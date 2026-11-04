@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cx } from "@/lib/cx";

@@ -1,5 +1,3 @@
-"use client";
-
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/state/auth";
 import { Dialog } from "@/components/ui";

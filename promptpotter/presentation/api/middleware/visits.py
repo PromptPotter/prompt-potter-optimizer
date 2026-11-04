@@ -10,11 +10,11 @@ from starlette.requests import cookie_parser
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application.app_visits import keep_visit
+from promptpotter.presentation.api.middleware.headers import served_build_file
 from promptpotter.presentation.api.middleware.oidc import OWNER_DEVICE_COOKIE_NAME
 from promptpotter.shared.errors import graceful
 
 _SITE_RECORDS = "/api/v1/site-records/"
-_CONTENT_NAMED = "/_next/static/"
 
 
 def _outside(host: str) -> bool:
@@ -37,7 +37,7 @@ def _kept(scope: Scope, status: int) -> bool:
         # The website's own sender, holding its token.
         return False
     # A page's own build files, fetched by every visit that loads it.
-    return not (path.startswith(_CONTENT_NAMED) and status in (200, 206, 304))
+    return path != "/theme-init.js" and not served_build_file(path, status)
 
 
 class OutsideVisitsMiddleware:

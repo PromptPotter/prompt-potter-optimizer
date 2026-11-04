@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useRef } from "react";
 import { Term } from "@/components/ui";
 import { couponRead } from "@/lib/api";

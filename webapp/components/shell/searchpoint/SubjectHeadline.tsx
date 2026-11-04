@@ -1,4 +1,3 @@
-"use client";
 import type { ArmReading } from "@/lib/api/types";
 import { fmtUnit } from "@/lib/format";
 import { HoverCard } from "@/components/ui";

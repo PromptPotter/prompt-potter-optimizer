@@ -2,8 +2,6 @@ import type { ErrorEnvelope } from "./types.generated";
 
 export const API = "/api/v1";
 
-// Stamped by the build (`next.config.ts`); the server names the build it serves on every API answer.
-const BUILD = process.env.NEXT_PUBLIC_WEBAPP_BUILD;
 let serverMovedOn = false;
 
 export function buildIsStale(): boolean {
@@ -14,8 +12,11 @@ export function buildIsStale(): boolean {
 export async function send(url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, { cache: "no-store", ...init });
   const serving = r.headers.get("X-Webapp-Build");
+  // Stamped by the build (`vite.config.ts`). Read here, never at import: the e2e harness loads this
+  // module in Node, where `import.meta.env` is absent.
+  const built: unknown = import.meta.env.VITE_WEBAPP_BUILD;
   // Only noted, never acted on here: a reload would drop an ingest draft or a command in flight.
-  if (BUILD && serving && serving !== BUILD) serverMovedOn = true;
+  if (built && serving && serving !== built) serverMovedOn = true;
   return r;
 }
 
@@ -47,7 +48,7 @@ export function failureKind(e: unknown): FailureKind {
   return "transient";
 }
 
-// The ONE envelope parser, reads and writes alike. A proxy 502 or a static-export 404 answers
+// The ONE envelope parser, reads and writes alike. A proxy 502 or a missing-page 404 answers
 // something else, which carries no `error_id`.
 export async function toApiError(r: Response): Promise<ApiError> {
   const body: unknown = await r.json().catch(() => null);

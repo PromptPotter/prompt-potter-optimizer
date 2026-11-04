@@ -1,4 +1,3 @@
-"use client";
 import { useRead } from "@/lib/hooks/useRead";
 import { workspaceStorageRead, type WorkspaceStorageResponse } from "@/lib/api";
 import { LIFECYCLE_STATUS_LABELS } from "@/lib/api/types.generated";

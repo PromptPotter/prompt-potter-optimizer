@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { SegmentedControl } from "@/components/ui";
 import { promptFieldLabel } from "@/lib/prompt-fields";

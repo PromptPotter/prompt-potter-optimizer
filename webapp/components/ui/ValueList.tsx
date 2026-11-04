@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { CommitInput } from "./CommitInput";

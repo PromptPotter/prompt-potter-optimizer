@@ -1,4 +1,3 @@
-"use client";
 import type { RoundReading } from "@/lib/derivations";
 import { HoverCard } from "@/components/ui";
 

@@ -1,4 +1,3 @@
-"use client";
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/host-assistant.md`): never hide them.
 import { useEffect, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect } from "react";
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
 import { LIVE_EVIDENCE_MS } from "@/lib/cadence";

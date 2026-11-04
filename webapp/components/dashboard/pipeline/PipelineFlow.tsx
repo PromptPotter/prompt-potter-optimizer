@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useRef, type ReactNode } from "react";
 import { useWidth } from "@/lib/hooks/useWidth";
 import type { PipelineView, PipelineViewEdge } from "@/lib/types";

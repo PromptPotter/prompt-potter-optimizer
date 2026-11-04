@@ -1,5 +1,3 @@
-"use client";
-
 import { BOOL, STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 
 export const SIDEBAR_WIDTH = { initial: 200, min: 160, max: 480 } as const;

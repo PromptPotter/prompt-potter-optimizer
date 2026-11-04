@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, type ComponentType, type ReactNode } from "react";
 import {
   CommitInput,

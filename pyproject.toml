@@ -205,7 +205,7 @@ include = ["promptpotter*"]
 #
 # The `assets/datasets` and `assets/webapp` entries are wildcards, so whatever lands
 # there is published verbatim — a credential in a dataset file, or a secret inlined into
-# the Next.js bundle, would ship. That script scans the built artifact for
+# the Vite bundle, would ship. That script scans the built artifact for
 # credential-shaped names and contents and refuses to hand you a wheel carrying one.
 [tool.setuptools.package-data]
 promptpotter = [
@@ -221,7 +221,7 @@ promptpotter = [
     "assets/free_tier.yaml",        # what a free account may run
     "assets/datasets/**/*.yaml",    # dataset definitions, family and install defaults
     "assets/datasets/**/*.md",      # + task framing and READMEs
-    # A BUILD ARTIFACT — a Next.js export — so it cannot sit in the source tree the way
+    # A BUILD ARTIFACT — the Vite build — so it cannot sit in the source tree the way
     # assets/optimizers/ does. `scripts/build_release.py` stages it before `uv build`;
     # without that the glob matches nothing silently.
     "assets/webapp/**/*",           # exported dashboard

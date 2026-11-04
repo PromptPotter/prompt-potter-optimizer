@@ -1,76 +1,19 @@
-// Next inlines `NEXT_PUBLIC_*` only on LITERAL member access — never a dynamic lookup helper.
-export const BRAND = {
-  name: process.env.NEXT_PUBLIC_BRAND_NAME || "PromptPotter Live Unit",
-  shortName: process.env.NEXT_PUBLIC_BRAND_SHORT_NAME || "PromptPotter",
-  description:
-    process.env.NEXT_PUBLIC_BRAND_DESCRIPTION ||
-    "LLM-driven program evolution for prompts and pipeline parameters.",
-  url: process.env.NEXT_PUBLIC_BRAND_URL || "https://app.promptpotter.com",
-  applicationCategory: "DeveloperApplication",
-  publisher: {
-    name: process.env.NEXT_PUBLIC_PUBLISHER_NAME || "PromptPotter",
-    url: process.env.NEXT_PUBLIC_PUBLISHER_URL || "https://promptpotter.com",
-  },
-  // Fixed: the provenance fact, never repainted by a whitelabel host.
-  provider: {
-    name: "PromptPotter",
-    url: "https://promptpotter.com",
-  },
-  // `??`, not `||`: an explicit empty string drops the login "visit our website" card.
-  marketing: {
-    url: process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://promptpotter.com",
-    title: process.env.NEXT_PUBLIC_MARKETING_TITLE || "PromptPotter",
-    tagline:
-      process.env.NEXT_PUBLIC_MARKETING_TAGLINE ||
-      "Give PromptPotter the prompt you're already using; it returns critiqued, improved versions with rich evaluation metadata.",
-  },
-  supportUrl:
-    process.env.NEXT_PUBLIC_SUPPORT_URL ||
-    "https://github.com/PromptPotter/prompt-potter-optimizer/issues",
-  // Never derived from `marketing.url`: clearing that must not take the consent links with it.
-  legal: {
-    terms: process.env.NEXT_PUBLIC_TERMS_URL || "https://promptpotter.com/terms",
-    privacy: process.env.NEXT_PUBLIC_PRIVACY_URL || "https://promptpotter.com/privacy",
-    imprint: process.env.NEXT_PUBLIC_IMPRINT_URL || "https://promptpotter.com/imprint",
-  },
-  license:
-    process.env.NEXT_PUBLIC_LICENSE ||
-    "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE",
-  // Mirrors the dark ground in `foundation/tokens.css` and layout's themeColor.
-  themeColor: "#181818",
-  backgroundColor: "#181818",
-  verification: "self-declared" as "self-declared" | "verified",
-} as const;
+import { brandOf, type Brand } from "@/lib/brand-of";
 
-// No softwareVersion: the version is live from /health.
-interface SoftwareApplicationLd {
-  "@context": "https://schema.org";
-  "@type": "SoftwareApplication";
-  name: string;
-  description: string;
-  applicationCategory: string;
-  url: string;
-  provider: { "@type": "Organization"; name: string; url: string };
-  publisher: { "@type": "Organization"; name: string; url: string };
-}
-
-export function softwareApplicationLd(): SoftwareApplicationLd {
-  return {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: BRAND.name,
-    description: BRAND.description,
-    applicationCategory: BRAND.applicationCategory,
-    url: BRAND.url,
-    provider: {
-      "@type": "Organization",
-      name: BRAND.provider.name,
-      url: BRAND.provider.url,
-    },
-    publisher: {
-      "@type": "Organization",
-      name: BRAND.publisher.name,
-      url: BRAND.publisher.url,
-    },
-  };
-}
+// Literal member reads, never `brandOf(import.meta.env)`: Vite inlines each named `VITE_*`, and a whole-object read would inline them all.
+export const BRAND: Brand = brandOf({
+  VITE_BRAND_NAME: import.meta.env.VITE_BRAND_NAME,
+  VITE_BRAND_SHORT_NAME: import.meta.env.VITE_BRAND_SHORT_NAME,
+  VITE_BRAND_DESCRIPTION: import.meta.env.VITE_BRAND_DESCRIPTION,
+  VITE_BRAND_URL: import.meta.env.VITE_BRAND_URL,
+  VITE_PUBLISHER_NAME: import.meta.env.VITE_PUBLISHER_NAME,
+  VITE_PUBLISHER_URL: import.meta.env.VITE_PUBLISHER_URL,
+  VITE_MARKETING_URL: import.meta.env.VITE_MARKETING_URL,
+  VITE_MARKETING_TITLE: import.meta.env.VITE_MARKETING_TITLE,
+  VITE_MARKETING_TAGLINE: import.meta.env.VITE_MARKETING_TAGLINE,
+  VITE_SUPPORT_URL: import.meta.env.VITE_SUPPORT_URL,
+  VITE_TERMS_URL: import.meta.env.VITE_TERMS_URL,
+  VITE_PRIVACY_URL: import.meta.env.VITE_PRIVACY_URL,
+  VITE_IMPRINT_URL: import.meta.env.VITE_IMPRINT_URL,
+  VITE_LICENSE: import.meta.env.VITE_LICENSE,
+});
