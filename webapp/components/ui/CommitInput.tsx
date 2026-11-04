@@ -20,7 +20,8 @@ type MultiLine = Own & { rows: number } & Omit<
     Owned | "rows"
   >;
 
-// Two latches: a caller that rejects a commit keeps its old `value`, so one would re-fire it on the next blur.
+// Two latches: a caller that rejects a commit keeps its old `value`, so blur alone would re-fire it.
+// Enter is asked, so it resends a draft the caller never adopted — a failed commit is retried there.
 function useCommitted(
   value: string,
   onCommit: (value: string) => void,
@@ -34,8 +35,8 @@ function useCommitted(
     setSent(value);
     setDraft(value);
   }
-  const commit = () => {
-    if (draft === sent) return;
+  const commit = (asked: boolean) => {
+    if (draft === (asked ? value : sent)) return;
     if (validate && !validate(draft)) return;
     setSent(draft);
     onCommit(draft);
@@ -44,24 +45,26 @@ function useCommitted(
     commit,
     field: {
       value: draft,
-      spellCheck: false,
-      autoComplete: "off" as const,
-      onBlur: commit,
+      onBlur: () => commit(false),
       onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(e.target.value),
     },
   };
 }
 
+// Defaults a caller may override: a key or a password field asks the browser for its own.
+const DEFAULTS = { spellCheck: false, autoComplete: "off" } as const;
+
 function Line({ value, onCommit, validate, ...rest }: OneLine) {
   const { commit, field } = useCommitted(value, onCommit, validate);
   return (
     <input
+      {...DEFAULTS}
       {...rest}
       {...field}
       onKeyDown={(e) => {
         if (e.key !== "Enter") return;
         e.preventDefault();
-        commit();
+        commit(true);
       }}
     />
   );
@@ -69,7 +72,7 @@ function Line({ value, onCommit, validate, ...rest }: OneLine) {
 
 function Area({ value, onCommit, validate, rows, ...rest }: MultiLine) {
   const { field } = useCommitted(value, onCommit, validate);
-  return <textarea {...rest} {...field} rows={rows} />;
+  return <textarea {...DEFAULTS} {...rest} {...field} rows={rows} />;
 }
 
 export function CommitInput(props: OneLine | MultiLine) {

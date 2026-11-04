@@ -24,6 +24,7 @@ export function OptimizerCard() {
   const { doc: pipeline, status: pipelineStatus } = useOptimizerPipeline();
   const [knobsOpen, setKnobsOpen] = useState(false);
   const clashes = useKnobClashes();
+  const clashCount = clashes.active?.length ?? 0;
   const { dash, isLive } = useCycleStream();
   const runState = figureOf(useViewedCourse(), "state");
   const view = pipeline?.view ?? null;
@@ -61,19 +62,21 @@ export function OptimizerCard() {
         />
         <Button
           variant="ghost"
-          className={cx("workflow-mech", clashes.length > 0 && "has-clash")}
+          className={cx("workflow-mech", clashCount > 0 && "has-clash")}
           aria-haspopup="dialog"
           aria-expanded={knobsOpen}
           aria-label={
-            clashes.length > 0
-              ? `Optimizer knobs — ${clashes.length} clash${clashes.length === 1 ? "" : "es"} in this config`
-              : "Optimizer knobs"
+            clashes.read.status === "failed"
+              ? "Optimizer knobs — the clash check did not load"
+              : clashCount > 0
+                ? `Optimizer knobs — ${clashCount} clash${clashCount === 1 ? "" : "es"} in this config`
+                : "Optimizer knobs"
           }
           title="Optimizer knobs — each node's configuration for this campaign"
           onClick={() => setKnobsOpen(true)}
         >
           <IconSliders />
-          {clashes.length > 0 ? <span className="workflow-mech-count">{clashes.length}</span> : null}
+          {clashCount > 0 ? <span className="workflow-mech-count">{clashCount}</span> : null}
         </Button>
       </Toolbar>
       <div className="workflow-graph">

@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
-import { CardFrame, DataTable, Empty, FailureLine, Loading, type Column } from "@/components/ui";
+import { CardFrame, DataTable, Empty, Loading, ReadState, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { indexLineage } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import { shortId } from "@/lib/format";
+import { shownData } from "@/lib/hooks/useRead";
 import { useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
 import { ChannelRestore, ConfigCell, pointKeyOf } from "./config-edit";
@@ -174,17 +175,19 @@ function CampaignSpines({
   subjects: readonly SubjectReading[];
   evidence: Evidence;
 }) {
-  const { root, loaded, failure } = useLineageTree(campaignId, true);
+  const read = useLineageTree(campaignId, true);
+  const root = shownData(read);
   const index = useMemo(() => indexLineage(root), [root]);
 
   const spines = useMemo(() => buildSpines(index, subjects), [index, subjects]);
 
-  if (failure) {
+  if (root === null) {
     return (
-      <FailureLine failure={failure} lead={`Could not read ${shortId(campaignId)}’s lineage.`} />
+      <ReadState read={read} subject={`${shortId(campaignId)}’s lineage`}>
+        {() => null}
+      </ReadState>
     );
   }
-  if (!loaded) return <Loading>Reading {shortId(campaignId)}&rsquo;s lineage…</Loading>;
   if (spines.length === 0) {
     return (
       <p className="note-info">

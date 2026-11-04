@@ -62,8 +62,9 @@ function Overrides({ title, map }: { title: string; map: Record<string, unknown>
 export function L1Variants({ variants }: { variants: Variant[] }) {
   // Index is the key: a variant's POSITION mints its candidate label (`C{round}.{idx}`).
   const [pick, setPick] = useState("0");
-  const idx = Number(pick);
-  const shown = variants[idx] ?? variants[0];
+  // A pick past a shrunk list reads its last variant, the one the control shows lit.
+  const idx = Math.min(Number(pick), variants.length - 1);
+  const shown = variants[idx];
   if (!shown) return null;
 
   const grounding = shown.evidence_grounding ?? null;
@@ -78,7 +79,7 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
             label: `.${i + 1}`,
             title: `Candidate ${i + 1} of ${variants.length}`,
           }))}
-          value={String(Math.min(idx, variants.length - 1))}
+          value={String(idx)}
           onChange={setPick}
           ariaLabel="Which generated candidate to show"
         />

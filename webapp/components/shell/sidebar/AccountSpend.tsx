@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Term } from "@/components/ui";
 import { couponRead } from "@/lib/api";
-import { COUPON_POLL_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
 import { allowanceCaveats, billText } from "@/lib/derivations";
 import { cssPct } from "@/lib/format";
@@ -11,7 +10,8 @@ import { useRegistry } from "@/lib/state/registry";
 
 export function AccountSpend() {
   const { entries } = useRegistry();
-  const read = useRead(couponRead(), { auth: true, intervalMs: COUPON_POLL_MS });
+  // No poll: spend moves only where a course's served lifetime bill moves, or a write re-asks it.
+  const read = useRead(couponRead(), { auth: true });
 
   const signature = entries.map((c) => c.facts.spend_lifetime.billed_usd).join(",");
   const asked = useRef(signature);

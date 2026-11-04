@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
 import type { MeasuredLift } from "@/lib/api/types";
 import { SCENARIO_WORDS } from "@/lib/api/types.generated";
@@ -14,11 +14,9 @@ import {
   ToolbarSep,
   type Column,
 } from "@/components/ui";
-import { LIVE_EVIDENCE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import { campaignAt, phaseWalks, readPaired } from "@/lib/derivations";
-import { invalidateReads } from "@/lib/read-cache";
+import { campaignAt, readPaired } from "@/lib/derivations";
 import { useRegistry } from "@/lib/state/registry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import {
@@ -76,16 +74,19 @@ export function ComparePane() {
     const line = byAddress.get(campaignAt(byAddress, c.rootCampaignId)?.facts.line ?? "");
     return line?.level === "course" ? [line] : [];
   });
-  const moved = compared
-    .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.status.run_phase}`)
-    .join("|");
-  useEffect(() => invalidateReads("evidence"), [moved]);
-  const running = compared.some((a) => phaseWalks(a.state.status.run_phase));
-  const { evidence, loading, failure, invalidMetric } = useEvidence(
-    selected,
-    running ? LIVE_EVIDENCE_MS : null,
-    { ranking, winnerChain, config, metric, grid },
-  );
+  const pulse = {
+    live: compared.some((a) => a.state.attached),
+    moved: compared
+      .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.status.run_phase}`)
+      .join("|"),
+  };
+  const { evidence, loading, failure, invalidMetric } = useEvidence(selected, pulse, {
+    ranking,
+    winnerChain,
+    config,
+    metric,
+    grid,
+  });
 
   // Keyed on campaigns, so re-pointing a channel keeps the metric; a stale metric pick 400s.
   const campaignsKey = useMemo(

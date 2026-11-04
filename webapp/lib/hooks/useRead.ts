@@ -76,7 +76,8 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
     const hit = readId === null ? null : cachedRead<T>(readId);
     if (hit) setHeld(landed(n, hit.data, keep));
   }
-  const gen = generation.n;
+  // A superseded id is already the next generation: this pass never returns the old id's `ready`.
+  const gen = generation.id === readId ? generation.n : generation.n + 1;
 
   const issueRef = useRef<ReadDescriptor<T> | null>(null);
   const genRef = useRef(gen);

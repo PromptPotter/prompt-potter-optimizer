@@ -10,7 +10,7 @@ import {
 } from "@/lib/api";
 import { KEY_SOURCE_LABELS } from "@/lib/api/types.generated";
 import { fmtAgo } from "@/lib/format";
-import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
 import { invalidateReads } from "@/lib/read-cache";
 
@@ -25,16 +25,9 @@ export function AccountKeysTab() {
 
 type KeyVerb = "save-key" | "remove-key";
 
-// Only a flat denial needs a sentence here: the server words its own refusals, and 403 and 404 are one answer.
-function refusal(f: CommandFailure): string | null {
-  return f.kind === "denied" || f.kind === "gone"
-    ? "This session may not change provider keys."
-    : null;
-}
-
 export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
   // No blanket revalidate: the write re-asks the one read carrying the keys.
-  const cmd = useCommand<KeyVerb>("account-keys", { describe: refusal, revalidate: false });
+  const cmd = useCommand<KeyVerb>("account-keys", { revalidate: false });
   const busy = cmd.pending !== null;
 
   const save = (provider: string, secret: string) =>

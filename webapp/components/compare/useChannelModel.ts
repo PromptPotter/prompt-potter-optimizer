@@ -17,7 +17,7 @@ import {
 } from "@/lib/derivations";
 import type { HierarchyCampaign } from "@/lib/api";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
-import { readyData } from "@/lib/hooks/useRead";
+import { readyData, shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { useLineageTree } from "@/lib/lineage";
 import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
@@ -90,12 +90,10 @@ export function useChannelModel(
     [rootAddress],
   );
 
-  const { root, loaded, failure } = useLineageTree(run?.address ?? "", rootPath.length > 0);
+  const read = useLineageTree(run?.address ?? "", rootPath.length > 0);
+  const root = shownData(read);
   const index = useMemo(() => indexLineage(root), [root]);
-  const tree = useMemo(
-    () => ({ root, index, loaded, failure, rootPath }),
-    [root, index, loaded, failure, rootPath],
-  );
+  const tree = useMemo(() => ({ read, index, rootPath }), [read, index, rootPath]);
   const [selected, setSelected] = useState<HierarchyCandidate | null>(null);
   const head = useChannelHead(index, reading, selected);
   const [seededFor, setSeededFor] = useState<string | null>(null);

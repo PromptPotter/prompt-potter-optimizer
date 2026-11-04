@@ -7,7 +7,8 @@ import {
   type CladogramCtx,
 } from "@/components/candidates/Forest";
 import type { RoundNodePos } from "@/components/candidates/forest-layout";
-import { Empty, FailureLine, Loading } from "@/components/ui";
+import { Empty, ReadState } from "@/components/ui";
+import { shownData } from "@/lib/hooks/useRead";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
@@ -26,7 +27,8 @@ export function ChannelMap({
   own: CladogramChannel | null;
 }) {
   const { tree, selected, setSelected, invalidated, subject } = model;
-  const { root, index, loaded, failure, rootPath } = tree;
+  const { index, rootPath } = tree;
+  const root = shownData(tree.read);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [whole, setWhole] = useState(false);
 
@@ -80,36 +82,35 @@ export function ChannelMap({
   if (rootPath.length === 0) {
     return <Empty>This campaign has no branch in the registry to map.</Empty>;
   }
-  if (failure) return <FailureLine failure={failure} lead="This campaign’s lineage could not be read." />;
-  if (!root) {
-    return loaded ? <Empty>No rounds on disk yet.</Empty> : <Loading>Reading the lineage…</Loading>;
-  }
-
   return (
-    <div className="cmp-channel-map">
-      {own && (
-        <p className="cmp-map-scope">
-          <span className="l4-dim">
-            {whole
-              ? "The whole campaign — everything after this point too."
-              : "How this point came to be — the family up to it, and no further."}
-          </span>
-          <button type="button" className="cmp-link" onClick={() => setWhole((v) => !v)}>
-            {whole ? "Cut to this point" : "Show the whole campaign"}
-          </button>
-        </p>
+    <ReadState read={tree.read} subject="this campaign’s lineage">
+      {(root) => (
+        <div className="cmp-channel-map">
+          {own && (
+            <p className="cmp-map-scope">
+              <span className="l4-dim">
+                {whole
+                  ? "The whole campaign — everything after this point too."
+                  : "How this point came to be — the family up to it, and no further."}
+              </span>
+              <button type="button" className="cmp-link" onClick={() => setWhole((v) => !v)}>
+                {whole ? "Cut to this point" : "Show the whole campaign"}
+              </button>
+            </p>
+          )}
+          {selected && <ArmedActions armed={selected} subject={subject} />}
+          <Forest
+            tree={root}
+            valueByKey={valueByKey}
+            thetaByKey={thetaByKey}
+            metric="accuracy"
+            expanded={expanded}
+            onLaneActivate={onLaneActivate}
+            ctx={ctx}
+          />
+        </div>
       )}
-      {selected && <ArmedActions armed={selected} subject={subject} />}
-      <Forest
-        tree={root}
-        valueByKey={valueByKey}
-        thetaByKey={thetaByKey}
-        metric="accuracy"
-        expanded={expanded}
-        onLaneActivate={onLaneActivate}
-        ctx={ctx}
-      />
-    </div>
+    </ReadState>
   );
 }
 

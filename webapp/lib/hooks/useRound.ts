@@ -26,7 +26,7 @@ export function isRoundUnfiled(dash: ServedDashboard | null, round: number | nul
 const NO_ROWS: ArmRow[] = [];
 
 export function useRound(path: CyclePath | null, round: number | null): RoundState {
-  const dash = useDashboardAt(path);
+  const { dash } = useDashboardAt(path);
   const unfiled = isRoundUnfiled(dash, round);
   const at = useMomentAt(path);
   const read = useRead(path && round != null && !unfiled ? roundRead(path, round, at) : null);

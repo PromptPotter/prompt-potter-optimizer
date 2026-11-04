@@ -1,4 +1,4 @@
-import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
+import { API, InvalidInputError, jget, jgetIfModified, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
 import type { ExportTier } from "./types.generated";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type { ReadDescriptor } from "../read-cache";
@@ -21,6 +21,7 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
+  SubtreeCampaign,
   SubtreeEntry,
   HierarchyResponse,
   LeafBytes,
@@ -362,12 +363,12 @@ export interface SubtreeMoment {
   cycle: CyclePath;
 }
 
-// The entry at `address` with every level under it.
+// The campaign at `address` with every level under it; any other level there is a failed read.
 export function subtreeRead(
   address: string,
   mask: SubtreeMask | null,
   moment: SubtreeMoment | null = null,
-): ReadDescriptor<SubtreeEntry> {
+): ReadDescriptor<SubtreeCampaign> {
   const params = new URLSearchParams();
   if (mask?.lens) params.set("lens", mask.lens);
   if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));
@@ -376,7 +377,19 @@ export function subtreeRead(
     params.set("at_cycle", encodeCyclePath(moment.cycle));
   }
   const q = params.toString();
-  return byEtag("subtree", `${API}/hierarchy/${enc(address)}${q ? `?${q}` : ""}`);
+  const entry = byEtag<SubtreeEntry>("subtree", `${API}/hierarchy/${enc(address)}${q ? `?${q}` : ""}`);
+  return {
+    id: entry.id,
+    load: async (signal, validator) => {
+      const res = await entry.load(signal, validator);
+      if (res.kind === "not_modified") return res;
+      if (res.data.level !== "campaign") {
+        // The address named a level this read does not serve: a verdict, never a retried outage.
+        throw new InvalidInputError(`not a campaign: ${res.data.level}`);
+      }
+      return { ...res, data: res.data };
+    },
+  };
 }
 
 // A course's steps, windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.

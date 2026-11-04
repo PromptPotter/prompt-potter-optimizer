@@ -1,7 +1,4 @@
-import { useEffect } from "react";
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
-import { LIVE_EVIDENCE_MS } from "@/lib/cadence";
-import { invalidateReads } from "@/lib/read-cache";
 import { armAt, individualOf, type ObservePoint } from "@/lib/derivations";
 import { useViewedLineage } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
@@ -15,7 +12,7 @@ const WITH_CONFIG: EvidenceAsk = { config: true };
 // `compared` with no keys is the ONLY reading that says "identical".
 export type OriginChanges =
   | { status: "pending" }
-  | { status: "failed"; message: string }
+  | { status: "failed"; failure: ReadFailure }
   | { status: "unrecorded" }
   | { status: "compared"; keys: string[] };
 
@@ -39,7 +36,7 @@ function changesOf(
   // `undefined`: the point IS the origin.
   shown: SubjectReading | null | undefined,
 ): OriginChanges {
-  if (failure) return { status: "failed", message: failure.message };
+  if (failure) return { status: "failed", failure };
   if (!evidence?.config_keys) return { status: "pending" };
   if (!recorded(origin) || (shown !== undefined && !recorded(shown))) {
     return { status: "unrecorded" };
@@ -52,20 +49,18 @@ function changesOf(
 export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const { viewedPath } = useWorkspace();
   const { index } = useViewedLineage();
-  const { dash, isLive } = useCycleStream();
+  const { dash } = useCycleStream();
+  const attached = dash?.producer.attached === true;
   const placed = point ? armAt(index, viewedPath, point.key) : null;
   const pair = useCompareWithOrigin(viewedPath, placed ? placed.facts.reading.arm.key : null);
-  const { evidence, failure } = useEvidence(
-    pair.subjects,
-    isLive ? LIVE_EVIDENCE_MS : null,
-    WITH_CONFIG,
-  );
   // A closed round and a newly scored cell re-ask at once rather than on the slow beat.
   const rounds = dash?.rounds.length ?? 0;
   const cells = point?.row?.reading.panel.scored ?? 0;
-  useEffect(() => {
-    if (isLive) invalidateReads("evidence");
-  }, [isLive, rounds, cells]);
+  const { evidence, failure } = useEvidence(
+    pair.subjects,
+    { live: attached, moved: attached ? `${rounds}:${cells}` : "" },
+    WITH_CONFIG,
+  );
 
   const [originKey, shownKey] = pair.subjects;
   const read = (key: string | undefined) =>

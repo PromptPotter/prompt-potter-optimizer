@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { postCommand } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";
-import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
 import { Button, FailureLine, Said, SegmentedControl, type Segment } from "@/components/ui";
 
@@ -21,25 +21,13 @@ const BLURB: Record<Mode, string> = {
     "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back.",
 };
 
-const describeFailure =
-  (apply: boolean) =>
-  (f: CommandFailure): string =>
-    f.kind === "denied"
-      ? "This account cannot run archive maintenance."
-      : apply
-        ? "The archive did not finish. Some runs may already have been rewritten — preview again to see what stands."
-        : "Could not reach the archive. Nothing was changed.";
-
 export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
   const [done, setDone] = useState<ArchiveReport | null>(null);
   // Two slots because `revalidate` is per-slot: a dry run reaches nothing a poll reads.
-  const dry = useCommand<Mode>("archive-preview", {
-    revalidate: false,
-    describe: describeFailure(false),
-  });
-  const commit = useCommand<Mode>("archive-apply", { describe: describeFailure(true) });
+  const dry = useCommand<Mode>("archive-preview", { revalidate: false });
+  const commit = useCommand<Mode>("archive-apply");
   const busy = dry.pending !== null || commit.pending !== null;
 
   // A preview must not stand as consent for another mode.

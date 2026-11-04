@@ -40,7 +40,7 @@ export function SteerForkPanel({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const dash = useDashboardAt(path);
+  const { dash } = useDashboardAt(path);
   const root = pathRoot(path);
   const rootCourse = useEntry(encodeCyclePath([root]));
   const isLive = phaseWalks(rootCourse?.level === "course" ? rootCourse.state.status.run_phase : undefined);

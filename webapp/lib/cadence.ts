@@ -11,10 +11,8 @@ export const CELLS_LIVE_POLL_MS = 8000;
 export const CONNECTOR_HEALTH_POLL_MS = 5000;
 export const MACHINE_STATUS_POLL_MS = 5000;
 export const LIVE_EVIDENCE_MS = 30000;
-// The coupon read sums every ledger the account owns: polled slowly, re-ticked when spend moves.
-export const COUPON_POLL_MS = 60_000;
-// A ready draft re-reads its `launch_refusal`, which reads the same wallet: at the coupon's pace.
-export const DRAFT_POLL_MS = COUPON_POLL_MS;
+// A ready draft re-reads its `launch_refusal`, which sums every ledger the account owns: slowly.
+export const DRAFT_POLL_MS = 60_000;
 export const VERIFY_PASS_POLL_MS = 5000;
 
 export const ELAPSED_TICK_MS = 1000;

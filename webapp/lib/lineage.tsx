@@ -3,30 +3,24 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { SubtreeCampaign, SubtreeCourse, SubtreeEntry } from "@/lib/api/types";
+import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
 import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
 import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
 import { useDebounced } from "@/lib/hooks/useDebounced";
-import { shownData, useRead, type ReadFailure, type ReadResult } from "@/lib/hooks/useRead";
+import { shownData, useRead, type ReadResult } from "@/lib/hooks/useRead";
 import { useRegistry } from "@/lib/state/registry";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
 
 const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
 
-export interface CampaignTree {
-  root: SubtreeCampaign | null;
-  loaded: boolean;
-  failure: ReadFailure | null;
-}
-
-const EMPTY: CampaignTree = { root: null, loaded: false, failure: null };
+export type CampaignTree = ReadResult<SubtreeCampaign>;
 
 interface ViewedLineage {
   tree: SubtreeCampaign | null;
-  treeRead: ReadResult<SubtreeEntry>;
+  treeRead: CampaignTree;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;
@@ -48,12 +42,12 @@ interface TreeAddressing {
 const TreeAddressingContext = createContext<TreeAddressing | null>(null);
 const ViewedLineageContext = createContext<ViewedLineage | null>(null);
 
-function useTreeRead(
+function useTree(
   address: string | null,
   mask: SubtreeMask | null,
   moment: SubtreeMoment | null,
   resting: ReadonlySet<string>,
-): ReadResult<SubtreeEntry> {
+): CampaignTree {
   const rests = address !== null && resting.has(address);
   // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
   // Kept by address: a mask or moment re-keys the read, and the campaign's last tree stands meanwhile.
@@ -62,22 +56,6 @@ function useTreeRead(
     intervalMs: rests ? undefined : LINEAGE_POLL_MS,
     keep: address,
   });
-}
-
-function useTree(
-  address: string | null,
-  mask: SubtreeMask | null,
-  moment: SubtreeMoment | null,
-  resting: ReadonlySet<string>,
-): CampaignTree {
-  const read = useTreeRead(address, mask, moment, resting);
-  const served = shownData(read);
-  const root = served?.level === "campaign" ? served : null;
-  const failure = read.status === "failed" && root === null ? read.failure : null;
-  return useMemo(
-    () => (root === null && failure === null ? EMPTY : { root, loaded: root !== null, failure }),
-    [root, failure],
-  );
 }
 
 export function LineageProvider({
@@ -139,9 +117,8 @@ export function LineageProvider({
     [at, leafPath],
   );
 
-  const treeRead = useTreeRead(viewedAddress, viewedMask, viewedMoment, resting);
-  const served = shownData(treeRead);
-  const viewedTree = served?.level === "campaign" ? served : null;
+  const treeRead = useTree(viewedAddress, viewedMask, viewedMoment, resting);
+  const viewedTree = shownData(treeRead);
   const index = useMemo(() => indexLineage(viewedTree), [viewedTree]);
 
   const maskActive = useMemo(

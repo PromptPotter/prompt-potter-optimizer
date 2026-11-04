@@ -16,7 +16,7 @@ import { SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
 import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
-import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import {
   couponRead,
@@ -234,15 +234,8 @@ function slotId(s: MachineSlot): string {
   return s.job_id;
 }
 
-// Only a flat denial needs a sentence here: the server words its own refusals, and 403 and 404 are one answer.
-function refusal(f: CommandFailure): string | null {
-  return f.kind === "denied" || f.kind === "gone"
-    ? "This session may not change spend limits."
-    : null;
-}
-
 function LimitControl({ quota }: { quota: QuotaStatus }) {
-  const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", { describe: refusal });
+  const cmd = useCommand<"set-concurrent-cycles">("account-run-limit");
   const limit = quota.max_concurrent_cycles;
 
   if (!quota.max_concurrent_cycles_writable) {

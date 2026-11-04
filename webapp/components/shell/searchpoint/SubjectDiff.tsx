@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { FailureLine } from "@/components/ui";
 import type { ObserveConfig } from "@/lib/derivations";
 import type { OriginChanges } from "@/lib/hooks/useOriginEvidence";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -41,7 +42,7 @@ function Changes({ changes }: { changes: OriginChanges }) {
     case "pending":
       return "comparing to origin…";
     case "failed":
-      return `the origin could not be compared — ${changes.message}`;
+      return <FailureLine failure={changes.failure} lead="The origin could not be compared." />;
     case "unrecorded":
       return "no configuration is recorded to compare";
     case "compared":

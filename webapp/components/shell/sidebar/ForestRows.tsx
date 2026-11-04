@@ -22,10 +22,10 @@ import type {
   UnstartedCampaign,
 } from "@/lib/api";
 import { useIngest } from "@/lib/ingest-flow";
-import { useLineageTree, type CampaignTree } from "@/lib/lineage";
+import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { PLACEHOLDER } from "@/lib/format";
-import { FailureLine } from "@/components/ui";
+import { ReadState } from "@/components/ui";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -185,35 +185,25 @@ function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: T
           <CampaignMenu campaign={campaign} />
         </div>
       </RowHoverCard>
-      {open && <CampaignBody body={tree.root} tree={tree} ctx={ctx} />}
+      {open && (
+        <ReadState read={tree} subject="its candidates" className="inner-library-empty">
+          {(root) => <CampaignBody body={root} ctx={ctx} />}
+        </ReadState>
+      )}
     </>
   );
 }
 
-function CampaignBody({
-  body,
-  tree,
-  ctx,
-}: {
-  body: SubtreeCampaign | null;
-  tree: CampaignTree;
-  ctx: TreeCtx;
-}) {
-  const courses = body ? body.children : [];
+function CampaignBody({ body, ctx }: { body: SubtreeCampaign; ctx: TreeCtx }) {
+  const courses = body.children;
   return (
     <ul className="unit-library-children">
-      {!tree.loaded && tree.failure === null && <li className="inner-library-empty">Loading…</li>}
-      {tree.failure !== null && (
-        <li className="inner-library-empty">
-          <FailureLine failure={tree.failure} lead="Candidates unknown, not absent:" />
-        </li>
-      )}
       {courses.length === 1 ? (
         <CourseBody course={courses[0]!} ctx={ctx} />
       ) : (
         courses.map((course) => (
           <li key={course.address}>
-            <CourseRow course={course} holdsLine={course.address === body?.facts.line} ctx={ctx} />
+            <CourseRow course={course} holdsLine={course.address === body.facts.line} ctx={ctx} />
           </li>
         ))
       )}
@@ -387,8 +377,6 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
   );
 }
 
-const LOADED: CampaignTree = { root: null, loaded: true, failure: null };
-
 function InnerCampaignRow({ campaign, ctx }: { campaign: SubtreeCampaign; ctx: TreeCtx }) {
   const { navigate } = useWorkspace();
   const open = ctx.isNodeOpen(campaign.address, true);
@@ -407,7 +395,7 @@ function InnerCampaignRow({ campaign, ctx }: { campaign: SubtreeCampaign; ctx: T
           </button>
         </div>
       </RowHoverCard>
-      {open && <CampaignBody body={campaign} tree={LOADED} ctx={ctx} />}
+      {open && <CampaignBody body={campaign} ctx={ctx} />}
     </>
   );
 }

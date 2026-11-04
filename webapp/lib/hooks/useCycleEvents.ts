@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cyclePathUrl } from "@/lib/api";
+import { reportIncident } from "@/lib/diagnostics";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import type { ActivityState, ProjectionEnvelope } from "@/lib/api/types";
@@ -42,15 +43,16 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false); // EventSource auto-reconnects; re-paints from a fresh snapshot
 
-    es.onmessage = (ev) => {
+    es.onmessage = (ev: MessageEvent<string>) => {
       let env: ProjectionEnvelope;
       try {
         env = JSON.parse(ev.data) as ProjectionEnvelope;
-      } catch {
+      } catch (e) {
+        // The server serializes every frame, so one that does not parse is an incident, not noise.
+        reportIncident(e, { surface: "cycle-events", address: key });
         return;
       }
-      // Tolerates a missing stamp, so an unstamped snapshot frame is never eaten.
-      if (env.cycle_id && env.cycle_id !== expectedCycleId) return;
+      if (env.cycle_id !== expectedCycleId) return;
       setActivity(env.activity);
     };
 

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef } from "react";
+import { FailureLine } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtGap } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
@@ -15,7 +16,7 @@ export const TimeRay = memo(function TimeRay() {
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
   const { pick } = useSelectNode();
-  const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
+  const { steps: served, head, olderFailure, hasMore, loadOlder } = useTimeRay();
 
   const rootKey = viewedPath ? encodeCyclePath(viewedPath) : "";
   const steps = useMemo(() => raySteps(served, rootKey), [served, rootKey]);
@@ -27,7 +28,7 @@ export const TimeRay = memo(function TimeRay() {
     el.scrollLeft = el.scrollWidth;
   }, [steps.length, at]);
 
-  if (!viewedPath || (!loaded && steps.length === 0)) return null;
+  if (!viewedPath || (head.status === "loading" && steps.length === 0)) return null;
   const setAt = (offset: number | null) =>
     navigate({ path: viewedPath, candidateId: viewedCandidateId, at: offset });
 
@@ -62,10 +63,11 @@ export const TimeRay = memo(function TimeRay() {
             ‹ earlier
           </button>
         )}
-        {failed && steps.length === 0 && (
-          <span className="dash-time-ray-empty">Chronology unavailable</span>
+        <FailureLine failure={olderFailure} lead="Earlier history did not load." />
+        {head.status === "failed" && steps.length === 0 && (
+          <FailureLine failure={head.failure} lead="Chronology unavailable." />
         )}
-        {!failed && loaded && steps.length === 0 && (
+        {head.status === "ready" && steps.length === 0 && (
           <span className="dash-time-ray-empty">Nothing recorded yet</span>
         )}
         {steps.map((step) => (

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ApiError, commandMessage, failureKind, operatorMessage } from "@/lib/api";
 import { toApiError } from "@/lib/api/client";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
-import { failureState, OFFLINE } from "@/lib/poll";
+import { connectionSaid } from "@/lib/poll";
 
 describe("failureKind", () => {
   it("maps the statuses whose reactions differ", () => {
@@ -14,9 +14,11 @@ describe("failureKind", () => {
     // An answered refusal is the read failing, never the server unreachable.
     const auth = new ApiError(401, "/api/v1/x");
     const kind = failureKind(auth);
-    const read = failureState({ kind, message: operatorMessage(auth, kind) });
-    expect(read.status).toBe("failed");
-    expect(read.statusText).not.toBe(OFFLINE.statusText);
+    const message = operatorMessage(auth, kind);
+    const refused = connectionSaid({ kind: "lost", failure: { kind, message } });
+    const offline = connectionSaid({ kind: "lost", failure: { kind: "transient", message } });
+    expect(refused?.label).toBe(message);
+    expect(refused?.label).not.toBe(offline?.label);
   });
 
   it("treats every server-side failure as transient", () => {

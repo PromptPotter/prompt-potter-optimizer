@@ -96,3 +96,41 @@ describe("useRead — an address that stops existing", () => {
     expect(onGone).not.toHaveBeenCalled();
   });
 });
+
+describe("useRead — a superseded id", () => {
+  beforeEach(() => {
+    clearReadCache();
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const page = (id: string): ReadDescriptor<string> => ({
+    id: `steps\x1f${id}`,
+    load: async () => ({ kind: "ok", data: id, validator: null }),
+  });
+
+  // The time ray reads a page into state the pass its cursor changes: a pass that still showed the
+  // old id's `ready` would add that page twice and lose the next.
+  it("never shows the old id's data as ready on a pass for the new id", async () => {
+    const seen: { id: string; read: string }[] = [];
+    const { rerender } = renderHook(
+      ({ id }: { id: string }) => {
+        const read = useRead(page(id));
+        seen.push({ id, read: read.status === "ready" ? read.data : read.status });
+        return read;
+      },
+      { wrapper, initialProps: { id: "c1" } },
+    );
+    await act(async () => {});
+    expect(seen.at(-1)).toEqual({ id: "c1", read: "c1" });
+
+    rerender({ id: "c2" });
+    await act(async () => {});
+    const afterSwitch = seen.filter((s) => s.id === "c2");
+    expect(afterSwitch.some((s) => s.read === "c1")).toBe(false);
+    expect(afterSwitch.at(-1)).toEqual({ id: "c2", read: "c2" });
+  });
+});

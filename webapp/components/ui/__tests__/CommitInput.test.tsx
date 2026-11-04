@@ -21,6 +21,24 @@ describe("CommitInput", () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("resends on Enter a value the caller never adopted, but never on blur", () => {
+    const onCommit = vi.fn();
+    render(<CommitInput value="" onCommit={onCommit} aria-label="key" />);
+    const input = screen.getByLabelText("key");
+    fireEvent.change(input, { target: { value: "sk-1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets the caller ask for the browser's autocomplete", () => {
+    render(
+      <CommitInput value="" onCommit={() => {}} autoComplete="new-password" aria-label="secret" />,
+    );
+    expect(screen.getByLabelText("secret").getAttribute("autocomplete")).toBe("new-password");
+  });
+
   it("keeps a draft `validate` refuses, and commits it once it parses", () => {
     const onCommit = vi.fn();
     const ok = (d: string) => {

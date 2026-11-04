@@ -211,10 +211,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
 
 ### The webapp's vanilla pass (audit 2026-10-29)
 
-- **Failures dropped to booleans before `FailureLine` can render them**: `useConnector` folds its read
-  failure into `schema.status: "error"`, `useTimeRay` serves `failed`, ChannelMap's tree `failed`/`loaded`,
-  `OriginChanges` flattens to `message`. `useCommand` `describe` tables (ArchiveCompactionControl,
-  AccountUsageTab, AccountProfileTab) sit beside `operatorMessage`. **Re-test:** every hook carries a failure object.
 - **Wording authored in the browser**: label tables still client-side (`lib/prompt-fields.ts::PROMPT_FIELD`, `lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`,
   `WINDOW_LABEL`, `AccountView::SECTIONS`, …) and the tone vocabularies off `domain/said.py::Tone` (`l4-eff-*`,
   `verdictTone`, PipelineFlow's). Canonical: served label constants, one tone. **Re-test:** each table
@@ -318,8 +314,8 @@ fixtures.
   line. Action: render `read_under`. **Re-test:** `git grep -n "maskLabel" -- webapp`.
 - **Intervals typed into UI text beside their owners**: `TimeRay.tsx::Gap` "beats every 15 s"
   (`heartbeat.py::HEARTBEAT_INTERVAL_S` is the owner, and the gap comment disagrees with `RECENT_STEP_S`),
-  `poll.tsx::OFFLINE.statusHint` "every 5 s", `TERMS.brand_live_preview` "every 2s". Action: interpolate
-  the served or `cadence.ts` constant. **Re-test:** `git grep -nE "every (15|5|2) ?s" -- webapp/components webapp/lib`.
+  `TERMS.brand_live_preview` "every 2s". Action: interpolate the served or `cadence.ts` constant.
+  **Re-test:** `git grep -nE "every (15|2) ?s" -- webapp/components webapp/lib`.
 - **`MeasurementRun.tsx` words the served `ArmEnd`** through ``TERMS[`arm_${early}`]`` and
   `early.replace("_", " ")`, its tone picked locally. Action: an `ArmEnd` row in `_WORD_TABLES`.
   **Re-test:** `git grep -n 'arm_\${' -- webapp/components`.
@@ -368,34 +364,12 @@ fixtures.
   **Re-test:** `git grep -nE "leafCampaignId|leafCycleId|path(Root|Leaf)\(viewedPath" -- webapp/components webapp/lib`.
 
 **E. Read discipline.**
-- **Evidence invalidation is built twice with two liveness tests**: `ComparePane`'s
-  `useEffect(() => invalidateReads("evidence"), [moved])` (`phaseWalks`) and `useOriginEvidence`
-  (`producer.appending`), each invalidating every evidence read. Action: one invalidation on one served
-  liveness fact. **Re-test:** `git grep -n 'invalidateReads("evidence")' -- webapp`.
-- **`KnobClashes.tsx::useKnobClashes` and `KnobClashes` each open `configMapRead`**, and the hook reads a
-  failure as `[]`, so `OptimizerCard` says "no clash" when the read failed. Action: one read; a failure
-  stays a failure. **Re-test:** `git grep -n "configMapRead" -- webapp/components`.
-- **`state/auth.tsx::AuthProvider` logs the user out on a transient failure** (any non-auth failure sets
-  `unauthed`, `adopt(null)` clears the cache), against I7; `useAuthGate::onAuthError` tests
-  `status === 401` beside `failureKind`. Action: branch on `failureKind`; transient keeps the session.
-  **Re-test:** `git grep -n "status === 401" -- webapp/lib/state`.
-- **`hooks/useCycleEvents.ts` drops an undecodable frame in a bare `catch`** and guards
-  `env.cycle_id &&` on a required field. Action: report the frame; drop the guard.
-  **Re-test:** `git grep -n "env.cycle_id &&" -- webapp/lib`.
-- **`hooks/useNestedPipelines.ts` words a failed level into `truncated`** (`"<dataset> unavailable (<kind>)"`)
-  instead of the unused `ReadFailure` member of `PipelineStatus`, and walks the nest client-side with its
-  own `MAX_DEPTH`. Action: served nest depth; a failure stays a `ReadFailure`.
-  **Re-test:** `git grep -nE "MAX_DEPTH|unavailable \(" -- webapp/lib/hooks`.
-- **`poll.tsx::useRay::loadOlder` pages through a hand-built `readThrough`** whose failure only reaches
-  `reportIncident`. Action: page through `useRead`. **Re-test:** `git grep -n "readThrough" -- webapp/lib`.
-- **Defaults on an index miss**: `PipelineFlow.tsx`'s `colX` (`offsets[i] ?? 0`, `widths[i] ?? CELL_W`),
-  `L1Variants.tsx` (`variants[idx] ?? variants[0]`). Action: handle the miss.
-  **Re-test:** `git grep -nE "\[(i|idx)\] \?\? " -- webapp/components`.
-- **`ForestRows.tsx` fakes `LOADED = { root: null, loaded: true }`** though `loaded` otherwise equals
-  `root !== null`, and hand-builds loading and failure rows beside `ui/states::ReadState`. Action:
-  delete `loaded`; render through `ReadState`. **Re-test:** `git grep -n "loaded: true" -- webapp/components`.
-- `hooks/useVerify.ts` repeats `poll.tsx::useDashboardAt`'s streamed-path test with its own
-  `dashboardRead`. **Re-test:** `git grep -n "dashboardRead(" -- webapp/lib/hooks`.
+- **`hooks/useNestedPipelines.ts` walks the nest client-side** with its own `MAX_DEPTH` and self-nest
+  test, worded into `truncated`. Action: the pipeline read serves the whole nest and its depth.
+  **Blocked by** K1 (`application/pipeline_resolve.py`). **Re-test:** `git grep -n "MAX_DEPTH" -- webapp/lib/hooks`.
+- **`useEvidence`'s move re-asks every mounted evidence read**, not its own: `invalidateReads` takes a
+  read name, never an id; `useRay.loadOlder` (`lib/poll.tsx`) re-asks the head and every mounted ray
+  the same way via `invalidateReads("steps")`. **Re-test:** `git grep -nE 'invalidateReads\("(evidence|steps)"\)' -- webapp`.
 
 **F. The node editor reads served row facts.**
 - **Key-name tests stand in for row facts** (I9): `NodeSurface::onAuthor`, `node-config.ts::effortLadder` /
@@ -958,8 +932,7 @@ word's `git grep -c` for that sense is 0.
   `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh). Decide: halt, or keep the hold.
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
-- **Four seams owed a re-read:** `webapp/lib/poll.tsx::CycleStreamState` fields nothing reads;
-  `webapp/lib/hooks/useCompareWithOrigin.ts` picks the best pointer; `webapp/lib/derivations/spend.ts::readSpend`
+- **Three seams owed a re-read:** `webapp/lib/hooks/useCompareWithOrigin.ts` picks the best pointer; `webapp/lib/derivations/spend.ts::readSpend`
   sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
@@ -1110,10 +1083,6 @@ word's `git grep -c` for that sense is 0.
     pane means editing Python strings. **Re-test:** `git grep -n "API keys" -- promptpotter`.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
     **Re-test:** the Host allowance section with a token-bound grant.
-  - `CommitInput` forces `autoComplete="off"` and, after a failed commit, will not resend the same value
-    on Enter. **Re-test:** fail a key PUT, press Enter again.
-  - `AccountSpend` refreshes the coupon both on its poll and from an effect watching the sidebar's
-    `billed_usd`. **Re-test:** `git grep -n "couponRead" -- webapp/components`.
   - The onboarding dialogs use raw `<button className="login-button">`, not `ui/Button`; and
     `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
     **Re-test:** `git grep -n "login-button" -- webapp/components/onboarding`.

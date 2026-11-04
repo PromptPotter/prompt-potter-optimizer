@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useWidth } from "@/lib/hooks/useWidth";
 import type { PipelineView, PipelineViewEdge } from "@/lib/types";
 import type { NodeReach } from "@/lib/api";
@@ -9,6 +9,7 @@ import { useViewedNode, useWorkspace } from "@/lib/workspace";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import { interiorNodes, layoutGrid, nodeModel, rowHopD, wrapAt } from "@/lib/derivations";
+import { reportIncident } from "@/lib/diagnostics";
 import { getCss } from "@/lib/theme";
 import { FailureLine, Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
@@ -133,6 +134,24 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
     else open("node", nodeKey({ id, scope }));
   };
 
+  // The view serves ranks 0..cols-1 on the rail; a rank past them breaks that contract.
+  const railCols = Math.max(interior.length, 1);
+  const strayRanks =
+    view.cycle.length > 0
+      ? ""
+      : interior
+          .filter((n) => n.rank >= railCols)
+          .map((n) => `${n.id}@${n.rank}`)
+          .join(",");
+  useEffect(() => {
+    if (strayRanks) {
+      reportIncident(new Error(`node rank past ${railCols} columns`), {
+        surface: "pipeline-rank",
+        address: strayRanks,
+      });
+    }
+  }, [strayRanks, railCols]);
+
   const sole = interior.length === 1 ? interior[0] : undefined;
   if (sole) {
     const isSelected = isSel(sole.id);
@@ -201,13 +220,14 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
   const widths = Array.from({ length: cols }, (_, i) =>
     i === selectedCol ? CELL_W + bonus : CELL_W - shrink,
   );
-  const offsets: number[] = [];
-  widths.reduce((acc, w, i) => {
-    offsets[i] = acc;
-    return acc + w;
-  }, 0);
+  // One column per rank: its width and its centre.
+  let left = 0;
+  const columns = widths.map((w) => {
+    const col = { w, x: left + w / 2 };
+    left += w;
+    return col;
+  });
   const railW = cols * CELL_W;
-  const colX = (i: number) => (offsets[i] ?? 0) + (widths[i] ?? CELL_W) / 2;
   const labelLines = (label: string) => (label.includes("_") ? label.split("_") : [label]);
 
   const marks = new Map<string, Mark>();
@@ -226,11 +246,14 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
       continue;
     }
     if (isRing) continue;
-    const cellW = widths[n.rank] ?? CELL_W;
+    // A rank past the rail is reported (above) and drawn in the last column, never dropped;
+    // `cols` is at least 1, so the last column exists.
+    const col = columns[n.rank] ?? columns[cols - 1]!;
+    const cellW = col.w;
     const shown = !compact && cellW >= 44;
     const chars = fontPx != null ? Math.floor((cellW - GUTTER) / (fontPx * 0.6)) : Infinity;
     marks.set(n.id, {
-      x: colX(n.rank),
+      x: col.x,
       y: cy,
       muted: false,
       hit: { x: -cellW / 2, y: 0, w: cellW, h: ROW_H },

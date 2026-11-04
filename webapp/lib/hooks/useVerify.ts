@@ -1,9 +1,8 @@
 import { useMemo } from "react";
 import { dashboardRead, isWarming } from "@/lib/api";
 import type { MeasuredUnit, VerificationMark, VerifyReading } from "@/lib/api/types";
-import { encodeCyclePath, type CyclePath } from "@/lib/ids";
-import { useCycleStream } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import type { CyclePath } from "@/lib/ids";
+import { useDashboardAt } from "@/lib/poll";
 import { readyData, useRead } from "./useRead";
 
 interface VerifyState {
@@ -18,14 +17,11 @@ export function useVerify(
   // Set only while a pass is awaited: nothing else moves the off-stream read.
   intervalMs?: number,
 ): VerifyState {
-  const { dash } = useCycleStream();
-  const { viewedPath } = useWorkspace();
-  const key = path ? encodeCyclePath(path) : null;
-  const streamed = key !== null && viewedPath != null && encodeCyclePath(viewedPath) === key;
+  const at = useDashboardAt(path);
   const read = readyData(
-    useRead(path && !streamed ? dashboardRead(path, null) : null, { auth: true, intervalMs }),
+    useRead(path && !at.streamed ? dashboardRead(path, null) : null, { auth: true, intervalMs }),
   );
-  const body = streamed ? dash : read && !isWarming(read) ? read : null;
+  const body = at.streamed ? at.dash : read && !isWarming(read) ? read : null;
   const rounds = body?.rounds;
   const marks = body?.verification;
   const unit = body?.measured_unit ?? null;

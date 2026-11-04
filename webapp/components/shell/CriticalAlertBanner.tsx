@@ -4,7 +4,7 @@ import { cycleAddress, postCommand } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { failureState, GONE, useCycleStream } from "@/lib/poll";
+import { connectionSaid, useCycleStream, type Connection } from "@/lib/poll";
 import { useActivePointer, useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -21,24 +21,21 @@ export function CriticalAlertBanner() {
   const netFailure = pointerFailure ?? registryFailure;
   // The workspace's verdict wins: the dashboard has already reset onto another address. With no
   // unit in view, the reads that list and point at runs are the connection.
-  const connection = goneAddress
-    ? GONE
+  const connection: Connection = goneAddress
+    ? { kind: "gone" }
     : !cycleId && netFailure
-      ? failureState(netFailure)
-      : stream;
+      ? { kind: "lost", failure: netFailure }
+      : stream.connection;
   const { dash } = stream;
   const backend: SaidRow | null =
     health === null || health.status === "live"
       ? null
       : { key: "backend", ...BACKEND_REACHABILITY_INFO[health.status], value: null, sub: null, detail: null };
-  const lost = connection.status === "offline" || connection.status === "failed";
-  const said: SaidRow | null = lost
-    ? { key: "connection_lost", tone: "danger", label: connection.statusText, value: null, sub: null, detail: connection.statusHint }
-    : connection.status === "gone"
-      ? { key: "address_gone", tone: "attention", label: connection.statusText, value: null, sub: null, detail: connection.statusHint }
-      : ([dash?.said ?? null, backend]
-          .filter((row) => row !== null)
-          .sort((a, b) => TONES.indexOf(b.tone) - TONES.indexOf(a.tone))[0] ?? null);
+  const said: SaidRow | null =
+    connectionSaid(connection) ??
+    ([dash?.said ?? null, backend]
+      .filter((row) => row !== null)
+      .sort((a, b) => TONES.indexOf(b.tone) - TONES.indexOf(a.tone))[0] ?? null);
   if (!said) return null;
 
   const danger = said.tone === "danger";

@@ -7,8 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, failureKind, meRead, type MeResponse } from "@/lib/api";
+import { failureKind, meRead, type MeResponse } from "@/lib/api";
 import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types.generated";
+import { DASHBOARD_RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
 import { clearReadCache, readThrough } from "@/lib/read-cache";
 
@@ -50,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const probeId = probeIdRef.current + 1;
     probeIdRef.current = probeId;
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const adopt = (identity: string | null) => {
       if (identityRef.current === identity) return;
       identityRef.current = identity;
@@ -66,16 +68,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((e: unknown) => {
         if (cancelled || probeIdRef.current !== probeId) return;
-        // A 401 is the probe's ordinary answer; anything else is an incident that reads as anon.
-        if (failureKind(e) !== "auth") reportIncident(e, { surface: "me" });
+        const kind = failureKind(e);
+        // A 401 is the probe's ordinary answer; anything else is an incident.
+        if (kind !== "auth") reportIncident(e, { surface: "me" });
+        // A transient failure says nothing of the session: a probed one keeps its identity and
+        // cache; an unprobed one stays `loading` (never anon, so a signed-in reload during an
+        // outage is not signed out) and re-probes on the reconnect beat (I7).
+        if (kind === "transient") {
+          if (identityRef.current === undefined) {
+            retry = setTimeout(refresh, DASHBOARD_RECONNECT_POLL_MS);
+          }
+          return;
+        }
         adopt(null);
         setMe(null);
         setStatus("unauthed");
       });
     return () => {
       cancelled = true;
+      clearTimeout(retry);
     };
-  }, [nonce]);
+  }, [nonce, refresh]);
 
   useEffect(() => {
     const onFocus = () => refresh();
@@ -126,7 +139,7 @@ export function useAuthGate(): {
   const { status, refresh } = useAuth();
   const onAuthError = useCallback(
     (err: unknown) => {
-      if (err instanceof ApiError && err.status === 401) refresh();
+      if (failureKind(err) === "auth") refresh();
     },
     [refresh],
   );

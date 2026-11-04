@@ -1,20 +1,23 @@
-import { readyData, useRead } from "@/lib/hooks/useRead";
-import { configMapRead, type ConfigCoupling } from "@/lib/api";
+import { readyData, useRead, type ReadResult } from "@/lib/hooks/useRead";
+import { configMapRead, type ConfigCoupling, type ConfigMapResponse } from "@/lib/api";
 import { COUPLING_SEVERITY_INFO } from "@/lib/api/types.generated";
 import { useWorkspace } from "@/lib/workspace";
 import { Badge, ReadState } from "@/components/ui";
 
 // The couplings this campaign's config VIOLATES — the preflight's own check, so no surface
-// disagrees with the engine. A coupling the config keeps is no news and is not listed.
-export function useKnobClashes(): ConfigCoupling[] {
+// disagrees with the engine. A coupling the config keeps is no news and is not listed. `active` is
+// null until the read lands: a failed read is no clash count, never zero.
+export function useKnobClashes(): {
+  read: ReadResult<ConfigMapResponse>;
+  active: ConfigCoupling[] | null;
+} {
   const { campaignId } = useWorkspace();
   const read = useRead(campaignId ? configMapRead(campaignId) : null);
-  return readyData(read)?.couplings.filter((c) => c.active) ?? [];
+  return { read, active: readyData(read)?.couplings.filter((c) => c.active) ?? null };
 }
 
 export function KnobClashes() {
-  const { campaignId } = useWorkspace();
-  const read = useRead(campaignId ? configMapRead(campaignId) : null);
+  const { read } = useKnobClashes();
   return (
     <ReadState read={read} subject="the knob clashes" idle={null}>
       {(map) => {

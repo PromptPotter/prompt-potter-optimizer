@@ -37,7 +37,16 @@ export class ApiError extends Error {
 
 export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid" | "refused";
 
+// A read refused client-side because the answer is not the kind it serves: no server said it.
+export class InvalidInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidInputError";
+  }
+}
+
 export function failureKind(e: unknown): FailureKind {
+  if (e instanceof InvalidInputError) return "invalid";
   if (!(e instanceof ApiError)) return "transient";
   if (e.status === 401) return "auth";
   if (e.status === 403) return "denied";

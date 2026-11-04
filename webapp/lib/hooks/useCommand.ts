@@ -32,14 +32,13 @@ const isAbort = (e: unknown) =>
 export function useCommand<V extends string>(
   surface: string,
   opts: {
-    describe?: (f: CommandFailure, verb: V) => string | null;
     /** `false` for a write no read reads back (preferences, consent, logout); else every mounted read re-asks. */
     revalidate?: boolean;
     /** The subject's identity; a change clears `failure`. */
     scope?: string | null;
   } = {},
 ): CommandSlot<V> {
-  const { describe, revalidate = true, scope = null } = opts;
+  const { revalidate = true, scope = null } = opts;
   const { onAuthError } = useAuthGate();
   const [pending, setPending] = useState<V | null>(null);
   const [failure, setFailure] = useState<CommandSlot<V>["failure"]>(null);
@@ -78,9 +77,8 @@ export function useCommand<V extends string>(
         code: api?.code ?? null,
         details: api?.details ?? null,
       };
-      const described = { ...f, message: describe?.(f, verb) ?? f.message };
-      setFailure({ ...described, verb });
-      return { ok: false, failure: described };
+      setFailure({ ...f, verb });
+      return { ok: false, failure: f };
     } finally {
       inFlight.current = false;
       setPending(null);

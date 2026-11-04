@@ -28,7 +28,7 @@ export function LimitReconcile({
   path: CyclePath;
   onChange: (limits: RunLimitOverrides) => void;
 }) {
-  const dash = useDashboardAt(path);
+  const { dash } = useDashboardAt(path);
   const left = dash?.fork_remainder ?? null;
   const rl = dash?.run_limits ?? null;
   const declared = rl?.optimizer ?? [];
