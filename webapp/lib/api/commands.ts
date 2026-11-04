@@ -2,7 +2,6 @@ import { encodeDescend, pathRoot, type CyclePath } from "../ids";
 import { API, send, toApiError } from "./client";
 import { mintIdempotencyKey } from "./errors";
 import type {
-  CommandKind,
   CommandPayloads,
   CommandResponses,
   ConfigOverrides as WireConfigOverrides,
@@ -13,7 +12,7 @@ import type { VerifyReading } from "./types";
 export type VerifyStrategy = VerifyReading["strategy"];
 
 // The body IS the kind's payload model, and the answer is its route's: neither is declared here.
-export async function postCommand<K extends CommandKind>(
+export async function postCommand<K extends keyof CommandPayloads>(
   kind: K,
   payload: CommandPayloads[K],
 ): Promise<CommandResponses[K]> {

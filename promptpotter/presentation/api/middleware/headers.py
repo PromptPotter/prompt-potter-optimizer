@@ -18,6 +18,19 @@ _WEBAPP_CSP = (
     "img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
     "form-action 'self'"
 )
+# The API reference (`main.py::scalar_docs`) is Scalar's page: its script and fonts come off its CDN.
+_DOCS = "/docs"
+_DOCS_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline'; font-src 'self' data: https://fonts.scalar.com; "
+    "img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+)
+
+
+def content_policy(path: str) -> str:
+    if path.startswith(_API):
+        return _API_CSP
+    return _DOCS_CSP if path == _DOCS else _WEBAPP_CSP
 
 
 def served_build_file(path: str, status: int) -> bool:
@@ -73,7 +86,7 @@ class ResponseHeadersMiddleware:
                     headers.setdefault(
                         "strict-transport-security", "max-age=63072000; includeSubDomains"
                     )
-                headers.setdefault("content-security-policy", _API_CSP if api else _WEBAPP_CSP)
+                headers.setdefault("content-security-policy", content_policy(path))
                 headers["cache-control"] = cache_policy(
                     api=api, path=path, status=message["status"]
                 )

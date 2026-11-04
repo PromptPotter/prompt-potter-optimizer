@@ -9,7 +9,7 @@
 
 ## No ad-hoc mutating routes
 
-**Every write touching campaign / cycle state goes through `CommandDispatcher.dispatch`** ([decisions](../../docs/decisions.md) § 0001), even behind a typed route; identity administration is an operator-admin channel (§ 0004). The sanctioned exceptions: `POST /datasets/ingest` opens a durable check-in draft (nothing runs until `/commands/start-checkin`); the `POST /datasets/draft/*` routes dispatch `edit-draft-campaign` through `commands/draft_editing.py::dispatch_draft_patch`; `/site-records/{table}` is the operator's website rows under one bearer token, outside every tenant.
+**Every write touching campaign / cycle state goes through `CommandDispatcher.dispatch`** ([decisions](../../docs/decisions.md) § 0001), even behind a typed route; identity administration is an operator-admin channel (§ 0004). **Every route on a session mount is named by a `CommandKind` or a `ReadKind`**, and a read answers its row's application callable's return model, raised at import (`api/catalogue.py::bind_surface`). The sanctioned exceptions: the `POST /datasets/draft/*` routes dispatch `edit-draft-campaign` through `commands/draft_editing.py::dispatch_draft_patch`; `/site-records/{table}` is the operator's website rows under one bearer token, outside every tenant.
 
 ## Sample look-ahead — the one entry point that is deliberately NOT at parity
 

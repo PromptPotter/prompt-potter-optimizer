@@ -4,7 +4,6 @@ import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
 import {
   STOP_REASON_INFO,
-  type CommandKind,
   type CommandPayloads,
   type HierarchyResponse,
   type ServedRound,
@@ -223,7 +222,7 @@ export async function passConsent(page: Page) {
 }
 
 /** The body IS the kind's payload model (`lib/api/commands.ts`). Never retry a 4xx — a refusal is permanent. */
-export async function command<K extends CommandKind>(
+export async function command<K extends keyof CommandPayloads>(
   request: APIRequestContext,
   kind: K,
   payload: CommandPayloads[K],

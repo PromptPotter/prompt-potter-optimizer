@@ -59,7 +59,6 @@ The scarce things — the provider's rate limit and the host's wallet — are ex
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | no |
 | What the box's keys may ever pay for an account | the host coupon, both units; its own keys are not metered | no |
 | Accounts the box holds | `Settings.MAX_ACCOUNTS` (`accounts_full`) | no |
-| Reads one principal may poll | `quota.py::refuse_read_rate` at `deps.py::admit_session` (429 `rate_limited`) | no |
-| Writes one principal may send, a free verb's included | `quota.py::refuse_write_rate` at the same seam, the host exempt (429 `rate_limited`) | no |
+| Requests one principal may send, a free verb's included | `quota.py::refuse_request_rate` at `deps.py::admit_session`: a `command_kinds.py::ReadKind` route draws a read bucket sized above the webapp's polls, every other route the write one; the host exempt (429 `rate_limited`) | no |
 
 A throttle is logged, never banked (`quota.py::RateLimitedError`). **The first gate WAITS; the third refuses.** A full machine queues the launch (`JobRegistry.request_slot`), drained least-served-first, bounded by `Settings.QUEUE_MAX_WAIT_S`; `cancel-queued-run` withdraws a launch, only by the principal that launched it (`shared/identity.py::acting_principal`). `machine-status` names only the caller's slots unless `MACHINE_STATUS_SCOPE=all`. The memory guard is the unit's `MemoryMax`.

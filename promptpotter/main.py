@@ -38,6 +38,7 @@ from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
+from promptpotter.presentation.api.catalogue import bind_surface
 from promptpotter.presentation.api.deps import (
     admit_session,
     auth_is_open,
@@ -318,6 +319,15 @@ for _mount in API_ROUTERS:
 _ROUTES = [
     route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)
 ]
+bind_surface(
+    [
+        route
+        for mount in API_ROUTERS
+        if mount.gate is admit_session
+        for route in mount.router.routes
+        if isinstance(route, APIRoute)
+    ]
+)
 
 
 def _request_bodies() -> Iterator[type[BaseModel]]:

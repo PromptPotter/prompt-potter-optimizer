@@ -33,7 +33,7 @@ async def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Appl
                 report = purge_cold_store(stores, dataset=payload.dataset, apply=payload.apply)
         return report
 
-    async def _empty() -> ArchiveReport:
+    async def _empty(_: object) -> ArchiveReport:
         # A deduped retry replays an EMPTY report: re-running `purge-cold` would report gone bytes deleted twice.
         return ArchiveReport()
 

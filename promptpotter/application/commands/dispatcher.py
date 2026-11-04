@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import importlib
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_kinds import (
@@ -45,6 +44,7 @@ from promptpotter.infrastructure.store.stores import (
 )
 from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import acting_principal, require_capability
+from promptpotter.shared.named_rows import imported
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
@@ -62,6 +62,7 @@ class _IdempotentMatch(FrozenModel):
     command_id: str
     offset: int
     ack: CommandAckStatus
+    effect: CommandEffect
 
 
 def _find_idempotent_command(
@@ -78,7 +79,7 @@ def _find_idempotent_command(
             at = keyed.get(record.command_id)
             if at is not None:
                 applied = _IdempotentMatch(
-                    command_id=record.command_id, offset=at, ack=record.status
+                    command_id=record.command_id, offset=at, ack=record.status, effect=record.effect
                 )
     return applied
 
@@ -98,17 +99,19 @@ class CommandCall[P: CommandPayload]:
         return self.payload.kind
 
 
-async def _no_body() -> None:
+async def _no_body(_: CommandEffect) -> None:
     """What a deduped retry answers for a command whose applied form answers nothing either."""
 
 
 @dataclass(frozen=True, slots=True)
 class Applier[R]:
-    """`replay=None` dedupes nothing; `ack="accepted"` leaves `run` the guard alone, the loop acking `applied`."""
+    """`effect_fn` reads the ack's effect off what `run` applied, and `replay` answers a retry from
+    the first act's; `replay=None` dedupes nothing; `ack="accepted"` leaves `run` the guard alone,
+    the loop acking `applied`."""
 
     run: Callable[[], Awaitable[R]]
-    replay: Callable[[], Awaitable[R]] | None
-    effect_fn: Callable[[], CommandEffect] | None = None
+    replay: Callable[[CommandEffect], Awaitable[R]] | None
+    effect_fn: Callable[[R], CommandEffect] | None = None
     ack: CommandAckStatus = "applied"
     # The draft claim this command holds through its ack; a Start hands its claim to the launch.
     claim: DraftClaim | None = None
@@ -117,7 +120,7 @@ class Applier[R]:
     def silent(
         run: Callable[[], Awaitable[object]],
         *,
-        effect_fn: Callable[[], CommandEffect] | None = None,
+        effect_fn: Callable[[object], CommandEffect] | None = None,
     ) -> Applier[object]:
         return Applier(run, _no_body, effect_fn=effect_fn)
 
@@ -161,6 +164,13 @@ class CommandOutcome[R]:
     ack: CommandAckStatus
 
 
+def handler_of(kind: CommandKind) -> Callable[[Dispatched[Any]], Awaitable[Applier[Any]]]:
+    return cast(
+        Callable[[Dispatched[Any]], Awaitable[Applier[Any]]],
+        imported(_HANDLER_PACKAGE, kind.handler),
+    )
+
+
 class CommandDispatcher:
     def __init__(
         self,
@@ -184,12 +194,11 @@ class CommandDispatcher:
 
     async def _applier(self, dispatched: Dispatched[Any]) -> Applier[Any]:
         kind = dispatched.payload.kind
-        require_capability(self.stores.identity, kind.capability, subject=f"command {kind.value!r}")
-        module, _, name = kind.handler.partition(":")
-        handler: Callable[[Dispatched[Any]], Awaitable[Applier[Any]]] = getattr(
-            importlib.import_module(f"{_HANDLER_PACKAGE}.{module}"), name
-        )
-        return await handler(dispatched)
+        if kind.capability is not None:
+            require_capability(
+                self.stores.identity, kind.capability, subject=f"command {kind.value!r}"
+            )
+        return await handler_of(kind)(dispatched)
 
     async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[Any]:
         """The payload's address base IS its target ledger."""
@@ -275,7 +284,7 @@ class CommandDispatcher:
             if existing is not None:
                 return CommandOutcome(
                     accepted=CommandAcceptedBody(command_id=existing.command_id),
-                    result=await applier.replay(),
+                    result=await applier.replay(existing.effect),
                     ack=existing.ack,
                 )
 
@@ -303,7 +312,7 @@ class CommandDispatcher:
                 )
                 raise
             effect = (
-                applier.effect_fn()
+                applier.effect_fn(applied[0])
                 if (applier.effect_fn is not None and ack_status != "rejected")
                 else NoEffect()
             )

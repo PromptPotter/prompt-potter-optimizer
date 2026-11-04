@@ -11,9 +11,9 @@
 **One registry, every host, no adapter adds a tool.**
 
 - **Tools.** Writes are the `domain/command_kinds.py::CommandKind` rows, already capability-gated. Reads
-  get a catalogue declared the same way: name, response model, capability and the `application/` function
-  that answers it. The writes outside the dispatcher (`POST /datasets/ingest`, the draft opens) become kinds
-  first, so the tool list is the whole surface.
+  are the `domain/command_kinds.py::ReadKind` rows, each naming the `application/` callable that answers
+  it; every session route is bound to one row (`presentation/api/catalogue.py::bind_surface`), so the
+  tool list is the whole surface.
 - **Resources.** The account's data, addressed by the hierarchy address grammar
   ([`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address).
 - **Prompts.** Templates. The check-in is one — "reach the origin gate", seeded from the `checkin/2`
@@ -48,12 +48,11 @@ A long-running call returns a task handle per MCP's Tasks extension
 ## Build order
 
 1. `ChatRequest` gains `tools` and multi-turn messages; each provider adapter parses tool calls.
-2. The read catalogue beside `CommandKind`, and the out-of-dispatcher writes as kinds.
-3. The registry, served in-process and over MCP stdio.
-4. The host endpoint, declared before its handler; a turn's steps are records on the account's workspace ledger.
-5. The webapp: the composer on every screen, steps, the one proposal shape.
-6. The check-in as the "reach the origin gate" prompt, and the delete list above.
-7. MCP over streamable HTTP, on R1.
+2. The registry over `CommandKind` and `ReadKind`, served in-process and over MCP stdio.
+3. The host endpoint, declared before its handler; a turn's steps are records on the account's workspace ledger.
+4. The webapp: the composer on every screen, steps, the one proposal shape.
+5. The check-in as the "reach the origin gate" prompt, and the delete list above.
+6. MCP over streamable HTTP, on R1.
 
 **Closes when** a new account drops a CSV whose headers are its own and the webapp's host takes it through
 the origin gate and starts the campaign; the same steps from Claude Code over MCP stdio reach the same draft.

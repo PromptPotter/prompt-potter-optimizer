@@ -371,14 +371,13 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
     )
     dispatched = DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop)
 
-    async def apply() -> Applier[object]:
+    async def apply() -> tuple[Applier[object], object]:
         applier = await change_run_limits(dispatched)
-        await applier.run()
-        return applier
+        return applier, await applier.run()
 
-    applier = asyncio.run(apply())
+    applier, applied = asyncio.run(apply())
     assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
-    effect = applier.effect_fn()
+    effect = applier.effect_fn(applied)
     assert isinstance(effect, ArmedCeilingEffect), f"a limits change acked {effect!r}"
     return effect.armed
 

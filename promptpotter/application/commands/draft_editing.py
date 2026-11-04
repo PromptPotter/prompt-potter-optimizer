@@ -52,8 +52,8 @@ async def edit_draft_campaign(
     before = origin_projection(draft)
     return Applier(
         _apply,
-        replay=lambda: reread_draft_wire(stores, draft_id),
-        effect_fn=lambda: origin_effect(stores, draft_id, before),
+        replay=lambda _: reread_draft_wire(stores, draft_id),
+        effect_fn=lambda _: origin_effect(stores, draft_id, before),
         claim=dispatched.claim,
     )
 

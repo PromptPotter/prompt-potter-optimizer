@@ -36,8 +36,8 @@ test("an account whose coupon is used up reads it inline, never under a modal", 
   const me = await (
     await request.get(`${fake.baseURL}/api/v1/auth/me`, { headers: cookie })
   ).json();
-  await request.post(`${fake.baseURL}/api/v1/auth/accept-terms`, {
-    headers: cookie,
+  await request.post(`${fake.baseURL}/api/v1/commands/accept-terms`, {
+    headers: { ...cookie, "Idempotency-Key": "accept-terms" },
     data: { version: me.terms_version },
   });
 

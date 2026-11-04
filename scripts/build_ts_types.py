@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from fastapi.routing import APIRoute
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -56,7 +56,7 @@ def _array_of(member: typing.Any) -> str:
 def _emit_type(annotation: typing.Any) -> str:
     if annotation is typing.Any:
         return "unknown"
-    if annotation is str:
+    if annotation is str or annotation is SecretStr:
         return "string"
     if annotation is int or annotation is float:
         return "number"
@@ -133,6 +133,11 @@ def _emit_field(name: str, info: FieldInfo, annotation: typing.Any, *, omittable
     return f"{_jsdoc(info.description)}  {info.alias or name}{'?' if omittable else ''}: {ts_type};"
 
 
+def _wire_fields(model: type[BaseModel]) -> list[tuple[str, FieldInfo]]:
+    """An excluded field never crosses as JSON (an upload's bytes ride the form)."""
+    return [(name, info) for name, info in model.model_fields.items() if not info.exclude]
+
+
 def _omitted_unset(model: type[BaseModel]) -> frozenset[str]:
     """The fields a model's own serializer leaves off the wire when nobody set them."""
     if any(info.is_required() for info in model.model_fields.values()):
@@ -168,29 +173,29 @@ def _emit_lifecycle_filter() -> str:
 
 def _emit_command_contract() -> str:
     """Exports what it names, so it runs before the exported blocks are collected."""
-    answers = {
-        route.path.removeprefix("/commands/"): vars(route)["response_model"]
+    routes = {
+        route.path.removeprefix("/commands/"): route
         for route in commands_router.routes
         if isinstance(route, APIRoute)
     }
-    kinds = sorted(CommandKind)
     sent, answered = [], []
-    for kind in kinds:
+    for kind in sorted(CommandKind):
         model = PAYLOAD_MODEL_FOR_KIND[kind]
-        required = [name for name, info in model.model_fields.items() if info.is_required()]
+        route = vars(routes[kind.value])
+        answered.append(f"  {json.dumps(kind.value)}: {_emit_type(route['response_model'])};")
+        # A kind posted as a form has no JSON body to type.
+        if all(p.field_info.annotation is not model for p in route["dependant"].body_params):
+            continue
+        required = [name for name, info in _wire_fields(model) if info.is_required()]
         keys = " | ".join(json.dumps(name) for name in required) or "never"
         sent.append(f"  {json.dumps(kind.value)}: CommandSent<{_export(model)}, {keys}>;")
-        answered.append(f"  {json.dumps(kind.value)}: {_emit_type(answers[kind.value])};")
-    members = " | ".join(json.dumps(k.value) for k in kinds)
     return (
-        "// Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).\n"
-        f"export type CommandKind = {members};\n\n"
         "type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;\n"
         "// A body as sent: its required keys, every other one omittable at any depth.\n"
         "export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } & {\n"
         "  [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;\n"
         "};\n\n"
-        "// Each kind's body IS its payload model "
+        "// Each JSON-posted kind's body IS its payload model "
         "(domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).\n"
         "export interface CommandPayloads {\n" + "\n".join(sent) + "\n}\n\n"
         "// What each kind answers: its route's `response_model` "
@@ -552,7 +557,7 @@ def _emit_interface(model: type) -> str:
     omitted = _omitted_unset(model)
     body_lines = [
         _emit_field(name, info, hints.get(name, info.annotation), omittable=name in omitted)
-        for name, info in model.model_fields.items()
+        for name, info in _wire_fields(model)
     ]
     body_lines += [
         _emit_computed_field(model, name, info)

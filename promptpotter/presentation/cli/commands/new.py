@@ -19,8 +19,9 @@ from promptpotter.application.datasets.authored import (
     campaign_file_block,
     validated_campaign_config,
 )
+from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
+from promptpotter.application.datasets.ingest import SlugTakenError
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS, origin_readiness
 from promptpotter.application.datasets.tabular_ingest import IngestError
@@ -30,6 +31,7 @@ from promptpotter.domain.command_kinds import (
     ArmRequest,
     EditDraftCampaignPayload,
     HeadToHeadRequest,
+    IngestUploadPayload,
     MintCampaignPayload,
     MintHeadToHeadPayload,
     PauseCyclePayload,
@@ -175,13 +177,12 @@ def _raise_incomplete(
 
 async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
     file_path = Path(args.dataset)
+    payload = IngestUploadPayload(
+        blob=await asyncio.to_thread(file_path.read_bytes), filename=file_path.name, slug=args.slug
+    )
     try:
-        draft = await ingest_draft(
-            stores=stores,
-            blob=await asyncio.to_thread(file_path.read_bytes),
-            filename=file_path.name,
-            slug=args.slug,
-        )
+        outcome = await CommandDispatcher(stores).dispatch(CommandCall(payload))
+        draft: DraftCampaignWire = outcome.result
     except IngestError as exc:
         raise SystemExit(f"ERROR: could not parse {file_path.name}: {exc.message}") from None
     except SlugTakenError as exc:

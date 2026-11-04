@@ -279,7 +279,7 @@ async def mint_head_to_head(
         )
         return await admitted.launched()
 
-    async def _replay() -> HeadToHeadLaunched:
+    async def _replay(_: object) -> HeadToHeadLaunched:
         # A retry under an applied act's key answers what it minted; a refused act's is a new act.
         return replayed_head_to_head(stores, dispatcher.job_registry, request)
 

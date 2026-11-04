@@ -379,7 +379,7 @@ assistant doing the typing.
   under the same rate buckets. Both mints stay federated, so § 0002 holds: a workload's signed JWT
   under OAuth client credentials (a CI job's OIDC token, MCP's machine-client extension), and an
   interactive login — MCP's OAuth (C5), or a device code (RFC 8628) for a program with no browser. A
-  pulled program holds one new rung, `campaign.answer`. Never "API key": `/auth/api-keys` is a
+  pulled program holds one new rung, `campaign.answer`. Never "API key": `set-api-key` is a
   provider's key. It opens with a [`../decisions.md`](../decisions.md) entry naming the
   authorization server — MCP's OAuth 2.1 makes this server a resource server, a device-code mint
   makes it the token issuer — and the [`../architecture.md`](../architecture.md) § Identity amendment

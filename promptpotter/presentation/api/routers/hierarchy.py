@@ -12,6 +12,7 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.hierarchy import (
     DEFAULT_STEP_LIMIT,
@@ -27,7 +28,9 @@ from promptpotter.presentation.api.routers.campaigns._conditional import conditi
 hierarchy_router = APIRouter()
 
 
-@hierarchy_router.get("/hierarchy", response_model=HierarchyResponse, tags=["Hierarchy"])
+@hierarchy_router.get(
+    "/hierarchy", name=ReadKind.HIERARCHY, response_model=HierarchyResponse, tags=["Hierarchy"]
+)
 def get_hierarchy(
     request: Request,
     stores: StoresDep,
@@ -66,7 +69,10 @@ def get_hierarchy(
 
 # Declared before the subtree route, whose `{address:path}` would otherwise take the `/@` too.
 @hierarchy_router.get(
-    "/hierarchy/{address:path}/@", response_model=HierarchySteps, tags=["Hierarchy"]
+    "/hierarchy/{address:path}/@",
+    name=ReadKind.HIERARCHY_STEPS,
+    response_model=HierarchySteps,
+    tags=["Hierarchy"],
 )
 def get_hierarchy_steps(
     request: Request,
@@ -87,7 +93,10 @@ def get_hierarchy_steps(
 
 
 @hierarchy_router.get(
-    "/hierarchy/{address:path}", response_model=HierarchyEntry, tags=["Hierarchy"]
+    "/hierarchy/{address:path}",
+    name=ReadKind.HIERARCHY_SUBTREE,
+    response_model=HierarchyEntry,
+    tags=["Hierarchy"],
 )
 def get_hierarchy_subtree(
     request: Request,

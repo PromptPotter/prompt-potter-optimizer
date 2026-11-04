@@ -6,6 +6,7 @@ from fastapi import Query
 
 from promptpotter.application import cycle_files
 from promptpotter.application.cycle_files import FileContentResponse, FilesResponse
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -13,6 +14,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
+    name=ReadKind.CYCLE_FILES,
     response_model=FilesResponse,
 )
 def list_cycle_files(
@@ -29,6 +31,7 @@ def list_cycle_files(
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/file",
+    name=ReadKind.CYCLE_FILE,
     response_model=FileContentResponse,
 )
 def get_cycle_file(

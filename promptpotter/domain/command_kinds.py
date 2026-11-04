@@ -8,10 +8,12 @@ from typing import Annotated, Any, ClassVar, Literal, Self
 from pydantic import (
     Field,
     JsonValue,
+    SecretStr,
     SerializerFunctionWrapHandler,
     model_serializer,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from promptpotter.domain.campaign import Arm, ArmName, Compare
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -44,13 +46,13 @@ from promptpotter.shared.identity import (
 
 
 class CommandKind(StrEnum):
-    """A row is `kind, handler, capability, cli_verb`: the handler is `application/commands/{module}:{attr}`, imported on dispatch; a `None` verb DECLARES the kind browser-only."""
+    """A row is `kind, handler, capability, cli_verb`: the handler is `application/commands/{module}:{attr}`, imported by the dispatch that needs it (the API imports every one at app import); a `None` capability is the account's own act, open to its session; a `None` verb DECLARES the kind browser-only."""
 
     handler: str
-    capability: str
+    capability: str | None
     cli_verb: str | None
 
-    def __new__(cls, kind: str, handler: str, capability: str, cli_verb: str | None) -> Self:
+    def __new__(cls, kind: str, handler: str, capability: str | None, cli_verb: str | None) -> Self:
         member = str.__new__(cls, kind)
         member._value_ = kind
         member.handler = handler
@@ -183,6 +185,31 @@ class CommandKind(StrEnum):
         CAMPAIGN_CREATE_CAP,
         "discard-draft",
     )
+    # The three doors a check-in draft opens by; each records on the workspace's ledger, as no draft has one yet.
+    INGEST_UPLOAD = "ingest-upload", "workspace_edits:ingest_upload", CAMPAIGN_CREATE_CAP, "new"
+    OPEN_DATASET_DRAFT = (
+        "open-dataset-draft",
+        "workspace_edits:open_dataset_draft",
+        CAMPAIGN_CREATE_CAP,
+        "open-dataset-draft",
+    )
+    OPEN_ORIGIN_DRAFT = (
+        "open-origin-draft",
+        "workspace_edits:open_origin_draft",
+        CAMPAIGN_CREATE_CAP,
+        "open-origin-draft",
+    )
+    SET_USER_SETTINGS = (
+        "set-user-settings",
+        "workspace_edits:set_user_settings",
+        None,
+        "set-user-settings",
+    )
+    ACCEPT_TERMS = "accept-terms", "workspace_edits:accept_terms", None, "accept-terms"
+    # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
+    # terminal sends on the box's own keys.
+    SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", CAMPAIGN_BUDGET_CAP, None
+    REMOVE_API_KEY = "remove-api-key", "workspace_edits:remove_api_key", CAMPAIGN_BUDGET_CAP, None
 
 
 # Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
@@ -197,7 +224,8 @@ class CommandPayload(RequestBody):
     line holder's, ``CampaignPayload`` and a bare one the workspace's, a ``DraftPayload`` its draft's."""
 
     kind: ClassVar[CommandKind]
-    # What the terminal prints after the ack, where the ack alone leaves the next step unsaid.
+    # What the terminal prints after the ack, where the ack alone leaves the next step unsaid; a
+    # `{field}` in it reads that field of the applied answer.
     follow_up: ClassVar[str] = ""
 
     def __init_subclass__(cls, kind: CommandKind | None = None, **kwargs: Any) -> None:
@@ -729,6 +757,62 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         return self
 
 
+class IngestUploadPayload(CommandPayload, kind=CommandKind.INGEST_UPLOAD):
+    """Parse an uploaded tabular file into a durable check-in draft; ``start-checkin`` mints its campaign."""
+
+    filename: str = Field(default="", max_length=256)
+    slug: str | None = Field(default=None, max_length=64, description="Optional slug override.")
+    # The bytes ride the act, never its record: the upload store keeps them (`record_upload`).
+    blob: SkipJsonSchema[bytes] = Field(exclude=True, repr=False)
+
+
+_DRAFT_OPENED = (
+    "Check-in {draft_id} is open: finish it in the browser, or drop it with `discard-draft`."
+)
+
+
+class OpenDatasetDraftPayload(CommandPayload, kind=CommandKind.OPEN_DATASET_DRAFT):
+    """Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-checkin``."""
+
+    follow_up: ClassVar[str] = _DRAFT_OPENED
+
+    dataset_name: str = Field(min_length=1, max_length=64)
+
+
+class OpenOriginDraftPayload(CommandPayload, kind=CommandKind.OPEN_ORIGIN_DRAFT):
+    """Open a prior origin as a prefilled check-in draft, its prompts verbatim; nothing runs until ``start-checkin``."""
+
+    follow_up: ClassVar[str] = _DRAFT_OPENED
+
+    origin_id: str = Field(min_length=1, max_length=128)
+
+
+class SetUserSettingsPayload(CommandPayload, kind=CommandKind.SET_USER_SETTINGS):
+    """Persist the caller's per-user preferences."""
+
+    demo_mode_enabled: bool
+
+
+class AcceptTermsPayload(CommandPayload, kind=CommandKind.ACCEPT_TERMS):
+    """Record the caller's acceptance of the Terms, server-stamped; a version other than the live one is refused."""
+
+    version: str = Field(min_length=1, max_length=64)
+
+
+class SetApiKeyPayload(CommandPayload, kind=CommandKind.SET_API_KEY):
+    """Hold the caller's own key for a provider: its sends there go out on it, past the coupon.
+    Never served back, and recorded masked."""
+
+    provider: str = Field(min_length=1, max_length=64)
+    secret: SecretStr
+
+
+class RemoveApiKeyPayload(CommandPayload, kind=CommandKind.REMOVE_API_KEY):
+    """Drop the caller's key for a provider; its next send there draws the coupon again."""
+
+    provider: str = Field(min_length=1, max_length=64)
+
+
 # The last payload model is declared above, so a kind carrying none fails right here.
 if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
     raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
@@ -743,3 +827,57 @@ class CommandAcceptedBody(StrictModel):
     """What a command whose applied form answers nothing returns: the record it appended."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")
+
+
+class ReadKind(StrEnum):
+    """The read catalogue beside `CommandKind`: a row is `kind, answer`. The answer is
+    `application/{module}:{attr}`, the function whose return is the served model. The route serving
+    a row is NAMED by its kind, and `presentation/api/catalogue.py::bind_surface` refuses at import a
+    session route no row names, a row no route serves, and an answer whose return is not its route's
+    model."""
+
+    answer: str
+
+    def __new__(cls, kind: str, answer: str) -> Self:
+        member = str.__new__(cls, kind)
+        member._value_ = kind
+        member.answer = answer
+        return member
+
+    ME = "me", "account:me"
+    USER_SETTINGS = "user-settings", "account:user_settings"
+    QUOTA_STATUS = "quota-status", "jobs.quota:quota_status"
+    COUPON = "coupon", "jobs.quota:coupon_status"
+    ACTIVITY = "activity", "jobs.account_activity:account_activity"
+    ACTIVE_SESSION = "active-session", "cycle_addressing:active_session"
+    MACHINE_STATUS = "machine-status", "jobs.machine_status:machine_status"
+    OPTIMIZERS = "optimizers", "pipeline_responses:optimizer_roster"
+    OPTIMIZER_PIPELINE = "optimizer-pipeline", "pipeline_responses:resolve_pipeline_for_optimizer"
+    LIBRARY = "library", "library:library"
+    BACKENDS = "backends", "backend_listing:list_backends"
+    BACKEND_HEALTH = "backend-health", "backend_listing:backend_health"
+    HIERARCHY = "hierarchy", "hierarchy:list_hierarchy"
+    HIERARCHY_STEPS = "hierarchy-steps", "cycle_reads:FamilyRay.window"
+    HIERARCHY_SUBTREE = "hierarchy-subtree", "hierarchy_subtree:hierarchy_subtree"
+    CYCLE_DASHBOARD = "cycle-dashboard", "served_dashboard:served_dashboard"
+    CYCLE_ROUND = "cycle-round", "cycle_reads:served_round"
+    CYCLE_ROUND_AUDIT = "cycle-round-audit", "cycle_reads:round_audit"
+    CYCLE_EXPORT = "cycle-export", "cycle_reads:export_cycle"
+    CYCLE_EVENTS = "cycle-events", "cycle_reads:cycle_event_frames"
+    CYCLE_FILES = "cycle-files", "cycle_files:list_cycle_files"
+    CYCLE_FILE = "cycle-file", "cycle_files:read_cycle_file"
+    EVIDENCE = "evidence", "evidence.read:select_evidence"
+    # A read on a POST: no LLM call is made and nothing is minted.
+    HEAD_TO_HEAD_PRICE = "head-to-head-price", "head_to_head_price:price_head_to_head"
+    DRAFT = "draft", "datasets.draft_build:reopen_draft"
+    CAMPAIGN_PIPELINE = "campaign-pipeline", "pipeline_resolve:resolve_pipeline_at"
+    # A read on a POST: nothing is written.
+    FORK_PREVIEW = "fork-preview", "pipeline_resolve:fork_preview"
+    CONFIG_MAP = "config-map", "config_map:campaign_config_map"
+    CAMPAIGN_STORAGE = "campaign-storage", "maintenance.storage_report:campaign_storage"
+    WORKSPACE_STORAGE = "workspace-storage", "maintenance.storage_report:workspace_storage"
+    DATASETS = "datasets", "origin_listing:dataset_index"
+    DATASET_PIPELINE = "dataset-pipeline", "pipeline_resolve:resolve_pipeline_for_dataset"
+    DATASET_CELLS = "dataset-cells", "scoring.measurement_log:measurement_log"
+    DATASET_CELL = "dataset-cell", "scoring.measurement_log:open_cell"
+    ORIGINS = "origins", "origin_listing:origin_index"

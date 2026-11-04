@@ -682,7 +682,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
     assert label().status_code == 404 and refusals() == 1, "a refused write left no trail line"
     with pytest.raises(quota.RateLimitedError):
         while True:
-            quota.refuse_write_rate(writer)
+            quota.refuse_request_rate(writer, read=False)
     throttled = label()
     assert (throttled.status_code, throttled.json()["error"]) == (429, "rate_limited"), (
         "a free verb wrote past its session's write rate"
@@ -691,7 +691,7 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
     assert browser.get("/api/v1/auth/me").status_code == 200, "a throttled writer lost its reads"
     host = default_identity()
     for _ in range(200):
-        quota.refuse_write_rate(host)
+        quota.refuse_request_rate(host, read=False)
 
     # Cross-origin, a credentialed caller is offered only the methods the routes serve and the
     # headers a client sends; another origin is offered nothing.
@@ -772,6 +772,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert ident.claims["principal"] == "sub-1"
     assert ident.capabilities == frozenset({CAMPAIGN_STEP_CAP})
     skipping, starting = CommandKind.SKIP_SEARCHPOINT, CommandKind.START_RUN
+    assert skipping.capability and starting.capability, "guard: both kinds are gated"
     require_capability(ident, skipping.capability, subject=skipping.value)  # holds campaign.step
     with pytest.raises(NotFoundError):
         require_capability(ident, starting.capability, subject=starting.value)  # lacks campaign.run
@@ -974,7 +975,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert session is not None
     identity = identity_of_session(session, bundle)
     stores = workspace(tmp_path, identity)
-    auth.accept_terms(auth.AcceptTermsBody(version=TERMS_VERSION), stores)
+    account.accept_terms(stores, TERMS_VERSION)
 
     def command(kind: str, at: str) -> CommandRecord:
         return CommandRecord(

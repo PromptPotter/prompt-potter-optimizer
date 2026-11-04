@@ -10,13 +10,17 @@ from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     UploadBasis,
     default_campaign_config,
+    owned_draft,
 )
 from promptpotter.application.datasets.origin_readiness import (
     SETUP_STEP_TITLES,
     OriginReadiness,
+    OriginResolution,
     SetupStep,
+    load_resolution,
     origin_readiness,
 )
+from promptpotter.application.hierarchy import draft_starts
 from promptpotter.application.jobs.quota import (
     LaunchRefusal,
     account_wallet,
@@ -35,6 +39,7 @@ from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     CapabilityMenu,
@@ -217,6 +222,36 @@ def _recap(draft: DraftCampaign, connector: str, rounds: int | None) -> str:
 
 async def read_draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
     return draft_wire(stores, draft, await draft_served(stores, draft))
+
+
+class DraftReopenResponse(StrictModel):
+    """A re-opened check-in: its draft and what the last resolver turn left."""
+
+    draft: DraftCampaignWire
+    resolution: OriginResolution = Field(
+        description="What the last resolver turn left, as `resolve-origin` answered it."
+    )
+    resolution_pending: bool = Field(
+        description="Its task is on file but no resolver turn ever set it up "
+        "(`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
+        "revisit never re-buys a turn or re-proposes over authored prompts."
+    )
+    start: LaunchStage | None = Field(
+        description="The stage of the Start that holds it: `queued` waits on a machine slot, "
+        "`starting` is minting it. Set, a reopen offers no second Start; its listing's lifecycle "
+        "tag says the same."
+    )
+
+
+async def reopen_draft(stores: Stores, draft_id: str) -> DraftReopenResponse:
+    """404 once started or discarded."""
+    draft = owned_draft(stores, draft_id)
+    return DraftReopenResponse(
+        draft=await read_draft_wire(stores, draft),
+        resolution=load_resolution(stores, draft),
+        resolution_pending=draft.resolution_pending(),
+        start=draft_starts(stores).get(draft_id),
+    )
 
 
 def draft_wire(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftCampaignWire:

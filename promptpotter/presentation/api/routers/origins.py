@@ -1,33 +1,18 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import Field
 
-from promptpotter.application.datasets.draft_build import DraftCampaignWire
-from promptpotter.application.datasets.ingest import draft_from_origin
-from promptpotter.application.origin_listing import OriginEntry, list_origins
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.application.origin_listing import OriginListResponse, origin_index
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.presentation.api.deps import StoresDep
 
 origins_router = APIRouter(prefix="/origins", tags=["Origins"])
 
 
-class OriginListResponse(StrictModel):
-    origins: list[OriginEntry] = Field(description="Runnable origins, newest first")
-    total: int = Field(description="Number of origins")
-
-
-@origins_router.get("", response_model=OriginListResponse)
+@origins_router.get("", response_model=OriginListResponse, name=ReadKind.ORIGINS)
 def get_origins(stores: StoresDep) -> OriginListResponse:
     """Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is `GET /datasets`'.
 
     Tenant-scoped, not owner-filtered.
     """
-    origins = list_origins(stores)
-    return OriginListResponse(origins=origins, total=len(origins))
-
-
-@origins_router.post("/{origin_id}/draft", response_model=DraftCampaignWire)
-async def post_origin_draft(origin_id: str, stores: StoresDep) -> DraftCampaignWire:
-    """Open a prior origin as a prefilled check-in draft; nothing runs until ``/commands/start-checkin``."""
-    return await draft_from_origin(stores=stores, origin_id=origin_id)
+    return origin_index(stores)

@@ -10,6 +10,7 @@ from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.head_to_head_price import HeadToHeadPrice, price_head_to_head
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import hashed_json
@@ -17,7 +18,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 
 
 # No capability gate and no L4 gate: tenant-scoped, and an id naming nothing is simply absent.
-@campaigns_router.get("/evidence", response_model=Evidence)
+@campaigns_router.get("/evidence", name=ReadKind.EVIDENCE, response_model=Evidence)
 def get_evidence(
     request: Request,
     stores: StoresDep,
@@ -130,7 +131,9 @@ def get_evidence(
     return hashed_json(request, evidence, stamp="generated_at")
 
 
-@campaigns_router.post("/head-to-head/price", response_model=HeadToHeadPrice)
+@campaigns_router.post(
+    "/head-to-head/price", name=ReadKind.HEAD_TO_HEAD_PRICE, response_model=HeadToHeadPrice
+)
 async def price_planned_head_to_head(stores: StoresDep, body: HeadToHeadPlan) -> HeadToHeadPrice:
     """What a head-to-head plan costs before any of it is minted, in dollars, calls and wall clock;
     each budget point carries the `mint-head-to-head` payload that mints its arms.

@@ -744,6 +744,13 @@ class OriginEditedEffect(FrozenModel):
     moved: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
 
 
+class DraftOpenedEffect(FrozenModel):
+    """A check-in draft opened by upload, dataset or origin: the draft a retry under its key answers."""
+
+    kind: Literal["draft_opened"] = "draft_opened"
+    draft_id: str
+
+
 CommandEffect = Annotated[
     NoEffect
     | PausedEffect
@@ -752,7 +759,8 @@ CommandEffect = Annotated[
     | ArmsTakenEffect
     | LookaheadTakenEffect
     | ArmedCeilingEffect
-    | OriginEditedEffect,
+    | OriginEditedEffect
+    | DraftOpenedEffect,
     Field(discriminator="kind"),
 ]
 

@@ -10,7 +10,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import SecretStr
 
 from promptpotter.application import account, health
 from promptpotter.application.jobs.account_activity import (
@@ -19,11 +18,6 @@ from promptpotter.application.jobs.account_activity import (
     ActivityWindow,
     account_activity,
 )
-from promptpotter.application.jobs.coupon import (
-    AccountKey,
-    put_account_key,
-    remove_account_key,
-)
 from promptpotter.application.jobs.quota import (
     CouponStatus,
     QuotaStatus,
@@ -31,9 +25,9 @@ from promptpotter.application.jobs.quota import (
     quota_status,
 )
 from promptpotter.config.paths import default_projects_root
-from promptpotter.config.settings import TERMS_VERSION, settings
+from promptpotter.config.settings import settings
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.run_records import Device, device_of
-from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.default_claim import (
     maybe_claim_default,
@@ -61,16 +55,13 @@ from promptpotter.presentation.api.middleware.oidc import (
     resolve_access_state,
 )
 from promptpotter.shared.errors import (
-    ConflictError,
     NotFoundError,
     ServiceUnavailableError,
 )
 from promptpotter.shared.identity import (
-    CAMPAIGN_BUDGET_CAP,
     AccessState,
     IdentityContext,
     display_name,
-    require_capability,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,36 +74,6 @@ OAUTH_FLOW_COOKIE_NAME = "promptpotter_oauth_flow"
 _OAUTH_FLOW_TTL_S = 600
 # The longest a browser keeps a cookie; each of the admin's sign-ins renews it.
 _OWNER_DEVICE_TTL_S = 400 * 24 * 60 * 60
-
-
-class ConnectedAccount(StrictModel):
-    """One OIDC provider bound to the active session."""
-
-    provider: str
-    email: str | None
-
-
-class UserSettings(RequestBody):
-    """The caller's per-user preferences."""
-
-    demo_mode_enabled: bool
-
-
-class MeResponse(StrictModel):
-    """The caller's identity envelope, with the provider and consent state the account and consent gates read."""
-
-    user_id: str
-    tenant_id: str
-    issuer: str | None
-    email: str | None
-    name: str | None
-    provider: str | None
-    connected_accounts: list[ConnectedAccount]
-    available_providers: list[str]
-    capabilities: list[str]
-    access_state: AccessState
-    terms_version: str
-    terms_accepted_version: str | None
 
 
 def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
@@ -278,10 +239,16 @@ async def callback(
             marker_path=bundle.paths.default_claim_marker,
         )
     elif registered_user_id(bundle.paths.default_claim_marker) is None:
+        why = (
+            "HOST_ADMIN_EMAIL's account has not signed in yet"
+            if settings.HOST_ADMIN_EMAIL.strip()
+            else "HOST_ADMIN_EMAIL is unset, so no browser identity may write the claim marker"
+        )
         logger.warning(
-            "Sign-in by %s did not claim this box: HOST_ADMIN_EMAIL is unset, so no browser identity "
-            "may write the claim marker. Terminal and browser will resolve DIFFERENT tenants until it is.",
+            "Sign-in by %s did not claim this box: %s. Terminal and browser will resolve DIFFERENT "
+            "tenants until it is claimed.",
             identity.email,
+            why,
         )
 
     session_id, session = bundle.session_store.create(
@@ -380,88 +347,32 @@ def _announce_if_opened(
         )
 
 
-@auth_router.get("/me", response_model=MeResponse)
+@auth_router.get("/me", response_model=account.MeResponse, name=ReadKind.ME)
 def me(
     request: Request, background: BackgroundTasks, identity: IdentityDep, stores: StoresDep
-) -> MeResponse:
+) -> account.MeResponse:
     """The caller's identity envelope; ``available_providers`` is the configured ones minus the connected one."""
     bundle = _require_bundle(request)
-    email, provider, access_state = identity.email, identity.provider, identity.access_state
-    name = display_name(email)
-    connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
-    configured = set(bundle.config.configured)
-    available = sorted(configured - {provider}) if provider else sorted(configured)
     # Opened at sign-in as a rule; here for an open box, which has none, and for a session that outlived its files.
     device = _device(request)
     arrival = account.arrive(stores, device=device)
     _announce_if_opened(background, arrival, identity, device)
-    user = arrival.user
-    return MeResponse(
-        user_id=str(identity.user_id),
-        tenant_id=str(identity.tenant_id),
-        issuer=str(identity.issuer) if identity.issuer else None,
-        email=email,
-        name=name,
-        provider=provider,
-        connected_accounts=connected,
-        available_providers=available,
-        capabilities=sorted(identity.capabilities),
-        access_state=access_state,
-        terms_version=TERMS_VERSION,
-        terms_accepted_version=user.terms_accepted.version if user.terms_accepted else None,
-    )
+    return account.me(stores, arrival.user, configured=bundle.config.configured)
 
 
-@auth_router.get("/quota-status", response_model=QuotaStatus)
+@auth_router.get("/quota-status", response_model=QuotaStatus, name=ReadKind.QUOTA_STATUS)
 def get_quota_status(job_registry: JobRegistryDep, stores: StoresDep) -> QuotaStatus:
     """The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never the raw nullable overrides."""
     return quota_status(stores=stores, job_registry=job_registry)
 
 
-@auth_router.get("/user-settings", response_model=UserSettings)
-def get_user_settings(stores: StoresDep) -> UserSettings:
+@auth_router.get("/user-settings", response_model=account.UserSettings, name=ReadKind.USER_SETTINGS)
+def get_user_settings(stores: StoresDep) -> account.UserSettings:
     """The current user's preferences."""
-    return UserSettings(demo_mode_enabled=account.account_of(stores).demo_mode_enabled)
+    return account.user_settings(stores)
 
 
-@auth_router.patch("/user-settings", response_model=UserSettings)
-def patch_user_settings(body: UserSettings, stores: StoresDep) -> UserSettings:
-    """Persist a preference change for the current user."""
-    user = account.account_of(stores)
-    stores.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
-    return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
-
-
-class AcceptTermsBody(RequestBody):
-    """The terms version the client accepts, which must equal the live ``TERMS_VERSION``."""
-
-    version: str
-
-
-class TermsConsent(StrictModel):
-    """The consent state after an accept, in the fields ``/me`` reports it."""
-
-    terms_version: str
-    terms_accepted_version: str | None
-
-
-@auth_router.post("/accept-terms", response_model=TermsConsent)
-def accept_terms(body: AcceptTermsBody, stores: StoresDep) -> TermsConsent:
-    """Record the current user's acceptance of the Terms, server-stamped.
-
-    A version other than the live ``TERMS_VERSION`` answers 409 ``terms_version_stale``.
-    """
-    if body.version != TERMS_VERSION:
-        raise ConflictError(
-            "Terms version is out of date — reload to accept the current terms.",
-            code="terms_version_stale",
-            details={"expected": TERMS_VERSION, "received": body.version},
-        )
-    account.accept_terms(stores, TERMS_VERSION)
-    return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=TERMS_VERSION)
-
-
-@auth_router.get("/activity", response_model=ActivityResponse)
+@auth_router.get("/activity", response_model=ActivityResponse, name=ReadKind.ACTIVITY)
 def activity(
     stores: StoresDep,
     window: ActivityWindow = "1d",
@@ -475,39 +386,8 @@ def activity(
     return account_activity(stores, window=window, group_by=group_by)
 
 
-@auth_router.get("/coupon", response_model=CouponStatus)
+@auth_router.get("/coupon", response_model=CouponStatus, name=ReadKind.COUPON)
 def get_coupon(stores: StoresDep) -> CouponStatus:
     """The host's allowance for the caller on the box's keys: its face, what is left, and the keys
     the caller sends on past it. What is left is derived from the ledgers, never a counter."""
     return coupon_status(stores)
-
-
-class ApiKeyBody(RequestBody):
-    """One provider key, never served back: a read names its last four characters alone."""
-
-    secret: SecretStr
-
-
-@auth_router.put("/api-keys/{provider}", response_model=AccountKey)
-def put_api_key(
-    provider: Annotated[str, Path(max_length=64)],
-    body: ApiKeyBody,
-    identity: IdentityDep,
-    stores: StoresDep,
-) -> AccountKey:
-    """Hold the caller's own key for *provider*: its sends there go out on it, past the coupon.
-
-    An unknown provider answers 422 ``unknown_provider``; a key that is not one unbroken string 422
-    ``api_key_malformed``. The provider judges the key itself, at its first send."""
-    require_capability(identity, CAMPAIGN_BUDGET_CAP, subject="put api key")
-    return put_account_key(stores, provider, body.secret)
-
-
-@auth_router.delete("/api-keys/{provider}", status_code=204)
-def delete_api_key(
-    provider: Annotated[str, Path(max_length=64)], identity: IdentityDep, stores: StoresDep
-) -> Response:
-    """Drop the caller's key for *provider*; its next send there draws the coupon again."""
-    require_capability(identity, CAMPAIGN_BUDGET_CAP, subject="delete api key")
-    remove_account_key(stores, provider)
-    return Response(status_code=204)

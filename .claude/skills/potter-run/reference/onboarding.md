@@ -28,9 +28,10 @@ web `webapp/components/ingest/`.
 
 When the operator says the data is ready **and it loads cleanly**, author the origin yourself:
 
-1. **Test the load first** — raw file → `POST /datasets/ingest`; a registered dataset →
-   `POST /datasets/{name}/draft` (its `dataset.yaml` `source:` names a recipe in
-   `application/datasets/loaders.py::BANK_RECIPES`). **If the load fails, do NOT simulate.**
+1. **Test the load first** — raw file → `POST /commands/ingest-upload` (a form); a registered dataset →
+   `POST /commands/open-dataset-draft` (its `dataset.yaml` `source:` names a recipe in
+   `application/datasets/loaders.py::BANK_RECIPES`); a prior origin → `POST /commands/open-origin-draft`.
+   **If the load fails, do NOT simulate.**
 2. **Author the origin** via `POST /commands/edit-draft-campaign`: prompt fields, `task_context`, the
    column map, a plain `task_description`. The closed-label answer space stays code-owned.
 3. **Gate, then start**: `origin_readiness` `complete`, then `POST /commands/start-checkin` with `{draft_id}`.

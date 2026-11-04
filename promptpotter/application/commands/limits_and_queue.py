@@ -33,7 +33,7 @@ async def change_run_limits(
     dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload.budget
     return Applier.silent(
         lambda: _apply_change_run_limits(dispatcher, hop, change),
-        effect_fn=lambda: _armed_ceiling(dispatcher.stores, hop),
+        effect_fn=lambda _: _armed_ceiling(dispatcher.stores, hop),
     )
 
 

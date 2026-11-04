@@ -99,11 +99,13 @@
         "title": "AbilityReading",
         "type": "object"
       },
-      "AcceptTermsBody": {
+      "AcceptTermsPayload": {
         "additionalProperties": false,
-        "description": "The terms version the client accepts, which must equal the live ``TERMS_VERSION``.",
+        "description": "Record the caller's acceptance of the Terms, server-stamped; a version other than the live one is refused.",
         "properties": {
           "version": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Version",
             "type": "string"
           }
@@ -111,7 +113,7 @@
         "required": [
           "version"
         ],
-        "title": "AcceptTermsBody",
+        "title": "AcceptTermsPayload",
         "type": "object"
       },
       "AccountKey": {
@@ -539,23 +541,6 @@
         ],
         "title": "AllowanceState",
         "type": "string"
-      },
-      "ApiKeyBody": {
-        "additionalProperties": false,
-        "description": "One provider key, never served back: a read names its last four characters alone.",
-        "properties": {
-          "secret": {
-            "format": "password",
-            "title": "Secret",
-            "type": "string",
-            "writeOnly": true
-          }
-        },
-        "required": [
-          "secret"
-        ],
-        "title": "ApiKeyBody",
-        "type": "object"
       },
       "ArchiveCampaignPayload": {
         "additionalProperties": false,
@@ -2117,7 +2102,30 @@
         "title": "BenchStatus",
         "type": "object"
       },
-      "Body_ingest_dataset_api_v1_datasets_ingest_post": {
+      "Body_edit_draft_campaign_api_v1_datasets_draft_candidate_library_post": {
+        "properties": {
+          "draft_id": {
+            "description": "Draft to attach the library to.",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Target library — one entry per line, or a single-column CSV/Excel.",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "draft_id"
+        ],
+        "title": "Body_edit_draft_campaign_api_v1_datasets_draft_candidate_library_post",
+        "type": "object"
+      },
+      "Body_ingest_upload_api_v1_commands_ingest_upload_post": {
         "properties": {
           "file": {
             "contentMediaType": "application/octet-stream",
@@ -2141,30 +2149,7 @@
         "required": [
           "file"
         ],
-        "title": "Body_ingest_dataset_api_v1_datasets_ingest_post",
-        "type": "object"
-      },
-      "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post": {
-        "properties": {
-          "draft_id": {
-            "description": "Draft to attach the library to.",
-            "maxLength": 128,
-            "minLength": 8,
-            "title": "Draft Id",
-            "type": "string"
-          },
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "description": "Target library — one entry per line, or a single-column CSV/Excel.",
-            "title": "File",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file",
-          "draft_id"
-        ],
-        "title": "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
+        "title": "Body_ingest_upload_api_v1_commands_ingest_upload_post",
         "type": "object"
       },
       "Broken": {
@@ -4763,7 +4748,7 @@
                 "type": "null"
               }
             ],
-            "description": "``null`` = a check-in can open it here. Otherwise why not: the same reading ``POST /datasets/{name}/draft`` refuses with, worded by `START_BLOCK_WORDS`."
+            "description": "``null`` = a check-in can open it here. Otherwise why not: the same reading ``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`."
           },
           "summary": {
             "anyOf": [
@@ -11236,6 +11221,40 @@
         "title": "NurseOwner",
         "type": "string"
       },
+      "OpenDatasetDraftPayload": {
+        "additionalProperties": false,
+        "description": "Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-checkin``.",
+        "properties": {
+          "dataset_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Dataset Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name"
+        ],
+        "title": "OpenDatasetDraftPayload",
+        "type": "object"
+      },
+      "OpenOriginDraftPayload": {
+        "additionalProperties": false,
+        "description": "Open a prior origin as a prefilled check-in draft, its prompts verbatim; nothing runs until ``start-checkin``.",
+        "properties": {
+          "origin_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Origin Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin_id"
+        ],
+        "title": "OpenOriginDraftPayload",
+        "type": "object"
+      },
       "OptSearchPoint": {
         "additionalProperties": false,
         "description": "The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage.",
@@ -13589,6 +13608,23 @@
         "title": "ReadingState",
         "type": "string"
       },
+      "RemoveApiKeyPayload": {
+        "additionalProperties": false,
+        "description": "Drop the caller's key for a provider; its next send there draws the coupon again.",
+        "properties": {
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "RemoveApiKeyPayload",
+        "type": "object"
+      },
       "ResolveOriginPayload": {
         "additionalProperties": false,
         "description": "One resolver turn over the draft's open gaps; what it proposes waits on a click.",
@@ -15433,6 +15469,30 @@
         "title": "ServedRound",
         "type": "object"
       },
+      "SetApiKeyPayload": {
+        "additionalProperties": false,
+        "description": "Hold the caller's own key for a provider: its sends there go out on it, past the coupon.\nNever served back, and recorded masked.",
+        "properties": {
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "secret": {
+            "format": "password",
+            "title": "Secret",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "provider",
+          "secret"
+        ],
+        "title": "SetApiKeyPayload",
+        "type": "object"
+      },
       "SetCampaignLabelPayload": {
         "additionalProperties": false,
         "description": "Name a campaign wherever it is named to a human; its id still addresses it.",
@@ -15522,6 +15582,21 @@
           "cells"
         ],
         "title": "SetSampleLookaheadPayload",
+        "type": "object"
+      },
+      "SetUserSettingsPayload": {
+        "additionalProperties": false,
+        "description": "Persist the caller's per-user preferences.",
+        "properties": {
+          "demo_mode_enabled": {
+            "title": "Demo Mode Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "demo_mode_enabled"
+        ],
+        "title": "SetUserSettingsPayload",
         "type": "object"
       },
       "SetupStep": {
@@ -17920,48 +17995,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/auth/accept-terms": {
-      "post": {
-        "description": "Record the current user's acceptance of the Terms, server-stamped.\n\nA version other than the live ``TERMS_VERSION`` answers 409 ``terms_version_stale``.",
-        "operationId": "accept_terms_api_v1_auth_accept_terms_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AcceptTermsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TermsConsent"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Accept Terms",
-        "tags": [
-          "Auth"
-        ]
-      }
-    },
     "/api/v1/auth/activity": {
       "get": {
         "description": "Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.\n\n``group_by`` is ``model`` (the exact model string) or ``api_key`` (the provider that billed\nthe call, and whether the host's key or the caller's own sent it).",
@@ -18031,95 +18064,6 @@
         ]
       }
     },
-    "/api/v1/auth/api-keys/{provider}": {
-      "delete": {
-        "description": "Drop the caller's key for *provider*; its next send there draws the coupon again.",
-        "operationId": "delete_api_key_api_v1_auth_api_keys__provider__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "title": "Provider",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Delete Api Key",
-        "tags": [
-          "Auth"
-        ]
-      },
-      "put": {
-        "description": "Hold the caller's own key for *provider*: its sends there go out on it, past the coupon.\n\nAn unknown provider answers 422 ``unknown_provider``; a key that is not one unbroken string 422\n``api_key_malformed``. The provider judges the key itself, at its first send.",
-        "operationId": "put_api_key_api_v1_auth_api_keys__provider__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "title": "Provider",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountKey"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Put Api Key",
-        "tags": [
-          "Auth"
-        ]
-      }
-    },
     "/api/v1/auth/callback/{provider}": {
       "get": {
         "operationId": "callback_api_v1_auth_callback__provider__get",
@@ -18165,7 +18109,7 @@
     "/api/v1/auth/coupon": {
       "get": {
         "description": "The host's allowance for the caller on the box's keys: its face, what is left, and the keys\nthe caller sends on past it. What is left is derived from the ledgers, never a counter.",
-        "operationId": "get_coupon_api_v1_auth_coupon_get",
+        "operationId": "coupon_api_v1_auth_coupon_get",
         "responses": {
           "200": {
             "content": {
@@ -18188,7 +18132,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Coupon",
+        "summary": "Coupon",
         "tags": [
           "Auth"
         ]
@@ -18300,7 +18244,7 @@
     "/api/v1/auth/quota-status": {
       "get": {
         "description": "The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never the raw nullable overrides.",
-        "operationId": "get_quota_status_api_v1_auth_quota_status_get",
+        "operationId": "quota_status_api_v1_auth_quota_status_get",
         "responses": {
           "200": {
             "content": {
@@ -18323,7 +18267,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Quota Status",
+        "summary": "Quota-Status",
         "tags": [
           "Auth"
         ]
@@ -18332,7 +18276,7 @@
     "/api/v1/auth/user-settings": {
       "get": {
         "description": "The current user's preferences.",
-        "operationId": "get_user_settings_api_v1_auth_user_settings_get",
+        "operationId": "user_settings_api_v1_auth_user_settings_get",
         "responses": {
           "200": {
             "content": {
@@ -18355,47 +18299,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get User Settings",
-        "tags": [
-          "Auth"
-        ]
-      },
-      "patch": {
-        "description": "Persist a preference change for the current user.",
-        "operationId": "patch_user_settings_api_v1_auth_user_settings_patch",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserSettings"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserSettings"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Patch User Settings",
+        "summary": "User-Settings",
         "tags": [
           "Auth"
         ]
@@ -18404,7 +18308,7 @@
     "/api/v1/backends": {
       "get": {
         "description": "Every registered connector, at the endpoint the operator configured for it.",
-        "operationId": "list_backends_api_v1_backends_get",
+        "operationId": "backends_api_v1_backends_get",
         "responses": {
           "200": {
             "content": {
@@ -18413,7 +18317,7 @@
                   "items": {
                     "$ref": "#/components/schemas/BackendResponse"
                   },
-                  "title": "Response List Backends Api V1 Backends Get",
+                  "title": "Response Backends Api V1 Backends Get",
                   "type": "array"
                 }
               }
@@ -18431,7 +18335,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "List Backends",
+        "summary": "Backends",
         "tags": [
           "Backends"
         ]
@@ -18440,7 +18344,7 @@
     "/api/v1/backends/{backend_id}/health": {
       "get": {
         "description": "Whether a launch against this backend would be admitted, by the reading admission itself takes.\n\nA down backend is an answer, never an error; only an unregistered ``backend_id`` answers 404.",
-        "operationId": "get_backend_health_api_v1_backends__backend_id__health_get",
+        "operationId": "backend_health_api_v1_backends__backend_id__health_get",
         "parameters": [
           {
             "in": "path",
@@ -18474,7 +18378,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Backend Health",
+        "summary": "Backend-Health",
         "tags": [
           "Backends"
         ]
@@ -18483,7 +18387,7 @@
     "/api/v1/campaigns/{campaign_id}/config-map": {
       "get": {
         "description": "One campaign's knob coupling and provenance map: what moves which estimand, what overwrites what, which knobs collide.\n\nRead over the config its root runs under; 404 on cross-user reads.",
-        "operationId": "get_campaign_config_map_api_v1_campaigns__campaign_id__config_map_get",
+        "operationId": "config_map_api_v1_campaigns__campaign_id__config_map_get",
         "parameters": [
           {
             "in": "path",
@@ -18517,7 +18421,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Campaign Config Map",
+        "summary": "Config-Map",
         "tags": [
           "Campaigns"
         ]
@@ -18526,7 +18430,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
         "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset`` carries: the state as of that line.",
-        "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
+        "operationId": "cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
             "in": "path",
@@ -18593,7 +18497,7 @@
                       "$ref": "#/components/schemas/WarmingDashboard"
                     }
                   ],
-                  "title": "Response Get Cycle Dashboard Api V1 Campaigns  Campaign Id  Cycles  Cycle Id  Dashboard Get"
+                  "title": "Response Cycle Dashboard Api V1 Campaigns  Campaign Id  Cycles  Cycle Id  Dashboard Get"
                 }
               }
             },
@@ -18610,7 +18514,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Cycle Dashboard",
+        "summary": "Cycle-Dashboard",
         "tags": [
           "Campaigns"
         ]
@@ -18619,7 +18523,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe": {
       "get": {
         "description": "Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.\n\n404 only for an unknown cycle; a running, paused or finished one answers one ``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up at), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``, ``sequence`` = its ledger offset), with a heartbeat comment every 15 s.",
-        "operationId": "stream_cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
+        "operationId": "cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
         "parameters": [
           {
             "in": "path",
@@ -18671,7 +18575,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Stream Cycle Events",
+        "summary": "Cycle-Events",
         "tags": [
           "Campaigns",
           "Stream"
@@ -18681,7 +18585,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/export": {
       "get": {
         "description": "One reading of the cycle, chosen by what its reader does next — the CLI's `export --tier`.\n\n``chat`` and ``report`` are text to paste, ``deploy`` is ``export.json``; ``notebook`` and ``package`` are several files, served as one zip.\n``deploy`` and ``package`` answer 409 until the cycle has written ``export.json``.",
-        "operationId": "get_cycle_export_api_v1_campaigns__campaign_id__cycles__cycle_id__export_get",
+        "operationId": "cycle_export_api_v1_campaigns__campaign_id__cycles__cycle_id__export_get",
         "parameters": [
           {
             "in": "path",
@@ -18754,7 +18658,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Cycle Export",
+        "summary": "Cycle-Export",
         "tags": [
           "Campaigns"
         ]
@@ -18763,7 +18667,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file": {
       "get": {
         "description": "The contents of one file under the cycle or campaign scope; with ``descend``, the inner cycle's, never the outer root's.",
-        "operationId": "get_cycle_file_api_v1_campaigns__campaign_id__cycles__cycle_id__file_get",
+        "operationId": "cycle_file_api_v1_campaigns__campaign_id__cycles__cycle_id__file_get",
         "parameters": [
           {
             "in": "path",
@@ -18848,7 +18752,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Cycle File",
+        "summary": "Cycle-File",
         "tags": [
           "Campaigns"
         ]
@@ -18857,7 +18761,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/files": {
       "get": {
         "description": "The recursive file tree of the cycle directory plus the campaign-level artifacts, at any depth through ``descend``.",
-        "operationId": "list_cycle_files_api_v1_campaigns__campaign_id__cycles__cycle_id__files_get",
+        "operationId": "cycle_files_api_v1_campaigns__campaign_id__cycles__cycle_id__files_get",
         "parameters": [
           {
             "in": "path",
@@ -18916,7 +18820,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "List Cycle Files",
+        "summary": "Cycle-Files",
         "tags": [
           "Campaigns"
         ]
@@ -18925,7 +18829,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}": {
       "get": {
         "description": "One closed round: its last close's arms and verdict, and the rows it names, each carrying its mark as ``status``.\n\nA fork answers for the rounds it inherited; a round that does not stand closed answers 404.\n``at`` is the dashboard route's: the round as it stood at that line of the cycle's own ledger.",
-        "operationId": "get_cycle_round_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__get",
+        "operationId": "cycle_round_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__get",
         "parameters": [
           {
             "in": "path",
@@ -19010,7 +18914,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Cycle Round",
+        "summary": "Cycle-Round",
         "tags": [
           "Campaigns"
         ]
@@ -19019,7 +18923,7 @@
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit": {
       "get": {
         "description": "The round's audit twin: the per-node LLM I/O, which the round beside it does not carry.\n\nA fork answers for the rounds it inherited; ``null`` where no twin is on disk.",
-        "operationId": "get_cycle_round_audit_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__audit_get",
+        "operationId": "cycle_round_audit_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__audit_get",
         "parameters": [
           {
             "in": "path",
@@ -19078,7 +18982,7 @@
                       "type": "null"
                     }
                   ],
-                  "title": "Response Get Cycle Round Audit Api V1 Campaigns  Campaign Id  Cycles  Cycle Id  Rounds  Round Num  Audit Get"
+                  "title": "Response Cycle Round Audit Api V1 Campaigns  Campaign Id  Cycles  Cycle Id  Rounds  Round Num  Audit Get"
                 }
               }
             },
@@ -19095,7 +18999,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Cycle Round Audit",
+        "summary": "Cycle-Round-Audit",
         "tags": [
           "Campaigns"
         ]
@@ -19104,7 +19008,7 @@
     "/api/v1/campaigns/{campaign_id}/fork-preview": {
       "post": {
         "description": "Whether this steer takes the babysit path: the fork gate's own verdict, asked without forking.\n\nA read despite the POST: nothing is written, and no capability is needed to ask.",
-        "operationId": "preview_fork_steer_api_v1_campaigns__campaign_id__fork_preview_post",
+        "operationId": "fork_preview_api_v1_campaigns__campaign_id__fork_preview_post",
         "parameters": [
           {
             "in": "path",
@@ -19148,7 +19052,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Preview Fork Steer",
+        "summary": "Fork-Preview",
         "tags": [
           "Campaigns"
         ]
@@ -19157,7 +19061,7 @@
     "/api/v1/campaigns/{campaign_id}/pipeline": {
       "get": {
         "description": "What this campaign runs, the one server-owned answer; ownership-gated, 404 on cross-tenant reads.",
-        "operationId": "get_campaign_pipeline_api_v1_campaigns__campaign_id__pipeline_get",
+        "operationId": "campaign_pipeline_api_v1_campaigns__campaign_id__pipeline_get",
         "parameters": [
           {
             "in": "path",
@@ -19203,7 +19107,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Campaign Pipeline",
+        "summary": "Campaign-Pipeline",
         "tags": [
           "Campaigns"
         ]
@@ -19212,7 +19116,7 @@
     "/api/v1/campaigns/{campaign_id}/storage": {
       "get": {
         "description": "On-disk size of the campaign tree, split into its MECE leaves. 404 on cross-user.",
-        "operationId": "get_campaign_storage_api_v1_campaigns__campaign_id__storage_get",
+        "operationId": "campaign_storage_api_v1_campaigns__campaign_id__storage_get",
         "parameters": [
           {
             "in": "path",
@@ -19246,15 +19150,75 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Campaign Storage",
+        "summary": "Campaign-Storage",
         "tags": [
           "Campaigns"
         ]
       }
     },
+    "/api/v1/commands/accept-terms": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "accept_terms_api_v1_commands_accept_terms_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptTermsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsConsent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Accept-Terms",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/archive-campaign": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "archive_campaign_api_v1_commands_archive_campaign_post",
         "parameters": [
           {
@@ -19306,7 +19270,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Archive Campaign",
+        "summary": "Archive-Campaign",
         "tags": [
           "Commands"
         ]
@@ -19314,7 +19278,7 @@
     },
     "/api/v1/commands/bank-snippet": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "bank_snippet_api_v1_commands_bank_snippet_post",
         "parameters": [
           {
@@ -19366,7 +19330,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Bank Snippet",
+        "summary": "Bank-Snippet",
         "tags": [
           "Commands"
         ]
@@ -19374,7 +19338,7 @@
     },
     "/api/v1/commands/cancel-queued-run": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "cancel_queued_run_api_v1_commands_cancel_queued_run_post",
         "parameters": [
           {
@@ -19426,7 +19390,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Cancel Queued Run",
+        "summary": "Cancel-Queued-Run",
         "tags": [
           "Commands"
         ]
@@ -19434,7 +19398,7 @@
     },
     "/api/v1/commands/change-run-limits": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "change_run_limits_api_v1_commands_change_run_limits_post",
         "parameters": [
           {
@@ -19486,7 +19450,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Change Run Limits",
+        "summary": "Change-Run-Limits",
         "tags": [
           "Commands"
         ]
@@ -19494,7 +19458,7 @@
     },
     "/api/v1/commands/cleanup-empty-cycles": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "cleanup_empty_cycles_api_v1_commands_cleanup_empty_cycles_post",
         "parameters": [
           {
@@ -19546,7 +19510,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Cleanup Empty Cycles",
+        "summary": "Cleanup-Empty-Cycles",
         "tags": [
           "Commands"
         ]
@@ -19554,7 +19518,7 @@
     },
     "/api/v1/commands/compact-archive": {
       "post": {
-        "description": "Compact, restore or purge the measurement archive's cold store; a preview and its apply answer in one shape.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "compact_archive_api_v1_commands_compact_archive_post",
         "parameters": [
           {
@@ -19606,7 +19570,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Compact Archive",
+        "summary": "Compact-Archive",
         "tags": [
           "Commands"
         ]
@@ -19614,7 +19578,7 @@
     },
     "/api/v1/commands/delete-campaign": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "delete_campaign_api_v1_commands_delete_campaign_post",
         "parameters": [
           {
@@ -19666,7 +19630,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Delete Campaign",
+        "summary": "Delete-Campaign",
         "tags": [
           "Commands"
         ]
@@ -19674,7 +19638,7 @@
     },
     "/api/v1/commands/delete-cycle": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "delete_cycle_api_v1_commands_delete_cycle_post",
         "parameters": [
           {
@@ -19726,7 +19690,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Delete Cycle",
+        "summary": "Delete-Cycle",
         "tags": [
           "Commands"
         ]
@@ -19734,7 +19698,7 @@
     },
     "/api/v1/commands/discard-draft": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "discard_draft_api_v1_commands_discard_draft_post",
         "parameters": [
           {
@@ -19786,7 +19750,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Discard Draft",
+        "summary": "Discard-Draft",
         "tags": [
           "Commands"
         ]
@@ -19846,7 +19810,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Edit Draft Campaign",
+        "summary": "Edit-Draft-Campaign",
         "tags": [
           "Commands"
         ]
@@ -19854,7 +19818,7 @@
     },
     "/api/v1/commands/fork-cycle": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "fork_cycle_api_v1_commands_fork_cycle_post",
         "parameters": [
           {
@@ -19906,7 +19870,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Fork Cycle",
+        "summary": "Fork-Cycle",
         "tags": [
           "Commands"
         ]
@@ -19914,7 +19878,7 @@
     },
     "/api/v1/commands/grade-bench": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "grade_bench_api_v1_commands_grade_bench_post",
         "parameters": [
           {
@@ -19966,7 +19930,67 @@
             "description": "Default Response"
           }
         },
-        "summary": "Grade Bench",
+        "summary": "Grade-Bench",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/ingest-upload": {
+      "post": {
+        "description": "The kind's payload as a form: the file is its ``blob`` and ``filename``.",
+        "operationId": "ingest_upload_api_v1_commands_ingest_upload_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_upload_api_v1_commands_ingest_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCampaignWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Ingest-Upload",
         "tags": [
           "Commands"
         ]
@@ -19974,7 +19998,7 @@
     },
     "/api/v1/commands/mint-campaign": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "mint_campaign_api_v1_commands_mint_campaign_post",
         "parameters": [
           {
@@ -20026,7 +20050,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Mint Campaign",
+        "summary": "Mint-Campaign",
         "tags": [
           "Commands"
         ]
@@ -20086,7 +20110,127 @@
             "description": "Default Response"
           }
         },
-        "summary": "Mint Head To Head",
+        "summary": "Mint-Head-To-Head",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/open-dataset-draft": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "open_dataset_draft_api_v1_commands_open_dataset_draft_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenDatasetDraftPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCampaignWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Open-Dataset-Draft",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/open-origin-draft": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "open_origin_draft_api_v1_commands_open_origin_draft_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenOriginDraftPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCampaignWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Open-Origin-Draft",
         "tags": [
           "Commands"
         ]
@@ -20094,7 +20238,7 @@
     },
     "/api/v1/commands/origin-gate-decision": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "origin_gate_decision_api_v1_commands_origin_gate_decision_post",
         "parameters": [
           {
@@ -20146,7 +20290,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Origin Gate Decision",
+        "summary": "Origin-Gate-Decision",
         "tags": [
           "Commands"
         ]
@@ -20154,7 +20298,7 @@
     },
     "/api/v1/commands/pause-cycle": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "pause_cycle_api_v1_commands_pause_cycle_post",
         "parameters": [
           {
@@ -20206,7 +20350,67 @@
             "description": "Default Response"
           }
         },
-        "summary": "Pause Cycle",
+        "summary": "Pause-Cycle",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/remove-api-key": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "remove_api_key_api_v1_commands_remove_api_key_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveApiKeyPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Remove-Api-Key",
         "tags": [
           "Commands"
         ]
@@ -20266,7 +20470,67 @@
             "description": "Default Response"
           }
         },
-        "summary": "Resolve Origin",
+        "summary": "Resolve-Origin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-api-key": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "set_api_key_api_v1_commands_set_api_key_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetApiKeyPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountKey"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set-Api-Key",
         "tags": [
           "Commands"
         ]
@@ -20274,7 +20538,7 @@
     },
     "/api/v1/commands/set-campaign-label": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "set_campaign_label_api_v1_commands_set_campaign_label_post",
         "parameters": [
           {
@@ -20326,7 +20590,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Set Campaign Label",
+        "summary": "Set-Campaign-Label",
         "tags": [
           "Commands"
         ]
@@ -20334,7 +20598,7 @@
     },
     "/api/v1/commands/set-concurrent-cycles": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "set_concurrent_cycles_api_v1_commands_set_concurrent_cycles_post",
         "parameters": [
           {
@@ -20386,7 +20650,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Set Concurrent Cycles",
+        "summary": "Set-Concurrent-Cycles",
         "tags": [
           "Commands"
         ]
@@ -20394,7 +20658,7 @@
     },
     "/api/v1/commands/set-sample-lookahead": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "set_sample_lookahead_api_v1_commands_set_sample_lookahead_post",
         "parameters": [
           {
@@ -20446,7 +20710,67 @@
             "description": "Default Response"
           }
         },
-        "summary": "Set Sample Lookahead",
+        "summary": "Set-Sample-Lookahead",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/set-user-settings": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "set_user_settings_api_v1_commands_set_user_settings_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserSettingsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set-User-Settings",
         "tags": [
           "Commands"
         ]
@@ -20454,7 +20778,7 @@
     },
     "/api/v1/commands/skip-searchpoint": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "skip_searchpoint_api_v1_commands_skip_searchpoint_post",
         "parameters": [
           {
@@ -20506,7 +20830,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Skip Searchpoint",
+        "summary": "Skip-Searchpoint",
         "tags": [
           "Commands"
         ]
@@ -20574,7 +20898,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Start Checkin",
+        "summary": "Start-Checkin",
         "tags": [
           "Commands"
         ]
@@ -20582,7 +20906,7 @@
     },
     "/api/v1/commands/start-run": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "start_run_api_v1_commands_start_run_post",
         "parameters": [
           {
@@ -20634,7 +20958,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Start Run",
+        "summary": "Start-Run",
         "tags": [
           "Commands"
         ]
@@ -20642,7 +20966,7 @@
     },
     "/api/v1/commands/step-cycle": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "step_cycle_api_v1_commands_step_cycle_post",
         "parameters": [
           {
@@ -20694,7 +21018,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Step Cycle",
+        "summary": "Step-Cycle",
         "tags": [
           "Commands"
         ]
@@ -20702,7 +21026,7 @@
     },
     "/api/v1/commands/submit-arms": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "submit_arms_api_v1_commands_submit_arms_post",
         "parameters": [
           {
@@ -20754,7 +21078,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Submit Arms",
+        "summary": "Submit-Arms",
         "tags": [
           "Commands"
         ]
@@ -20762,7 +21086,7 @@
     },
     "/api/v1/commands/unarchive-campaign": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "unarchive_campaign_api_v1_commands_unarchive_campaign_post",
         "parameters": [
           {
@@ -20814,7 +21138,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Unarchive Campaign",
+        "summary": "Unarchive-Campaign",
         "tags": [
           "Commands"
         ]
@@ -20822,7 +21146,7 @@
     },
     "/api/v1/commands/verify-candidate": {
       "post": {
-        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "verify_candidate_api_v1_commands_verify_candidate_post",
         "parameters": [
           {
@@ -20874,7 +21198,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Verify Candidate",
+        "summary": "Verify-Candidate",
         "tags": [
           "Commands"
         ]
@@ -20883,7 +21207,7 @@
     "/api/v1/datasets": {
       "get": {
         "description": "Every dataset this identity may read: its own tenant origins, then install content.",
-        "operationId": "list_datasets_api_v1_datasets_get",
+        "operationId": "datasets_api_v1_datasets_get",
         "responses": {
           "200": {
             "content": {
@@ -20906,7 +21230,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "List Datasets",
+        "summary": "Datasets",
         "tags": [
           "Datasets"
         ]
@@ -20915,7 +21239,7 @@
     "/api/v1/datasets/draft/candidate-library": {
       "post": {
         "description": "Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft.",
-        "operationId": "upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
+        "operationId": "edit_draft_campaign_api_v1_datasets_draft_candidate_library_post",
         "parameters": [
           {
             "in": "header",
@@ -20938,7 +21262,7 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post"
+                "$ref": "#/components/schemas/Body_edit_draft_campaign_api_v1_datasets_draft_candidate_library_post"
               }
             }
           },
@@ -20966,7 +21290,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Upload Candidate Library",
+        "summary": "Edit-Draft-Campaign",
         "tags": [
           "Datasets"
         ]
@@ -20975,7 +21299,7 @@
     "/api/v1/datasets/draft/candidate-library/from-column": {
       "post": {
         "description": "Build a draft's candidate library from the distinct values of one of its own columns and return the updated draft.",
-        "operationId": "build_candidate_library_from_column_api_v1_datasets_draft_candidate_library_from_column_post",
+        "operationId": "edit_draft_campaign_api_v1_datasets_draft_candidate_library_from_column_post",
         "parameters": [
           {
             "in": "header",
@@ -21026,49 +21350,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Build Candidate Library From Column",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
-    "/api/v1/datasets/ingest": {
-      "post": {
-        "description": "Parse an uploaded tabular file into a durable check-in draft; ``/commands/start-checkin`` mints its campaign.",
-        "operationId": "ingest_dataset_api_v1_datasets_ingest_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_ingest_dataset_api_v1_datasets_ingest_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftCampaignWire"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Ingest Dataset",
+        "summary": "Edit-Draft-Campaign",
         "tags": [
           "Datasets"
         ]
@@ -21077,7 +21359,7 @@
     "/api/v1/datasets/{name}/cells": {
       "get": {
         "description": "The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones holding a kept cell.",
-        "operationId": "get_dataset_cells_api_v1_datasets__name__cells_get",
+        "operationId": "dataset_cells_api_v1_datasets__name__cells_get",
         "parameters": [
           {
             "in": "path",
@@ -21317,7 +21599,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Dataset Cells",
+        "summary": "Dataset-Cells",
         "tags": [
           "Datasets"
         ]
@@ -21326,7 +21608,7 @@
     "/api/v1/datasets/{name}/cells/{answer}": {
       "get": {
         "description": "One answer opened: its row assembled into a trace.",
-        "operationId": "get_dataset_cell_api_v1_datasets__name__cells__answer__get",
+        "operationId": "dataset_cell_api_v1_datasets__name__cells__answer__get",
         "parameters": [
           {
             "in": "path",
@@ -21369,50 +21651,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Dataset Cell",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
-    "/api/v1/datasets/{name}/draft": {
-      "post": {
-        "description": "Open an authored dataset's files as a prefilled, durable check-in draft.",
-        "operationId": "draft_from_existing_dataset_api_v1_datasets__name__draft_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftCampaignWire"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Draft From Existing Dataset",
+        "summary": "Dataset-Cell",
         "tags": [
           "Datasets"
         ]
@@ -21421,7 +21660,7 @@
     "/api/v1/datasets/{name}/pipeline": {
       "get": {
         "description": "One dataset's declared pipeline, gated by the resolver every dataset read shares.",
-        "operationId": "get_dataset_pipeline_api_v1_datasets__name__pipeline_get",
+        "operationId": "dataset_pipeline_api_v1_datasets__name__pipeline_get",
         "parameters": [
           {
             "in": "path",
@@ -21455,7 +21694,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Dataset Pipeline",
+        "summary": "Dataset-Pipeline",
         "tags": [
           "Datasets"
         ]
@@ -21464,7 +21703,7 @@
     "/api/v1/drafts/{draft_id}": {
       "get": {
         "description": "Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded.",
-        "operationId": "get_draft_api_v1_drafts__draft_id__get",
+        "operationId": "draft_api_v1_drafts__draft_id__get",
         "parameters": [
           {
             "in": "path",
@@ -21498,7 +21737,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Draft",
+        "summary": "Draft",
         "tags": [
           "Campaigns"
         ]
@@ -21507,7 +21746,7 @@
     "/api/v1/evidence": {
       "get": {
         "description": "The cross-subject read: the bench head-to-head, roster, comparability, replicates and decomposition, then a merged interval per subject with every pairwise test under the selected metric.",
-        "operationId": "get_evidence_api_v1_evidence_get",
+        "operationId": "evidence_api_v1_evidence_get",
         "parameters": [
           {
             "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded by `SCENARIO_WORDS`, its caveat included.",
@@ -21619,7 +21858,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Evidence",
+        "summary": "Evidence",
         "tags": [
           "Campaigns"
         ]
@@ -21628,7 +21867,7 @@
     "/api/v1/head-to-head/price": {
       "post": {
         "description": "What a head-to-head plan costs before any of it is minted, in dollars, calls and wall clock;\neach budget point carries the `mint-head-to-head` payload that mints its arms.\n\nA read despite the POST: no LLM call is made and nothing is minted.",
-        "operationId": "price_planned_head_to_head_api_v1_head_to_head_price_post",
+        "operationId": "head_to_head_price_api_v1_head_to_head_price_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -21661,7 +21900,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Price Planned Head To Head",
+        "summary": "Head-To-Head-Price",
         "tags": [
           "Campaigns"
         ]
@@ -21701,7 +21940,7 @@
     "/api/v1/hierarchy": {
       "get": {
         "description": "Every campaign in one store the caller owns, as hierarchy entries, each with its courses.\n\n``descend`` enters an inner store exactly as every per-cycle read does.",
-        "operationId": "get_hierarchy_api_v1_hierarchy_get",
+        "operationId": "hierarchy_api_v1_hierarchy_get",
         "parameters": [
           {
             "in": "query",
@@ -21815,7 +22054,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Hierarchy",
+        "summary": "Hierarchy",
         "tags": [
           "Hierarchy"
         ]
@@ -21824,7 +22063,7 @@
     "/api/v1/hierarchy/{address}": {
       "get": {
         "description": "The entry at ``address`` with every level under it: courses, rounds, candidates, inner campaigns.\n\n``at`` is a line of the ledger of ``at_cycle`` (a whole cycle path, root hop included; absent, the\ncampaign's root): a course minted later is not in the subtree, and run-state stays live.\n``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite),\n``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).\n``samples`` is a comma-separated sample-id mask; with neither, the subtree is the raw read. 404 where\nno entry stands at ``address``.",
-        "operationId": "get_hierarchy_subtree_api_v1_hierarchy__address__get",
+        "operationId": "hierarchy_subtree_api_v1_hierarchy__address__get",
         "parameters": [
           {
             "in": "path",
@@ -21929,7 +22168,7 @@
                       "$ref": "#/components/schemas/HierarchyCandidate"
                     }
                   ],
-                  "title": "Response Get Hierarchy Subtree Api V1 Hierarchy  Address  Get"
+                  "title": "Response Hierarchy Subtree Api V1 Hierarchy  Address  Get"
                 }
               }
             },
@@ -21946,7 +22185,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Hierarchy Subtree",
+        "summary": "Hierarchy-Subtree",
         "tags": [
           "Hierarchy"
         ]
@@ -21955,7 +22194,7 @@
     "/api/v1/hierarchy/{address}/@": {
       "get": {
         "description": "The course's chronology: its steps, its forks' and its inner runs', merged by time.\n\nThe replay endpoint: the SSE tail always seeks to EOF, so history has no other home.\nWindowed newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior\nresponse (absent = the head window, malformed = 400, never a 304). Consecutive windows page back\nwithout overlap or hole; revalidate any window with ``If-None-Match``.",
-        "operationId": "get_hierarchy_steps_api_v1_hierarchy__address____get",
+        "operationId": "hierarchy_steps_api_v1_hierarchy__address____get",
         "parameters": [
           {
             "in": "path",
@@ -22017,7 +22256,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Hierarchy Steps",
+        "summary": "Hierarchy-Steps",
         "tags": [
           "Hierarchy"
         ]
@@ -22026,7 +22265,7 @@
     "/api/v1/library": {
       "get": {
         "description": "Every snippet the caller's library holds, the install's packs beside its own, for a target or an optimizer prompt alike.",
-        "operationId": "get_library_api_v1_library_get",
+        "operationId": "library_api_v1_library_get",
         "responses": {
           "200": {
             "content": {
@@ -22049,7 +22288,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Library",
+        "summary": "Library",
         "tags": [
           "Optimizer"
         ]
@@ -22058,7 +22297,7 @@
     "/api/v1/machine-status": {
       "get": {
         "description": "Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see.",
-        "operationId": "get_machine_status_api_v1_machine_status_get",
+        "operationId": "machine_status_api_v1_machine_status_get",
         "responses": {
           "200": {
             "content": {
@@ -22081,7 +22320,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Machine Status",
+        "summary": "Machine-Status",
         "tags": [
           "Sessions"
         ]
@@ -22090,7 +22329,7 @@
     "/api/v1/optimizer-pipeline": {
       "get": {
         "description": "One optimizer manifest: its ``view`` topology plus the per-node typed config surface, read-only.",
-        "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
+        "operationId": "optimizer_pipeline_api_v1_optimizer_pipeline_get",
         "parameters": [
           {
             "description": "The registered optimizer whose manifest to read",
@@ -22127,7 +22366,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Optimizer Pipeline",
+        "summary": "Optimizer-Pipeline",
         "tags": [
           "Optimizer"
         ]
@@ -22136,7 +22375,7 @@
     "/api/v1/optimizers": {
       "get": {
         "description": "The optimizers this install can run, one per registered manifest: what ``optimization.optimizer`` accepts.",
-        "operationId": "get_optimizers_api_v1_optimizers_get",
+        "operationId": "optimizers_api_v1_optimizers_get",
         "responses": {
           "200": {
             "content": {
@@ -22159,7 +22398,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Optimizers",
+        "summary": "Optimizers",
         "tags": [
           "Optimizer"
         ]
@@ -22168,7 +22407,7 @@
     "/api/v1/origins": {
       "get": {
         "description": "Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is `GET /datasets`'.\n\nTenant-scoped, not owner-filtered.",
-        "operationId": "get_origins_api_v1_origins_get",
+        "operationId": "origins_api_v1_origins_get",
         "responses": {
           "200": {
             "content": {
@@ -22191,50 +22430,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Origins",
-        "tags": [
-          "Origins"
-        ]
-      }
-    },
-    "/api/v1/origins/{origin_id}/draft": {
-      "post": {
-        "description": "Open a prior origin as a prefilled check-in draft; nothing runs until ``/commands/start-checkin``.",
-        "operationId": "post_origin_draft_api_v1_origins__origin_id__draft_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "origin_id",
-            "required": true,
-            "schema": {
-              "title": "Origin Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftCampaignWire"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Post Origin Draft",
+        "summary": "Origins",
         "tags": [
           "Origins"
         ]
@@ -22243,7 +22439,7 @@
     "/api/v1/sessions/active": {
       "get": {
         "description": "The caller-tenant's active-session pointer: its latest launch from any entry point.\n\nNo active session is a steady state: it answers 200 with null ids, and this route has no 404.",
-        "operationId": "get_active_session_api_v1_sessions_active_get",
+        "operationId": "active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {
             "content": {
@@ -22266,7 +22462,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Active Session",
+        "summary": "Active-Session",
         "tags": [
           "Sessions"
         ]
@@ -22429,7 +22625,7 @@
     "/api/v1/workspace/storage": {
       "get": {
         "description": "On-disk size per campaign across the caller's workspace, fattest first, archived campaigns included.\n\nThe shared caches and a residual ``other`` slice ride along, so the total is the tenant's real footprint.",
-        "operationId": "get_workspace_storage_api_v1_workspace_storage_get",
+        "operationId": "workspace_storage_api_v1_workspace_storage_get",
         "responses": {
           "200": {
             "content": {
@@ -22452,7 +22648,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Get Workspace Storage",
+        "summary": "Workspace-Storage",
         "tags": [
           "Campaigns"
         ]

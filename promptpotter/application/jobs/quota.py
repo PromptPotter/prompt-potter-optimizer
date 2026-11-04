@@ -128,23 +128,23 @@ class RateLimitedError(QuotaExceededError):
         super().__init__(code="rate_limited", message=message)
 
 
-def refuse_read_rate(principal_id: str) -> None:
-    """Only a read is metered here: it is what a poll repeats."""
-    if not _consume_rate_token(f"read:{principal_id}", burst=_READ_BURST, per_s=_READ_PER_S):
-        raise RateLimitedError(
-            "Too many reads, faster than the dashboard polls; slow down and retry shortly."
-        )
-
-
 # Sized above a person working a check-in by hand: each committed edit is one write, none on a timer.
 _WRITE_BURST = 60.0
 _WRITE_PER_S = 1.0
 
 
-def refuse_write_rate(identity: IdentityContext) -> None:
-    """Every request but a read, a free verb's included; the host is exempt, as from every bucket that meters a stranger."""
-    if not is_host(identity) and not _consume_rate_token(
-        f"write:{acting_principal(identity).id}", burst=_WRITE_BURST, per_s=_WRITE_PER_S
+def refuse_request_rate(identity: IdentityContext, *, read: bool) -> None:
+    """A read is what a poll repeats, so it has the wider bucket; a write is every other request, a
+    free verb's included. The host is exempt, as from every bucket that meters a stranger."""
+    if is_host(identity):
+        return
+    principal = acting_principal(identity).id
+    if read and not _consume_rate_token(f"read:{principal}", burst=_READ_BURST, per_s=_READ_PER_S):
+        raise RateLimitedError(
+            "Too many reads, faster than the dashboard polls; slow down and retry shortly."
+        )
+    if not read and not _consume_rate_token(
+        f"write:{principal}", burst=_WRITE_BURST, per_s=_WRITE_PER_S
     ):
         raise RateLimitedError("Too many changes in a row; slow down and retry shortly.")
 

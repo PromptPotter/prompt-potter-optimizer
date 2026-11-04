@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+from pydantic import Field
+
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
@@ -32,6 +35,27 @@ def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> ActivePointer:
     ).is_dir():
         return ActivePointer(None, None)
     return ActivePointer(campaign_id, cycle_id)
+
+
+class ActiveSessionResponse(StrictModel):
+    """The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`."""
+
+    tenant_id: str = Field(
+        description="Tenant the pointer belongs to — the caller's own, always known"
+    )
+    campaign_id: str | None = Field(
+        description="Campaign of the latest launch; null when no session is active."
+    )
+    cycle_id: str | None = Field(
+        description="Cycle of the latest launch; null when no session is active."
+    )
+
+
+def active_session(stores: Stores) -> ActiveSessionResponse:
+    pointer = active_pointer(stores)
+    return ActiveSessionResponse(
+        tenant_id=stores.tenant_id, campaign_id=pointer.campaign_id, cycle_id=pointer.cycle_id
+    )
 
 
 def holds_active_pointer(*, tenant: str | None) -> bool:

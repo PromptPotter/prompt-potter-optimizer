@@ -38,8 +38,8 @@ function view(coupon: CouponStatus) {
 describe("ProviderKeys", () => {
   beforeEach(clearReadCache);
 
-  it("shows a held key by its last four alone, and removing it issues the DELETE", async () => {
-    const sent = serve(() => new Response(null, { status: 204 }));
+  it("shows a held key by its last four alone, and removing it issues the command", async () => {
+    const sent = serve(() => Response.json({ command_id: "c1" }, { status: 202 }));
     view(
       couponStatus({
         routes: [providerRoute("anthropic", accountKey("anthropic", "ab12")), providerRoute("openai")],
@@ -54,10 +54,16 @@ describe("ProviderKeys", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Remove the anthropic key" }));
     });
-    expect(sent).toEqual([{ method: "DELETE", url: "/api/v1/auth/api-keys/anthropic", body: null }]);
+    expect(sent).toEqual([
+      {
+        method: "POST",
+        url: "/api/v1/commands/remove-api-key",
+        body: JSON.stringify({ provider: "anthropic" }),
+      },
+    ]);
   });
 
-  it("sends a pasted key once, on Enter, as the PUT body", async () => {
+  it("sends a pasted key once, on Enter, as the command body", async () => {
     const sent = serve(() => Response.json(accountKey("openai", "wxyz")));
     view(couponStatus());
 
@@ -69,9 +75,9 @@ describe("ProviderKeys", () => {
     });
     expect(sent).toEqual([
       {
-        method: "PUT",
-        url: "/api/v1/auth/api-keys/openai",
-        body: JSON.stringify({ secret: "sk-test-wxyz" }),
+        method: "POST",
+        url: "/api/v1/commands/set-api-key",
+        body: JSON.stringify({ provider: "openai", secret: "sk-test-wxyz" }),
       },
     ]);
   });

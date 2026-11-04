@@ -3610,8 +3610,7 @@ export interface DatasetIndexEntry {
    * usable rows. */
   n_samples: number | null;
   /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
-   * ``POST /datasets/{name}/draft`` refuses with, worded by
-   * `START_BLOCK_WORDS`. */
+   * ``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`. */
   start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
 }
 
@@ -3865,6 +3864,12 @@ export interface ArmStarted {
   hop: CycleHop;
 }
 
+/** What a command whose applied form answers nothing returns: the record it appended. */
+export interface CommandAcceptedBody {
+  /** Stable id of the appended `CommandRecord`. */
+  command_id: string;
+}
+
 /** What a pass did, or would do. */
 export interface ArchiveReport {
   files_touched: number;
@@ -3887,10 +3892,22 @@ export interface ArchiveReport {
   bytes_freed: number;
 }
 
-/** What a command whose applied form answers nothing returns: the record it appended. */
-export interface CommandAcceptedBody {
-  /** Stable id of the appended `CommandRecord`. */
-  command_id: string;
+/** The caller's per-user preferences. */
+export interface UserSettings {
+  demo_mode_enabled: boolean;
+}
+
+/** The consent state after an accept, in the fields ``/me`` reports it. */
+export interface TermsConsent {
+  terms_version: string;
+  terms_accepted_version: string | null;
+}
+
+export interface AccountKey {
+  provider: string;
+  /** The key's last four characters: all that is ever served back. */
+  last4: string;
+  added_at: string;
 }
 
 /** The caller's identity envelope, with the provider and consent state the account and consent gates read. */
@@ -3932,17 +3949,6 @@ export interface QuotaStatus {
   bound: 'throttle' | 'machine' | null;
   campaigns_today: number;
   max_campaigns_per_day: number;
-}
-
-/** The caller's per-user preferences. */
-export interface UserSettings {
-  demo_mode_enabled: boolean;
-}
-
-/** The consent state after an accept, in the fields ``/me`` reports it. */
-export interface TermsConsent {
-  terms_version: string;
-  terms_accepted_version: string | null;
 }
 
 /** Time-bucketed spend / requests / tokens over the requested window. */
@@ -4021,13 +4027,6 @@ export interface ProviderRoute {
   key: AccountKey | null;
 }
 
-export interface AccountKey {
-  provider: string;
-  /** The key's last four characters: all that is ever served back. */
-  last4: string;
-  added_at: string;
-}
-
 export interface SiteRecordWire {
   /** When this box kept the row, UTC */
   at: string;
@@ -4045,6 +4044,11 @@ export interface SiteRecordsResponse {
 export interface SiteRecordsDropped {
   /** Rows removed */
   dropped: number;
+}
+
+/** Record the caller's acceptance of the Terms, server-stamped; a version other than the live one is refused. */
+export interface AcceptTermsPayload {
+  version: string;
 }
 
 /** Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree */
@@ -4078,7 +4082,6 @@ export interface ChangeRunLimitsPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   budget: Budget;
 }
 
@@ -4088,7 +4091,6 @@ export interface CleanupEmptyCyclesPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
 }
 
 /** ``apply`` defaults to False on every mode, including the destructive one: a preview is what */
@@ -4116,7 +4118,6 @@ export interface DeleteCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
 }
 
 /** Close an open check-in without minting; its check-in calls stay billed to the workspace. */
@@ -4130,7 +4131,6 @@ export interface ForkCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   /** Recorded with the command. */
   reason: string;
   mode: RunMode;
@@ -4444,13 +4444,22 @@ export interface LivesConfig {
   cap: number;
 }
 
+/** Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-checkin``. */
+export interface OpenDatasetDraftPayload {
+  dataset_name: string;
+}
+
+/** Open a prior origin as a prefilled check-in draft, its prompts verbatim; nothing runs until ``start-checkin``. */
+export interface OpenOriginDraftPayload {
+  origin_id: string;
+}
+
 /** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */
 export interface OriginGateDecisionPayload {
   /** The full id: a prefix is the terminal's to resolve, before it builds a
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   /** `proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the
    * cycle. */
   decision: 'rescore' | 'proceed' | 'abort';
@@ -4462,14 +4471,24 @@ export interface PauseCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   /** Recorded with the command. */
   reason: string;
+}
+
+/** Drop the caller's key for a provider; its next send there draws the coupon again. */
+export interface RemoveApiKeyPayload {
+  provider: string;
 }
 
 /** One resolver turn over the draft's open gaps; what it proposes waits on a click. */
 export interface ResolveOriginPayload {
   draft_id: string;
+}
+
+/** Hold the caller's own key for a provider: its sends there go out on it, past the coupon. */
+export interface SetApiKeyPayload {
+  provider: string;
+  secret: string;
 }
 
 /** Name a campaign wherever it is named to a human; its id still addresses it. */
@@ -4492,11 +4511,15 @@ export interface SetSampleLookaheadPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   /** 1 disarms. */
   cells: number;
   /** As deep as the stop rules allow, every round, until pressed off. */
   auto: boolean;
+}
+
+/** Persist the caller's per-user preferences. */
+export interface SetUserSettingsPayload {
+  demo_mode_enabled: boolean;
 }
 
 /** Cut the candidate being scored at its next sample boundary; the round carries on with the rest. */
@@ -4505,7 +4528,6 @@ export interface SkipSearchpointPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
 }
 
 /** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no */
@@ -4526,7 +4548,6 @@ export interface StartRunPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   budget: Budget;
   step_rounds: number | null;
   mode: RunMode;
@@ -4538,7 +4559,6 @@ export interface StepCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   /** Rounds to run. */
   step_rounds: number;
 }
@@ -4549,7 +4569,6 @@ export interface SubmitArmsPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   /** Each an edit of the round's parent: `changes_description` and at least one of
    * `prompt_fields`, `shots`, `pipeline_overlay`. */
   arms: SubmittedArm[];
@@ -4585,7 +4604,6 @@ export interface VerifyCandidatePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
-  descend: string | null;
   candidate_id: string;
   samples: number | null;
   strategy: 'random' | 'hard';
@@ -4608,17 +4626,15 @@ export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"] as const;
 export type Tone = (typeof TONES)[number];
 
-// Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "mint-head-to-head" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
-
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
 export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } & {
   [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;
 };
 
-// Each kind's body IS its payload model (domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).
+// Each JSON-posted kind's body IS its payload model (domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).
 export interface CommandPayloads {
+  "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
   "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
@@ -4633,12 +4649,17 @@ export interface CommandPayloads {
   "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
   "mint-head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
+  "open-dataset-draft": CommandSent<OpenDatasetDraftPayload, "dataset_name">;
+  "open-origin-draft": CommandSent<OpenOriginDraftPayload, "origin_id">;
   "origin-gate-decision": CommandSent<OriginGateDecisionPayload, "campaign_id" | "cycle_id" | "decision">;
   "pause-cycle": CommandSent<PauseCyclePayload, "campaign_id" | "cycle_id">;
+  "remove-api-key": CommandSent<RemoveApiKeyPayload, "provider">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
+  "set-api-key": CommandSent<SetApiKeyPayload, "provider" | "secret">;
   "set-campaign-label": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
   "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
   "set-sample-lookahead": CommandSent<SetSampleLookaheadPayload, "campaign_id" | "cycle_id" | "cells">;
+  "set-user-settings": CommandSent<SetUserSettingsPayload, "demo_mode_enabled">;
   "skip-searchpoint": CommandSent<SkipSearchpointPayload, "campaign_id" | "cycle_id">;
   "start-checkin": CommandSent<StartCheckinPayload, "draft_id">;
   "start-run": CommandSent<StartRunPayload, "campaign_id" | "cycle_id">;
@@ -4650,6 +4671,7 @@ export interface CommandPayloads {
 
 // What each kind answers: its route's `response_model` (presentation/api/routers/commands.py).
 export interface CommandResponses {
+  "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
   "cancel-queued-run": CommandAcceptedBody;
@@ -4662,14 +4684,20 @@ export interface CommandResponses {
   "edit-draft-campaign": DraftCampaignWire;
   "fork-cycle": CommandAcceptedBody;
   "grade-bench": CommandAcceptedBody;
+  "ingest-upload": DraftCampaignWire;
   "mint-campaign": CommandAcceptedBody;
   "mint-head-to-head": HeadToHeadStarted;
+  "open-dataset-draft": DraftCampaignWire;
+  "open-origin-draft": DraftCampaignWire;
   "origin-gate-decision": CommandAcceptedBody;
   "pause-cycle": CommandAcceptedBody;
+  "remove-api-key": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
+  "set-api-key": AccountKey;
   "set-campaign-label": CommandAcceptedBody;
   "set-concurrent-cycles": CommandAcceptedBody;
   "set-sample-lookahead": CommandAcceptedBody;
+  "set-user-settings": UserSettings;
   "skip-searchpoint": CommandAcceptedBody;
   "start-checkin": StartCheckinResponse | HeadToHeadStarted;
   "start-run": CommandAcceptedBody;

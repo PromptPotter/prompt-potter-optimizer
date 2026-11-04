@@ -2024,6 +2024,7 @@
               "mapping": {
                 "armed_ceiling": "#/components/schemas/ArmedCeilingEffect",
                 "arms_taken": "#/components/schemas/ArmsTakenEffect",
+                "draft_opened": "#/components/schemas/DraftOpenedEffect",
                 "gate_decided": "#/components/schemas/GateDecidedEffect",
                 "lookahead_taken": "#/components/schemas/LookaheadTakenEffect",
                 "none": "#/components/schemas/NoEffect",
@@ -2057,6 +2058,9 @@
               },
               {
                 "$ref": "#/components/schemas/OriginEditedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/DraftOpenedEffect"
               }
             ],
             "title": "Effect"
@@ -3228,6 +3232,27 @@
           "prior_clean_rounds"
         ],
         "title": "DegradationHealth",
+        "type": "object"
+      },
+      "DraftOpenedEffect": {
+        "additionalProperties": false,
+        "description": "A check-in draft opened by upload, dataset or origin: the draft a retry under its key answers.",
+        "properties": {
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "draft_opened",
+            "default": "draft_opened",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id"
+        ],
+        "title": "DraftOpenedEffect",
         "type": "object"
       },
       "Election": {

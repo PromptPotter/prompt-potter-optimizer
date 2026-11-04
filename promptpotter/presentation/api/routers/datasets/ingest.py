@@ -9,18 +9,12 @@ from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.draft_patch import candidate_library_from_column
-from promptpotter.application.datasets.ingest import (
-    MAX_UPLOAD_BYTES,
-    draft_from_dataset,
-    ingest_draft,
-)
 from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
-from promptpotter.domain.command_kinds import EditDraftCampaignPayload
+from promptpotter.domain.command_kinds import CommandKind, EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.strict_model import RequestBody
-from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep
+from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep, read_upload
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
-from promptpotter.shared.errors import ContentTooLargeError
 
 
 def _candidate_library_call(
@@ -30,46 +24,11 @@ def _candidate_library_call(
     return CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch), idempotency_key)
 
 
-def _too_large(observed: int | str) -> ContentTooLargeError:
-    return ContentTooLargeError(
-        f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
-    )
-
-
-async def _read_capped(request: Request, upload: UploadFile, cap: int) -> bytes:
-    declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > cap:
-        raise _too_large(declared)
-
-    # Still counted while streaming: the header can lie or be absent.
-    chunk_size = 1024 * 1024
-    buf = bytearray()
-    while chunk := await upload.read(chunk_size):
-        buf.extend(chunk)
-        if len(buf) > cap:
-            raise _too_large(len(buf))
-    return bytes(buf)
-
-
-@datasets_router.post("/ingest", response_model=DraftCampaignWire)
-async def ingest_dataset(
-    request: Request,
-    stores: StoresDep,
-    file: Annotated[
-        UploadFile,
-        File(
-            description="Any tabular file (delimited text in any encoding, JSON, JSONL, "
-            "XLSX, XLS, ODS), read off its bytes; any columns."
-        ),
-    ],
-    slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
-) -> DraftCampaignWire:
-    """Parse an uploaded tabular file into a durable check-in draft; ``/commands/start-checkin`` mints its campaign."""
-    blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-    return await ingest_draft(stores=stores, blob=blob, filename=file.filename or "", slug=slug)
-
-
-@datasets_router.post("/draft/candidate-library", response_model=DraftCampaignWire)
+@datasets_router.post(
+    "/draft/candidate-library",
+    response_model=DraftCampaignWire,
+    name=CommandKind.EDIT_DRAFT_CAMPAIGN,
+)
 async def upload_candidate_library(
     request: Request,
     stores: StoresDep,
@@ -83,8 +42,7 @@ async def upload_candidate_library(
     key: IdempotencyKeyDep,
 ) -> DraftCampaignWire:
     """Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft."""
-    blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-    terms = parse_candidate_library(blob, file.filename or "")
+    terms = parse_candidate_library(await read_upload(request, file), file.filename or "")
     return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, key))
 
 
@@ -96,7 +54,11 @@ class _BuildLibraryBody(RequestBody):
     column: str = Field(min_length=1, max_length=256)
 
 
-@datasets_router.post("/draft/candidate-library/from-column", response_model=DraftCampaignWire)
+@datasets_router.post(
+    "/draft/candidate-library/from-column",
+    response_model=DraftCampaignWire,
+    name=CommandKind.EDIT_DRAFT_CAMPAIGN,
+)
 async def build_candidate_library_from_column(
     stores: StoresDep,
     body: _BuildLibraryBody,
@@ -105,9 +67,3 @@ async def build_candidate_library_from_column(
     """Build a draft's candidate library from the distinct values of one of its own columns and return the updated draft."""
     terms = candidate_library_from_column(stores, body.draft_id, body.column)
     return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, key))
-
-
-@datasets_router.post("/{name:path}/draft", response_model=DraftCampaignWire)
-async def draft_from_existing_dataset(name: str, stores: StoresDep) -> DraftCampaignWire:
-    """Open an authored dataset's files as a prefilled, durable check-in draft."""
-    return await draft_from_dataset(stores=stores, dataset_name=name)

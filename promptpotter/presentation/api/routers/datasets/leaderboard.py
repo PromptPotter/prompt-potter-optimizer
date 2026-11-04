@@ -10,6 +10,7 @@ from promptpotter.application.scoring.measurement_log import (
     open_cell,
 )
 from promptpotter.domain.cells import Cell, CellsResponse, HardSampleOrder, HeatmapScope
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.scoring import SampleStatus
 from promptpotter.presentation.api.deps import StoresDep
@@ -17,7 +18,9 @@ from promptpotter.presentation.api.routers.campaigns._conditional import conditi
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 
 
-@datasets_router.get("/{name:path}/cells", response_model=CellsResponse)
+@datasets_router.get(
+    "/{name:path}/cells", name=ReadKind.DATASET_CELLS, response_model=CellsResponse
+)
 def get_dataset_cells(
     request: Request,
     name: str,
@@ -102,7 +105,7 @@ def get_dataset_cells(
     )
 
 
-@datasets_router.get("/{name:path}/cells/{answer}", response_model=Cell)
+@datasets_router.get("/{name:path}/cells/{answer}", name=ReadKind.DATASET_CELL, response_model=Cell)
 async def get_dataset_cell(name: str, answer: str, stores: StoresDep) -> Cell:
     """One answer opened: its row assembled into a trace."""
     return await open_cell(stores, name, answer)

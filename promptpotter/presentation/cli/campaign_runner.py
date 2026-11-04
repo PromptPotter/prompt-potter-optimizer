@@ -7,7 +7,7 @@ import contextlib
 import importlib
 import json
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -23,6 +23,7 @@ from promptpotter.shared.errors import (
     RequestTooLargeError,
     SendRefusedError,
 )
+from promptpotter.shared.named_rows import imported
 
 if TYPE_CHECKING:
     import argparse
@@ -39,11 +40,10 @@ _PARSER = build_parser(VERBS)
 
 
 def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]:
-    module, _, name = COMMANDS[verb].partition(":")
-    handler: Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]] = getattr(
-        importlib.import_module(f"{_COMMANDS_PACKAGE}.{module}"), name
+    return cast(
+        "Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]",
+        imported(_COMMANDS_PACKAGE, COMMANDS[verb]),
     )
-    return handler
 
 
 def main() -> None:

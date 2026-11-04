@@ -45,7 +45,7 @@ BASELINE = {
     "escalation_rules": 11,
     # Function-local imports of the package's own modules. The bare invocation's first-run check
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
-    "deferred_imports": 7,
+    "deferred_imports": 6,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 17,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.

@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from pydantic import ValidationError
-
 from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import (
     DatasetBasis,
@@ -145,14 +143,11 @@ async def plan_draft_patch(
             {"optimization": prior},
             {"optimization": patch.optimization_overrides},
         )
-        try:
-            overrides = OptimizationOverrides.model_validate(merged["optimization"])
-        except ValidationError as exc:
-            first = exc.errors()[0]
-            where = ".".join(str(p) for p in first["loc"])
-            raise PayloadInvalidError(
-                f"patch.optimization_overrides.{where}: {first['msg']}"
-            ) from exc
+        overrides = PayloadInvalidError.validating(
+            OptimizationOverrides,
+            merged["optimization"],
+            under=("patch", "optimization_overrides"),
+        )
         resolve_optimizer(overrides.optimizer, overrides.nodes, gate=overrides.arm_gate)
         changes["optimization_overrides"] = overrides.model_dump(mode="json")
 

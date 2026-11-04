@@ -63,7 +63,7 @@ async def resolve_origin(
         save_checkin_draft(stores, result.draft, resolution=result.resolution)
         return ResolveOriginResponse(resolution=result.resolution, draft=wire)
 
-    async def _on_replay() -> ResolveOriginResponse:
+    async def _on_replay(_: object) -> ResolveOriginResponse:
         # The draft's `resolution.json` is the live turn's block: a deduped retry re-spends no LLM call.
         replayed = owned_draft(stores, draft_id)
         return ResolveOriginResponse(
@@ -75,7 +75,7 @@ async def resolve_origin(
     return Applier(
         _apply,
         replay=_on_replay,
-        effect_fn=lambda: origin_effect(stores, draft_id, before),
+        effect_fn=lambda _: origin_effect(stores, draft_id, before),
         claim=dispatched.claim,
     )
 

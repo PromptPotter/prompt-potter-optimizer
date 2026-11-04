@@ -16,6 +16,7 @@ from promptpotter.application.served_dashboard import (
     WarmingDashboard,
     served_dashboard,
 )
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.round_audit import RoundAudit
@@ -31,6 +32,7 @@ from promptpotter.shared.errors import NotFoundError
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard",
+    name=ReadKind.CYCLE_DASHBOARD,
     response_model=ServedDashboard | WarmingDashboard,
 )
 def get_cycle_dashboard(
@@ -61,6 +63,7 @@ def get_cycle_dashboard(
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
+    name=ReadKind.CYCLE_ROUND,
     response_model=RoundView,
 )
 def get_cycle_round(
@@ -89,6 +92,7 @@ def get_cycle_round(
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit",
+    name=ReadKind.CYCLE_ROUND_AUDIT,
     response_model=RoundAudit | None,
 )
 def get_cycle_round_audit(
@@ -113,6 +117,7 @@ _EXPORT_MEDIA = {".txt": "text/plain", ".json": "application/json", ".zip": "app
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/export",
+    name=ReadKind.CYCLE_EXPORT,
     response_class=Response,
     responses={200: {"content": {media: {} for media in _EXPORT_MEDIA.values()}}},
 )

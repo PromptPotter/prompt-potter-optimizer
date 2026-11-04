@@ -1,4 +1,5 @@
 import { API, send, toApiError } from "./client";
+import { postCommand } from "./commands";
 import { mintIdempotencyKey } from "./errors";
 import type { DraftCampaignWire } from "./types";
 
@@ -9,8 +10,9 @@ export async function postIngestDataset(
   const form = new FormData();
   form.append("file", file);
   if (slug) form.append("slug", slug);
-  const r = await send(`${API}/datasets/ingest`, {
+  const r = await send(`${API}/commands/ingest-upload`, {
     method: "POST",
+    headers: { "Idempotency-Key": mintIdempotencyKey() },
     body: form,
   });
   if (!r.ok) throw await toApiError(r);
@@ -47,18 +49,10 @@ export async function postBuildCandidateLibraryFromColumn(
   return (await r.json()) as DraftCampaignWire;
 }
 // Opens a draft from the dataset's CURRENT config; no campaign exists until `start-checkin`.
-export async function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
-  const r = await send(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
-    method: "POST",
-  });
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as DraftCampaignWire;
+export function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
+  return postCommand("open-dataset-draft", { dataset_name: name });
 }
 // Unlike `postDraftFromDataset`, reproduces the origin's prompt verbatim, with `campaign_origin` lineage.
-export async function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
-  const r = await send(`${API}/origins/${encodeURIComponent(originId)}/draft`, {
-    method: "POST",
-  });
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as DraftCampaignWire;
+export function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
+  return postCommand("open-origin-draft", { origin_id: originId });
 }

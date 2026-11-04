@@ -3,21 +3,24 @@ from __future__ import annotations
 import hmac
 from typing import Annotated
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, Request, UploadFile
 
 from promptpotter.application.account import registered_or_default_identity
-from promptpotter.application.jobs.quota import refuse_read_rate, refuse_write_rate
+from promptpotter.application.datasets.ingest import MAX_UPLOAD_BYTES
+from promptpotter.application.jobs.quota import refuse_request_rate
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
     BadRequestError,
+    ContentTooLargeError,
     NotFoundError,
     ServiceUnavailableError,
     UnauthorizedError,
 )
-from promptpotter.shared.identity import IdentityContext, acting_principal
+from promptpotter.shared.identity import IdentityContext
 
 
 def auth_is_open() -> bool:
@@ -46,10 +49,29 @@ StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]
 
 
 def admit_session(request: Request, identity: IdentityDep) -> None:
-    if request.method in ("GET", "HEAD"):
-        refuse_read_rate(acting_principal(identity).id)
-    else:
-        refuse_write_rate(identity)
+    """A read is what the catalogue names one (`ReadKind`), whatever its verb."""
+    route = request.scope.get("route")
+    refuse_request_rate(identity, read=getattr(route, "name", None) in ReadKind)
+
+
+async def read_upload(request: Request, upload: UploadFile) -> bytes:
+    """Refused past ``MAX_UPLOAD_BYTES`` by the declared length, and still counted while streaming:
+    the header can lie or be absent."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        raise _too_large(declared)
+    buf = bytearray()
+    while chunk := await upload.read(1024 * 1024):
+        buf.extend(chunk)
+        if len(buf) > MAX_UPLOAD_BYTES:
+            raise _too_large(len(buf))
+    return bytes(buf)
+
+
+def _too_large(observed: int | str) -> ContentTooLargeError:
+    return ContentTooLargeError(
+        f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
+    )
 
 
 def require_site_records_token(request: Request) -> None:

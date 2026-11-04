@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Literal, NamedTuple
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
-from promptpotter.config.settings import LOCK_TIMEOUT, settings
+from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import blocklist, default_claim
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
@@ -43,8 +44,14 @@ from promptpotter.infrastructure.store.user_store import (
     read_accounts,
 )
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
-from promptpotter.shared.errors import LedgerUnreadableError, PotterError
-from promptpotter.shared.identity import IdentityContext, acting_principal, default_identity
+from promptpotter.shared.errors import ConflictError, LedgerUnreadableError, PotterError
+from promptpotter.shared.identity import (
+    AccessState,
+    IdentityContext,
+    acting_principal,
+    default_identity,
+    display_name,
+)
 
 
 def _consent(
@@ -172,13 +179,87 @@ def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
     return arrival
 
 
-def accept_terms(stores: Stores, version: str) -> User:
-    """``accepted_at`` is this server's clock, never the client's: its legal weight rests on that."""
+class ConnectedAccount(StrictModel):
+    """One OIDC provider bound to the active session."""
+
+    provider: str
+    email: str | None
+
+
+class MeResponse(StrictModel):
+    """The caller's identity envelope, with the provider and consent state the account and consent gates read."""
+
+    user_id: str
+    tenant_id: str
+    issuer: str | None
+    email: str | None
+    name: str | None
+    provider: str | None
+    connected_accounts: list[ConnectedAccount]
+    available_providers: list[str]
+    capabilities: list[str]
+    access_state: AccessState
+    terms_version: str
+    terms_accepted_version: str | None
+
+
+def me(stores: Stores, user: User, *, configured: Iterable[str]) -> MeResponse:
+    """``available_providers`` is the *configured* ones minus the connected one."""
+    identity = stores.identity
+    email, provider = identity.email, identity.provider
+    return MeResponse(
+        user_id=str(identity.user_id),
+        tenant_id=str(identity.tenant_id),
+        issuer=str(identity.issuer) if identity.issuer else None,
+        email=email,
+        name=display_name(email),
+        provider=provider,
+        connected_accounts=[ConnectedAccount(provider=provider, email=email)] if provider else [],
+        available_providers=sorted(set(configured) - {provider}),
+        capabilities=sorted(identity.capabilities),
+        access_state=identity.access_state,
+        terms_version=TERMS_VERSION,
+        terms_accepted_version=user.terms_accepted.version if user.terms_accepted else None,
+    )
+
+
+class UserSettings(StrictModel):
+    """The caller's per-user preferences."""
+
+    demo_mode_enabled: bool
+
+
+def user_settings(stores: Stores) -> UserSettings:
+    return UserSettings(demo_mode_enabled=account_of(stores).demo_mode_enabled)
+
+
+def set_user_settings(stores: Stores, settings_sent: UserSettings) -> UserSettings:
+    user = account_of(stores)
+    stores.users.save(user.model_copy(update=settings_sent.model_dump()))
+    return settings_sent
+
+
+class TermsConsent(StrictModel):
+    """The consent state after an accept, in the fields ``/me`` reports it."""
+
+    terms_version: str
+    terms_accepted_version: str | None
+
+
+def accept_terms(stores: Stores, version: str) -> TermsConsent:
+    """``accepted_at`` is this server's clock, never the client's: its legal weight rests on that.
+    A version other than the live ``TERMS_VERSION`` is refused, so the gate re-renders current text."""
+    if version != TERMS_VERSION:
+        raise ConflictError(
+            "Terms version is out of date — reload to accept the current terms.",
+            code="terms_version_stale",
+            details={"expected": TERMS_VERSION, "received": version},
+        )
     consent = ConsentRecord(version=version, accepted_at=utcnow_iso())
     user = account_of(stores).model_copy(update={"terms_accepted": consent})
     _consent(stores, "terms_accepted", at=consent.accepted_at, subject=version)
     stores.users.save(user)
-    return user
+    return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=version)
 
 
 def record_refusal(stores: Stores, *, subject: str) -> None:

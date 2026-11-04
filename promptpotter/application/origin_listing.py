@@ -46,7 +46,7 @@ class DatasetIndexEntry(StrictModel):
     start_block: StartBlock | None = Field(
         description=(
             "``null`` = a check-in can open it here. Otherwise why not: the same reading "
-            "``POST /datasets/{name}/draft`` refuses with, worded by `START_BLOCK_WORDS`."
+            "``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`."
         ),
     )
 
@@ -138,3 +138,21 @@ def list_origins(stores: Stores) -> list[OriginEntry]:
             )
         )
     return sorted(out, key=lambda o: o.created_at, reverse=True)
+
+
+class OriginListResponse(StrictModel):
+    origins: list[OriginEntry] = Field(description="Runnable origins, newest first")
+    total: int = Field(description="Number of origins")
+
+
+def origin_index(stores: Stores) -> OriginListResponse:
+    origins = list_origins(stores)
+    return OriginListResponse(origins=origins, total=len(origins))
+
+
+class DatasetIndexResponse(StrictModel):
+    datasets: list[DatasetIndexEntry]
+
+
+def dataset_index(stores: Stores) -> DatasetIndexResponse:
+    return DatasetIndexResponse(datasets=list_datasets(stores))

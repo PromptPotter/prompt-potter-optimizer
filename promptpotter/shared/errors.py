@@ -266,33 +266,45 @@ class PayloadInvalidError(PotterError):
     code = "payload_invalid"
 
     @classmethod
-    def refusing(cls, errors: Iterable[Mapping[str, Any]]) -> PayloadInvalidError:
-        """A model's refusal in its own words, its validator's sentence where one raised."""
-        found: list[dict[str, Any]] = []
-        for error in errors:
-            said = error["ctx"]["error"] if error["type"] == "value_error" else error["msg"]
-            found.append({"loc": [str(part) for part in error["loc"]], "msg": str(said)})
-        reason = "; ".join(
-            f"{'.'.join(e['loc'])}: {e['msg']}" if e["loc"] else e["msg"] for e in found
-        )
-        return cls(reason, details={"errors": found})
+    def refusing(
+        cls, errors: Iterable[Mapping[str, Any]], *, under: tuple[str, ...] = ()
+    ) -> PayloadInvalidError:
+        """*under* locates a model validated inside a larger payload."""
+        found = _located(errors, under)
+        return cls(_said(found, shown=len(found)), details={"errors": found})
 
     @classmethod
-    def validating[M: BaseModel](cls, model: type[M], fields: Mapping[str, Any]) -> M:
+    def validating[M: BaseModel](
+        cls, model: type[M], fields: object, *, under: tuple[str, ...] = ()
+    ) -> M:
         """A payload a terminal or a host built, refused in the words the REST body's 422 carries."""
         try:
             return model.model_validate(fields)
         except ValidationError as exc:
-            raise cls.refusing(exc.errors()) from exc
+            raise cls.refusing(exc.errors(), under=under) from exc
+
+
+def _located(errors: Iterable[Mapping[str, Any]], under: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Each failing field by its path and rule, never its value (a refused field may be a secret);
+    a validator's own sentence where one raised."""
+    return [
+        {
+            "loc": [*under, *(str(part) for part in error["loc"])],
+            "msg": str(error["ctx"]["error"] if error["type"] == "value_error" else error["msg"]),
+        }
+        for error in errors
+    ]
+
+
+def _said(found: list[dict[str, Any]], *, shown: int) -> str:
+    said = "; ".join(
+        f"{'.'.join(e['loc'])}: {e['msg']}" if e["loc"] else e["msg"] for e in found[:shown]
+    )
+    return said + (f"; and {len(found) - shown} more" if len(found) > shown else "")
 
 
 def validation_reason(exc: ValidationError, *, shown: int) -> str:
-    """Each failing field by its path and rule, never its value: a refused field may be a secret."""
-    errors = exc.errors(include_input=False, include_url=False)
-    said = "; ".join(
-        f"{'.'.join(map(str, e['loc'])) or 'the top level'}: {e['msg']}" for e in errors[:shown]
-    )
-    return said + (f"; and {len(errors) - shown} more" if len(errors) > shown else "")
+    return _said(_located(exc.errors(include_input=False, include_url=False), ()), shown=shown)
 
 
 class ServiceUnavailableError(PotterError):

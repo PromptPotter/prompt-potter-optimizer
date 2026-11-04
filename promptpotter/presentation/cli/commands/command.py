@@ -4,6 +4,8 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
@@ -43,6 +45,9 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
     named = [name for name in _ADDRESS if name in model.model_fields] or [next(iter(fields))]
     ids = {name: str(fields[name]) for name in named}
     sent = await CommandDispatcher(stores).dispatch(CommandCall(payload))
+    # A `{field}` in the follow-up names a field of what the kind answers, as the route serves it.
+    answered = sent.result.model_dump(mode="json") if isinstance(sent.result, BaseModel) else {}
+    follow_up = model.follow_up and model.follow_up.format_map(answered)
     return CommandResult(
         data={
             **payload.model_dump(mode="json"),
@@ -50,6 +55,6 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
             "ack": sent.ack,
         },
         human=" ".join(
-            filter(None, (f"{'/'.join(ids.values())} -> {kind} {sent.ack}.", model.follow_up))
+            filter(None, (f"{'/'.join(ids.values())} -> {kind} {sent.ack}.", follow_up))
         ),
     )

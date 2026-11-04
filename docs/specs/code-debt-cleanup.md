@@ -10,14 +10,6 @@ acting.
 
 **Rides with:** any pass in the file named.
 
-- **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
-  `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
-  `/hierarchy`, `/auth/*`, `/datasets`; the `walk` tier on the offline-run world reads 429 in 2 to 5
-  specs a run, as the bucket drains across a fast walk. It meters the host, whom
-  `quota.py::refuse_write_rate` exempts and `quota.py::refuse_read_rate` does not. Action: the limit
-  admits one tab's own polling cadence and exempts the host. **Rides with:** the quota read rate (arc A2);
-  the `walk` tier is enabled after it lands.
-  **Re-test:** `npx playwright test --project=cold --project=walk` logs no 429.
 - **Left by the upload check-in's 422** (`25be69eac` cut rows on every draft read; fixed 2026-11-02 by
   gating `startability.py::draft_samples` on `origin_readiness.py::columns_confirmed`):
   - **"Run the resolver now" lives three times**: webapp `useIngestFlow` (`advance`, `land`,
@@ -238,9 +230,9 @@ import-graph script before and after; close each wave with `gate.py --only layer
   that draws nothing. **Re-test:** every family has a pane.
 - **The `walk` tier rots unseen**: the gate runs only `cold`, so a walk assertion outlives the control
   it names. The world is built: `PP_E2E_WALK_WORLD=<offline-run>/potter` serves a copy through
-  `e2e/walk_world.py`, and every walk spec passes there but the ones the read bucket 429s. Action:
-  the gate's `playwright` check adds `--project=walk` on that world. **Blocked by** § URGENT "The
-  per-principal read rate limit". **Re-test:** `gate.py` lists a walk check.
+  `e2e/walk_world.py`, and the host it walks as is exempt from the read bucket
+  (`quota.py::refuse_request_rate`). Action: the gate's `playwright` check builds that world and adds
+  `--project=walk` on it. **Re-test:** `gate.py` lists a walk check.
 - **The Vite build leaves five things standing**:
   - The derivations barrel pulls the network layer into every chunk that imports it.
   - Babel (React Compiler) is 87% of build time.
@@ -523,10 +515,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 - **`_Billed` is `_Cost` with a flag flipped** (`store/account_spend.py::_Cost.counts_mirrored`): a
   flag keeping a bank's spend and a campaign's cost apart over one fold of the same lines. Action:
   one fold whose value carries both sums, read by `billed_spend` and `ledger_cost`. **Re-test:** `git grep -n "counts_mirrored" -- promptpotter`.
-- **Two `ValidationError` formatters remain beside `shared/errors.py::validation_reason`**:
-  `application/datasets/draft_patch.py` (prefixes the field) and `PayloadInvalidError.refusing`
-  (carries `ctx`). Action: both read `validation_reason`, the prefix and the context as its data.
-  **Re-test:** `git grep -n "exc.errors()" -- promptpotter`.
 - **A ledger subscriber that raises after `Admission._write` lands a charge leaves it in `_unlanded`**
   (`llm/spend_book.py`), so the book counts that part twice until the run ends — conservative, never
   under. Action: the record lands before any subscriber runs. **Re-test:** the outlives journey in
@@ -1039,20 +1027,21 @@ word's `git grep -c` for that sense is 0.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).
 - **A side worktree cannot pass the full gate**: pytest's `compileall` breaks on long Temp paths,
   so a rebuilt commit series is gated without it. **Re-test:** the full gate green in a worktree.
-- **Seen bounding the perimeter** (2026-10-29):
-  - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
-    `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against
-    access-model's "all writes flow through one dispatcher". **Re-test:**
-    `git grep -n "@router.\(post\|patch\|delete\)" -- promptpotter/presentation/api/routers`.
-  - `/docs` serves Scalar's HTML, which loads its script from a CDN, while `ResponseHeadersMiddleware`
-    gives every non-API path `_WEBAPP_CSP` (`script-src 'self'`): the page likely renders blank.
-    **Re-test:** open `/docs` in a browser and read the console.
-  - `auth.py::callback` warns "HOST_ADMIN_EMAIL is unset" also when it is set and that admin has not
-    signed in yet. **Re-test:** set it, sign in as someone else, read the log line.
-  - `POST /campaigns/{id}/fork-preview` is a read on a write verb, so it spends the write bucket
-    (`quota.py::refuse_write_rate`), not the read one. **Re-test:** `git grep -n "fork-preview" -- promptpotter/presentation`.
-  - `quota.py::refuse_read_rate` takes a principal id and meters the host, while the launch, verb and
-    write buckets take the identity and exempt it. **Re-test:** `git grep -n "def refuse_.*_rate" -- promptpotter`.
+- **Seen building the read catalogue** (2026-11-04):
+  - `application/origin_listing.py::list_origins` logs and skips an origin whose dataset no longer
+    resolves: an error swallowed into a log, so the list is silently short. Action: serve the row with
+    its fault. **Re-test:** `git grep -n "skipping origin" -- promptpotter/application/origin_listing.py`.
+  - `GET /auth/me` writes (`account.arrive`): a read catalogued as `ReadKind.ME` that opens an account.
+    Action: arrival is the sign-in callback's act alone. **Re-test:** `git grep -n "arrive(" -- promptpotter/presentation`.
+    Until it ships, a host or MCP registry takes the user from `account_of` and never calls `arrive` or
+    `_announce_if_opened`: no MCP or delegate read opens an account.
+  - Three routes are named `edit-draft-campaign`: its `/commands/` route and the two form doors in
+    `routers/datasets/ingest.py` (`candidate-library`, `from-column`), so `catalogue.py::bind_surface`
+    admits N routes per command where a read gets one. Action: one route per kind, the form doors a
+    form body on it, as `ingest-upload` is. **Re-test:** `git grep -n "name=CommandKind.EDIT_DRAFT_CAMPAIGN" -- promptpotter`.
+  - `application/datasets/draft_patch.py` drops `nodes` on an optimizer switch, the rule
+    `domain/campaign_config.py::merge_config_layers` already applies: one rule spelled twice. Action:
+    the merge alone. **Re-test:** `git grep -n 'pop("nodes"' -- promptpotter/application/datasets`.
 - **Seen building the host coupon** (2026-10-29):
   - Every connector declares its cells the box's to pay (`Connector.cell_payer`): none can send on the
     account's key, so an own-key account past its coupon is refused any run with a backend. Action: a

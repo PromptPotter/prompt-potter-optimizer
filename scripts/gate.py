@@ -844,8 +844,8 @@ def _eslint(sel: Selection) -> Outcome:
 
 
 def _playwright(_sel: Selection) -> Outcome:
-    # Only `cold`: `walk` drains the host's read bucket (`quota.py::refuse_read_rate`) and `spend`
-    # costs real money.
+    # Only `cold`: `walk` needs an offline-run world (`PP_E2E_WALK_WORLD`) and `spend` costs real
+    # money.
     return run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
 
 
