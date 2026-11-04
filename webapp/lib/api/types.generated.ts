@@ -2203,23 +2203,20 @@ export interface FileContentResponse {
 /** A re-opened check-in: its draft and what the last resolver turn left. */
 export interface DraftReopenResponse {
   draft: DraftCampaignWire;
-  /** The last resolver turn's output; null when none ran. */
-  resolution: OriginLastResolution | null;
-  /** Proposals the last turn left unclicked, so a re-opened check-in keeps the
-   * operator's outstanding actions. */
-  raised: RaisedCommand[];
+  /** What the last resolver turn left, as `resolve-origin` answered it. */
+  resolution: OriginResolution;
   /** Its task is on file but no resolver turn ever set it up
    * (`DraftCampaign.resolution_pending`): the one case a reopen sends
    * `resolve-origin`, so a revisit never re-buys a turn or re-proposes over
    * authored prompts. */
   resolution_pending: boolean;
-  /** A Start on it waits on a machine slot: it is minted once one frees, so a
-   * reopen offers no second Start (the same fact as its listing's `queued`
-   * lifecycle). */
-  queued: boolean;
+  /** The stage of the Start that holds it: `queued` waits on a machine slot,
+   * `starting` is minting it. Set, a reopen offers no second Start; its
+   * listing's lifecycle tag says the same. */
+  start: 'queued' | 'starting' | null;
 }
 
-/** A check-in's draft as every check-in route answers it; Start mints its campaign. No */
+/** A check-in's draft as every check-in route answers it; Start mints its campaign. */
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -2240,11 +2237,14 @@ export interface DraftCampaignWire {
   optimization_overrides: OptimizationOverrides;
   /** The optimizer as this draft's config runs it, as a campaign serves it. */
   optimizer_setup: OptimizerSetup;
-  raw_task_description: string;
+  /** The task; null until one is set. */
+  raw_task_description: string | null;
   pipeline_overlay: Record<string, unknown>;
   headers: string[];
-  column_query: string;
-  column_ground_truth: string;
+  /** The input header; null until one is set. */
+  column_query: string | null;
+  /** The target header; null until one is set. */
+  column_ground_truth: string | null;
   /** By checklist field id. Nothing reaches mint until `confirmed`. */
   field_provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
   /** Per active step, its starting prompt's fields by name; empty until the check-
@@ -2555,6 +2555,16 @@ export interface LaunchRefusal {
   provider: string | null;
   /** What binds and the remedy, in the refusal's own words. */
   sentence: string;
+}
+
+/** The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the */
+export interface OriginResolution {
+  /** Null until a resolver turn ran, and again after a later edit. */
+  last_resolution: OriginLastResolution | null;
+  /** Proposals the last turn left unclicked. */
+  raised: RaisedCommand[];
+  /** Why the last turn came back thin or empty; null where it did not. */
+  degraded_cause: string | null;
 }
 
 /** One resolver turn's own output. Its findings ride ``OriginResolution.raised`` as commands. */
@@ -3817,16 +3827,6 @@ export interface ResolveOriginResponse {
   draft: DraftCampaignWire;
 }
 
-/** The last resolver turn, as the draft's ``resolution.json`` holds it; the mint gate is the */
-export interface OriginResolution {
-  /** Null until a resolver turn ran, and again after a later edit. */
-  last_resolution: OriginLastResolution | null;
-  /** Proposals the last turn left unclicked. */
-  raised: RaisedCommand[];
-  /** Why the last turn came back thin (a paid repair retry); null where it did not. */
-  degraded_cause: string | null;
-}
-
 /** What a Start answers: the job holding its slot, and the cycle it minted. */
 export interface StartCheckinResponse {
   job_id: string;
@@ -4447,9 +4447,9 @@ export interface PauseCyclePayload {
   reason: string;
 }
 
+/** One resolver turn over the draft's open gaps; what it proposes waits on a click. */
 export interface ResolveOriginPayload {
   draft_id: string;
-  message: string;
 }
 
 /** Name a campaign wherever it is named to a human; its id still addresses it. */

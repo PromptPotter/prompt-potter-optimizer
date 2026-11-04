@@ -47,7 +47,7 @@ The MCP SDK is an extra (§ 0006). A long-running call returns a task handle, pe
 
 ## Deleted when it lands
 
-- **The `checkin` node as the conversation surface, and `CheckinOutput`.** The resolver's findings become tool calls (edit the draft, confirm a column). `RaisedCommand` goes, and so does `ResolveOriginPayload.message`, which has no caller.
+- **The `checkin` node as the conversation surface, and `CheckinOutput`.** The resolver's findings become tool calls (edit the draft, confirm a column). `RaisedCommand` goes.
 - **The composer's keyword parser** (`webapp/components/shell/families.tsx::familiesNamed`).
 - **The "run the resolver now" rule, spelled three times**: webapp `useIngestFlow`, CLI `new.py::_hold_checkin`, `DraftCampaign.resolution_pending`. The host reads the served gaps.
 - **The client-only thread book's per-subject keys** (`webapp/lib/chat/thread.ts`), once threads persist.

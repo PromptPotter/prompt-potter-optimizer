@@ -164,7 +164,7 @@ class OriginResolution(StrictModel):
     )
     degraded_cause: str | None = Field(
         default=None,
-        description="Why the last turn came back thin (a paid repair retry); null where it did not.",
+        description="Why the last turn came back thin or empty; null where it did not.",
     )
 
 
@@ -193,21 +193,21 @@ def columns_confirmed(draft: DraftCampaign) -> bool:
 
 def _column_gaps(draft: DraftCampaign) -> list[FieldGap]:
     gaps: list[FieldGap] = []
-    _check_column(
-        draft,
-        field_key="column.query",
-        value=draft.column_query,
-        label="input",
-        gaps=gaps,
-    )
-    _check_column(
-        draft,
-        field_key="column.ground_truth",
-        value=draft.column_ground_truth,
-        label="target",
-        gaps=gaps,
-    )
-    if draft.column_query and draft.column_query == draft.column_ground_truth:
+    for field_key, value, label in (
+        ("column.query", draft.column_query, "input"),
+        ("column.ground_truth", draft.column_ground_truth, "target"),
+    ):
+        column = _check_column(draft, field_key=field_key, value=value, label=label, gaps=gaps)
+        if column is not None and (row := draft.first_blank_row.get(column)) is not None:
+            gaps.append(
+                FieldGap.of(
+                    field_key,
+                    "conflict",
+                    f"Row {row} has an empty “{column}” cell, and every row needs both columns. "
+                    "Pick another column, or fill the cell and upload the file again.",
+                )
+            )
+    if draft.column_query is not None and draft.column_query == draft.column_ground_truth:
         gaps.append(
             FieldGap.of(
                 "column.ground_truth",
@@ -223,13 +223,14 @@ def _check_column(
     draft: DraftCampaign,
     *,
     field_key: str,
-    value: str,
+    value: str | None,
     label: str,
     gaps: list[FieldGap],
-) -> None:
+) -> str | None:
+    """The header confirmed as the column; None where its gap is appended instead."""
     provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
-    if provenance is Provenance.CONFIRMED and value in draft.headers:
-        return
+    if provenance is Provenance.CONFIRMED and value is not None and value in draft.headers:
+        return value
     if provenance is Provenance.PROPOSED:
         gaps.append(
             FieldGap.of(
@@ -238,7 +239,7 @@ def _check_column(
                 f"Confirm the {label} column (proposed {value!r}).",
             )
         )
-        return
+        return None
     headers = ", ".join(draft.headers) or "<none>"
     gaps.append(
         FieldGap.of(
@@ -247,19 +248,20 @@ def _check_column(
             f"Pick which uploaded column is the {label}. Available: {headers}.",
         )
     )
+    return None
 
 
 def _check_confirmed(
     draft: DraftCampaign,
     *,
     field_key: str,
-    value: str,
+    value: str | None,
     label: str,
     hint: str,
     gaps: list[FieldGap],
 ) -> None:
     provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
-    if provenance is Provenance.CONFIRMED and value.strip():
+    if provenance is Provenance.CONFIRMED and value is not None:
         return
     proposed = provenance is Provenance.PROPOSED
     extra = " (proposed — confirm or correct)." if proposed else ""

@@ -5296,7 +5296,7 @@
       },
       "DraftCampaignWire": {
         "additionalProperties": false,
-        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign. No\n``tenant_id`` rides it (decisions.md § 0002).",
+        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign.\n\nNo ``tenant_id`` rides it (decisions.md § 0002).",
         "properties": {
           "active_steps": {
             "description": "The pipeline this draft runs. Who may move a node's axes is `node_config_schema`'s answer alone.",
@@ -5312,12 +5312,28 @@
             "type": "integer"
           },
           "column_ground_truth": {
-            "title": "Column Ground Truth",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The target header; null until one is set.",
+            "title": "Column Ground Truth"
           },
           "column_query": {
-            "title": "Column Query",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The input header; null until one is set.",
+            "title": "Column Query"
           },
           "connector": {
             "title": "Connector",
@@ -5443,8 +5459,16 @@
             "description": "`GET /campaigns/{id}/pipeline`'s answer, computed from the draft: a pre-commit check-in has no dataset dir, so its pipeline is never fetched by slug."
           },
           "raw_task_description": {
-            "title": "Raw Task Description",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task; null until one is set.",
+            "title": "Raw Task Description"
           },
           "reach": {
             "additionalProperties": {
@@ -5579,42 +5603,37 @@
           "draft": {
             "$ref": "#/components/schemas/DraftCampaignWire"
           },
-          "queued": {
-            "description": "A Start on it waits on a machine slot: it is minted once one frees, so a reopen offers no second Start (the same fact as its listing's `queued` lifecycle).",
-            "title": "Queued",
-            "type": "boolean"
-          },
-          "raised": {
-            "description": "Proposals the last turn left unclicked, so a re-opened check-in keeps the operator's outstanding actions.",
-            "items": {
-              "$ref": "#/components/schemas/RaisedCommand"
-            },
-            "title": "Raised",
-            "type": "array"
-          },
           "resolution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OriginLastResolution"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The last resolver turn's output; null when none ran."
+            "$ref": "#/components/schemas/OriginResolution",
+            "description": "What the last resolver turn left, as `resolve-origin` answered it."
           },
           "resolution_pending": {
             "description": "Its task is on file but no resolver turn ever set it up (`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes over authored prompts.",
             "title": "Resolution Pending",
             "type": "boolean"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "starting"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stage of the Start that holds it: `queued` waits on a machine slot, `starting` is minting it. Set, a reopen offers no second Start; its listing's lifecycle tag says the same.",
+            "title": "Start"
           }
         },
         "required": [
           "draft",
           "resolution",
-          "raised",
           "resolution_pending",
-          "queued"
+          "start"
         ],
         "title": "DraftReopenResponse",
         "type": "object"
@@ -5782,7 +5801,7 @@
             "anyOf": [
               {
                 "maxLength": 16384,
-                "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               {
@@ -12032,7 +12051,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the last turn came back thin (a paid repair retry); null where it did not.",
+            "description": "Why the last turn came back thin or empty; null where it did not.",
             "title": "Degraded Cause"
           },
           "last_resolution": {
@@ -13520,18 +13539,13 @@
       },
       "ResolveOriginPayload": {
         "additionalProperties": false,
+        "description": "One resolver turn over the draft's open gaps; what it proposes waits on a click.",
         "properties": {
           "draft_id": {
             "maxLength": 128,
             "minLength": 8,
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Draft Id",
-            "type": "string"
-          },
-          "message": {
-            "default": "",
-            "maxLength": 4000,
-            "title": "Message",
             "type": "string"
           }
         },

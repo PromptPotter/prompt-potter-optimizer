@@ -27,7 +27,7 @@ class CampaignLaunch:
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     dataset_name: str
-    # The check-in a Start mints from; null for every other launch. A queued one serves its draft queued.
+    # The check-in a Start mints from; null for every other launch. Its draft is served at its stage.
     draft_id: str | None = None
     kind: Literal["campaign_launch"] = "campaign_launch"
 

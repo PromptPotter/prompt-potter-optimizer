@@ -45,8 +45,9 @@ async def edit_draft_campaign(
 
     async def _apply() -> DraftCampaignWire:
         updated = apply_draft_patch(draft, plan)
+        wire = draft_wire(stores, updated, plan.served)
         save_checkin_draft(stores, updated)
-        return draft_wire(stores, updated, plan.served)
+        return wire
 
     before = origin_projection(draft)
     return Applier(

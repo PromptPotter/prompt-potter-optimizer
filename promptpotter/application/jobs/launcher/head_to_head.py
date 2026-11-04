@@ -32,7 +32,6 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import draft_served
 from promptpotter.domain.campaign import ArmName
 from promptpotter.domain.campaign_config import CampaignConfig, effective_config
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
@@ -110,11 +109,7 @@ async def checkin_arms(
     stores: Stores, claim: DraftClaim, request: HeadToHeadRequest
 ) -> CheckinArms:
     served = await draft_served(stores, owned_draft(stores, claim.draft_id))
-    try:
-        await _probe(served.connector)
-    except BackendUnreachableError as exc:
-        exc.details["draft_id"] = claim.draft_id
-        raise
+    await _probe(served.connector)
     overlays = [request.declared_optimization(arm) for arm in request.arms]
     return CheckinArms(claim, await open_checkin(stores, claim.draft_id, served, overlays=overlays))
 

@@ -7,11 +7,11 @@ from pydantic import Field
 
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, read_draft_wire
+from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.draft_patch import candidate_library_from_column
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
-    draft_from_dataset_name,
+    draft_from_dataset,
     ingest_draft,
 )
 from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
@@ -66,9 +66,7 @@ async def ingest_dataset(
 ) -> DraftCampaignWire:
     """Parse an uploaded tabular file into a durable check-in draft; ``/commands/start-checkin`` mints its campaign."""
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-
-    draft = await ingest_draft(stores=stores, blob=blob, filename=file.filename or "", slug=slug)
-    return await read_draft_wire(stores, draft)
+    return await ingest_draft(stores=stores, blob=blob, filename=file.filename or "", slug=slug)
 
 
 @datasets_router.post("/draft/candidate-library", response_model=DraftCampaignWire)
@@ -112,5 +110,4 @@ async def build_candidate_library_from_column(
 @datasets_router.post("/{name:path}/draft", response_model=DraftCampaignWire)
 async def draft_from_existing_dataset(name: str, stores: StoresDep) -> DraftCampaignWire:
     """Open an authored dataset's files as a prefilled, durable check-in draft."""
-    draft = await draft_from_dataset_name(stores=stores, dataset_name=name)
-    return await read_draft_wire(stores, draft)
+    return await draft_from_dataset(stores=stores, dataset_name=name)

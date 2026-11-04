@@ -16,6 +16,7 @@ from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import (
     AdmissionGate,
     producer_alive,
+    reclaim_producer,
     this_producer,
     this_producer_lock,
 )
@@ -31,7 +32,7 @@ from promptpotter.domain.job import (
     ScoringPass,
     SlotHolder,
 )
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
 from promptpotter.shared.clock import utcnow_iso
@@ -58,7 +59,7 @@ class JobRegistry:
     def __init__(self, jobs_dir: Path, *, capacity: Callable[[int], int]) -> None:
         self._dir = jobs_dir
         self._dir.mkdir(parents=True, exist_ok=True)
-        # Reentrant: `request_slot` → `list_running` → `_reap_if_orphaned` → `release` retake it.
+        # Reentrant: under `admission_gate`, `_orphaned` and `release` retake it.
         self._lock = threading.RLock()
         # Its cross-process peer, nesting the same way.
         self._gate = AdmissionGate(jobs_dir)
@@ -274,65 +275,44 @@ class JobRegistry:
             ) from exc
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
-        """A released job launched before today is deleted here: every reader past a release counts today's."""
-        today = utcnow_iso()[:10]
-        out: list[Job] = []
-        for path in self._dir.glob("*.json"):
-            if (job := self._read(path)) is None:
-                continue
-            if job.released and not job.launched_on(today):
-                unlink_robust(path)
-                continue
-            if user_id is not None and job.user_id != user_id:
-                continue
-            out.append(job)
+        """Released jobs included, until `reap_orphans` deletes one launched before today."""
+        out = [
+            job
+            for path in self._dir.glob("*.json")
+            if (job := self._read(path)) is not None and user_id in (None, job.user_id)
+        ]
         out.sort(key=lambda j: j.created_at, reverse=True)
         return out
 
-    def _reap_if_orphaned(self, job: Job) -> Job:
+    def _orphaned(self, job: Job) -> bool:
         """``_tasks`` holds only THIS process's jobs: "no task" is not "dead" — ask the producer lock."""
-        if job.released:
-            return job
         with self._lock:
             task = self._tasks.get(job.job_id)
         if task is not None and not task.done():
-            return job
+            return False
         # Adopted: ask the lock — on Windows the spawned process is the venv launcher, not the run.
         adopted = task is not None and job.producer_id != this_producer(self._dir)
-        if (task is None or adopted) and producer_alive(self._dir, job.producer_id):
-            return job
-        logger.warning(
-            "job %s claims %s but its producer is gone — releasing", job.job_id, job.stage.value
-        )
-        self.release(job.job_id)
-        return self.get(job.job_id) or job
+        return not ((task is None or adopted) and producer_alive(self._dir, job.producer_id))
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
-        """Oldest first, and a reconciling READ: a job whose producer is gone is released here."""
-        out = self._reconciled(lambda j: j.holds_slot, user_id=user_id)
+        """Oldest first, and a plain read: a job whose producer is gone is left out, never released."""
+        out = self._live(lambda j: j.holds_slot, user_id=user_id)
         out.sort(key=lambda j: (j.created_at, j.job_id))
         return out
 
     def list_holding_spend(self, *, user_id: str | None = None) -> list[Job]:
         """Oldest first: every slot holder, and every embedded and inner run beside them."""
-        out = self._reconciled(lambda j: j.holds_spend, user_id=user_id)
+        out = self._live(lambda j: j.holds_spend, user_id=user_id)
         out.sort(key=lambda j: (j.created_at, j.job_id))
         return out
 
     def list_queued(self, *, user_id: str | None = None) -> list[Job]:
-        out = self._reconciled(lambda j: j.queued, user_id=user_id)
+        out = self._live(lambda j: j.queued, user_id=user_id)
         out.sort(key=lambda j: (j.created_at, j.job_id))
         return out
 
-    def _reconciled(self, wanted: Callable[[Job], bool], *, user_id: str | None) -> list[Job]:
-        out: list[Job] = []
-        for j in self.list_all(user_id=user_id):
-            if not wanted(j):
-                continue
-            j = self._reap_if_orphaned(j)
-            if wanted(j):
-                out.append(j)
-        return out
+    def _live(self, wanted: Callable[[Job], bool], *, user_id: str | None) -> list[Job]:
+        return [j for j in self.list_all(user_id=user_id) if wanted(j) and not self._orphaned(j)]
 
     def running_job_for(self, workspace: WorkspaceDir, hop: CycleHop) -> Job | None:
         """The RUN holding *hop*, however started: a scoring pass on it bills no ceiling of the cycle's."""
@@ -373,13 +353,34 @@ class JobRegistry:
             if j.launched_on(today) and isinstance(j.holder, CampaignLaunch)
         ]
 
-    def queued_drafts(self, *, user_id: str) -> frozenset[str]:
-        """The check-ins a queued Start waits on: a reload serves each queued, never Start again."""
-        return frozenset(
-            j.holder.draft_id
-            for j in self.list_queued(user_id=user_id)
-            if isinstance(j.holder, CampaignLaunch) and j.holder.draft_id is not None
-        )
+    def draft_starts(self, *, user_id: str) -> dict[str, LaunchStage]:
+        """Each check-in a live Start holds, at its stage."""
+        starts: dict[str, LaunchStage] = {}
+        for job in self._live(lambda j: not j.released, user_id=user_id):
+            if not isinstance(job.holder, CampaignLaunch) or job.holder.draft_id is None:
+                continue
+            match job.stage:
+                case RunPhase.QUEUED | RunPhase.STARTING as stage:
+                    starts[job.holder.draft_id] = stage
+        return starts
+
+    def reap_orphans(self) -> None:
+        """The sweep's, and no read's: releases each job whose producer is gone, reclaims that
+        producer's file, and deletes a release launched before today."""
+        today = utcnow_iso()[:10]
+        with self.admission_gate():
+            for job in self.list_all():
+                if job.released:
+                    if not job.launched_on(today):
+                        unlink_robust(self._path(job.job_id))
+                elif self._orphaned(job):
+                    logger.warning(
+                        "job %s claims %s but its producer is gone — releasing",
+                        job.job_id,
+                        job.stage.value,
+                    )
+                    self.release(job.job_id)
+                    reclaim_producer(self._dir, job.producer_id)
 
     def _persist(self, job: Job) -> None:
         write_json(self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))

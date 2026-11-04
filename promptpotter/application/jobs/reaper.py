@@ -4,6 +4,8 @@ import asyncio
 import logging
 from pathlib import Path
 
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
@@ -83,13 +85,19 @@ def sweep_dead_cycles(projects_root: Path) -> int:
     return reaped
 
 
+def sweep(projects_root: Path) -> None:
+    """Every reclaim of what a dead producer left: no read releases, stamps or deletes any of it."""
+    sweep_dead_cycles(projects_root)
+    reclaim_orphan_sandboxes(projects_root)
+    JobRegistry.attach(jobs_dir(projects_root)).reap_orphans()
+
+
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:
     sleep_for = 0.0
     while True:
         await asyncio.sleep(sleep_for)
         try:
-            await asyncio.to_thread(sweep_dead_cycles, projects_root)
-            await asyncio.to_thread(reclaim_orphan_sandboxes, projects_root)
+            await asyncio.to_thread(sweep, projects_root)
         except Exception:
             # A raising tick must not END the loop: all reaping would stop for the rest of the server's uptime.
             logger.exception("periodic sweep tick failed; the loop continues")

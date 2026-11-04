@@ -16,8 +16,9 @@ assistant" host is open —
 
 The core imports nothing from an optimizer module; each file's import list is the proof.
 
-- **The thread model** — `lib/chat/thread.ts`: one ordered item list behind `ThreadProvider` /
-  `useThreads`. `message` and `file` are what the operator and the assistant write, `run` is the
+- **The thread model** — `lib/chat/thread.ts`: one ordered item list per subject (a `ThreadKey`:
+  a run's address or a check-in's), all kept in one book behind `ThreadProvider` /
+  `useThreads`, so nothing filed under one subject reaches another. `message` and `file` are what the operator and the assistant write, `run` is the
   frozen values of a task that ended (generic in its payload), and a `block` is an
   always-current region a host mounts into the list and the store never keeps.
 - **The renderer** — `components/chat/Thread.tsx` draws that list and follows its tail;

@@ -23,7 +23,6 @@ from promptpotter.application.datasets.origin_readiness import (
     checklist_field,
     field_values,
     origin_readiness,
-    save_checkin_draft,
 )
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import MATCHERS
@@ -31,7 +30,6 @@ from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
@@ -75,9 +73,7 @@ class OriginConsultation(NamedTuple):
     response_model: type[CheckinOutput]
 
 
-def build_origin_consultation(
-    draft: DraftCampaign, pipeline: DraftPipeline, message: str | None = None
-) -> OriginConsultation:
+def build_origin_consultation(draft: DraftCampaign, pipeline: DraftPipeline) -> OriginConsultation:
     """Deterministic (no timestamp, no id), so an unchanged turn replays free; adding either re-bills every turn."""
     readiness = origin_readiness(draft, pipeline)
     response_model = checkin_output(
@@ -111,13 +107,8 @@ def build_origin_consultation(
         "task_description grounded in the sample rows.\n\n"
         f"{json.dumps(state, indent=2, ensure_ascii=False)}"
     )
-    if draft.raw_task_description:
+    if draft.raw_task_description is not None:
         user_content += f"\n\nOperator's stated framing so far:\n{draft.raw_task_description}"
-    if message and message.strip():
-        user_content += (
-            "\n\nOperator's message this turn (takes precedence over the framing "
-            f"above where they conflict):\n{message.strip()}"
-        )
 
     consultation_instruction = (
         "This is a draft-campaign origin. Fill 'assessment', 'findings', and "
@@ -146,24 +137,18 @@ async def resolve_origin_turn(
     stores: Stores,
     draft: DraftCampaign,
     pipeline: DraftPipeline,
-    message: str | None = None,
 ) -> OriginResolutionResult:
-    consultation = build_origin_consultation(draft, pipeline, message)
+    """Keeps no draft: its caller keeps the turn's once the answer is built."""
+    consultation = build_origin_consultation(draft, pipeline)
 
-    # Bound here as well as in `CommandDispatcher`: the CLI path (`new <file>`) has no dispatcher.
-    context = draft_call_context(stores, draft.draft_id)
-    token = set_cycle_ledger(context.ledger)
-    try:
-        # No launch admitted this call and no run's book watches it; a check-in has no producer.
-        async with paid_call(stores=stores, bucket="turn", provider=checkin_provider()):
-            raw, repair_attempts = await run_checkin(
-                response_model=consultation.response_model,
-                consultation_instruction=consultation.instruction,
-                user_content=consultation.user_content,
-                context=context,
-            )
-    finally:
-        reset_cycle_ledger(token)
+    # No launch admitted this call and no run's book watches it; a check-in has no producer.
+    async with paid_call(stores=stores, bucket="turn", provider=checkin_provider()):
+        raw, repair_attempts = await run_checkin(
+            response_model=consultation.response_model,
+            consultation_instruction=consultation.instruction,
+            user_content=consultation.user_content,
+            context=draft_call_context(stores, draft.draft_id),
+        )
 
     raised = raised_commands(draft, raw)
     updated = _apply_findings(draft, raw, raised, pipeline.chain.prompt_nodes())
@@ -186,12 +171,11 @@ async def resolve_origin_turn(
         ],
         degraded_cause=degraded_cause,
     )
-    save_checkin_draft(stores, updated, resolution=block)
-
     return OriginResolutionResult(resolution=block, draft=updated)
 
 
 def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: int) -> str | None:
+    """Served, never raised: the turn was paid, so its answer is kept with the cause beside it."""
     asking = output.next_action.kind == "ask" and bool(output.next_action.questions)
     if not applied and not asking and not output.recap.strip():
         reasons = ["it produced no usable setup, recap, or question"]
@@ -199,9 +183,7 @@ def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: in
             reasons.append(
                 "the retry after the empty/truncated first response also failed to recover"
             )
-        raise RuntimeError(
-            "the check-in model returned an empty/degraded response — " + "; ".join(reasons)
-        )
+        return "the check-in model returned an empty/degraded response — " + "; ".join(reasons)
     if repair_attempts > 0:
         return (
             "the model's first response was empty or truncated and was retried "

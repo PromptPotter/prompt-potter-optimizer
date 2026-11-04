@@ -90,14 +90,16 @@ class DraftCampaign:
     sample_preview: tuple[dict[str, str], ...]
     basis: DraftBasis
     scoring_matcher: str
-    raw_task_description: str
+    raw_task_description: str | None
     pipeline_overlay: dict[str, Any]
     created_at: str
     updated_at: str
     headers: tuple[str, ...] = ()
-    column_query: str = ""
-    column_ground_truth: str = ""
+    column_query: str | None = None
+    column_ground_truth: str | None = None
     column_label_sets: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Per header, the first row (1-based, file order) whose cell is blank: that column cuts no bank.
+    first_blank_row: dict[str, int] = field(default_factory=dict)
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
     origin_prompts: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -128,6 +130,7 @@ class DraftCampaign:
             "column_query": self.column_query,
             "column_ground_truth": self.column_ground_truth,
             "column_label_sets": {k: list(v) for k, v in self.column_label_sets.items()},
+            "first_blank_row": dict(self.first_blank_row),
             "field_provenance": {k: v.value for k, v in self.field_provenance.items()},
             "source_file": self.source_file,
             "origin_prompts": {node: dict(f) for node, f in self.origin_prompts.items()},
@@ -161,6 +164,7 @@ class DraftCampaign:
             column_query=data["column_query"],
             column_ground_truth=data["column_ground_truth"],
             column_label_sets={k: tuple(v) for k, v in data["column_label_sets"].items()},
+            first_blank_row=dict(data["first_blank_row"]),
             field_provenance={k: Provenance(v) for k, v in data["field_provenance"].items()},
             source_file=data["source_file"],
             origin_prompts={node: dict(f) for node, f in data["origin_prompts"].items()},
@@ -181,13 +185,18 @@ class DraftCampaign:
         """The task is on file and no resolver turn ever set it up: a reopen resolves, while an
         origin's or the operator's authored prompts are never re-proposed over."""
         return (
-            bool(self.raw_task_description.strip())
+            self.raw_task_description is not None
             and not self.resolver_ran
             and not self.authored_prompts()
         )
 
+    def confirmed_task(self) -> str:
+        """The task a Start commits: the gate refuses every Start before one is confirmed."""
+        assert self.raw_task_description is not None, "a Start passed a gate holding no task"
+        return self.raw_task_description
+
     def answer_space(self) -> tuple[str, ...] | None:
-        if not self.column_ground_truth:
+        if self.column_ground_truth is None:
             return None
         return self.column_label_sets.get(self.column_ground_truth)
 
@@ -211,7 +220,7 @@ class DraftCampaign:
         authored = self.origin_prompts.get(step, {})
         fields = dict(authored)
         if "instruction" in seeded and not any(text.strip() for text in authored.values()):
-            fields = {"instruction": self.raw_task_description}
+            fields = {"instruction": self.confirmed_task()}
         # Appended even when answer_format is blank: the optimizer prompts promise the labels.
         labels = self.answer_space()
         if labels and "answer_format" in seeded:
@@ -358,6 +367,7 @@ def new_draft(
     headers: list[str],
     source_file: str = "",
     column_label_sets: dict[str, tuple[str, ...]] | None = None,
+    first_blank_row: dict[str, int] | None = None,
 ) -> DraftCampaign:
     now = utcnow_iso()
     column_query, column_ground_truth, provenance = _seed_provenance(headers)
@@ -370,12 +380,13 @@ def new_draft(
         sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
         basis=basis,
         scoring_matcher=DEFAULT_SCORING_MATCHER,
-        raw_task_description="",
+        raw_task_description=None,
         pipeline_overlay={},
         headers=tuple(headers),
         column_query=column_query,
         column_ground_truth=column_ground_truth,
         column_label_sets=dict(column_label_sets or {}),
+        first_blank_row=dict(first_blank_row or {}),
         field_provenance=provenance,
         created_at=now,
         updated_at=now,
@@ -385,22 +396,16 @@ def new_draft(
 
 def _seed_provenance(
     headers: list[str],
-) -> tuple[str, str, dict[str, Provenance]]:
-    query_col, ground_truth_col, provenance = _auto_detect_columns(headers)
-    provenance["task_description"] = Provenance.UNSET
-    return query_col, ground_truth_col, provenance
-
-
-def _auto_detect_columns(
-    headers: list[str],
-) -> tuple[str, str, dict[str, Provenance]]:
-    header_set = set(headers)
-    query_col = "query" if "query" in header_set else ""
-    ground_truth_col = "ground_truth" if "ground_truth" in header_set else ""
-    provenance = {
-        "column.query": Provenance.CONFIRMED if query_col else Provenance.UNSET,
-        "column.ground_truth": Provenance.CONFIRMED if ground_truth_col else Provenance.UNSET,
-    }
+) -> tuple[str | None, str | None, dict[str, Provenance]]:
+    query_col = "query" if "query" in headers else None
+    ground_truth_col = "ground_truth" if "ground_truth" in headers else None
+    provenance: dict[str, Provenance] = {}
+    for field_key, column in (
+        ("column.query", query_col),
+        ("column.ground_truth", ground_truth_col),
+    ):
+        if column is not None:
+            provenance[field_key] = Provenance.CONFIRMED
     return query_col, ground_truth_col, provenance
 
 

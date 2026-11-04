@@ -50,7 +50,7 @@ from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.datasets import ingest, loaders, tabular_ingest
-from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft
+from promptpotter.application.datasets.draft_campaign import DatasetBasis, new_draft, owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
@@ -1877,7 +1877,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         encoding="utf-8",
     )
 
-    draft = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name="heldout"))
+    cut = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name="heldout"))
+    draft = owned_draft(built_stores, cut.draft_id)
     served = asyncio.run(draft_served(built_stores, draft))
     content = build_origin_consultation(
         draft, draft_pipeline(built_stores, draft, served)
@@ -1889,9 +1890,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
 
     # An upload's Start asks the mint's refusals of the draft BEFORE its dataset lands, so a refused
     # Start takes no slug and its retry is refused the same way, never as a collision.
-    uploaded = asyncio.run(
+    landed = asyncio.run(
         ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\nz,1\n", filename="tiny.csv")
     )
+    uploaded = owned_draft(built_stores, landed.draft_id)
     starved = {"l1_generate": {"config": {"model": "deepseek/deepseek-v4-flash", "max_tokens": 64}}}
     built_stores.drafts.write_draft(
         uploaded.draft_id,

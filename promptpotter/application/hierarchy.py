@@ -49,6 +49,7 @@ from promptpotter.domain.hierarchy import (
     UnstartedFacts,
 )
 from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading, ReadingState
+from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
@@ -471,19 +472,21 @@ def campaign_entry(
     )
 
 
-def queued_drafts(stores: Stores) -> frozenset[str]:
-    """This account's check-ins a queued Start waits on: the listing and the reopen serve them."""
+def draft_starts(stores: Stores) -> dict[str, LaunchStage]:
+    """This account's check-ins a Start holds, at its stage: the listing and the reopen serve them."""
     jobs = JobRegistry.attach(stores.jobs_dir)
-    return jobs.queued_drafts(user_id=str(stores.identity.user_id))
+    return jobs.draft_starts(user_id=str(stores.identity.user_id))
 
 
-def unstarted_entry(stores: Stores, draft: DraftCampaign, *, queued: bool) -> UnstartedCampaign:
+def unstarted_entry(
+    stores: Stores, draft: DraftCampaign, *, start: LaunchStage | None
+) -> UnstartedCampaign:
     """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
-    `queued` while a Start waits on a slot for it."""
+    the stage of a Start that holds it."""
     ledger = stores.drafts.ledger(draft.draft_id)
     spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name
-    lifecycle = "queued" if queued else "unstarted"
+    lifecycle = "unstarted" if start is None else start.value
     return UnstartedCampaign(
         address=draft.draft_id,
         parent=None,
@@ -517,8 +520,8 @@ def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
         *{str(s.identity.user_id) for s in stores},
         *(s.campaigns.version() for s in stores),
         *(s.drafts.version() for s in stores),
-        # A queue entry moves no draft file: its own fact, read only where a draft could wait on it.
-        *(sorted(queued_drafts(s)) for s in stores if s.drafts.draft_ids()),
+        # A Start's stage moves no draft file: its own fact, read only where a draft could be held.
+        *(sorted(draft_starts(s).items()) for s in stores if s.drafts.draft_ids()),
         *(archive.version() for archive in archives),
         *(file_sig(path) for path in rulers),
         *(definition_version(s, name) for (_, name), s in definitions),
@@ -575,9 +578,9 @@ def list_hierarchy(
     unstarted: list[UnstartedCampaign] = []
     if campaign_id is None and not attached_only and lifecycle in ("unstarted", "all"):
         drafts = sorted(owned_drafts(leaf), key=lambda d: d.updated_at, reverse=True)
-        queued = queued_drafts(leaf) if drafts else frozenset()
+        starts = draft_starts(leaf) if drafts else {}
         unstarted = [
-            unstarted_entry(leaf, draft, queued=draft.draft_id in queued)
+            unstarted_entry(leaf, draft, start=starts.get(draft.draft_id))
             for draft in drafts
             if dataset in (None, draft.dataset_name)
         ]

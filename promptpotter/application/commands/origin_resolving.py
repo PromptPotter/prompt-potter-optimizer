@@ -15,6 +15,7 @@ from promptpotter.application.datasets.origin_readiness import (
     OriginResolution,
     load_resolution,
     origin_projection,
+    save_checkin_draft,
 )
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
@@ -40,7 +41,7 @@ async def resolve_origin(
     dispatched: DispatchedToDraft[ResolveOriginPayload],
 ) -> Applier[ResolveOriginResponse]:
     stores = dispatched.dispatcher.stores
-    draft_id, message = dispatched.payload.draft_id, dispatched.payload.message
+    draft_id = dispatched.payload.draft_id
     draft = owned_draft(stores, draft_id)
     # Before the paid call: the turn's prompt slots are the chain's declared prompt fields.
     served = await draft_served(stores, draft)
@@ -48,9 +49,7 @@ async def resolve_origin(
 
     async def _apply() -> ResolveOriginResponse:
         try:
-            result = await resolve_origin_turn(
-                stores=stores, draft=draft, pipeline=pipeline, message=message
-            )
+            result = await resolve_origin_turn(stores=stores, draft=draft, pipeline=pipeline)
         except PotterError:
             raise
         except Exception as exc:
@@ -60,9 +59,9 @@ async def resolve_origin(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc
         # A turn writes no field the pipeline reads, so the declaration read before it holds.
-        return ResolveOriginResponse(
-            resolution=result.resolution, draft=draft_wire(stores, result.draft, served)
-        )
+        wire = draft_wire(stores, result.draft, served)
+        save_checkin_draft(stores, result.draft, resolution=result.resolution)
+        return ResolveOriginResponse(resolution=result.resolution, draft=wire)
 
     async def _on_replay() -> ResolveOriginResponse:
         # The draft's `resolution.json` is the live turn's block: a deduped retry re-spends no LLM call.

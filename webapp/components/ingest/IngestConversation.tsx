@@ -103,7 +103,10 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
           Parsing your file…
         </p>
       ) : null}
-      {phase.stage === "reopening" ? <Loading>Reading your check-in…</Loading> : null}
+      {phase.stage === "reopening" && flow.readFailure === null ? (
+        <Loading>Reading your check-in…</Loading>
+      ) : null}
+      <FailureLine failure={flow.readFailure} lead="Could not read this check-in." />
       {phase.stage === "checkin" ? <CheckinLoadingWindow model={phase.model} /> : null}
       {phase.stage === "collision" ? (
         <CollisionCard flow={flow} existingSlug={phase.existingSlug} suggestedSlug={phase.suggestedSlug} />

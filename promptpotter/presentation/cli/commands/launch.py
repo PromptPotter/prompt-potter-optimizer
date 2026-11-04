@@ -14,7 +14,7 @@ from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.jobs.reaper import sweep_dead_cycles
+from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import default_projects_root
@@ -42,8 +42,8 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 def prepare_launch() -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
-    # A CLI-only install has no periodic sweep: a launch is where a dead producer's cycle is recorded.
-    sweep_dead_cycles(default_projects_root())
+    # A CLI-only install has no periodic sweep: a launch is where a dead producer's leavings are reclaimed.
+    sweep(default_projects_root())
     ensure_api_key()
 
 

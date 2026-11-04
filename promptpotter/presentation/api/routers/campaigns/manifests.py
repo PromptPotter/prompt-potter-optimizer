@@ -10,11 +10,10 @@ from promptpotter.application.datasets.draft_build import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import (
-    OriginLastResolution,
-    RaisedCommand,
+    OriginResolution,
     load_resolution,
 )
-from promptpotter.application.hierarchy import queued_drafts
+from promptpotter.application.hierarchy import draft_starts
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     ForkPreviewRequest,
@@ -22,6 +21,7 @@ from promptpotter.application.pipeline_resolve import (
     fork_preview,
     resolve_pipeline_at,
 )
+from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
@@ -34,21 +34,18 @@ class DraftReopenResponse(StrictModel):
     """A re-opened check-in: its draft and what the last resolver turn left."""
 
     draft: DraftCampaignWire
-    resolution: OriginLastResolution | None = Field(
-        description="The last resolver turn's output; null when none ran."
-    )
-    raised: list[RaisedCommand] = Field(
-        description="Proposals the last turn left unclicked, so a re-opened check-in keeps the "
-        "operator's outstanding actions."
+    resolution: OriginResolution = Field(
+        description="What the last resolver turn left, as `resolve-origin` answered it."
     )
     resolution_pending: bool = Field(
         description="Its task is on file but no resolver turn ever set it up "
         "(`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
         "revisit never re-buys a turn or re-proposes over authored prompts."
     )
-    queued: bool = Field(
-        description="A Start on it waits on a machine slot: it is minted once one frees, so a "
-        "reopen offers no second Start (the same fact as its listing's `queued` lifecycle)."
+    start: LaunchStage | None = Field(
+        description="The stage of the Start that holds it: `queued` waits on a machine slot, "
+        "`starting` is minting it. Set, a reopen offers no second Start; its listing's lifecycle "
+        "tag says the same."
     )
 
 
@@ -56,13 +53,11 @@ class DraftReopenResponse(StrictModel):
 async def get_draft(stores: StoresDep, draft_id: str) -> DraftReopenResponse:
     """Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded."""
     draft = owned_draft(stores, draft_id)
-    block = load_resolution(stores, draft)
     return DraftReopenResponse(
         draft=await read_draft_wire(stores, draft),
-        resolution=block.last_resolution,
-        raised=block.raised,
+        resolution=load_resolution(stores, draft),
         resolution_pending=draft.resolution_pending(),
-        queued=draft_id in queued_drafts(stores),
+        start=draft_starts(stores).get(draft_id),
     )
 
 

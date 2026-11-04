@@ -6,7 +6,7 @@ import type { DraftDependency } from "@/lib/api";
 interface DependencyProps {
   librarySize: number;
   headers: string[];
-  targetColumn: string;
+  targetColumn: string | null;
   onUpload: (file: File) => void;
   onBuildFromColumn: (column: string) => void;
   busy: boolean;
@@ -33,7 +33,7 @@ function DependencyRow({
 }: DependencyProps & { dep: DraftDependency }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [column, setColumn] = useState(
-    headers.includes(targetColumn) ? targetColumn : (headers[0] ?? ""),
+    targetColumn !== null && headers.includes(targetColumn) ? targetColumn : (headers[0] ?? ""),
   );
   return (
     <fieldset>

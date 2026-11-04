@@ -14,39 +14,16 @@ acting.
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
   `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.
   **Re-test:** `npx playwright test --project=cold` logs no 429.
-- **Left by the check-in address (unstarted campaigns)**:
-  - `components/chat/README.md` still describes one global `ThreadProvider` (another session's file).
-  - **A promoted Start is unserved**: `application/hierarchy.py::queued_drafts` serves a draft `queued` only while
-    its job is QUEUED; once promoted to STARTING (probe, `init_services`) and until the mint closes the
-    draft, a reload serves it open and a Start is refused `draft_held`. Action: serve the job's stage
-    (`queued` | `starting`) off the same `CampaignLaunch.draft_id`.
-  - `useIngestFlow::readDraft` is a hand-rolled fetch in an effect (not `useRead`), its failure said
-    into the thread as a string, not a `ReadFailure` on `FailureLine`.
-  - `application/hierarchy.py::entries_version` reads the jobs dir on every listing poll where a draft exists, and
-    `JobRegistry.list_queued` is a reconciling read: a GET can release an orphaned job.
-  - The check-in thread is retold from the draft on a reload (`useIngestFlow::retell`): a warning or
-    failure line said live is not draft state and is not retold.
-  **Re-test:** `git grep -n "ThreadProvider" -- webapp/components/chat/README.md`;
-  `git grep -n "queued_drafts" -- promptpotter` serves a stage.
 - **Left by the upload check-in's 422** (`25be69eac` cut rows on every draft read; fixed 2026-11-02 by
   gating `startability.py::draft_samples` on `origin_readiness.py::columns_confirmed`):
-  - **Save, then a response that can fail**: `application/datasets/ingest.py::ingest_draft` writes the draft before the router
-    builds `draft_wire`, so a failed build leaves an orphan the browser never gets an id for;
-    `draft_editing` / `origin_resolving` write (or pay a resolver turn) and the dispatcher then records the
-    command `rejected`. Action: the effect and its response are one step that lands or does not.
-  - **Two fields for one idea**: `DraftCampaign.column_query == ""` means unset while
-    `field_provenance["column.query"]` says UNSET/PROPOSED/CONFIRMED. Action: the column is absent until set.
-  - **Row validity is Start's, not the gate's**: with both columns confirmed, one blank cell makes
-    `materialize_samples` raise on every draft read. Action: a blank cell is a gap the gate serves.
   - **"Run the resolver now" lives three times**: webapp `useIngestFlow` (`advance`, `land`,
     `submitContext`), CLI `new.py::_hold_checkin`, `DraftCampaign.resolution_pending`. Action: the served flag
     alone. **Rides with:** the host assistant ([`host-assistant.md`](host-assistant.md)).
-  - `ResolveOriginPayload.message` has no caller; a failed reopen leaves a dead state, since re-clicking
-    the same address re-runs no effect (`useIngestFlow.ts`).
-  - Copy promises "any column names work" (`DatasetPickList.tsx`) while auto-detect matches only the
-    literal `query`/`ground_truth` (`draft_campaign.py::_auto_detect_columns`).
-  **Re-test:** upload a CSV whose headers are not `query`/`ground_truth` with a blank target cell, confirm
-  both columns, reopen the draft.
+  **Re-test:** `git grep -n "void runCheckin" -- webapp/lib/hooks/useIngestFlow.ts` is one line, under `resolution_pending`.
+  - **A Start's check-in stops at `queued` / `starting`**: the mint closes the draft, so its read
+    404s, and no served answer names the campaign a draft's Start minted, so no poll can follow it
+    there. Action: one read of a Start off its job (`CampaignLaunch.draft_id`, its stage, then
+    `Job.hop`). **Re-test:** Start a queued check-in; the view lands on the minted campaign unreloaded.
 - **The phone draws the run's figures twice**: `shell/Views.tsx::ViewGlances` (any time more than one view
   is open; the Dashboard preset opens six) repeats the masthead `RunMasthead::RunFacts` `FigureRow`,
   both reading the same served `Said` figures. Action: delete the strip; a masthead figure some
@@ -935,8 +912,8 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   naming both reaches the operator as an error, not a sentence. Action: `BlockPoolInitializer.refusal`
   names the repeated entry. **Re-test:** two account packs with one text, both named; the draft serves.
 - **A detached arm's job is the spawner's until its process adopts it**
-  (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_reap_if_orphaned`): a `head-to-head`
-  terminal killed between the spawn and the adoption leaves jobs a reconciling read releases, so the
+  (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_orphaned`): a `head-to-head`
+  terminal killed between the spawn and the adoption leaves jobs the sweep releases, so the
   child's `adopt` refuses and the arm's minted cycle never runs. Action: the child holds the producer
   lock before the spawner returns. **Re-test:** kill the terminal right after its `arm …` lines; each
   arm's cycle runs or reads released with its reason.

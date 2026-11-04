@@ -206,7 +206,7 @@ def commit_upload_definition(
         source=source,
         pipeline=committed_pipeline_json(draft, upload),
         campaign=default_campaign_block(draft, upload),
-        description=draft.raw_task_description,
+        description=draft.confirmed_task(),
         framing=draft_task_context(draft),
         origin=draft.committed_prompts(chain),
     )

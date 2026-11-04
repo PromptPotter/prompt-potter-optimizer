@@ -22,7 +22,7 @@ import { DRAFT_POLL_MS } from "@/lib/cadence";
 import type { Tone } from "@/lib/api/types.generated";
 import { checkinThreadKey, useThreads } from "@/lib/chat/thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
-import { readyData, useRead } from "@/lib/hooks/useRead";
+import { readyData, useRead, type ReadFailure } from "@/lib/hooks/useRead";
 import { dropCachedRead } from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
@@ -48,14 +48,15 @@ type IngestPhase =
       raised: RaisedCommand[];
       degradedCause: string | null;
     }
-  // The served `DraftReopenResponse.queued`: a Start waits on a machine slot, minted once one frees.
-  | { stage: "queued" };
+  // The served `DraftReopenResponse.start`: a Start holds the draft, queued on a slot or minting it.
+  | { stage: NonNullable<DraftReopenResponse["start"]> };
 
 /** The check-in the workspace views: a draft id, `NEW_CHECKIN` before one is minted, null off one. */
 export type CheckinSubject = string | null;
 export const NEW_CHECKIN = "";
 
 const QUEUED_LINE = "Campaign queued — it is minted and starts when a machine slot frees.";
+const STARTING_LINE = "Campaign starting — it is being minted and opens in your list once it runs.";
 
 export interface IngestFlow {
   phase: IngestPhase;
@@ -69,6 +70,8 @@ export interface IngestFlow {
   awaitingContext: boolean;
   // The refused write, shown beside Start in review: the thread sits above the card, off a phone's screen.
   failure: CommandFailure | null;
+  // The held draft's read, refused: a reopen retries it on its clock until it lands or is gone.
+  readFailure: ReadFailure | null;
   // A dataset file dropped anywhere: onto a fresh check-in, never into the viewed one's draft.
   attachFile: (file: File) => void;
   pickDataset: (entry: DatasetIndexEntry) => void;
@@ -176,10 +179,10 @@ export function useIngestFlow({
       p.stage === "ready" && p.draft.draft_id === updated.draft_id ? { ...p, draft: updated } : p,
     );
 
-  // The held draft's one read: a reopen lands its answer, and while Start is on screen it rides
-  // the clock, so the refusal tracks the wallet. Held across stages, so no kept body re-lands.
+  // The held draft's one read: a reopen rides the clock until it lands, and while Start is on
+  // screen so does review, so the refusal tracks the wallet. Held across stages, so no kept body re-lands.
   const draftNow = useRead(draftId !== null ? draftRead(draftId) : null, {
-    intervalMs: phase.stage === "ready" ? DRAFT_POLL_MS : undefined,
+    intervalMs: phase.stage === "ready" || phase.stage === "reopening" ? DRAFT_POLL_MS : undefined,
   });
   const served = readyData(draftNow);
   const [landedServed, setLandedServed] = useState(served);
@@ -214,7 +217,7 @@ export function useIngestFlow({
   const advance = (draft: DraftCampaignWire) => {
     hold(draft.draft_id);
     setInputText("");
-    if (draft.raw_task_description.trim()) {
+    if (draft.raw_task_description !== null) {
       say(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
       void runCheckin(draft);
       return;
@@ -223,16 +226,6 @@ export function useIngestFlow({
       `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Or let me propose it from the rows.`,
     );
     setPhase({ stage: "awaiting-context", draft });
-  };
-
-  // A refusal that kept its draft (a down backend) opens it: its read lands it, or says the failure.
-  const reopenKept = (failure: CommandFailure | null) => {
-    const kept = failure?.details?.draft_id;
-    if (typeof kept !== "string") return false;
-    opening.clear();
-    hold(kept);
-    setPhase({ stage: "reopening" });
-    return true;
   };
 
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
@@ -265,7 +258,7 @@ export function useIngestFlow({
         });
         return;
       }
-      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
+      setPhase({ stage: "idle" });
       return;
     }
     threads.setFileDetail(threadKey.current, id, `${r.value.n_samples} rows`);
@@ -280,7 +273,7 @@ export function useIngestFlow({
     const r = await opening.run("dataset", () => postDraftFromDataset(name));
     if (!alive()) return;
     if (!r.ok) {
-      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
+      setPhase({ stage: "idle" });
       return;
     }
     advance(r.value);
@@ -297,7 +290,7 @@ export function useIngestFlow({
     const r = await opening.run("origin", () => postDraftFromOrigin(entry.origin_id));
     if (!alive()) return;
     if (!r.ok) {
-      if (!reopenKept(r.failure)) setPhase({ stage: "idle" });
+      setPhase({ stage: "idle" });
       return;
     }
     hold(r.value.draft_id);
@@ -308,8 +301,10 @@ export function useIngestFlow({
   // A reload's thread, told from what the draft serves: each line is its state, never a memory.
   const retell = ({ draft, resolution }: DraftReopenResponse) => {
     say(`Reopened your check-in on “${draft.slug}” — ${draft.n_samples} rows parsed.`);
-    if (draft.raw_task_description.trim()) echo(draft.raw_task_description);
-    const recap = resolution?.recap || resolution?.assessment;
+    if (draft.raw_task_description !== null) echo(draft.raw_task_description);
+    if (resolution.degraded_cause) say(resolution.degraded_cause, "warn");
+    const turn = resolution.last_resolution;
+    const recap = turn?.recap || turn?.assessment;
     if (recap) say(recap);
     if (draft.candidate_library_size > 0)
       say(`Candidate library attached — ${draft.candidate_library_size} targets.`);
@@ -318,12 +313,12 @@ export function useIngestFlow({
   // Where the served draft stands, landed: `told` is false where the thread already says it.
   const land = (res: DraftReopenResponse, told: boolean) => {
     const draft = res.draft;
-    if (res.queued) {
-      if (told) say(QUEUED_LINE);
-      setPhase({ stage: "queued" });
+    if (res.start !== null) {
+      if (told) say(res.start === "queued" ? QUEUED_LINE : STARTING_LINE);
+      setPhase({ stage: res.start });
       return;
     }
-    if (!draft.raw_task_description.trim()) {
+    if (draft.raw_task_description === null) {
       if (told)
         say("Describe the task — what should the model do with each row? Send when ready.");
       setPhase({ stage: "awaiting-context", draft });
@@ -339,9 +334,9 @@ export function useIngestFlow({
     setPhase({
       stage: "ready",
       draft,
-      resolution: res.resolution,
-      raised: res.raised,
-      degradedCause: null,
+      resolution: res.resolution.last_resolution,
+      raised: res.resolution.raised,
+      degradedCause: res.resolution.degraded_cause,
     });
   };
 
@@ -360,9 +355,8 @@ export function useIngestFlow({
   // A revisit continues its kept thread; an empty one (a reload, a deep link) is retold.
   useEffect(() => {
     if (phase.stage !== "reopening") return;
-    if (draftNow.status === "failed") {
-      say(draftNow.failure.message, "danger");
-      // The read's own landing: a refused reopen leaves the check-in idle.
+    // A refusal stays on `readFailure` while the clock retries it; a gone draft leaves the check-in idle.
+    if (draftNow.status === "failed" && draftNow.failure.kind === "gone") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPhase({ stage: "idle" });
       return;
@@ -525,6 +519,7 @@ export function useIngestFlow({
     saving: pendingPatches > 0,
     awaitingContext,
     failure: opening.failure ?? resolving.failure ?? writing.failure ?? starting.failure,
+    readFailure: draftNow.status === "failed" ? draftNow.failure : null,
     attachFile,
     pickDataset,
     openOrigin: (entry) => void openOrigin(entry),

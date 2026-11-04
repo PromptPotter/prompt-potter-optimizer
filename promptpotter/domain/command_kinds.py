@@ -582,7 +582,7 @@ class EditDraftCampaignPayload(DraftPayload, kind=CommandKind.EDIT_DRAFT_CAMPAIG
 
 
 class ResolveOriginPayload(DraftPayload, kind=CommandKind.RESOLVE_ORIGIN):
-    message: str = Field(default="", max_length=4000)
+    """One resolver turn over the draft's open gaps; what it proposes waits on a click."""
 
 
 class ArmRequest(StrictModel):

@@ -87,18 +87,22 @@ def this_producer_lock(jobs_dir: Path) -> Path:
 
 
 def producer_alive(jobs_dir: Path, producer_id: str) -> bool:
-    """Answering RECLAIMS a dead producer's file; an unstamped id reads as gone."""
+    """An unstamped id reads as gone."""
     if not producer_id:
         return False
     try:
         path = _producer_path(jobs_dir, producer_id)
     except ValueError:
         return False
-    if producer_lock.held(path):
-        return True
+    return producer_lock.held(path)
+
+
+def reclaim_producer(jobs_dir: Path, producer_id: str) -> None:
+    """A dead producer's file, unlinked by the sweep once it released that producer's job."""
+    if not producer_id or producer_alive(jobs_dir, producer_id):
+        return
     with contextlib.suppress(OSError):
-        path.unlink()
-    return False
+        _producer_path(jobs_dir, producer_id).unlink()
 
 
 def _retire(path: Path) -> None:

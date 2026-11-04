@@ -72,7 +72,8 @@ class EditDraftPatch(StrictModel):
     scoring_matcher: str | None = Field(default=None, min_length=1, max_length=64)
     # The empty string clears the dials back to correctness alone.
     scoring_dials: str | None = Field(default=None, max_length=512)
-    raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
+    # A blank task is no task: the draft holds none until one is set.
+    raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
     pipeline_overlay: dict[str, Any] | None = None
     node_narrowing: dict[str, list[ParamIntent]] | None = None
     node_output: NodeOutputEdit | None = None

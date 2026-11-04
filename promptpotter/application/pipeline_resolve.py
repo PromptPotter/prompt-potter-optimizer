@@ -61,7 +61,6 @@ from promptpotter.domain.campaign_config import (
     apply_cycle_seed,
     effective_config,
 )
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, render_prompt
 from promptpotter.domain.paired_reading import ArmKey
@@ -417,15 +416,11 @@ def draft_backend_type(stores: Stores, draft: DraftCampaign) -> str:
 
 
 async def draft_served(stores: Stores, draft: DraftCampaign) -> ServedPipeline:
-    try:
-        return await served_pipeline(
-            stores,
-            connectors.CONNECTORS.get(draft_backend_type(stores, draft)),
-            experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
-        )
-    except BackendUnreachableError as exc:
-        exc.details["draft_id"] = draft.draft_id
-        raise
+    return await served_pipeline(
+        stores,
+        connectors.CONNECTORS.get(draft_backend_type(stores, draft)),
+        experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
+    )
 
 
 async def dataset_pipeline(

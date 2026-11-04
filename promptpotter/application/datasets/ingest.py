@@ -5,7 +5,11 @@ from typing import Any
 
 from promptpotter.application.account import record_upload
 from promptpotter.application.datasets.authored import read_authored_dataset
-from promptpotter.application.datasets.draft_build import overlay_from_campaign_config
+from promptpotter.application.datasets.draft_build import (
+    DraftCampaignWire,
+    draft_wire,
+    overlay_from_campaign_config,
+)
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
     DatasetBasis,
@@ -29,7 +33,7 @@ from promptpotter.application.datasets.tabular_ingest import (
     read_tabular,
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import draft_served, resolve_campaign_config
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
@@ -68,6 +72,21 @@ def _column_label_sets(
     }
 
 
+def _first_blank_rows(headers: list[str], rows: list[dict[str, str]]) -> dict[str, int]:
+    blank: dict[str, int] = {}
+    for ordinal, row in enumerate(rows, start=1):
+        for header in headers:
+            if header not in blank and not row.get(header, ""):
+                blank[header] = ordinal
+    return blank
+
+
+async def _kept(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
+    wire = draft_wire(stores, draft, await draft_served(stores, draft))
+    save_checkin_draft(stores, draft)
+    return wire
+
+
 class SlugTakenError(ConflictError):
     def __init__(self, slug: str, suggested: str) -> None:
         self.slug = slug
@@ -85,7 +104,7 @@ async def ingest_draft(
     blob: bytes,
     filename: str,
     slug: str | None = None,
-) -> DraftCampaign:
+) -> DraftCampaignWire:
     await _open_checkin(stores)
     kept = stores.tenant_datasets.keep_upload(blob, file_extension(filename))
     record_upload(stores, filename=filename, kept=kept)
@@ -110,8 +129,9 @@ async def ingest_draft(
         headers=list(table.headers),
         source_file=filename or "",
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
+        first_blank_row=_first_blank_rows(list(table.headers), list(table.rows)),
     )
-    return save_checkin_draft(stores, draft)
+    return await _kept(stores, draft)
 
 
 async def draft_from_dataset(
@@ -120,7 +140,7 @@ async def draft_from_dataset(
     dataset_name: str,
     overrides: dict[str, Any] | None = None,
     origin_campaign: Campaign | None = None,
-) -> DraftCampaign:
+) -> DraftCampaignWire:
     await _open_checkin(stores)
     dataset_dir = offered_dataset(stores, dataset_name).directory
     bank = checkin_bank(stores, dataset_name)
@@ -128,7 +148,7 @@ async def draft_from_dataset(
 
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
-    task = authored.task_description
+    task = authored.task_description or None
     matcher, dials = scoring_choice(cc.scoring)
     pipeline_overlay = authored.pipeline_nodes
     if origin_campaign is not None:
@@ -179,18 +199,14 @@ async def draft_from_dataset(
             "pipeline_steps": authored.active_steps,
             "candidate_library": authored.candidate_library,
         },
-        provenance={"task_description": Provenance.CONFIRMED},
+        provenance={} if task is None else {"task_description": Provenance.CONFIRMED},
     )
     if overrides:
         draft = draft.patch(**overrides)
-    return save_checkin_draft(stores, draft)
+    return await _kept(stores, draft)
 
 
-async def draft_from_dataset_name(*, stores: Stores, dataset_name: str) -> DraftCampaign:
-    return await draft_from_dataset(stores=stores, dataset_name=dataset_name)
-
-
-async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaign:
+async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignWire:
     campaign = canonical_origin_campaign(stores, origin_id)
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")

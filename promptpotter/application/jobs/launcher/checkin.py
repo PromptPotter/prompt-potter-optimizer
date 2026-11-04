@@ -51,7 +51,6 @@ from promptpotter.application.pipeline_resolve import (
     draft_served,
 )
 from promptpotter.domain.campaign import Optimize
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt
@@ -222,8 +221,6 @@ async def hold_checkin_start(
         land_job(stores, job_registry, job.job_id, hop, held.share)
         claim_cycle(stores, job_registry, job, hop)
     except BaseException as exc:
-        if isinstance(exc, BackendUnreachableError):
-            exc.details["draft_id"] = request.claim.draft_id
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
         raise
     finally:

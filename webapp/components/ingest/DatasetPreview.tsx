@@ -11,9 +11,8 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
   const { sample_preview: rows, headers } = draft;
   if (rows.length === 0 || headers.length === 0) return null;
 
-  // `column_query` is `""` until confirmed, so an unnamed header must not match it.
   const roleOf = (h: string) =>
-    !h ? "" : h === draft.column_query ? " (input)" : h === draft.column_ground_truth ? " (target)" : "";
+    h === draft.column_query ? " (input)" : h === draft.column_ground_truth ? " (target)" : "";
 
   // Keyed by position: an unnamed header is `""`, and two can be.
   const columns: Column<PreviewRow>[] = headers.map((h, i) => ({

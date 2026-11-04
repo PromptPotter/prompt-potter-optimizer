@@ -60,8 +60,10 @@ class DraftDependency(PipelineDependency):
 
 
 class DraftCampaignWire(StrictModel):
-    """A check-in's draft as every check-in route answers it; Start mints its campaign. No
-    ``tenant_id`` rides it (decisions.md § 0002)."""
+    """A check-in's draft as every check-in route answers it; Start mints its campaign.
+
+    No ``tenant_id`` rides it (decisions.md § 0002).
+    """
 
     draft_id: str
     slug: str
@@ -85,11 +87,11 @@ class DraftCampaignWire(StrictModel):
     optimizer_setup: OptimizerSetup = Field(
         description="The optimizer as this draft's config runs it, as a campaign serves it."
     )
-    raw_task_description: str
+    raw_task_description: str | None = Field(description="The task; null until one is set.")
     pipeline_overlay: dict[str, Any]
     headers: list[str]
-    column_query: str
-    column_ground_truth: str
+    column_query: str | None = Field(description="The input header; null until one is set.")
+    column_ground_truth: str | None = Field(description="The target header; null until one is set.")
     field_provenance: dict[str, Provenance] = Field(
         description="By checklist field id. Nothing reaches mint until `confirmed`."
     )
@@ -184,7 +186,9 @@ def _wire_overrides(draft: DraftCampaign, declared: Budget) -> OptimizationOverr
 _TITLE_MAX_CHARS = 72
 
 
-def _task_title(task: str) -> str | None:
+def _task_title(task: str | None) -> str | None:
+    if task is None:
+        return None
     first = next((line.strip() for line in task.splitlines() if line.strip()), "")
     title = re.sub(r"[.\s]+$", "", re.sub(r"^#+\s*", "", first))
     return title if 0 < len(title) <= _TITLE_MAX_CHARS else None
@@ -369,5 +373,5 @@ def default_campaign_block(draft: DraftCampaign, upload: UploadBasis) -> dict[st
 
 def draft_task_context(draft: DraftCampaign) -> TaskDecomposition:
     return TaskDecomposition.from_dict(
-        {**draft.decomposed_task_context, "raw_description": draft.raw_task_description}
+        {**draft.decomposed_task_context, "raw_description": draft.confirmed_task()}
     )

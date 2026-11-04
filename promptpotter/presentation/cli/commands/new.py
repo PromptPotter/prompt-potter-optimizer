@@ -57,7 +57,7 @@ from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError, 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
 
-    from promptpotter.application.datasets.origin_readiness import FieldGap, OriginLastResolution
+    from promptpotter.application.datasets.origin_readiness import FieldGap, OriginResolution
     from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadLaunched
     from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.application.jobs.launcher.run_job import HeldRun
@@ -152,11 +152,13 @@ def _draft_kept(draft_id: str) -> str:
 
 
 def _raise_incomplete(
-    gaps: Sequence[FieldGap], turn: OriginLastResolution | None, draft_id: str
+    gaps: Sequence[FieldGap], turn: OriginResolution | None, draft_id: str
 ) -> NoReturn:
     lines = ["ERROR: origin still incomplete — nothing minted.", "", "Open fields:"]
     lines += [f"  - {g.field}: {g.hint}" for g in gaps]
-    questions = turn.questions if turn else []
+    if turn is not None and turn.degraded_cause:
+        lines += ["", f"The resolver turn came back thin: {turn.degraded_cause}."]
+    questions = turn.last_resolution.questions if turn and turn.last_resolution else []
     if questions:
         lines += ["", "The resolver asked:"]
         lines += [f"  - {q.prompt}".rstrip() for q in questions]
@@ -204,14 +206,14 @@ async def _hold_checkin(
     # A turn writes no field the pipeline reads, so one read serves both readiness checks.
     served = await draft_served(stores, draft)
 
-    last_turn: OriginLastResolution | None = None
+    last_turn: OriginResolution | None = None
     if not origin_readiness(draft, draft_pipeline(stores, draft, served)).complete:
         _checkin_line("origin resolver", "running AI check-in")
         # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
         turn = await dispatch_origin_resolution(
             stores, CommandCall(ResolveOriginPayload(draft_id=draft_id))
         )
-        last_turn = turn.resolution.last_resolution
+        last_turn = turn.resolution
         draft = owned_draft(stores, draft_id)
 
     readiness = origin_readiness(draft, draft_pipeline(stores, draft, served))
