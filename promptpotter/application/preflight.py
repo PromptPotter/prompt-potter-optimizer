@@ -34,7 +34,7 @@ def _check_sp_budget_vs_dataset(
 ) -> PreflightWarning | None:
     # Only the PER-ROUND draw: an origin budget above the bank is fine (`sample_dataset` slices).
     m = len(dataset)
-    n = selected.round_cells(m)
+    n = selected.round_cells_asked(m)
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",

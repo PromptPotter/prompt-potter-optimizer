@@ -73,7 +73,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         session.record_intervention("submit-arms")
         session.store.campaigns.leave_comparison(session.hop, ComparisonExit.SUBMIT_ARMS)
         bank_proposals(ctx, arms, submitted=True)
-        session.state.control.take_submission(command_id, arms=len(arms))
+        session.state.control.take_submission(command_id)
         return arms
 
     arms = await hold_for_operator(session, _take, node=OPERATOR_SEAT.name, round_num=ctx.round_num)

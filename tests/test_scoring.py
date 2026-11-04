@@ -3835,7 +3835,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     declared = minted_campaign(
         CycleHop(campaign_id="arm", cycle_id="cycle_arm"),
         config=_h2h_config("potter", 0, _H2H_FORMULA, None),
-        purpose=Compare(arm=Arm(head_to_head_id="any", arm_key="any")),
+        purpose=Compare(arm=Arm(head_to_head_id="any", arm_key="any", replicate=1)),
     ).declaration
     for h2h_id in ("real4", "real5", "real6", "real7", "real8"):
         alike = declared.shared_part()
@@ -3976,7 +3976,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
                     f"{optimizer}_{key}_{record}",
                     hour,
                     selected=0.6,
-                    purpose=Compare(arm=Arm(head_to_head_id=record, arm_key=key)),
+                    purpose=Compare(arm=Arm(head_to_head_id=record, arm_key=key, replicate=1)),
                     graded=key != "waiting",
                 )
             )
@@ -4055,7 +4055,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             tilt=tilt,
             elects_on=elects_on,
             fit=fit,
-            purpose=Compare(arm=Arm(head_to_head_id="seeds", arm_key=cid)),
+            purpose=Compare(arm=Arm(head_to_head_id="seeds", arm_key=cid, replicate=1)),
         )
         for i, (cid, (selected, tilt, elects_on, fit)) in enumerate(replicated.items())
     ]

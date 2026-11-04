@@ -53,13 +53,13 @@ from promptpotter.application.evidence.metric_catalogue import (
     resolve_metric,
 )
 from promptpotter.application.evidence.subjects import (
-    ScenarioReading,
     SubjectMask,
     SubjectReading,
     SubjectSpec,
     WinnerChainPoint,
     authorship_of,
     parse_tree_address,
+    scenario_said,
 )
 from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
@@ -87,6 +87,7 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
 )
 from promptpotter.domain.ruler import CellScopes
+from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -361,7 +362,7 @@ class _Head(NamedTuple):
     point: _ChainPoint
     authorship: str
     human_intervened: bool
-    scenario: ScenarioReading | None = None
+    scenario: Said | None = None
     chain: list[_ChainPoint] | None = None
 
 
@@ -687,7 +688,7 @@ def _masked(point: _ChainPoint, keys: frozenset[str] | None) -> _ChainPoint:
 
 def _scenario(
     stores: Stores, spec: SubjectSpec, cycle: _Cycle
-) -> tuple[ScenarioReading, list[_ChainPoint]] | None:
+) -> tuple[Said, list[_ChainPoint]] | None:
     record = load_mask_record(stores, spec.campaign_id, spec.samples, lens=spec.lens)
     recorded = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
     if recorded is None:
@@ -700,10 +701,10 @@ def _scenario(
     parted = last.scenario_key != last.recorded_key
     keys = cycle.mask(spec.samples)
     return (
-        ScenarioReading(
+        scenario_said(
+            spec.lens.spelling if spec.lens else None,
             recorded_winner_key=last.recorded_key,
             scenario_winner_key=last.scenario_key,
-            winner_changed=parted,
             first_divergent_round=last.round if parted else None,
             invariant_rounds=len(steps) - 1 if parted else len(steps),
             # The cycle's, not the chain's: the chain stops at the parting.

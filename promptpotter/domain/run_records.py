@@ -25,7 +25,6 @@ from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
-    GateDecision,
     GateKind,
     LaunchStage,
     PauseCause,
@@ -694,56 +693,6 @@ class NoEffect(FrozenModel):
     kind: Literal["none"] = "none"
 
 
-class PausedEffect(FrozenModel):
-    """``pause-cycle``, taken by the loop."""
-
-    kind: Literal["paused"] = "paused"
-    run_phase: Literal[RunPhase.PAUSED]
-
-
-class SkippedEffect(FrozenModel):
-    """``skip-sample``, taken by the loop."""
-
-    kind: Literal["skipped"] = "skipped"
-    skipped: int
-
-
-class GateDecidedEffect(FrozenModel):
-    """``origin-gate-decision``, taken by the loop."""
-
-    kind: Literal["gate_decided"] = "gate_decided"
-    decision: GateDecision
-
-
-class ArmsTakenEffect(FrozenModel):
-    """``submit-arms``: how many arms the round banked."""
-
-    kind: Literal["arms_taken"] = "arms_taken"
-    arms: int
-
-
-class LookaheadTakenEffect(FrozenModel):
-    """``set-sample-lookahead``, spent by the round that took it."""
-
-    kind: Literal["lookahead_taken"] = "lookahead_taken"
-    cells: int
-    auto: bool
-
-
-class ArmedCeilingEffect(FrozenModel):
-    """``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands."""
-
-    kind: Literal["armed_ceiling"] = "armed_ceiling"
-    armed: Budget
-
-
-class OriginEditedEffect(FrozenModel):
-    """A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new."""
-
-    kind: Literal["origin_edited"] = "origin_edited"
-    moved: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
-
-
 class DraftOpenedEffect(FrozenModel):
     """A check-in draft opened by upload, dataset or origin: the draft a retry under its key answers."""
 
@@ -751,18 +700,7 @@ class DraftOpenedEffect(FrozenModel):
     draft_id: str
 
 
-CommandEffect = Annotated[
-    NoEffect
-    | PausedEffect
-    | SkippedEffect
-    | GateDecidedEffect
-    | ArmsTakenEffect
-    | LookaheadTakenEffect
-    | ArmedCeilingEffect
-    | OriginEditedEffect
-    | DraftOpenedEffect,
-    Field(discriminator="kind"),
-]
+CommandEffect = Annotated[NoEffect | DraftOpenedEffect, Field(discriminator="kind")]
 
 
 class CommandAckRecord(FrozenModel):
@@ -1263,6 +1201,7 @@ class ComparisonExit(enum.StrEnum):
     FORK = "fork"
     SUBMIT_ARMS = "submit_arms"
     SKIP = "skip"
+    SET_LIMITS = "set_limits"
 
 
 class LeftComparisonRecord(FrozenModel):

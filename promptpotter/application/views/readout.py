@@ -376,7 +376,9 @@ class ReadoutProjection(Projection):
             return
         opening = self._sample_lookahead_depth is None
         self._sample_lookahead_depth = depth
-        if opening and depth <= 1:
+        if depth > 1 and record.role is MeasurementRole.BENCH:
+            tail = " (a bench pass holds the backend's ceiling; no press reaches it)"
+        elif opening and depth <= 1:
             tail = (
                 f" — {qt} samples run one at a time; arm it from the browser to overlap them"
                 if qt > 1

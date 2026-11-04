@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any, assert_never
 
-from promptpotter.application.jobs.launcher.admission import refuse_as_busy, request_job
+from promptpotter.application.jobs.launcher.admission import refuse_as_busy, request_jobs
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, hold_checkin_start
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
@@ -82,7 +82,7 @@ class Admitted:
         async def hold_and_detach() -> CycleHop:
             held = await _hold(request, stores=stores, job_registry=job_registry, job=job)
             hop = held.session.hop
-            held.detach(mode=self.mode)
+            await held.detach(mode=self.mode)
             return hop
 
         if job.queued:
@@ -100,7 +100,7 @@ def admit(
     inline: Inline | None,
 ) -> Admitted:
     """Call AFTER everything a person types: a slot held across an interactive check-in is lost."""
-    job = request_job(
+    (job,) = request_jobs(
         stores=stores,
         job_registry=job_registry,
         holder=CampaignLaunch(request.dataset_name, draft_id=request.draft_id),

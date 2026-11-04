@@ -188,7 +188,6 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    ArmedCeilingEffect,
     BankedSubject,
     ConfigOverrides,
     CycleSeed,
@@ -365,21 +364,20 @@ def _budgeted(budget: Budget) -> CampaignConfig:
 
 
 def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> Budget:
-    """The ceiling the change armed, as its ack's effect states it."""
+    """The ceiling the change armed: the campaign's money and the cycle's own axes."""
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
     )
     dispatched = DispatchedToCycle(dispatcher, payload, minted_campaign(hop), hop)
 
-    async def apply() -> tuple[Applier[object], object]:
+    async def apply() -> Applier[object]:
         applier = await change_run_limits(dispatched)
-        return applier, await applier.run()
+        await applier.run()
+        return applier
 
-    applier, applied = asyncio.run(apply())
-    assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
-    effect = applier.effect_fn(applied)
-    assert isinstance(effect, ArmedCeilingEffect), f"a limits change acked {effect!r}"
-    return effect.armed
+    asyncio.run(apply())
+    campaigns = dispatcher.stores.campaigns
+    return campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
 
 
 # 1. What a call costs
@@ -1557,7 +1555,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     dispatcher = CommandDispatcher(built_stores, registry)
     armed = _change_run_limits(dispatcher, moved, Budget(usd=0.50))
     assert armed.usd == pytest.approx(0.50), (
-        "the trace holds no ceiling a replay could stop the run at"
+        "the change armed no ceiling a replay could stop the run at"
     )
     assert budget_stop(moved_book) == StopReason.TOKEN_BUDGET, (
         "a USD raise lifted the token ceiling"
@@ -3201,7 +3199,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
     armed = _change_run_limits(dispatcher, hop, Budget(usd=None))
     assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
-        "the ack's ceiling is not what a stop fires at: the campaign's money and the cycle's own"
+        "the armed ceiling is not what a stop fires at: the campaign's money and the cycle's own"
     )
     lifted, held = metered.campaigns.read_campaign_ceiling(hop), registry.get(job.job_id)
     assert lifted == Budget(usd=None, tokens=1_000), (
@@ -3314,7 +3312,9 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     stores.tenant_datasets.relabel("duel", bank.dataset_hash)
     detached: list[JobSpec] = []
 
-    def ran_elsewhere(registry: JobRegistry, spec: JobSpec, **_: Stores) -> asyncio.Task[None]:
+    async def ran_elsewhere(
+        registry: JobRegistry, spec: JobSpec, **_: Stores
+    ) -> asyncio.Task[None]:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         detached.append(spec)
         registry.release(spec.job_id)

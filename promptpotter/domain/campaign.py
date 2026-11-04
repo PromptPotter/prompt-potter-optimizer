@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
 
@@ -110,6 +111,8 @@ class Arm(FrozenModel):
 
     head_to_head_id: ArmName
     arm_key: ArmName
+    # Arms of one replicate share its draws (`run_clamp`); numbered at the mint by treatment.
+    replicate: int = Field(ge=1)
 
 
 class Optimize(FrozenModel):
@@ -127,6 +130,17 @@ class Compare(FrozenModel):
 
 # What a run is FOR (decisions.md § 0009), declared once: every scope, stamp and meter derives from it.
 Purpose = Annotated[Optimize | Compare, Field(discriminator="kind")]
+
+
+def run_clamp(clamp: DeterminismClamp | None, purpose: Purpose) -> DeterminismClamp | None:
+    """The clamp a run draws and sends under. A head-to-head pins one seed on every arm
+    (`PINNED_LOOP_KEYS`), so an arm's replicate enters it: else N replicates of one treatment make
+    one draw and read as a tight interval. Arms of one replicate share it (common random numbers),
+    so a pair's difference carries no draw-to-draw noise."""
+    if clamp is None or clamp.seed is None or isinstance(purpose, Optimize):
+        return clamp
+    seed = random.Random(f"{clamp.seed}:{purpose.arm.replicate}").getrandbits(31)
+    return clamp.model_copy(update={"seed": seed})
 
 
 class Environment(FrozenModel):

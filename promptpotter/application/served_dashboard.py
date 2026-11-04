@@ -375,18 +375,20 @@ def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    wiring = stores.campaigns.read_run_wiring(hop)
-    return None if wiring is None else _binding(stores, hop, config, run, wiring.run_limits)
+    held = fold_at(Cut(cycle=CycleDir(cycle_dir_for(stores.base_dir, hop)), hop=hop, offset=None))
+    return None if held is None else _binding(stores, hop, config, run, held.run_limits)
 
 
 def _binding(
-    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, declared: RunLimits
+    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, folded: RunLimits
 ) -> RunLimits:
+    """*folded* carries the cycle's standing budget already; the campaign's ceiling rides its root.
+    A next launch keeps the fold's optimizer limits under the budget it would be admitted at."""
     if config is not None and not run.producer.appending:
-        declared = declared.model_copy(
+        return folded.model_copy(
             update={"budget": next_launch_budget(config, stores=stores, hop=hop)}
         )
-    return stores.campaigns.armed_run_limits(hop, declared)
+    return stores.campaigns.armed_run_limits(hop, folded)
 
 
 def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:

@@ -53,7 +53,7 @@ from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
-    request_job,
+    request_jobs,
     withdraw_queued,
 )
 from promptpotter.application.jobs.machine_status import machine_status
@@ -88,7 +88,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
-from promptpotter.domain.job import CampaignLaunch
+from promptpotter.domain.job import CampaignLaunch, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
@@ -696,6 +696,48 @@ async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) 
     for _ in range(200):
         quota.refuse_request_rate(host, read=False)
 
+    # A slot ask's rate token is debited under the gate it was read under: N asks racing on one
+    # token admit exactly one, or a burst of paid passes each reads the same untouched bucket.
+    monkeypatch.setattr(settings_mod.settings, "USER_RATE_BURST", 1)
+    monkeypatch.setattr(settings_mod.settings, "USER_RATE_PER_MIN", 0)
+    passes = JobRegistry(home / "pass-jobs", capacity=lambda _: 8)
+    racing = threading.Barrier(4)
+
+    def ask_slot() -> bool:
+        racing.wait()
+        try:
+            request_jobs(
+                stores=build_stores_from_identity(writer),
+                job_registry=passes,
+                holder=ScoringPass("verify"),
+            )
+        except quota.RateLimitedError:
+            return False
+        return True
+
+    admitted = await asyncio.gather(*(asyncio.to_thread(ask_slot) for _ in range(4)))
+    assert sorted(admitted) == [False, False, False, True], (
+        "asks racing on one rate token were each admitted off one reading of the bucket"
+    )
+
+    # A slotless paid call takes its token in one step: N calls racing on one token admit one.
+    calls = threading.Barrier(4)
+
+    async def one_call() -> bool:
+        await asyncio.to_thread(calls.wait)
+        try:
+            async with quota.paid_call(
+                stores=build_stores_from_identity(writer), bucket="turn", provider="openrouter"
+            ):
+                return True
+        except quota.RateLimitedError:
+            return False
+
+    admitted = await asyncio.gather(*(one_call() for _ in range(4)))
+    assert sorted(admitted) == [False, False, False, True], (
+        "paid calls racing on one rate token were each admitted off one reading of the bucket"
+    )
+
     # Cross-origin, a credentialed caller is offered only the methods the routes serve and the
     # headers a client sends; another origin is offered nothing.
     site = "https://site.example"
@@ -862,8 +904,10 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     )
     # A full box: every launch takes a place in line.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    owners = request_job(stores=owner, job_registry=registry, holder=CampaignLaunch("ds1"))
-    delegates = request_job(stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1"))
+    (owners,) = request_jobs(stores=owner, job_registry=registry, holder=CampaignLaunch("ds1"))
+    (delegates,) = request_jobs(
+        stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1")
+    )
     assert owners.queued and delegates.queued
     assert owners.user_id == delegates.user_id, "one account: the quota key cannot tell them apart"
 
@@ -1090,7 +1134,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A launch holds its cycle from the moment it is accepted; a full box queues it.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    job = request_job(
+    (job,) = request_jobs(
         stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
     )
     assert job.queued
@@ -1100,7 +1144,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert claimed.pause_refusal, "a queued launch was offered a pause no loop can take"
     delete_refused()
     with pytest.raises(CycleBusyError):
-        request_job(
+        request_jobs(
             stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
         )
     with pytest.raises(CycleBusyError):

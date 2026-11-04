@@ -390,14 +390,15 @@ class CleanupEmptyCyclesPayload(CyclePayload, kind=CommandKind.CLEANUP_EMPTY_CYC
 class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.CHANGE_RUN_LIMITS):
     """Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or
     round-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the
-    account allowance; the command's ack on the cycle's ledger carries the ceiling it armed."""
+    account allowance. On an arm of a head-to-head it moves that arm alone, and leaves the
+    comparison only when a ceiling moved."""
 
     inner_refusal: ClassVar[str | None] = (
         "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
     )
     follow_up: ClassVar[str] = (
-        "It is clamped against your account allowance; the command's ack carries the ceiling it "
-        "armed, and `resume` picks it up."
+        "It is clamped against your account allowance, and `resume` picks it up; an arm of a "
+        "head-to-head leaves its comparison only when a ceiling moved."
     )
 
     # An axis it does not name stays as it stands; a named null lifts it.
@@ -674,7 +675,11 @@ class HeadToHeadRequest(StrictModel):
         return {**arm.optimization_sent, **({"budget": budget} if budget else {})}
 
     def purpose(self, arm: ArmRequest) -> Compare:
-        return Compare(arm=Arm(head_to_head_id=self.head_to_head_id, arm_key=arm.arm_key))
+        """Replicate 1 as asked: the mint numbers it on the arms standing under its record lock
+        (`jobs/mint.py::_numbered`)."""
+        return Compare(
+            arm=Arm(head_to_head_id=self.head_to_head_id, arm_key=arm.arm_key, replicate=1)
+        )
 
 
 class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):

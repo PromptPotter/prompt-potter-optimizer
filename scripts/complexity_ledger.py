@@ -37,7 +37,7 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 67,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 9,
+    "models_lax": 8,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
@@ -51,7 +51,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 185,
+    "p_served": 183,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.
@@ -99,7 +99,9 @@ def _served_properties() -> list[str]:
 
 # Where a change lands by hand: the package, the scripts and the webapp's production source. A test, a prose doc and a generated file are no such site.
 _WEBAPP_SOURCE = ("app", "components", "lib")
+# The terminal's readers: the CLI, and the one view builder that renders only its lines.
 _CLI_ROOT = _PACKAGE_ROOT / "presentation" / "cli"
+_TERMINAL_VIEW = _PACKAGE_ROOT / "application" / "views" / "evidence.py"
 
 
 def _sites() -> dict[Path, str]:
@@ -275,7 +277,7 @@ def _read_names(sites: dict[Path, str]) -> set[str]:
                 for entry in "".join(groups).split(","):
                     if key := re.match(r"\s*(\w+)", entry):
                         read.add(key[1])
-        elif _CLI_ROOT in path.parents:
+        elif _CLI_ROOT in path.parents or path == _TERMINAL_VIEW:
             code = text
         else:
             continue

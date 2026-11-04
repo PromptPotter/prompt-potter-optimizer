@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.datasets.draft_build import (
@@ -10,12 +10,7 @@ from promptpotter.application.datasets.draft_build import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
-from promptpotter.application.datasets.origin_readiness import (
-    origin_delta,
-    origin_projection,
-    save_checkin_draft,
-)
-from promptpotter.domain.run_records import NoEffect, OriginEditedEffect
+from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched, DispatchedToDraft
@@ -25,14 +20,6 @@ if TYPE_CHECKING:
 
 async def reread_draft_wire(stores: Stores, draft_id: str) -> DraftCampaignWire:
     return await read_draft_wire(stores, owned_draft(stores, draft_id))
-
-
-def origin_effect(
-    stores: Stores, draft_id: str, before: dict[str, Any]
-) -> OriginEditedEffect | NoEffect:
-    """Recorded on the ack because the command payload states only what was ASKED for."""
-    moved = origin_delta(before, origin_projection(owned_draft(stores, draft_id)))
-    return OriginEditedEffect(moved=moved) if moved else NoEffect()
 
 
 async def edit_draft_campaign(
@@ -49,12 +36,8 @@ async def edit_draft_campaign(
         save_checkin_draft(stores, updated)
         return wire
 
-    before = origin_projection(draft)
     return Applier(
-        _apply,
-        replay=lambda _: reread_draft_wire(stores, draft_id),
-        effect_fn=lambda _: origin_effect(stores, draft_id, before),
-        claim=dispatched.claim,
+        _apply, replay=lambda _: reread_draft_wire(stores, draft_id), claim=dispatched.claim
     )
 
 

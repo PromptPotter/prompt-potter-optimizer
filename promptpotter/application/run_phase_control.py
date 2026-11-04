@@ -9,16 +9,9 @@ from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     GateDecision,
     PauseCause,
-    RunPhase,
     StopReason,
 )
-from promptpotter.domain.run_records import (
-    ArmsTakenEffect,
-    GateDecidedEffect,
-    LookaheadTakenEffect,
-    PausedEffect,
-    SkippedEffect,
-)
+from promptpotter.domain.run_records import NoEffect
 from promptpotter.infrastructure.llm.telemetry import emit_command_ack
 from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import Controls
@@ -85,7 +78,7 @@ class RunControl:
     # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
     # one arming would multiply concurrency at every nested level.
     enclosing: tuple[Path, ...] = ()
-    # Held for the whole run and never spent (a screen has no round); ``None`` reads the inbox.
+    # Held, never spent, where no round spends a press (a screen, a bench pass); ``None`` reads the inbox.
     held_lookahead: int | None = None
 
     def _inbox(self) -> Controls:
@@ -110,11 +103,7 @@ class RunControl:
         """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""
         asked = self._inbox().pause
         if asked is not None:
-            emit_command_ack(
-                command_id=asked.command_id,
-                status="applied",
-                effect=PausedEffect(run_phase=RunPhase.PAUSED),
-            )
+            emit_command_ack(command_id=asked.command_id, status="applied", effect=NoEffect())
             return PauseCause.COMMAND, f"pause-cycle by {asked.issued_by.display}"
         for outer in reversed(self.enclosing):
             if standing_controls(outer).pause is not None:
@@ -128,7 +117,7 @@ class RunControl:
         skips = self._inbox().skips
         if not skips:
             return False
-        emit_command_ack(command_id=skips[0], status="applied", effect=SkippedEffect(skipped=1))
+        emit_command_ack(command_id=skips[0], status="applied", effect=NoEffect())
         return True
 
     def take_gate_decision(self) -> GateDecision | None:
@@ -136,19 +125,16 @@ class RunControl:
         if not standing:
             return None
         command_id, asked = standing[0]
-        decision = cast("GateDecision", asked)
-        emit_command_ack(
-            command_id=command_id, status="applied", effect=GateDecidedEffect(decision=decision)
-        )
-        return decision
+        emit_command_ack(command_id=command_id, status="applied", effect=NoEffect())
+        return cast("GateDecision", asked)
 
     def standing_submission(self) -> tuple[str, SubmitArmsPayload] | None:
         """Read, not taken: the round's arms are banked before `take_submission` acks them."""
         standing = self._inbox().submissions
         return standing[0] if standing else None
 
-    def take_submission(self, command_id: str, *, arms: int) -> None:
-        emit_command_ack(command_id=command_id, status="applied", effect=ArmsTakenEffect(arms=arms))
+    def take_submission(self, command_id: str) -> None:
+        emit_command_ack(command_id=command_id, status="applied", effect=NoEffect())
 
     def sample_lookahead(self) -> int:
         if self.held_lookahead is not None:
@@ -161,11 +147,7 @@ class RunControl:
             return
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
-            emit_command_ack(
-                command_id=asked.command_id,
-                status="applied",
-                effect=LookaheadTakenEffect(cells=asked.cells, auto=asked.auto),
-            )
+            emit_command_ack(command_id=asked.command_id, status="applied", effect=NoEffect())
 
 
 def budget_stop(book: SpendBook) -> StopReason | None:

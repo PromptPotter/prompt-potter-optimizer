@@ -4,7 +4,6 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
-from promptpotter.application.commands.draft_editing import origin_effect
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
     draft_wire,
@@ -13,7 +12,6 @@ from promptpotter.application.datasets.draft_build import (
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import (
     load_resolution,
-    origin_projection,
     save_checkin_draft,
 )
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
@@ -71,13 +69,7 @@ async def resolve_origin(
             draft=await read_draft_wire(stores, replayed),
         )
 
-    before = origin_projection(draft)
-    return Applier(
-        _apply,
-        replay=_on_replay,
-        effect_fn=lambda _: origin_effect(stores, draft_id, before),
-        claim=dispatched.claim,
-    )
+    return Applier(_apply, replay=_on_replay, claim=dispatched.claim)
 
 
 async def dispatch_origin_resolution(

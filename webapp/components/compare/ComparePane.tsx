@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
 import type { MeasuredLift } from "@/lib/api/types";
-import { SCENARIO_WORDS } from "@/lib/api/types.generated";
 import {
   CardFrame,
   DataTable,
@@ -278,38 +277,25 @@ export function ComparePane() {
 function Scenarios({ evidence }: { evidence: Evidence }) {
   const masked = evidence.subjects.filter((s) => s.scenario !== null);
   if (masked.length === 0) return null;
-  const w = SCENARIO_WORDS;
   return (
     <CardFrame title="What the scoring mask changed" headingTag="h2">
       {masked.map((s) => {
-        const sc = s.scenario;
-        if (!sc) return null;
-        const line = (
-          <>
-            <strong>{s.label}</strong> under <code>{s.mask?.lens}</code>:{" "}
-            {sc.winner_changed ? (
-              <>
-                {w.parted} {sc.first_divergent_round}, {w.crowned}{" "}
-                <code>{sc.scenario_winner_key?.slice(0, 8)}</code> {w.instead_of}{" "}
-                <code>{sc.recorded_winner_key?.slice(0, 8)}</code>.
-              </>
-            ) : (
-              <>{w.held}.</>
-            )}{" "}
-            {sc.invariant_rounds} of {sc.total_rounds}{" "}
-            {sc.total_rounds === 1 ? w.round : w.rounds} {w.unchanged}; {w.reads_over}{" "}
-            {sc.n_samples_scored} {sc.n_samples_scored === 1 ? w.sample : w.samples}.
-          </>
-        );
-        return sc.first_divergent_round !== null ? (
-          <Said key={s.key} tone="warn" label={line} />
-        ) : (
+        const said = s.scenario;
+        if (!said) return null;
+        return (
           <p key={s.key} className="note-lede">
-            {line}
+            <Said
+              tone={said.tone}
+              label={
+                <>
+                  <strong>{s.label}</strong> {said.label}
+                </>
+              }
+              detail={said.detail}
+            />
           </p>
         );
       })}
-      <p className="note-info">{w.caveat}</p>
     </CardFrame>
   );
 }

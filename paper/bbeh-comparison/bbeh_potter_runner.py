@@ -197,7 +197,7 @@ async def run_bbeh_campaign(
                 "optimizer": "promptpotter",
                 "budget_rounds": opt_cfg.budget.rounds,
                 "n_variants": select_optimizer(opt_cfg).arms_per_round,
-                "sp_budget_round": select_optimizer(opt_cfg).round_cells(len(train_pool)),
+                "sp_budget_round": select_optimizer(opt_cfg).round_cells_asked(len(train_pool)),
                 "model_id": target_model,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4) if train_acc is not None else None,

@@ -131,6 +131,12 @@ class JobRegistry:
                 stage=stage,
             )
 
+    def has_room(self, count: int) -> bool:
+        """Whether *count* slots asked together all start now; ask it under the gate that takes them."""
+        with self.admission_gate():
+            live = len(self.list_running())
+            return all(live + i < self._capacity(live + i) for i in range(count))
+
     async def await_claim(self, job_id: str) -> None:
         """A poll, not a signal: the slot frees in another process, and only the jobs dir is shared."""
         deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S

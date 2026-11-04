@@ -246,40 +246,6 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
     return {key: getter(draft) for key, getter in getters.items()}
 
 
-def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
-    """The authored prompts, not the committed origin: what a commit derives from the task and the
-    labels moves with fields this projection already holds."""
-    projection: dict[str, Any] = {
-        "slug": draft.slug,
-        "basis": draft.basis.model_dump(mode="json"),
-        "scoring_matcher": draft.scoring_matcher,
-        "pipeline_steps": list(draft.pipeline_steps),
-        "pipeline_overlay": draft.pipeline_overlay,
-        "optimization_overrides": draft.optimization_overrides,
-        "candidate_library": list(draft.candidate_library),
-        "reused_origin_id": draft.reused_origin_id,
-    }
-    for field_key, value in (
-        ("column.query", draft.column_query),
-        ("column.ground_truth", draft.column_ground_truth),
-        ("task_description", draft.raw_task_description),
-    ):
-        if draft.field_provenance.get(field_key) is Provenance.CONFIRMED:
-            projection[field_key] = value
-    for step, fields in draft.origin_prompts.items():
-        for name, text in fields.items():
-            projection[f"prompt.{step}.{name}"] = text
-    return projection
-
-
-def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: {"from": before.get(key), "to": after.get(key)}
-        for key in before.keys() | after.keys()
-        if before.get(key) != after.get(key)
-    }
-
-
 def save_checkin_draft(
     stores: Stores, draft: DraftCampaign, *, resolution: OriginResolution | None = None
 ) -> DraftCampaign:

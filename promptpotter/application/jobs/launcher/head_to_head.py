@@ -194,7 +194,7 @@ class AdmittedHeadToHead:
         exits: list[asyncio.Task[None]] = []
         for i, arm in enumerate(arms):
             try:
-                exits.append(arm.held.detach(mode=RunMode()))
+                exits.append(await arm.held.detach(mode=RunMode()))
             except BaseException as exc:
                 for rest in arms[i + 1 :]:
                     session = rest.held.session

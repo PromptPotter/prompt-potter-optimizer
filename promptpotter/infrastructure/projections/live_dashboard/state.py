@@ -139,7 +139,9 @@ class DashboardFacts(StrictModel):
 
     round_cells_ceiling: int
 
-    # As DECLARED; what binds now is ``ServedDashboard.run_limits``.
+    # As the launch declared it, the cycle's standing budget laid over; the campaign's ceiling is
+    # laid at the read (`campaign_store/store.py::CampaignStore.armed_run_limits`), so what binds is
+    # ``ServedDashboard.run_limits``.
     run_limits: RunLimits
     defaults_drift: DefaultsDrift | None = Field(
         default=None,

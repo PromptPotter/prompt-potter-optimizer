@@ -18,9 +18,9 @@ from promptpotter.application.jobs.quota import (
     hold_moved,
     move_campaign_money,
     next_launch_budget,
-    refuse_verb_rate,
     sends_on,
     share_campaign_ceiling,
+    slot_rate,
 )
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import cycle_config
@@ -142,38 +142,47 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     return None
 
 
-def request_job(
+def request_jobs(
     *,
     stores: Stores,
     job_registry: JobRegistry,
     holder: SlotHolder,
     hop: CycleHop = UNRESOLVED_HOP,
-) -> Job:
-    user = account_of(stores)
+    count: int = 1,
+) -> list[Job]:
+    """THE slot door of every launch, head-to-head and scoring pass: *count* jobs or none. Only a
+    lone ask queues; N asked together never do, so no arm searches while a sibling waits on
+    another machine. A rate token is debited per job returned, past every refusal but the queue's."""
+    assert count == 1 or hop == UNRESOLVED_HOP, "jobs asked together mint their cycles"
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
-    with job_registry.admission_gate():
-        match holder:
-            case CampaignLaunch():
-                check_launch_quotas(
-                    user=user, stores=stores, job_registry=job_registry, hop=hop, launches=1
-                )
-            case ScoringPass(verb=verb):
-                refuse_verb_rate(stores, user, verb)
-            case _:
-                assert_never(holder)
+    with job_registry.admission_gate(), slot_rate(stores, holder, hop, asked=count):
+        # A scoring pass is load, never a campaign the concurrent and daily ceilings count.
+        if isinstance(holder, CampaignLaunch):
+            check_launch_quotas(
+                user=account_of(stores),
+                stores=stores,
+                job_registry=job_registry,
+                hop=hop,
+                launches=count,
+            )
         if hop != UNRESOLVED_HOP:
             _refuse_taken_cycle(stores, job_registry, hop)
-        job = job_registry.request_slot(
-            user_id=str(stores.identity.user_id),
-            principal_id=acting_principal(stores.identity).id,
-            workspace=stores.campaigns.workspace,
-            holder=holder,
-            hop=hop,
-        )
+        if count > 1 and not job_registry.has_room(count):
+            raise _machine_busy(job_registry)
+        jobs = [
+            job_registry.request_slot(
+                user_id=str(stores.identity.user_id),
+                principal_id=acting_principal(stores.identity).id,
+                workspace=stores.campaigns.workspace,
+                holder=holder,
+                hop=hop,
+            )
+            for _ in range(count)
+        ]
         # A pass takes no claim: it never queues, and holds the cycle itself once admitted (`paid_pass`).
         if hop != UNRESOLVED_HOP and isinstance(holder, CampaignLaunch):
-            claim_cycle(stores, job_registry, job, hop)
-        return job
+            claim_cycle(stores, job_registry, jobs[0], hop)
+        return jobs
 
 
 def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
@@ -354,64 +363,59 @@ def admit_arms(
     job_registry: JobRegistry,
     holder: CampaignLaunch | EmbeddedRun,
 ) -> list[tuple[Job, HeldBudget]]:
-    """Every arm's job and share, each at its budget and sends, or none, under one gate: never
-    queued, so no arm searches while a sibling waits on another machine. An embedded host holds
-    no slot (`embedded_share`)."""
-    user = account_of(stores)
-    admitted: list[tuple[Job, HeldBudget]] = []
+    """Every arm's job and share, each at its budget and sends, or none, under one gate. An
+    embedded host holds no slot (`embedded_share`)."""
     with job_registry.admission_gate():
-        job: Job | None = None
+        jobs: list[Job] = []
         try:
-            if isinstance(holder, CampaignLaunch):
-                check_launch_quotas(
-                    user=user,
-                    stores=stores,
-                    job_registry=job_registry,
-                    hop=UNRESOLVED_HOP,
-                    launches=len(declared),
+            jobs = _arm_jobs(stores, job_registry, holder, count=len(declared))
+            admitted = [
+                (
+                    job,
+                    admit_and_share(
+                        budget,
+                        Budget(),
+                        stores=stores,
+                        job_registry=job_registry,
+                        job=job,
+                        hop=None,
+                        step_rounds=None,
+                        sends=sends,
+                    ),
                 )
-            for budget, sends in declared:
-                job = _arm_job(stores, job_registry, holder)
-                if job.queued:
-                    raise _machine_busy(job_registry)
-                held = admit_and_share(
-                    budget,
-                    Budget(),
-                    stores=stores,
-                    job_registry=job_registry,
-                    job=job,
-                    hop=None,
-                    step_rounds=None,
-                    sends=sends,
-                )
-                admitted.append((job, held))
-                job = None
+                for job, (budget, sends) in zip(jobs, declared, strict=True)
+            ]
         except BaseException as exc:
             # Inside the gate, so no admission between reads the arms a refusal takes back.
-            for refused in [*(j for j, _ in admitted), *([] if job is None else [job])]:
+            for refused in jobs:
                 release_slot(job_registry, refused.job_id, exc, stores=stores, hop=None)
             raise
     return admitted
 
 
-def _arm_job(
-    stores: Stores, job_registry: JobRegistry, holder: CampaignLaunch | EmbeddedRun
-) -> Job:
-    user_id, workspace = str(stores.identity.user_id), stores.campaigns.workspace
-    principal_id = acting_principal(stores.identity).id
+def _arm_jobs(
+    stores: Stores, job_registry: JobRegistry, holder: CampaignLaunch | EmbeddedRun, *, count: int
+) -> list[Job]:
     match holder:
         case CampaignLaunch():
-            return job_registry.request_slot(
-                user_id=user_id, principal_id=principal_id, workspace=workspace, holder=holder
+            jobs = request_jobs(
+                stores=stores, job_registry=job_registry, holder=holder, count=count
             )
+            # A lone arm the door queued: an arm never waits on another machine.
+            if jobs[0].queued:
+                refuse_as_busy(stores, job_registry, jobs[0])
+            return jobs
         case EmbeddedRun():
-            return job_registry.create(
-                user_id=user_id,
-                principal_id=principal_id,
-                workspace=workspace,
-                hop=UNRESOLVED_HOP,
-                holder=holder,
-            )
+            return [
+                job_registry.create(
+                    user_id=str(stores.identity.user_id),
+                    principal_id=acting_principal(stores.identity).id,
+                    workspace=stores.campaigns.workspace,
+                    hop=UNRESOLVED_HOP,
+                    holder=holder,
+                )
+                for _ in range(count)
+            ]
         case _:
             assert_never(holder)
 
@@ -555,8 +559,8 @@ async def paid_pass(
 ) -> AsyncIterator[SpendBook]:
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
-    job = await asyncio.to_thread(
-        request_job,
+    (job,) = await asyncio.to_thread(
+        request_jobs,
         stores=stores,
         job_registry=job_registry,
         holder=ScoringPass(verb),

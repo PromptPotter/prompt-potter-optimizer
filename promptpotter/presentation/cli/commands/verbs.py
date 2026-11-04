@@ -156,8 +156,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 metavar="KEY=OPTIMIZER[,KNOB=VALUE…]",
                 help="Repeatable, one per arm: its key, the optimizer it runs, and that "
                 "optimizer's knobs in `new --set`'s spelling — `--arm capo=capo "
-                "--arm capo-b5=capo,nodes.<node>.max_blocks=5`. No `budget.*` or "
-                "`halt_at_accuracy`: every arm runs the budget below to its end.",
+                "--arm capo-b5=capo,nodes.<node>.max_blocks=5`; an arm on an earlier arm's "
+                "treatment, this act's or a standing one's, is its next replicate, on its own seed. No `budget.*` or `halt_at_accuracy`: every arm runs the budget below to its end.",
             ),
             *BUDGET_AXES,
         ),

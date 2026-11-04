@@ -14,6 +14,7 @@ from promptpotter.domain.cycle_paths import (
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
+from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.identity import Principal
@@ -143,57 +144,53 @@ class SubjectMask(StrictModel):
     samples: list[int] | None
 
 
-class ScenarioReading(StrictModel):
-    """What the mask did to this branch: how far it agrees with the record, and the round it stops.
-
-    The chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is
-    one round's disagreement — both read at ``first_divergent_round``, or at the branch's last round
-    where there is none. Reading a mid-chain counterfactual against the branch's final crown instead
-    would compare two different rounds and report the gap between them as a change.
-
-    Worded by ``SCENARIO_WORDS`` on every surface, its ``caveat`` with it: the honest limit of a
-    lens is not something a surface can be trusted to remember.
-    """
-
-    recorded_winner_key: str | None
-    scenario_winner_key: str | None
-    winner_changed: bool
-    first_divergent_round: int | None
-    invariant_rounds: int
-    total_rounds: int
-    n_samples_scored: int
+_SCENARIO_CAVEAT = (
+    "This re-ranks the RECORD under the formula you named — it does not re-run the campaign. θ is "
+    "not re-fitted and no election is replayed, so the round named here is where the two readings "
+    "first part, not a verdict the campaign reached. The chain STOPS at that round: past it the run "
+    "would have stood on a parent it never had, and no measurement says what that produces. `ab` "
+    "replay is what re-derives an election exactly."
+)
 
 
-type ScenarioWord = Literal[
-    "parted",
-    "crowned",
-    "instead_of",
-    "held",
-    "round",
-    "rounds",
-    "unchanged",
-    "reads_over",
-    "sample",
-    "samples",
-    "caveat",
-]
-SCENARIO_WORDS: dict[ScenarioWord, str] = {
-    "parted": "parts from the record at round",
-    "crowned": "where it would have crowned",
-    "instead_of": "instead of",
-    "held": "never parts from the record",
-    "round": "round",
-    "rounds": "rounds",
-    "unchanged": "unchanged",
-    "reads_over": "the head reads over",
-    "sample": "sample",
-    "samples": "samples",
-    "caveat": "This re-ranks the RECORD under the formula you named — it does not re-run the "
-    "campaign. θ is not re-fitted and no election is replayed, so the round named here is where "
-    "the two readings first part, not a verdict the campaign reached. The chain STOPS at that "
-    "round: past it the run would have stood on a parent it never had, and no measurement says "
-    "what that produces. `ab` replay is what re-derives an election exactly.",
-}
+def scenario_said(
+    lens: str | None,
+    *,
+    recorded_winner_key: str | None,
+    scenario_winner_key: str | None,
+    first_divergent_round: int | None,
+    invariant_rounds: int,
+    total_rounds: int,
+    n_samples_scored: int,
+) -> Said:
+    """What the mask did to this branch, worded once for every surface after the subject's label:
+    how far it agrees with the record, and the round it stops; ``warn`` where it parts, its detail
+    the caveat, since the honest limit of a lens is not something a surface can be trusted to
+    remember. *lens* is the address's (`SubjectMask.lens`).
+
+    The chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners is one
+    round's disagreement, both read at *first_divergent_round*, or at the branch's last round where
+    there is none: a mid-chain counterfactual against the branch's final crown would compare two
+    different rounds and report the gap between them as a change."""
+    verdict = (
+        "never parts from the record"
+        if first_divergent_round is None
+        else (
+            f"parts from the record at round {first_divergent_round}, where it would have crowned "
+            f"{(scenario_winner_key or '-')[:8]} instead of {(recorded_winner_key or '-')[:8]}"
+        )
+    )
+    rounds = "round" if total_rounds == 1 else "rounds"
+    samples = "sample" if n_samples_scored == 1 else "samples"
+    return Said(
+        key="scenario",
+        tone="quiet" if first_divergent_round is None else "warn",
+        label=(
+            f"under {lens or '-'}: {verdict}. {invariant_rounds} of {total_rounds} {rounds} "
+            f"unchanged; the head reads over {n_samples_scored} {samples}."
+        ),
+        detail=_SCENARIO_CAVEAT,
+    )
 
 
 class WinnerChainPoint(StrictModel):
@@ -243,7 +240,8 @@ class SubjectReading(StrictModel):
     comparable: bool | None
     comparable_note: str
     mask: SubjectMask | None
-    scenario: ScenarioReading | None
+    # What the mask did to this branch (`scenario_said`), on a masked course alone.
+    scenario: Said | None
     winner_chain: list[WinnerChainPoint] | None
     config: dict[str, str] | None
     # `None` where round 0 carries no hashes: an unknown arm groups with nothing.

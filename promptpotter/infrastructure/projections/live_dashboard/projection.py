@@ -53,6 +53,7 @@ from promptpotter.domain.run_records import (
     RunWiringRecord,
     SampleScoredRecord,
     SampleStartedRecord,
+    StandingBudgetRecord,
     TokenUsageRecord,
 )
 from promptpotter.domain.run_standing import RunStanding
@@ -184,6 +185,13 @@ class LiveDashboardProjection(Projection):
         ]
         self._launch()
         self._measurement_node = record.measurement_node
+
+    def _handle_standing_budget(self, record: StandingBudgetRecord) -> None:
+        # Last wins and names every cycle axis it stands, so laying each over the last is laying the last.
+        limits = self.state.run_limits
+        self.state.run_limits = limits.model_copy(
+            update={"budget": limits.budget.over(record.budget)}
+        )
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if self.state.declared_phase == record.run_phase:

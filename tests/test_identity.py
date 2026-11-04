@@ -128,7 +128,7 @@ from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
-from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize
+from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, run_clamp
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
@@ -606,6 +606,22 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert len(list((tmp_path / "reuse" / "optimizer_reuse").glob("*.json"))) == 3, (
         "the second route replayed the first route's banked answer"
     )
+
+    # A head-to-head pins one seed on every arm: an arm's replicate (numbered at the mint, § 2)
+    # enters the seed, and arms of one replicate share it, so a pair differs by its treatment alone
+    # (common random numbers).
+    def armed(key: str, replicate: int) -> Compare:
+        return Compare(arm=Arm(head_to_head_id="h", arm_key=key, replicate=replicate))
+
+    drawn = [ask("q", run_clamp(pinned, armed("potter", n))).get("seed") for n in (1, 2)]
+    assert drawn[0] != drawn[1], (
+        "two replicates under a pinned seed sent one request, so the second replayed the first's "
+        "answer and N replicates read as one draw"
+    )
+    assert run_clamp(pinned, armed("gepa", 1)) == run_clamp(pinned, armed("potter", 1)), (
+        "two arms of one replicate drew apart, so their difference carries draw noise"
+    )
+    assert run_clamp(pinned, Optimize()) == pinned, "a run outside a head-to-head moved its pin"
 
     # A node left to the gateway's choice of host is filed as, and sent to, the host it is pinned to.
     routes = default_routes()
@@ -1230,8 +1246,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert not declared.budget.named and declared.run_seed is None, (
         "a declaration restated a budget axis or a seed no layer set"
     )
-    armed = declare(opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="a")))
-    twin = declare(opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="b")))
+    armed = declare(
+        opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="a", replicate=1))
+    )
+    twin = declare(
+        opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="b", replicate=1))
+    )
     assert armed.shared_part() == twin.shared_part(), (
         "two arms of one declaration hold different shared parts"
     )
@@ -1246,9 +1266,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
 
-    def arm_of(key: str, budget: Budget) -> list[CyclePlan]:
+    def arm_of(key: str, budget: Budget, *, h2h: str = "h") -> list[CyclePlan]:
         request = HeadToHeadRequest(
-            head_to_head_id="h",
+            head_to_head_id=h2h,
             arms=[
                 ArmRequest(
                     arm_key=key,
@@ -1267,6 +1287,71 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         arm_of("b", Budget(usd=None, rounds=3))
     assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
         "an arm refused off its head-to-head's record minted a campaign"
+    )
+    # Two acts on one fresh id each plan off no record: the second to mint is held to the first's
+    # record, so one comparison never holds two shared parts.
+    early = arm_of("x", Budget(usd=None, rounds=3), h2h="race")
+    mint_arms(arm_of("y", Budget(usd=None, rounds=2), h2h="race"), billed=None)
+    declared_race = stores.campaigns.load_head_to_head("race")
+    assert declared_race is not None, "a fresh id's first mint declared no record"
+    with pytest.raises(ConflictError):
+        mint_arms(early, billed=None)
+    assert stores.campaigns.load_head_to_head("race") == declared_race, (
+        "an act that planned off no record rewrote the record another act minted under"
+    )
+    assert [
+        campaign.declaration.shared_part()
+        for campaign in stores.campaigns.list_campaigns(lifecycle="all")
+        if isinstance(p := campaign.declaration.purpose, Compare)
+        and p.arm.head_to_head_id == "race"
+    ] == [declared_race.shared], "one comparison holds arms of two shared parts"
+    # An act on an id another act holds is refused before it pays or mints, never queued behind it.
+    standing = stores.campaigns.list_campaigns(lifecycle="all")
+    with stores.campaigns.head_to_head_held("race"), pytest.raises(ConflictError):
+        mint_arms(arm_of("z", Budget(usd=None, rounds=2), h2h="race"), billed=None)
+    assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
+        "an act on a held head-to-head minted a campaign"
+    )
+
+    # A replicate is numbered at the mint by the key the evidence groups on, the treatment, across
+    # every act on the id: a later act's arm on a standing treatment is its next replicate, on its
+    # own seed, and arms of one replicate share theirs (common random numbers).
+    def act(h2h: str, *arms: tuple[str, OptimizationOverrides]) -> dict[str, Compare]:
+        request = HeadToHeadRequest(
+            head_to_head_id=h2h,
+            arms=[ArmRequest(arm_key=key, optimization=sent) for key, sent in arms],
+            budget=Budget(usd=None, rounds=2),
+        )
+        minted = mint_arms(asyncio.run(arm_plans(arming, door, request, rows_30)), billed=None)
+        purposes: dict[str, Compare] = {}
+        for cycle in minted:
+            campaign = stores.campaigns.load_campaign(cycle.campaign_id)
+            assert campaign is not None and isinstance(campaign.declaration.purpose, Compare)
+            purposes[campaign.declaration.purpose.arm.arm_key] = campaign.declaration.purpose
+        return purposes
+
+    on_potter = OptimizationOverrides(optimizer="potter")
+    reps = act("reps", ("p1", on_potter), ("c1", OptimizationOverrides(optimizer="capo")))
+    reps |= act("reps", ("p2", on_potter), ("p3", on_potter))
+    assert {key: purpose.arm.replicate for key, purpose in reps.items()} == {
+        "p1": 1,
+        "c1": 1,
+        "p2": 2,
+        "p3": 3,
+    }, "a later act's arm on a standing treatment was numbered as its first replicate"
+    seeded = DeterminismClamp(temperature=0.0, seed=7)
+    seeds = {key: run_clamp(seeded, purpose) for key, purpose in reps.items()}
+    assert seeds["p1"] != seeds["p2"] != seeds["p3"] != seeds["p1"], (
+        "two replicates of one treatment drew one seed, so the evidence reads one draw as two"
+    )
+    assert seeds["p1"] == seeds["c1"], "two arms of one replicate drew apart"
+    # A knob set to its default is no other treatment, so the evidence pools the two arms.
+    stated = OptimizationOverrides(
+        optimizer="potter", arm_gate=OptimizationConfig.model_fields["arm_gate"].default
+    )
+    knob = act("knob", ("k1", on_potter), ("k2", stated))
+    assert [knob[key].arm.replicate for key in ("k1", "k2")] == [1, 2], (
+        "an arm stating a default knob ran as replicate 1 of a treatment it shares"
     )
     # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
     # campaign minted on that declaration resolves to.
@@ -1291,7 +1376,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     assert l4.run_seed == 3, "an L4 seat's declaration lost the seed its seat names"
     l4_arm = declare(
-        opened, seat_config, purpose=Compare(arm=Arm(head_to_head_id="h4", arm_key="a"))
+        opened,
+        seat_config,
+        purpose=Compare(arm=Arm(head_to_head_id="h4", arm_key="a", replicate=1)),
     )
     as_campaign = minted_campaign(
         CycleHop(campaign_id="decl__0000a4", cycle_id="cycle_l4arm"),

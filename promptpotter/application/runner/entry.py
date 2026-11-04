@@ -43,6 +43,7 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
 )
 from promptpotter.application.served_dashboard import fork_remainder
+from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
@@ -345,7 +346,10 @@ async def run_optimization(
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
         with (
             at_round(0),
-            binding_optimizer(optimizer, determinism=campaign_config.optimization.determinism),
+            binding_optimizer(
+                optimizer,
+                determinism=run_clamp(campaign_config.optimization.determinism, session.purpose),
+            ),
         ):
             diagnosing = optimizer.plan.controller if mode.diag else None
             if mode.diag and diagnosing is None:

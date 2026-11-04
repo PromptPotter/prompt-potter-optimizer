@@ -81,7 +81,6 @@ UNREPORTED_KINDS: frozenset[str] = frozenset(
         "resolved_run",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "scoring_locked",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "spawned",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
-        "standing_budget",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
     }
 )
 

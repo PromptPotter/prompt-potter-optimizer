@@ -15,6 +15,7 @@ from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext, Proposal
+from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -201,7 +202,7 @@ class Cycle:
 
     def rng(self, round_num: int, tag: str) -> random.Random:
         """A function of the run's seed, *round_num* and *tag* alone, so a resume redraws the same."""
-        clamp = self.config.optimization.determinism
+        clamp = run_clamp(self.config.optimization.determinism, self.session.purpose)
         seed = self.session.campaign_id if clamp is None or clamp.seed is None else clamp.seed
         return random.Random(f"{seed}:{round_num}:{tag}")
 

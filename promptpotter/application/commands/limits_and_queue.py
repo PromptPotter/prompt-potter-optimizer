@@ -7,7 +7,7 @@ from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends, withdraw_queued
-from promptpotter.domain.run_records import ArmedCeilingEffect
+from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
@@ -24,22 +24,13 @@ if TYPE_CHECKING:
         SetConcurrentCyclesPayload,
     )
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 async def change_run_limits(
     dispatched: DispatchedToCycle[ChangeRunLimitsPayload],
 ) -> Applier[object]:
     dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload.budget
-    return Applier.silent(
-        lambda: _apply_change_run_limits(dispatcher, hop, change),
-        effect_fn=lambda _: _armed_ceiling(dispatcher.stores, hop),
-    )
-
-
-def _armed_ceiling(stores: Stores, hop: CycleHop) -> ArmedCeilingEffect:
-    cycle = stores.campaigns.read_standing_budget(hop).budget
-    return ArmedCeilingEffect(armed=stores.campaigns.read_campaign_ceiling(hop).over(cycle))
+    return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change))
 
 
 def _clamp_to_account_ceilings(
@@ -59,14 +50,17 @@ def _clamp_to_account_ceilings(
 async def _apply_change_run_limits(
     dispatcher: CommandDispatcher, hop: CycleHop, change: Budget
 ) -> None:
-    """Clamped to the account FIRST: unclamped, a raise here is the way around the host-wallet gate."""
+    """Clamped to the account FIRST: unclamped, a raise here is the way around the host-wallet gate.
+    Settable on every arm of a head-to-head: a change that moves a ceiling the arm runs under moves
+    it alone, off its head-to-head's budget, so the act is its exit (decisions.md § 0009); a change
+    restating the ceilings it stands under leaves the arm in its comparison."""
     reserve = Budget()
     # Rounds and a clock are no money: a change naming neither money axis skips the wallet read.
     if change.named & MONEY_AXES:
         change, reserve = await asyncio.to_thread(
             _clamp_to_account_ceilings, dispatcher, hop, change
         )
-    await asyncio.to_thread(
+    moved = await asyncio.to_thread(
         quota.hold_budget_change,
         job_registry=dispatcher.job_registry,
         stores=dispatcher.stores,
@@ -74,6 +68,10 @@ async def _apply_change_run_limits(
         change=change,
         reserve=reserve,
     )
+    if moved:
+        await asyncio.to_thread(
+            dispatcher.stores.campaigns.leave_comparison, hop, ComparisonExit.SET_LIMITS
+        )
 
 
 async def set_concurrent_cycles(

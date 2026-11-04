@@ -155,9 +155,9 @@ class RoundPlan:
 
     @property
     def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
-        """The proposers of each walk that is a round of its own, by pipeline: seeds heading round 1 are its."""
-        alone = {INITIAL_POPULATION: self.initial_population} if self.seeds_alone else {}
-        return {DEFAULT_PIPELINE: self.proposers, **alone}
+        """The proposers of each walk that is a round of its own, by pipeline, as `walk` decides it: seeds heading round 1 are its."""
+        walks = (self.walk(stands=True), self.walk(stands=False))
+        return {walk.pipeline: walk.proposers for walk in walks}
 
     def walk(self, *, stands: bool) -> RoundWalk:
         """A round seeds only where no population stands: a resumed one restores its own."""
@@ -323,18 +323,30 @@ class SelectedOptimizer:
     def sampler(self) -> Sampler:
         return self.plan.sampler
 
+    def _asked_panel(self, search: int, pipeline: str) -> PanelSize:
+        return self.sampler.drawn(self.knobs(self.sampler.name), search, pipeline)
+
+    def round_cells_asked(self, search: int) -> int:
+        """Cells the sampler asks of a round after the first, unclamped: an ask above the search
+        split is the finding preflight reports, never cells a round walks."""
+        return self._asked_panel(search, DEFAULT_PIPELINE).cells
+
+    def round_panel(self, search: int, pipeline: str = DEFAULT_PIPELINE) -> PanelSize:
+        """The panel a walk of *pipeline* walks: an ask above the split (an L4 size) still walks no
+        more cells than the split holds; no cells where it holds no panel."""
+        asked = self._asked_panel(search, pipeline)
+        return PanelSize(min(asked.cells, search), asked.block_size)
+
     def round_cells(self, search: int) -> int:
-        """Cells a round after the first asks for; 0 where the search split holds no panel."""
-        return self.sampler.drawn(self.knobs(self.sampler.name), search, DEFAULT_PIPELINE).cells
+        """Cells a round after the first walks per arm."""
+        return self.round_panel(search).cells
 
     def round_cells_ceiling(self, search: int) -> int:
         """The most cells one round buys: its arms on the walk's panel, then the parent's reads past theirs."""
         return max(self._walk_ceiling(search, *walk) for walk in self.plan.round_walks.items())
 
     def _walk_ceiling(self, search: int, pipeline: str, walk: tuple[Proposer, ...]) -> int:
-        asked = self.sampler.drawn(self.knobs(self.sampler.name), search, pipeline)
-        # An L4 size above the split still walks no more cells than the split holds.
-        panel = PanelSize(min(asked.cells, search), asked.block_size)
+        panel = self.round_panel(search, pipeline)
         read = self.plan.selector.parent_read(panel) + sum(p.parent_read(panel) for p in walk)
         # The selector's and proposers' parent reads are a union inside one panel, not a sum.
         return self.walk_arms(walk) * panel.cells + min(read, panel.cells)

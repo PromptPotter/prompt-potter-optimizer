@@ -3,7 +3,7 @@ of its ceiling and no machine slot."""
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
@@ -51,7 +51,8 @@ if TYPE_CHECKING:
     from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.bench import BenchScore
-    from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign import RunDeclaration
+    from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
     from promptpotter.domain.command_kinds import HeadToHeadRequest
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import GateDecision
@@ -154,6 +155,21 @@ async def compact_archive(
     return report
 
 
+@dataclass(frozen=True, slots=True)
+class _Mint:
+    """A session on a dataset: the run mints the campaign it declares."""
+
+    declaration: RunDeclaration
+
+
+@dataclass(frozen=True, slots=True)
+class _Resume:
+    """A session bound to a campaign: the run resumes it under the selection its resume checked."""
+
+    cycle: CycleConfig
+    optimizer: SelectedOptimizer
+
+
 async def run_campaign(
     session: Session,
     campaign_config: CampaignConfig | None = None,
@@ -166,8 +182,7 @@ async def run_campaign(
 ) -> tuple[Session, CycleResult]:
     """Answers the session bound to the cycle the run ended on. Blocks under ``origin_gate: strict``
     until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
-    declaration = None
-    resumed: SelectedOptimizer | None = None
+    start: _Mint | _Resume
     if session.campaign_id:
         if campaign_config is not None:
             raise PayloadInvalidError(
@@ -179,8 +194,8 @@ async def run_campaign(
         if campaign is None:
             raise NotFoundError(f"campaign not found: {session.campaign_id}")
         plan = resolve_resume(session, campaign, session.bank.samples)
-        session, cycle, resumed = plan.session, plan.cycle, plan.optimizer
-        campaign_config = cycle.config
+        session, start = plan.session, _Resume(plan.cycle, plan.optimizer)
+        campaign_config = plan.cycle.config
         connector = campaign.connector
     else:
         if campaign_config is None:
@@ -188,6 +203,7 @@ async def run_campaign(
                 "a mint declares its campaign: pass the config to run", code="mint_undeclared"
             )
         declaration = declare(session, campaign_config, purpose=Optimize())
+        start = _Mint(declaration)
         campaign_config = effective_config(declaration)
         connector = declaration.environment.connector
     # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
@@ -200,25 +216,25 @@ async def run_campaign(
         step_rounds=step_rounds,
         sends=sends_on(session.store, campaign_config, connector),
     ) as (job_id, held):
-        if declaration is None:
-            assert resumed is not None, "a session bound to a campaign resumes it"
-            optimizer = resumed
-        else:
-            minted = await mint_framed_cycle(
-                session,
-                declaration,
-                session.bank.samples,
-                campaign_id=fresh_campaign_id(session),
-                task_text=None,
-            )
-            session, optimizer, cycle = minted.session, minted.optimizer, minted.cycle
-            land_job(
-                session.store,
-                JobRegistry.attach(session.store.jobs_dir),
-                job_id,
-                session.hop,
-                held.share,
-            )
+        match start:
+            case _Resume(cycle=cycle, optimizer=optimizer):
+                pass
+            case _Mint(declaration=declaration):
+                minted = await mint_framed_cycle(
+                    session,
+                    declaration,
+                    session.bank.samples,
+                    campaign_id=fresh_campaign_id(session),
+                    task_text=None,
+                )
+                session, optimizer, cycle = minted.session, minted.optimizer, minted.cycle
+                land_job(
+                    session.store,
+                    JobRegistry.attach(session.store.jobs_dir),
+                    job_id,
+                    session.hop,
+                    held.share,
+                )
         return await run_optimization(
             list(session.bank.samples),
             cycle,

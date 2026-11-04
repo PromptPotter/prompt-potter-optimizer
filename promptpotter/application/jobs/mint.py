@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -441,6 +443,39 @@ def _declared_by(record: HeadToHeadRecord, arms: Mapping[str, str]) -> str:
     return f"its record, declared {record.created_at} on origin {record.origin} (arms: {held})"
 
 
+def _held_to_record(
+    plans: Sequence[CyclePlan],
+    stored: HeadToHeadRecord | None,
+    standing: Mapping[str, Campaign],
+) -> HeadToHeadRecord:
+    """Every arm held to *stored*, else to this act's first arm, and to the arms *standing*; the
+    record they stand on."""
+    first = _arm_of(plans[0])
+    arms = {key: campaign.campaign_id for key, campaign in standing.items()}
+    record = _record_of(plans[0]) if stored is None else stored
+    stood_by = f"arm {first.arm_key}" if stored is None else _declared_by(stored, arms)
+    for plan in plans:
+        _refuse_off_record(record, plan, arms, stood_by=stood_by)
+    return record
+
+
+def _numbered(plans: Sequence[CyclePlan], standing: Mapping[str, Campaign]) -> list[CyclePlan]:
+    """Each arm's replicate: 1 + the arms on its treatment before it, the *standing* ones then
+    this act's in listing order, keyed as the evidence groups them (`Campaign.treatment.digest`).
+    Arms of one replicate share a seed (common random numbers), a treatment's replicates each
+    their own (`run_clamp`)."""
+    taken = Counter(campaign.treatment.digest for campaign in standing.values())
+    numbered: list[CyclePlan] = []
+    for plan in plans:
+        taken[plan.treatment.digest] += 1
+        arm = _arm_of(plan).model_copy(update={"replicate": taken[plan.treatment.digest]})
+        purpose = Compare(arm=arm)
+        numbered.append(
+            replace(plan, declaration=plan.declaration.model_copy(update={"purpose": purpose}))
+        )
+    return numbered
+
+
 def arm_config(
     declared: CampaignConfig, request: HeadToHeadRequest, arm: ArmRequest
 ) -> CampaignConfig:
@@ -456,8 +491,8 @@ async def arm_plans(
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> list[CyclePlan]:
     """THE one place an arm is planned: every refusal it owes — held to its head-to-head's record
-    (the stored one, else this act's first arm) and priced on its own budget — before any arm's
-    key is taken, any arm admitted, or anything paid."""
+    as it stands now (the mint holds it again, under its lock: `_mint_all`) and priced on its own
+    budget — before any arm's key is taken, any arm admitted, or anything paid."""
     plans: list[CyclePlan] = []
     for arm in request.arms:
         config = arm_config(declared, request, arm)
@@ -470,15 +505,11 @@ async def arm_plans(
         plans.append(
             resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
         )
-    arms = {
-        key: campaign.campaign_id
-        for key, campaign in standing_arms(session.store, request.head_to_head_id).items()
-    }
-    stored = session.store.campaigns.load_head_to_head(request.head_to_head_id)
-    record = _record_of(plans[0]) if stored is None else stored
-    stood_by = f"arm {request.arms[0].arm_key}" if stored is None else _declared_by(stored, arms)
-    for plan in plans:
-        _refuse_off_record(record, plan, arms, stood_by=stood_by)
+    _held_to_record(
+        plans,
+        session.store.campaigns.load_head_to_head(request.head_to_head_id),
+        standing_arms(session.store, request.head_to_head_id),
+    )
     for plan in plans:
         bound = await cell_bound(plan.session, plan.pipeline_params)
         measured = measured_cell_price(plan.session, plan.pipeline_params)
@@ -572,16 +603,38 @@ def mint(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCyc
     )
 
 
+@contextmanager
+def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None]:
+    """An act's arms hold their head-to-head's record from before anything it pays (a framing)
+    through their mint, so a concurrent act on the id is refused before it pays; a run outside a
+    head-to-head holds nothing."""
+    first = plans[0]
+    if not isinstance(first.declaration.purpose, Compare):
+        yield None
+        return
+    with first.session.store.campaigns.head_to_head_held(_arm_of(first).head_to_head_id) as stored:
+        yield stored
+
+
 def _mint_all(
-    plans: Sequence[CyclePlan], campaign_ids: Sequence[str], *, billed: Path | None
+    plans: Sequence[CyclePlan],
+    campaign_ids: Sequence[str],
+    *,
+    billed: Path | None,
+    stored: HeadToHeadRecord | None,
 ) -> list[MintedCycle]:
-    """*billed* moves into the first cycle alone. Arms join their head-to-head on the framed plans
-    they mint, so a record this act declares is its first arm's as minted."""
+    """Inside `_record_held`, whose *stored* record it is; *billed* moves into the first cycle
+    alone. Arms join their head-to-head on the framed plans they mint: a record this act declares
+    is its first arm's as minted, and every arm is held to the record and to the arms minted, and
+    numbered on them."""
     first = plans[0]
     if isinstance(first.declaration.purpose, Compare):
-        campaigns = first.session.store.campaigns
-        if campaigns.load_head_to_head(_arm_of(first).head_to_head_id) is None:
-            campaigns.declare_head_to_head(_record_of(first))
+        stores = first.session.store
+        standing = standing_arms(stores, _arm_of(first).head_to_head_id)
+        plans = _numbered(plans, standing)
+        record = _held_to_record(plans, stored, standing)
+        if stored is None:
+            stores.campaigns.declare_head_to_head(record)
     return [
         mint(plan, campaign_id=campaign_id, billed=billed if i == 0 else None)
         for i, (plan, campaign_id) in enumerate(zip(plans, campaign_ids, strict=True))
@@ -590,7 +643,13 @@ def _mint_all(
 
 def mint_arms(plans: Sequence[CyclePlan], *, billed: Path | None) -> list[MintedCycle]:
     """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing."""
-    minted = _mint_all(plans, [fresh_campaign_id(plan.session) for plan in plans], billed=billed)
+    with _record_held(plans) as stored:
+        minted = _mint_all(
+            plans,
+            [fresh_campaign_id(plan.session) for plan in plans],
+            billed=billed,
+            stored=stored,
+        )
     relabel_minted(minted[0].session)
     return minted
 
@@ -609,10 +668,13 @@ async def _mint_framed(
     task_text: str | None,
 ) -> list[MintedCycle]:
     description = _description_to_decompose(session, plans[0].cycle.config, task_text)
-    if description is None:
-        minted = _mint_all(plans, campaign_ids, billed=None)
-    else:
-        minted = await _mint_after_framing(session, plans, description, campaign_ids=campaign_ids)
+    with _record_held(plans) as stored:
+        if description is None:
+            minted = _mint_all(plans, campaign_ids, billed=None, stored=stored)
+        else:
+            minted = await _mint_after_framing(
+                session, plans, description, campaign_ids=campaign_ids, stored=stored
+            )
     relabel_minted(minted[0].session)
     return minted
 
@@ -647,7 +709,12 @@ async def mint_framed_cycle(
 
 
 async def _mint_after_framing(
-    session: Session, plans: Sequence[CyclePlan], description: str, *, campaign_ids: Sequence[str]
+    session: Session,
+    plans: Sequence[CyclePlan],
+    description: str,
+    *,
+    campaign_ids: Sequence[str],
+    stored: HeadToHeadRecord | None,
 ) -> list[MintedCycle]:
     """The cycle id hashes the framing, so its call bills a draft ledger the first mint adopts or a refusal discards."""
     assert session.dataset_name, "a framing commits to the dataset the session opened"
@@ -670,7 +737,7 @@ async def _mint_after_framing(
             )
             for plan in plans
         ]
-        minted = _mint_all(framed, campaign_ids, billed=checkin_ledger.path)
+        minted = _mint_all(framed, campaign_ids, billed=checkin_ledger.path, stored=stored)
     except BaseException:
         drafts.discard(drafts.hold(draft_id))
         raise

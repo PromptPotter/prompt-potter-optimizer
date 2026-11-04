@@ -76,8 +76,6 @@ acting.
 10. **Engine decisions narrated into `logger.warning`** — `bench/resume_and_fork/repair.py`, `origin_gate.py`,
     `termination.py`, `escalation/firing.py`. Action: each decision a field of its step's record.
     **Re-test:** `git grep -c "logger.warning" -- promptpotter/application/bench/resume_and_fork/repair.py`.
-11. **The `evidence` CLI is a 731-line renderer in presentation** — `presentation/cli/commands/evidence.py`.
-    Action: rows plus a label table in `application/views/evidence.py`. **Re-test:** `wc -l` of the file.
 
 ### The engine swept by shape (debt hunt 2026-11-02)
 
@@ -290,9 +288,6 @@ fixtures.
   **Re-test:** `git grep -nE "liveCandidate(SearchPoint|Verdicts|ObserveConfig)|round_axis.completed.includes" -- webapp/lib webapp/components`.
 
 **B. Served words own every wording.**
-- **The scoring-mask scenario sentence is built twice** from `SCENARIO_WORDS` pieces, with "under"/"of"
-  typed at each site: `compare/ComparePane.tsx::Scenarios` and `cli/commands/evidence.py::_scenario_lines`.
-  Action: `application/evidence/subjects.py` serves it as a `Said` row. **Re-test:** `git grep -n "SCENARIO_WORDS" -- promptpotter/presentation webapp/components`.
 - **`lib/lineage.tsx::maskLabel` / `maskActive` word and decide the active re-read client-side**
   (the badge reads "Showing the Sample set mask"), beside the served `hierarchy_subtree.py::_read_under`
   line. Action: render `read_under`. **Re-test:** `git grep -n "maskLabel" -- webapp`.
@@ -669,11 +664,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   cells) elects an arm PoBB eliminated. Action: a caught-up cell is a row of the prior's round reading.
   **Rides with:** any change to `CatchUpPool`. **Re-test:** a locked-in leader's round reading counts
   its caught-up cells.
-- **The origin's `changes_description` embeds the absolute dataset path**
-  (`application/origin.py::establish_campaign_origin`), so a decision record depends on where the
-  checkout sits; `offline_run.py --against` another checkout reads gepa and levi as MOVED. Action:
-  name the dataset, not its path. **Rides with:** any change to the origin record. **Re-test:**
-  `offline_run.py --against` a base run from another directory reads gepa UNMOVED.
 - **A lost mirror loses its money**: `infrastructure/llm/spend_book.py::SpendBook.mirror` logs a failed
   append, yet the nested record already says `mirrored=True`, so no bill or bank counts that call. Action: a
   failed carry raises, or the nested record is written only after the carry lands. **Re-test:** a root
@@ -713,30 +703,15 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 
 A leading **INVESTIGATE** means nobody has shown the item is real; answer that first.
 
-- **`dashboard.json::run_limits` goes stale on `change-run-limits`.** It is copied from the cycle's
-  last `run_wiring` record, while a mid-run `set-limits` writes `standing_budget` + an ack. Seen on
-  h2h-7 `capo-b5` (`__530ab2`): `set-limits --max-rounds 10` armed 10 (ack `effect.armed`), the
-  cycle stopped `rounds_budget` at 10 clean rounds, and the dashboard still served `rounds: 50` —
-  while `cycles` and `evidence` read 10. One served fact, two sources. **Re-test:** after
-  `set-limits --max-rounds N` on a live cycle, `dashboard.json::run_limits.budget.rounds == N`.
-- **The head-to-head guard reads identical budgets as `differs`.** `head_to_heads/<id>.json` keeps
-  `shared.budget: {}` when each arm's ceiling came by `--max-usd` (a standing budget, not the
-  declaration); `evidence/head_to_head.py::pair_guard`'s `off_record` then compares every arm's
-  `next_launch_budget` against `over_the_default({})`. h2h-7's three arms print the same
-  `usd=0.2, rounds=50` under "budget DIFFERS", so no per-arm-ceiling head-to-head reads
-  `controlled`. One budget, two homes. Sent to `arc/n-arm-mint-v2` (#58), which owns the record.
-  **Re-test:** `evidence` on h2h-7 reads `controlled`.
-- **A head-to-head's arms may diverge on budget mid-run, and only `evidence` notices.** `set-limits`
-  on one arm moves it alone (by design), and `evidence` then marks every pair `x` (`Differs on:
-  budget`) — but nothing at the `set-limits` door says the arm is leaving the head-to-head's
-  declared budget. Open: refuse it on an arm, or serve the divergence where it is made.
+- **`dashboard.json::run_limits`'s money axes still go stale on `set-limits --max-usd`**: the
+  `CampaignCeilingRecord` sits on the root cycle's ledger, which no other cycle's fold reads, so
+  `campaign_store/store.py::CampaignStore.armed_run_limits` lays it at the served read only. One budget rule is spelled in
+  three places: the fold, `jobs/quota.py::declare_run_budget` and `infrastructure/llm/spend_book.py`.
+  **Re-test:** after `set-limits --max-usd X` on a fork, `dashboard.json::run_limits.budget.usd == X`.
 - **A reserved cell's bill is on no ledger** (`Connector.holds_own_sends` writes no hold), so
   `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends but never the cell.
   Action: a hold record per reserved cell. **Rides with:** any change to `spend_book.py::reserved`.
   **Re-test:** `grep -n "emit_spend_hold" promptpotter/infrastructure/llm/spend_book.py`.
-- **The bench pass runs at look-ahead depth 1**, because depth is a press a round spends and
-  `runner/bench.py` runs outside any round. **Decided:** the pass takes a depth of its own. **Rides
-  with:** any change to `runner/bench.py`'s walk. **Re-test:** time one bench pass against its cell count.
 - **A resume from a pause at the origin boundary runs round 0 again** (a second round-0 election,
   a second `l1_critique`). Open: whether the re-send should read the banked `optimizer_state`.
   **Rides with:** `DashboardCheckout.over` or the origin round in `runner/run_prep.py`. **Re-test:**
@@ -759,12 +734,9 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   decided; if calls, a cells axis on `Budget` the search meter binds. **Rides with:** any change to
   `Budget`'s axes. **Re-test:** `price-head-to-head paper/plans/comparability.yaml` — do one point's
   `search_cells` differ by arm?
-- **A pinned `determinism.seed` makes every replicate one draw.** `PINNED_LOOP_KEYS` pins
-  `optimization.determinism` across a head-to-head, and `bench/cycle.py::Cycle.rng` seeds every
-  member off the pin instead of the campaign id, so N replicates of an arm on a pinning dataset make
-  the same draws and read as a tight interval. Action: a replicate's identity enters the seed under a
-  pin. **Rides with:** any change to `Cycle.rng` or `PINNED_LOOP_KEYS`. **Re-test:** two replicates under a
-  pinned seed send the same first `l1_generate` request.
+- **Structured optimizer calls send the clamp's seed raw** (`bench/llm_call.py::_merged_config`)
+  while `Calls.ask` draws one per call: two seed rules, so unpinned structured calls with one prompt
+  replay across campaigns. Action: one seed rule, read off `domain/campaign.py::run_clamp`.
 - **The $0 price opens a backend session** (`application/head_to_head_price.py::price_head_to_head`
   through `jobs/launcher/head_to_head.py::dataset_arms`) only to resolve the node models and the
   partition, so a stopped backend refuses a read that makes no call. **Rides with:** any change to
@@ -778,50 +750,26 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   over `round_cells_ceiling`: 4,230 cells on 310 search rows), which its race rarely spends, so a
   budget point must fund the worst case to mint CAPO at all. **Re-test:** a finished CAPO round's
   cells against its ceiling.
-- **`notebooks/bbeh_potter.ipynb` states another protocol than `shared_config.py`**: its Methodology
-  cell and Cell 2 say the test set is the ~4,060 non-mini rows and the default target mistral-small;
-  `load_and_split` tests on the second 10 mini rows per task. Action: the notebook states what
-  `shared_config.py` runs. **Re-test:** `grep -n "non-mini" notebooks/bbeh_potter.ipynb`.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
-  `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
-  hands it down.
-- **`CommandAckRecord.effect` is typed, but nothing reads it.** A writer with no reader is not a state:
-  serve it or delete it.
-- **`embedded_run.run_campaign` steers one branch with two flags:** a `None` `declaration` plus
-  `assert resumed is not None`.
+  `checkin` each call `select_optimizer` themselves; `checkin.py::_land_draft` refuses each overlay
+  before landing, then `resolve_cycle_plan` selects and refuses again. Action: `DraftPipeline`
+  (`pipeline_resolve.py::draft_pipeline`) carries its `SelectedOptimizer`, and a check-in plans its
+  cycles off the draft before landing. **Rides with:** K1's `pipeline_resolve.py` reshape.
 - **A moved capability or backend revision alone passes a resume.** It is named as a drift cause only
-  when the origin hash also mismatches.
+  when the origin hash also mismatches (`jobs/mint.py::resolve_resume` → `ConfigDriftError`).
+  **Fork:** refusing contradicts "a drift is served, never refused" (`RunWiringRecord.backend_revision`);
+  serving needs a `RunWiringRecord` field like `defaults_drift` at every entry point.
 - **`round_cells` has two meanings for one draw:** potter's unclamped value, read by L4, verify and the
   overlap, and the backbone's ceiling panel, clamped to the search split. Also, `RoundPlan.walk` and
   `round_walks` each decide which walk counts as a round of its own.
 - **The capo offline bench turns on one seed**: lift +0.700 or none after a draw-order change, so the
   fixture cannot tell a mating-law change from a reshuffle.
-- **A detached arm's job is the spawner's until its process adopts it**
-  (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_orphaned`): a `head-to-head`
-  terminal killed between the spawn and the adoption leaves jobs the sweep releases, so the
-  child's `adopt` refuses and the arm's minted cycle never runs. Action: the child holds the producer
-  lock before the spawner returns. **Re-test:** kill the terminal right after its `arm …` lines; each
-  arm's cycle runs or reads released with its reason.
-- **Two acts on one fresh head-to-head id race its record**: `jobs/mint.py::arm_plans` reads the
-  standing record outside any lock, so two concurrent acts each declare their own `SharedPart`.
-  Action: declare the record under the workspace lock and plan the second off it. **Re-test:** two
-  `mint-head-to-head` on one fresh id at once — one is refused off the record.
-- **A refused launch still spends its rate tokens** (`jobs/quota.py::check_launch_quotas`): the
-  bucket is debited before the slot checks that can still refuse, so a head-to-head refused
-  `machine_busy` costs all its arms' tokens. Action: debit on admission. **Re-test:** refuse N
-  launches on a full box; the next is not `rate_limited`.
-- **Two launch doors**: `jobs/launcher/launch.py::launch` (one run, may queue) and
-  `jobs/launcher/head_to_head.py::admit_head_to_head` (N arms, never queued) each request slots and
-  admit. Action: one door admitting N, queueing only when N is 1. **Re-test:** `git grep -c
-  "check_launch_quotas(" -- promptpotter/application/jobs/launcher/*.py` is 1.
-- **The origin's `changes_description` embeds the checkout's absolute path** (`Origin from
-  /…/origin.yaml`): a served individual names the host's filesystem, and two checkouts of one commit
-  read `decisions MOVED` in `scripts/offline_run.py --against`. Action: name the dataset-relative
-  path. **Re-test:** `grep -c '"Origin from /' <home>/<optimizer>/decisions.json` is 0.
 - **The controlled offline leg's arm-memory count moves between identical runs** (`arm potter: memory
   holds 380` then `375` own answers on one tree): a cell coalesced with a twin in flight is answered
   from memory, not sent. A printed reading, not a decision. Action: count filed answers, not distinct
-  ones. **Re-test:** two `--controlled` runs of one tree print one count.
+  ones — the count is `scripts/offline_run.py::run_controlled`'s (`file_answers` mints a ref per
+  filing, and a coalesced cell files none). Separately, `--controlled` stops at `_variant_edit`
+  ("no framing to cite") on the foreign potter campaign, on main too. **Re-test:** two `--controlled` runs of one tree print one count.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 

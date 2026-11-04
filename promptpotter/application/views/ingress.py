@@ -66,7 +66,7 @@ def init_enter(
     return InitEnterView(
         warnings=tuple(WarningEntry(title=w.title, detail=w.detail) for w in warnings),
         patience=ctx.patience,
-        sp_budget_round=selected.round_cells(len(dataset)),
+        sp_budget_round=selected.round_cells_asked(len(dataset)),
         model=selected.model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,

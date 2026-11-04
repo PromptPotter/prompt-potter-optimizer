@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, Unpack, get_args
 
@@ -93,8 +94,10 @@ from promptpotter.infrastructure.store.io import (
     prune_empty_dirs,
     read_text_optional,
     rmtree_robust,
+    take_lock,
     unlink_robust,
     write_json,
+    write_lock_name,
     write_text,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -283,6 +286,24 @@ class CampaignStore:
         return self._read_declared(
             head_to_head_path(self._base_dir, head_to_head_id), HeadToHeadRecord
         )
+
+    @contextmanager
+    def head_to_head_held(self, head_to_head_id: str) -> Iterator[HeadToHeadRecord | None]:
+        """The standing record, held against every other act on *head_to_head_id* for the block:
+        what one act pays toward, declares and mints under it, no other plans past. Never waited
+        on, since the block pays: a second act is refused before its first paid call."""
+        path = head_to_head_path(self._base_dir, head_to_head_id)
+        lock = take_lock(path.with_name(write_lock_name(path.name)), wait_s=0)
+        if lock is None:
+            raise ConflictError(
+                f"another act is minting arms of head-to-head {head_to_head_id}; nothing was "
+                "minted, so retry once it ends",
+                code="head_to_head_busy",
+            )
+        try:
+            yield self.load_head_to_head(head_to_head_id)
+        finally:
+            lock.release()
 
     def declare_head_to_head(self, record: HeadToHeadRecord) -> None:
         write_json(
@@ -760,10 +781,11 @@ class CampaignStore:
             raise NotFoundError(f"Campaign not found: {hop.campaign_id}")
         return scan_campaign_ceiling(self.ledger(campaign.root_hop))
 
-    def armed_run_limits(self, hop: CycleHop, declared: RunLimits) -> RunLimits:
-        standing = standing_budget(self.cycle_dir(hop)).budget
-        armed = declared.budget.over(self.read_campaign_ceiling(hop), standing)
-        return declared.model_copy(update={"budget": armed})
+    def armed_run_limits(self, hop: CycleHop, folded: RunLimits) -> RunLimits:
+        """*folded* is `LiveDashboardState.run_limits`, the cycle's standing budget laid in by the
+        fold; the campaign's ceiling rides its root's ledger, which no fold of this cycle reads."""
+        armed = folded.budget.over(self.read_campaign_ceiling(hop))
+        return folded.model_copy(update={"budget": armed})
 
     def write_cycle_share(self, hop: CycleHop, allotment: Budget) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(

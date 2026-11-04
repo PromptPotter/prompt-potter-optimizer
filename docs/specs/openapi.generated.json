@@ -662,11 +662,17 @@
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Head To Head Id",
             "type": "string"
+          },
+          "replicate": {
+            "minimum": 1.0,
+            "title": "Replicate",
+            "type": "integer"
           }
         },
         "required": [
           "head_to_head_id",
-          "arm_key"
+          "arm_key",
+          "replicate"
         ],
         "title": "Arm",
         "type": "object"
@@ -3545,7 +3551,7 @@
       },
       "ChangeRunLimitsPayload": {
         "additionalProperties": false,
-        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance; the command's ack on the cycle's ledger carries the ceiling it armed.",
+        "description": "Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or\nround-halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the\naccount allowance. On an arm of a head-to-head it moves that arm alone, and leaves the\ncomparison only when a ceiling moved.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget"
@@ -14702,72 +14708,6 @@
         "title": "SampleWalk",
         "type": "object"
       },
-      "ScenarioReading": {
-        "additionalProperties": false,
-        "description": "What the mask did to this branch: how far it agrees with the record, and the round it stops.\n\nThe chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is\none round's disagreement — both read at ``first_divergent_round``, or at the branch's last round\nwhere there is none. Reading a mid-chain counterfactual against the branch's final crown instead\nwould compare two different rounds and report the gap between them as a change.\n\nWorded by ``SCENARIO_WORDS`` on every surface, its ``caveat`` with it: the honest limit of a\nlens is not something a surface can be trusted to remember.",
-        "properties": {
-          "first_divergent_round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "First Divergent Round"
-          },
-          "invariant_rounds": {
-            "title": "Invariant Rounds",
-            "type": "integer"
-          },
-          "n_samples_scored": {
-            "title": "N Samples Scored",
-            "type": "integer"
-          },
-          "recorded_winner_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recorded Winner Key"
-          },
-          "scenario_winner_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scenario Winner Key"
-          },
-          "total_rounds": {
-            "title": "Total Rounds",
-            "type": "integer"
-          },
-          "winner_changed": {
-            "title": "Winner Changed",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "recorded_winner_key",
-          "scenario_winner_key",
-          "winner_changed",
-          "first_divergent_round",
-          "invariant_rounds",
-          "total_rounds",
-          "n_samples_scored"
-        ],
-        "title": "ScenarioReading",
-        "type": "object"
-      },
       "ScoreboardRow": {
         "additionalProperties": false,
         "description": "One rank-ordered row of a round's scoreboard: an arm's reading at its rank.",
@@ -16482,7 +16422,7 @@
           "scenario": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ScenarioReading"
+                "$ref": "#/components/schemas/Said"
               },
               {
                 "type": "null"
@@ -21808,13 +21748,13 @@
         "operationId": "evidence_api_v1_evidence_get",
         "parameters": [
           {
-            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded by `SCENARIO_WORDS`, its caveat included.",
+            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail.",
             "in": "query",
             "name": "subject",
             "required": false,
             "schema": {
               "default": [],
-              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded by `SCENARIO_WORDS`, its caveat included.",
+              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (courses only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail.",
               "items": {
                 "type": "string"
               },

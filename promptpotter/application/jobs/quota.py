@@ -4,9 +4,9 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import NamedTuple, get_args
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from typing import NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
@@ -30,7 +30,15 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, Job
+from promptpotter.domain.job import (
+    UNRESOLVED_HOP,
+    CampaignLaunch,
+    EmbeddedRun,
+    InnerRun,
+    Job,
+    JobHolder,
+    ScoringPass,
+)
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
@@ -99,26 +107,96 @@ _READ_BURST = 300.0
 _READ_PER_S = 20.0
 
 
-def _consume_rate_token(bucket: str, *, burst: float, per_s: float, tokens: int = 1) -> bool:
-    """All *tokens* or none: a refused ask takes nothing from the bucket."""
+def _refilled(bucket: str, *, burst: float, per_s: float, now: float) -> float:
+    """What *bucket* holds at *now*; the caller holds ``_rate_lock``."""
+    held, last = _rate_buckets.get(bucket, (burst, now))
+    return min(burst, held + (now - last) * per_s)
+
+
+def _consume_rate_token(bucket: str, *, burst: float, per_s: float) -> bool:
+    """One token or none: a refused ask takes nothing from the bucket."""
     now = time.monotonic()
     with _rate_lock:
-        held, last = _rate_buckets.get(bucket, (burst, now))
-        held = min(burst, held + (now - last) * per_s)
-        if held < tokens:
-            _rate_buckets[bucket] = (held, now)
-            return False
-        _rate_buckets[bucket] = (held - tokens, now)
-        return True
+        held = _refilled(bucket, burst=burst, per_s=per_s, now=now)
+        taken = held >= 1
+        _rate_buckets[bucket] = (held - 1 if taken else held, now)
+        return taken
 
 
-def _consume_launch_token(bucket: str, *, launches: int = 1) -> bool:
-    return _consume_rate_token(
-        bucket,
+class _Meter(NamedTuple):
+    """An admission's rate bucket: asked before anything can refuse, debited only on admission."""
+
+    bucket: str
+    refusal: str
+
+
+def _new_campaign(stores: Stores, hop: CycleHop) -> bool:
+    """A stranger's fresh mint, a check-in's Start included (it names no cycle yet): what the
+    launch rate and the daily ceiling meter. The host is exempt: they bound a stranger on its key."""
+    return not is_host(stores.identity) and hop == UNRESOLVED_HOP
+
+
+def _verb_meter(stores: Stores, verb: str) -> _Meter | None:
+    if is_host(stores.identity):
+        return None
+    return _Meter(
+        f"{verb}:{stores.identity.user_id}",
+        f"Too many {verb} requests; slow down and retry shortly.",
+    )
+
+
+def _slot_meter(stores: Stores, holder: JobHolder, hop: CycleHop) -> _Meter | None:
+    match holder:
+        case CampaignLaunch():
+            if not _new_campaign(stores, hop):
+                return None
+            return _Meter(
+                f"launch:{stores.identity.user_id}",
+                "Too many campaign launches; slow down and retry shortly.",
+            )
+        case ScoringPass(verb=verb):
+            return _verb_meter(stores, verb)
+        # Neither asks the slot door: an embedded run is a declared exemption (`embedded_share`).
+        case EmbeddedRun() | InnerRun():
+            return None
+        case _:
+            assert_never(holder)
+
+
+def _metered_held(meter: _Meter, now: float) -> float:
+    return _refilled(
+        meter.bucket,
         burst=settings.USER_RATE_BURST,
         per_s=settings.USER_RATE_PER_MIN / 60.0,
-        tokens=launches,
+        now=now,
     )
+
+
+def _refuse_metered(meter: _Meter | None, *, asked: int) -> None:
+    if meter is None:
+        return
+    with _rate_lock:
+        held = _metered_held(meter, time.monotonic())
+    if held < asked:
+        raise RateLimitedError(meter.refusal)
+
+
+def _debit_metered(meter: _Meter | None, *, tokens: int) -> None:
+    if meter is None:
+        return
+    now = time.monotonic()
+    with _rate_lock:
+        _rate_buckets[meter.bucket] = (_metered_held(meter, now) - tokens, now)
+
+
+@contextmanager
+def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -> Iterator[None]:
+    """Refused at the slot door, debited *asked* tokens when its body admits: the caller holds the
+    admission gate across both, so no two asks read one bucket; a refused ask spends no token."""
+    meter = _slot_meter(stores, holder, hop)
+    _refuse_metered(meter, asked=asked)
+    yield
+    _debit_metered(meter, tokens=asked)
 
 
 class RateLimitedError(QuotaExceededError):
@@ -154,10 +232,6 @@ def check_launch_quotas(
 ) -> None:
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, then the
     *launches* asked together — a head-to-head's arms, all admitted or none."""
-    # A fresh mint, a check-in's Start included, names no cycle yet.
-    rate_limited = not is_host(stores.identity) and hop == UNRESOLVED_HOP
-    if rate_limited and not _consume_launch_token(f"launch:{user.user_id}", launches=launches):
-        raise RateLimitedError("Too many campaign launches; slow down and retry shortly.")
     asking = "" if launches == 1 else f", and this head-to-head starts {launches} at once"
 
     # A queued launch counts, or an account queues without bound and the drain order can starve.
@@ -173,7 +247,7 @@ def check_launch_quotas(
             ),
         )
 
-    if rate_limited:
+    if _new_campaign(stores, hop):
         today = job_registry.list_launched_today(user_id=user.user_id)
         if len(today) + launches > user.max_campaigns_per_day:
             raise QuotaExceededError(
@@ -685,17 +759,26 @@ def move_campaign_money(
         )
 
 
-def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
-    # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
-    if not is_host(stores.identity) and not _consume_launch_token(f"{bucket}:{user.user_id}"):
-        raise RateLimitedError(f"Too many {bucket} requests; slow down and retry shortly.")
-
-
 def _admit_call(*, stores: Stores, bucket: str, provider: str) -> SpendBook:
+    """Its token taken in one step, so concurrent calls never share one; a refused book gives it back."""
+    meter = _verb_meter(stores, bucket)
+    if meter is None:
+        return _call_book(stores, provider)
+    if not _consume_rate_token(
+        meter.bucket, burst=settings.USER_RATE_BURST, per_s=settings.USER_RATE_PER_MIN / 60.0
+    ):
+        raise RateLimitedError(meter.refusal)
+    try:
+        return _call_book(stores, provider)
+    except BaseException:
+        _debit_metered(meter, tokens=-1)
+        raise
+
+
+def _call_book(stores: Stores, provider: str) -> SpendBook:
     # Nothing is reserved, nor refused up front: `keyed_client` refuses a send no key pays or one
     # past a used-up coupon, and the book one past its headroom.
     user = account_of(stores)
-    refuse_verb_rate(stores, user, bucket)
     key = paying_key(stores.api_keys.load(), provider)
     if key is None or not draws_coupon(key.paid_by):
         return unbounded_spend_book()
@@ -823,8 +906,11 @@ def hold_budget_change(
     hop: CycleHop,
     change: Budget,
     reserve: Budget,
-) -> None:
-    """Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land first."""
+) -> bool:
+    """Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land first.
+    Whether the ceiling *hop* runs under moved: a change restating it moves nothing."""
+    campaigns = stores.campaigns
+    armed = campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
     # Under the gate a launch admits under, so no share is taken from a split mid-move.
     with job_registry.admission_gate():
         job = job_registry.running_job_for(stores.campaigns.workspace, hop)
@@ -835,10 +921,14 @@ def hold_budget_change(
         )
     cycle = change.only(CYCLE_AXES)
     if cycle.named:
-        prior = stores.campaigns.read_standing_budget(hop)
-        stores.campaigns.write_standing_budget(
+        prior = campaigns.read_standing_budget(hop)
+        campaigns.write_standing_budget(
             hop, prior.budget.over(cycle), pause_at_round=prior.pause_at_round
         )
+    return (
+        campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
+        != armed
+    )
 
 
 def _contended(subject: str) -> QuotaExceededError:

@@ -878,47 +878,6 @@
         "title": "ArmSlot",
         "type": "object"
       },
-      "ArmedCeilingEffect": {
-        "additionalProperties": false,
-        "description": "``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands.",
-        "properties": {
-          "armed": {
-            "$ref": "#/components/schemas/Budget"
-          },
-          "kind": {
-            "const": "armed_ceiling",
-            "default": "armed_ceiling",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "armed"
-        ],
-        "title": "ArmedCeilingEffect",
-        "type": "object"
-      },
-      "ArmsTakenEffect": {
-        "additionalProperties": false,
-        "description": "``submit-arms``: how many arms the round banked.",
-        "properties": {
-          "arms": {
-            "title": "Arms",
-            "type": "integer"
-          },
-          "kind": {
-            "const": "arms_taken",
-            "default": "arms_taken",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "arms"
-        ],
-        "title": "ArmsTakenEffect",
-        "type": "object"
-      },
       "BackendRevision": {
         "additionalProperties": false,
         "description": "What a launch read of the backend's revision, beside the one its connector was written against.",
@@ -2022,42 +1981,14 @@
           "effect": {
             "discriminator": {
               "mapping": {
-                "armed_ceiling": "#/components/schemas/ArmedCeilingEffect",
-                "arms_taken": "#/components/schemas/ArmsTakenEffect",
                 "draft_opened": "#/components/schemas/DraftOpenedEffect",
-                "gate_decided": "#/components/schemas/GateDecidedEffect",
-                "lookahead_taken": "#/components/schemas/LookaheadTakenEffect",
-                "none": "#/components/schemas/NoEffect",
-                "origin_edited": "#/components/schemas/OriginEditedEffect",
-                "paused": "#/components/schemas/PausedEffect",
-                "skipped": "#/components/schemas/SkippedEffect"
+                "none": "#/components/schemas/NoEffect"
               },
               "propertyName": "kind"
             },
             "oneOf": [
               {
                 "$ref": "#/components/schemas/NoEffect"
-              },
-              {
-                "$ref": "#/components/schemas/PausedEffect"
-              },
-              {
-                "$ref": "#/components/schemas/SkippedEffect"
-              },
-              {
-                "$ref": "#/components/schemas/GateDecidedEffect"
-              },
-              {
-                "$ref": "#/components/schemas/ArmsTakenEffect"
-              },
-              {
-                "$ref": "#/components/schemas/LookaheadTakenEffect"
-              },
-              {
-                "$ref": "#/components/schemas/ArmedCeilingEffect"
-              },
-              {
-                "$ref": "#/components/schemas/OriginEditedEffect"
               },
               {
                 "$ref": "#/components/schemas/DraftOpenedEffect"
@@ -2145,7 +2076,8 @@
           "no_divergence_check",
           "fork",
           "submit_arms",
-          "skip"
+          "skip",
+          "set_limits"
         ],
         "title": "ComparisonExit",
         "type": "string"
@@ -3818,32 +3750,6 @@
         "title": "ForkTrigger",
         "type": "string"
       },
-      "GateDecidedEffect": {
-        "additionalProperties": false,
-        "description": "``origin-gate-decision``, taken by the loop.",
-        "properties": {
-          "decision": {
-            "enum": [
-              "rescore",
-              "proceed",
-              "abort"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "kind": {
-            "const": "gate_decided",
-            "default": "gate_decided",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "decision"
-        ],
-        "title": "GateDecidedEffect",
-        "type": "object"
-      },
       "HealthRecord": {
         "additionalProperties": false,
         "description": "On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one.",
@@ -4664,32 +4570,6 @@
           "cap"
         ],
         "title": "LivesReading",
-        "type": "object"
-      },
-      "LookaheadTakenEffect": {
-        "additionalProperties": false,
-        "description": "``set-sample-lookahead``, spent by the round that took it.",
-        "properties": {
-          "auto": {
-            "title": "Auto",
-            "type": "boolean"
-          },
-          "cells": {
-            "title": "Cells",
-            "type": "integer"
-          },
-          "kind": {
-            "const": "lookahead_taken",
-            "default": "lookahead_taken",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "cells",
-          "auto"
-        ],
-        "title": "LookaheadTakenEffect",
         "type": "object"
       },
       "ManifestNodeOverlay": {
@@ -5594,38 +5474,6 @@
         "title": "OptimizerStepExitView",
         "type": "object"
       },
-      "OriginEditedEffect": {
-        "additionalProperties": false,
-        "description": "A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new.",
-        "properties": {
-          "kind": {
-            "const": "origin_edited",
-            "default": "origin_edited",
-            "title": "Kind",
-            "type": "string"
-          },
-          "moved": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "propertyNames": {
-                "enum": [
-                  "from",
-                  "to"
-                ]
-              },
-              "type": "object"
-            },
-            "minProperties": 1,
-            "title": "Moved",
-            "type": "object"
-          }
-        },
-        "required": [
-          "moved"
-        ],
-        "title": "OriginEditedEffect",
-        "type": "object"
-      },
       "OriginSource": {
         "enum": [
           "fork_seed",
@@ -6003,28 +5851,6 @@
         ],
         "title": "PauseCause",
         "type": "string"
-      },
-      "PausedEffect": {
-        "additionalProperties": false,
-        "description": "``pause-cycle``, taken by the loop.",
-        "properties": {
-          "kind": {
-            "const": "paused",
-            "default": "paused",
-            "title": "Kind",
-            "type": "string"
-          },
-          "run_phase": {
-            "const": "paused",
-            "title": "Run Phase",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_phase"
-        ],
-        "title": "PausedEffect",
-        "type": "object"
       },
       "PhaseRecord": {
         "additionalProperties": false,
@@ -8532,27 +8358,6 @@
           }
         },
         "title": "Skipped",
-        "type": "object"
-      },
-      "SkippedEffect": {
-        "additionalProperties": false,
-        "description": "``skip-sample``, taken by the loop.",
-        "properties": {
-          "kind": {
-            "const": "skipped",
-            "default": "skipped",
-            "title": "Kind",
-            "type": "string"
-          },
-          "skipped": {
-            "title": "Skipped",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "skipped"
-        ],
-        "title": "SkippedEffect",
         "type": "object"
       },
       "SpDiffView": {

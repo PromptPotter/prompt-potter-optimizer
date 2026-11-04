@@ -411,6 +411,11 @@ async def score_on_bench(
     )
     # Counted before the send, so the pass is never one of its own readers.
     reads_before = _reads_before(session)
+    # A look-ahead press is a round's to spend, and a pass is no round: it holds the backend's ceiling.
+    control = session.state.control
+    session.state.control = replace(
+        control, held_lookahead=session.backend_client.max_cells_in_flight
+    )
     try:
         return await _pass_on_bench(
             session,
@@ -435,6 +440,7 @@ async def score_on_bench(
         graded(cb, session, stopped, subject=subject, label=label)
         raise
     finally:
+        session.state.control = control
         cb.on_phase(CampaignPhase.BENCH, "exit")
 
 

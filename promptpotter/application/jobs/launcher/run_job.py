@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -84,28 +85,29 @@ class JobSpec(StrictModel):
         return self
 
 
-def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> asyncio.Task[None]:
-    """Answers the task that ends when the run's process exits."""
+async def spawn_job(
+    job_registry: JobRegistry, spec: JobSpec, *, stores: Stores
+) -> asyncio.Task[None]:
+    """Returns only once the run's process holds the job and its claim (`run_job`): a spawner
+    gone before that, its producer lock with it, would leave a job a reconciling read releases
+    under its child. Answers the task that ends when the run's process exits."""
     log_path = spec.jobs_dir / JOB_LOGS_DIR / f"{spec.job_id}.log"
     try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "ab") as log:
-            child = subprocess.Popen(
-                [sys.executable, "-X", "utf8", "-m", __spec__.name],
-                stdin=subprocess.PIPE,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                **_DETACHED,
-            )
-        assert child.stdin is not None
-        child.stdin.write(spec.model_dump_json().encode())
-        child.stdin.close()
+        child = _start(spec, log_path)
     except BaseException as exc:
         # No process took the job, so nothing else will ever hand its slot back or stamp its cycle.
         release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
         raise
 
-    loop, exited = asyncio.get_running_loop(), asyncio.Event()
+    loop = asyncio.get_running_loop()
+    if not await _adoption(loop, child, spec.job_id):
+        refused = RuntimeError(
+            f"job {spec.job_id}'s process exited before taking the job over (log {log_path})"
+        )
+        release_slot(job_registry, spec.job_id, refused, stores=stores, hop=spec.hop)
+        raise refused
+
+    exited = asyncio.Event()
 
     def _await_exit() -> None:
         child.wait()
@@ -118,7 +120,7 @@ def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> as
 
     async def watch() -> None:
         await exited.wait()
-        # Releases only the claim of a child that died before taking the job over; one that ran has consumed it.
+        # Releases only the claim of a child that died before its run declared itself; one that ran has consumed it.
         stores.campaigns.release_claim(
             spec.hop, job_id=spec.job_id, detail="its process exited before the run began"
         )
@@ -127,6 +129,57 @@ def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> as
     job_registry.attach_task(spec.job_id, exited_task)
     logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, log_path)
     return exited_task
+
+
+def _start(spec: JobSpec, log_path: Path) -> subprocess.Popen[bytes]:
+    """The run's process, its spec on stdin; stdout is `_adoption`'s, stderr the job's log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "ab") as log:
+        child = subprocess.Popen(
+            [sys.executable, "-X", "utf8", "-m", __spec__.name],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=log,
+            **_DETACHED,
+        )
+    assert child.stdin is not None
+    child.stdin.write(spec.model_dump_json().encode())
+    child.stdin.close()
+    return child
+
+
+# The one line a run's process says on its stdout: it holds the job and its claim.
+_ADOPTED = b"adopted\n"
+
+
+def _adoption(
+    loop: asyncio.AbstractEventLoop, child: subprocess.Popen[bytes], job_id: str
+) -> asyncio.Future[bool]:
+    """Whether *child* adopted its job; ``False`` once it exits without saying so. Read on a
+    daemon thread, for the reason `_await_exit` is."""
+    said: asyncio.Future[bool] = loop.create_future()
+
+    def settle(adopted: bool) -> None:
+        if not said.done():
+            said.set_result(adopted)
+
+    def read() -> None:
+        assert child.stdout is not None
+        with child.stdout:
+            adopted = any(line == _ADOPTED for line in child.stdout)
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(settle, adopted)
+
+    threading.Thread(target=read, name=f"job-{job_id}-adopt", daemon=True).start()
+    return said
+
+
+def _tell_spawner() -> None:
+    """`spawn_job`'s handshake; stdout then joins the log, which closes the pipe."""
+    sys.stdout.flush()
+    sys.stdout.buffer.write(_ADOPTED)
+    sys.stdout.buffer.flush()
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 
 
 async def run_held_job(
@@ -224,8 +277,8 @@ class HeldRun:
             install_datasets_root=stores.install_datasets_root,
         )
 
-    def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
-        return spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
+    async def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
+        return await spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
 
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
@@ -270,6 +323,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     if adopted is not None:
         # The claim now lives and dies with THIS process: a run killed before it declares itself leaves the cycle free.
         claim_cycle(stores, job_registry, adopted, spec.hop)
+    _tell_spawner()
     try:
         campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
         if campaign is None:

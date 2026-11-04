@@ -18,7 +18,7 @@ The **record** is the realized lineage — a tree. A mask splits it: **invariant
 
 **The lens re-ranks the RECORD; `ab` re-runs the ELECTION.** The lens orders by `scoreboard_rank_key`; the election ranks θ-lift over the parent, which under another formula needs a re-fit against a re-calibrated ruler — `ab`'s job. Both stop at the first departure. `?samples=<id,…>` composes with a `score:` lens and re-scores the arms and the parent (`RoundResult.reference_rows`) alike.
 
-**The compare channel.** `GET /evidence` carries the same segments on a subject (`subject=course:<c>/<cy>;lens=score:<F>;samples=3,7`), the mask part of the subject KEY. `application/mask/divergence.py::masked_election` decides one round; `scenario_spine` walks the chain and ends on the round the two part (`application/evidence/subjects.py::ScenarioReading`); θ is not re-fitted, so the parting round is a boundary, not a verdict.
+**The compare channel.** `GET /evidence` carries the same segments on a subject (`subject=course:<c>/<cy>;lens=score:<F>;samples=3,7`), the mask part of the subject KEY. `application/mask/divergence.py::masked_election` decides one round; `scenario_spine` walks the chain and ends on the round the two part, served as one `Said` line (`application/evidence/subjects.py::scenario_said`); θ is not re-fitted, so the parting round is a boundary, not a verdict.
 
 ### Applying one — the preview IS the fork point
 

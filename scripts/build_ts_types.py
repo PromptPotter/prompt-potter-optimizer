@@ -250,7 +250,6 @@ _WORD_TABLES: tuple[tuple[str, str], ...] = (
     ("promptpotter.domain.cells", "HEATMAP_SCOPE_LABELS"),
     ("promptpotter.domain.cells", "HARD_SAMPLE_ORDER_LABELS"),
     ("promptpotter.infrastructure.store.data_root", "LEAF_INFO"),
-    ("promptpotter.application.evidence.subjects", "SCENARIO_WORDS"),
     ("promptpotter.application.account", "SIGN_IN_REFUSAL_INFO"),
     ("promptpotter.application.pipeline_responses", "STEER_OUTSIDE_INFO"),
     ("promptpotter.domain.spend", "CAP_AXIS_INFO"),

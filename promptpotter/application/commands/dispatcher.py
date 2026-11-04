@@ -116,12 +116,8 @@ class Applier[R]:
     claim: DraftClaim | None = None
 
     @staticmethod
-    def silent(
-        run: Callable[[], Awaitable[object]],
-        *,
-        effect_fn: Callable[[object], CommandEffect] | None = None,
-    ) -> Applier[object]:
-        return Applier(run, _no_body, effect_fn=effect_fn)
+    def silent(run: Callable[[], Awaitable[object]]) -> Applier[object]:
+        return Applier(run, _no_body)
 
     @staticmethod
     def for_loop(refusal: str) -> Applier[object]:

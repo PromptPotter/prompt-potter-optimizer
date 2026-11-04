@@ -1488,7 +1488,7 @@ export interface SubjectReading {
   comparable: boolean | null;
   comparable_note: string;
   mask: SubjectMask | null;
-  scenario: ScenarioReading | null;
+  scenario: Said | null;
   winner_chain: WinnerChainPoint[] | null;
   config: Record<string, string> | null;
   arm_id: string | null;
@@ -1531,17 +1531,6 @@ export interface SubjectReading {
 export interface SubjectMask {
   lens: string | null;
   samples: number[] | null;
-}
-
-/** What the mask did to this branch: how far it agrees with the record, and the round it stops. */
-export interface ScenarioReading {
-  recorded_winner_key: string | null;
-  scenario_winner_key: string | null;
-  winner_changed: boolean;
-  first_divergent_round: number | null;
-  invariant_rounds: number;
-  total_rounds: number;
-  n_samples_scored: number;
 }
 
 /** One step of the branch standing behind a subject — the winner chain from the origin up to */
@@ -1628,6 +1617,7 @@ export interface Compare {
 export interface Arm {
   head_to_head_id: string;
   arm_key: string;
+  replicate: number;
 }
 
 /** The comparability guard: whether the bench headlines it is taken over — a pair's, a row's */
@@ -5314,21 +5304,6 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "trace": { label: "Trace", description: "Loop telemetry: prompts, the langfuse trace.", loop: true },
   "history": { label: "History", description: "The loop's event spine: its ledger.", loop: true },
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
-};
-
-// Mirror of application/evidence/subjects.py::SCENARIO_WORDS.
-export const SCENARIO_WORDS: Record<"parted" | "crowned" | "instead_of" | "held" | "round" | "rounds" | "unchanged" | "reads_over" | "sample" | "samples" | "caveat", string> = {
-  "parted": "parts from the record at round",
-  "crowned": "where it would have crowned",
-  "instead_of": "instead of",
-  "held": "never parts from the record",
-  "round": "round",
-  "rounds": "rounds",
-  "unchanged": "unchanged",
-  "reads_over": "the head reads over",
-  "sample": "sample",
-  "samples": "samples",
-  "caveat": "This re-ranks the RECORD under the formula you named — it does not re-run the campaign. θ is not re-fitted and no election is replayed, so the round named here is where the two readings first part, not a verdict the campaign reached. The chain STOPS at that round: past it the run would have stood on a parent it never had, and no measurement says what that produces. `ab` replay is what re-derives an election exactly.",
 };
 
 // Mirror of application/account.py::SIGN_IN_REFUSAL_INFO.
