@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.node_context import NodeContext, rewalk_origin
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
-from promptpotter.application.bench.round_analysis import compute_round_diagnostics
+from promptpotter.application.bench.round_analysis import mended_round
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_callbacks import restated_round
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -20,15 +20,19 @@ from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.optimizer_state import OptimizerState, StatePart
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.run_records import RoundProposedRecord
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
-    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRound
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+        StandingRound,
+        StandingRounds,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +125,12 @@ async def repair_incomplete_rounds(
             rows = t.rows(key)
             if not isinstance(arm, Concluded) or not _holed(t, key, arm):
                 continue
-            attempted = [by_key[r.key] for r in rows if r.key in by_key]
+            # Round 0's walk is the origin's cells, the ones it never sent among them.
+            attempted = (
+                cycle.origin_cells(dataset)
+                if t.round == 0
+                else [by_key[r.key] for r in rows if r.key in by_key]
+            )
             if not attempted:
                 logger.warning(
                     "Round %d arm %s has unmeasured cells but none in this dataset to "
@@ -132,18 +141,9 @@ async def repair_incomplete_rounds(
                 continue
             sp = cycle.points.measured(arm)
             stamp = MeasuredPass(individual_id=arm.individual.id, role=MeasurementRole.REPAIR)
-            missing = [by_key[r.key] for r in rows if _repairable_hole(r) and r.key in by_key]
-            for hole in missing:
-                await score_search_point(
-                    sp,
-                    [hole],
-                    session,
-                    label=stamp.role,
-                    sample_index=cycle.sample_index,
-                    measured=stamp,
-                    force_fresh=True,
-                )
-            # Re-scored whole (all cache hits now), so the composite is the GATEWAY's over the full panel.
+            missing = sum(map(_repairable_hole, rows))
+            # ONE walk, whole: the archive never replays an errored cell, so it sends exactly the
+            # holes, and the composite is the GATEWAY's over the full panel.
             scored = await score_search_point(
                 sp,
                 attempted,
@@ -170,16 +170,18 @@ async def repair_incomplete_rounds(
                 "re-measured %d, composite %s → %s",
                 t.round,
                 arm.label,
-                len(missing),
+                missing,
                 len(scored.sheet),
                 None if (was := t.folds.get(key)) is None else was.composite_fitness,
                 scored.scores.composite_fitness,
             )
         # The headline is the head arm's own: re-keying its rows moves it, never a second write.
-        mended = t.model_copy(update={"cells": cells, "folds": folds}) if cells != t.cells else t
-        if mended is not t:
-            diagnostics = compute_round_diagnostics(mended, session.pipeline_schema)
-            corrected[slot] = mended.model_copy(update={"diagnostics": diagnostics})
+        if cells != t.cells:
+            corrected[slot] = mended_round(
+                t.model_copy(update={"cells": cells, "folds": folds}),
+                corrected[:slot],
+                session.pipeline_schema,
+            )
     return corrected
 
 
@@ -274,6 +276,35 @@ def _package_drift(
     return mismatches, drifted
 
 
+def _origin_only(rounds: Sequence[RoundResult], standing: StandingRounds) -> bool:
+    """No round has read the origin yet: none closed past it, none walked on it."""
+    return [t.round for t in rounds] == [0] and 1 not in standing.proposals
+
+
+async def rewalk_lost_origin(cycle: Cycle, dataset: list[Sample], callbacks: RunCallbacks) -> None:
+    """A replayed origin no round has read yet, that lost cells, re-closes in place, never on a
+    branch that would keep only the dead measurement: one walk sends its holes and the cells its
+    walk never sent, the rest replayed. Past the divergence check, so a resume it refuses pays nothing."""
+    session = cycle.session
+    origin, head = cycle.origin_round, cycle.origin_round.head
+    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
+    if origin.at_offset is None or not _origin_only(cycle.rounds, standing):
+        return
+    assert origin.election is not None and head is not None, "round 0 ends on its origin"
+    rows = origin.rows(origin.election.ended_on)
+    holes = sum(map(_repairable_hole, rows))
+    if not holes and len(rows) >= head.expected_samples:
+        return
+    ctx = RoundContext(cycle=cycle, round_num=0, callbacks=callbacks)
+    await rewalk_origin(ctx, cycle.origin_cells(dataset), force_fresh=False)
+    logger.warning(
+        "Resume re-measured the origin's %d lost cell(s) and the %d its walk never sent; round 0 "
+        "closes again on them.",
+        holes,
+        max(0, head.expected_samples - len(rows)),
+    )
+
+
 async def apply_correction(
     cycle: Cycle,
     prior: list[RoundResult],
@@ -284,6 +315,11 @@ async def apply_correction(
     """*cycle* is seated on *prior*, and is seated on what the branch carries where one is cut."""
     session = cycle.session
     campaign_store, hop = session.store.campaigns, session.hop
+    # One read of the line before the branch exists to displace it.
+    standing = campaign_store.standing_rounds(hop, moment=None)
+    if _origin_only(prior, standing):
+        # Re-walked in place past the divergence check (`rewalk_lost_origin`).
+        return None
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.
     carried_rounds = prior[: cut.resume_at]
@@ -297,8 +333,6 @@ async def apply_correction(
         return None
     # The whole trajectory: a round above the cut reads those below, so its package shows the reach.
     corrected = [*mended, *prior[cut.resume_at :]]
-    # One read of the line before the branch exists to displace it.
-    standing = campaign_store.standing_rounds(hop, moment=None)
     proposed: dict[int, RoundProposedRecord] = {
         n: held.record for n, held in standing.proposals.items()
     }

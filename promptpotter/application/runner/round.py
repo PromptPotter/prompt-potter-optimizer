@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.bench.node_context import NodeContext, bank_proposals
+from promptpotter.application.bench.node_context import NodeContext, bank_proposals, reread_walk
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.diagnostics.verify import verify_on_saturation
@@ -83,7 +83,7 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
     cycle = ctx.cycle
     prior = cycle.rounds[-1]
     # A replayed walk makes no call, so nothing it would read is re-sent.
-    if prior.round == 0 or not prior.results or cycle.banked_proposals(ctx.round_num) is not None:
+    if prior.round == 0 or not prior.results or cycle.banked_walk(ctx.round_num) is not None:
         return
     at_prior = RoundContext(cycle=cycle, round_num=prior.round, callbacks=ctx.callbacks)
     for adapter in cycle.optimizer.plan.adapters:
@@ -239,7 +239,7 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
         note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
         arms=None if walk.pipeline == INITIAL_POPULATION else cycle.optimizer.arms_per_round,
         proposer=walk.proposer,
-        replayed=False,
+        replayed=cycle.banked_walk(ctx.round_num) is not None,
     )
     opening = walk.lead.opening(NodeContext(ctx, walk.lead), bench)
     fold = cycle.parent_fold
@@ -317,23 +317,34 @@ def _one_arm_each(ctx: RoundContext, proposals: list[Proposal]) -> list[Proposal
 
 
 def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
-    """Once per round: a resume re-walking a banked round reads its record and writes no second."""
-    session = ctx.cycle.session
+    """Once per round, with the state the walk left and the decisions it made: a resume seats both
+    and walks no proposer."""
     # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
     if not proposals:
         return
-    if session.store.campaigns.round_proposals(session.hop, ctx.round_num) is None:
-        bank_proposals(ctx, proposals, submitted=False)
+    flush_pending_decisions(ctx.cycle, ctx.callbacks.ledger)
+    bank_proposals(ctx, proposals, submitted=False)
+
+
+async def _walked(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals:
+    cycle = ctx.cycle
+    if (banked := cycle.banked_walk(ctx.round_num)) is not None:
+        cycle.seat_walk(ctx.round_num, banked.walked)
+        await reread_walk(ctx, banked.reads)
+        return Proposals(list(banked.proposals))
+    seeds, proposers, _ = walk.walked
+    if seeds:
+        seeded = await _walk(ctx, seeds, panel)
+        cycle.population = [p.individual for p in seeded.proposals if not p.refused]
+    population = await _walk(ctx, proposers, panel)
+    bank_walk(ctx, population.proposals)
+    return population
 
 
 async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals:
-    seeds, proposers, seated = walk.walked
-    if seeds:
-        seeded = await _walk(ctx, seeds, panel)
-        ctx.cycle.population = [p.individual for p in seeded.proposals if not p.refused]
-    population = await _walk(ctx, proposers, panel)
-    bank_walk(ctx, population.proposals)
+    population = await _walked(ctx, walk, panel)
     arms = _one_arm_each(ctx, population.proposals)
+    seated = walk.walked[2]
     if seated:
         arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
     return replace(population, proposals=arms)

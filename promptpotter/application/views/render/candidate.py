@@ -63,7 +63,8 @@ def individual_summary(
                 f" (+{len(vf.allowed) - 3})" if len(vf.allowed) > 3 else ""
             )
             out.append(f"{YELLOW}⚠{RESET} {vf.axis} = {vf.value!r}  ∉ [{allowed_str}]")
-            out.append("  ↳ never measured; the next l1_generate reads it in l1_wounds")
+        reasons = ", ".join(dict.fromkeys(vf.reason for vf in report.validation_failures))
+        out.append(f"  ↳ never measured; refused before a cell ({reasons})")
         return IndividualSummary(
             tag=f"{YELLOW}INVALID{RESET}",
             body_line="",

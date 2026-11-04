@@ -455,13 +455,19 @@ def health_finding(health: DegradationHealth, cause: HealthCause) -> str:
             )
         case "origin_incomplete":
             panel = sent + health.not_attempted
-            reported_cells = sent - health.hole_count - health.no_result_count
-            never_sent = (
-                f", {health.not_attempted} of them never sent" if health.not_attempted else ""
+            short = ", ".join(
+                f"{count} {what}"
+                for count, what in (
+                    (health.hole_count, "errored"),
+                    (health.no_result_count, "answered no label"),
+                    (health.unscored, "measured but ungraded"),
+                    (health.not_attempted, "never sent"),
+                )
+                if count
             )
             return (
-                f"the origin measured {reported_cells} of {panel} cells — "
-                f"{panel - reported_cells} never reported{never_sent}. This baseline is what "
+                f"the origin scored {health.scored_cells} of {panel} cells — {short}. "
+                "This baseline is what "
                 "every later round's lift is read against, so the shortfall is permanent and "
                 "silent: overlap lines will quote the surviving cells as though nothing were "
                 "missing."

@@ -6,11 +6,16 @@ from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.resume_and_fork.repair import rewalk_lost_origin
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import Controller, RoundContext
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import budget_stop
-from promptpotter.application.runner.origin_gate import run_origin_gate
+from promptpotter.application.runner.origin_gate import (
+    origin_gate_passed,
+    pass_origin_gate,
+    run_origin_gate,
+)
 from promptpotter.application.runner.round import (
     emit_origin_round,
     execute_round,
@@ -76,16 +81,24 @@ async def run_round_loop(
 
     try:
         run_init(cycle, cb)
-        # Until an L1 round closes, EVERY launch re-closes round 0: a stopped run's file passed no gate.
+        # Until an L1 round closes, every launch asks the gate, unless round 0 banked a pass.
         if diagnosing is None and clean_rounds == 0:
+            # A replayed origin closed on the ledger already; a fresh or re-measured one closes here.
             open_round = 0
-            await emit_origin_round(cycle, session, cb)
+            await rewalk_lost_origin(cycle, dataset, cb)
+            if cycle.origin_round.at_offset is None:
+                await emit_origin_round(cycle, session, cb)
             open_round = None
-            if origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None:
-                gate_stop = await run_origin_gate(
-                    cycle, dataset, config, session, cb, opt.origin_gate
-                )
-                if gate_stop is not None:
+            if (
+                not origin_gate_passed(session)
+                and origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None
+            ):
+                if session.store.campaigns.resumed_ending(session.hop) is StopReason.ORIGIN_GATE:
+                    # Resuming an origin the gate halted, still unhealthy, is the operator's override.
+                    pass_origin_gate(session, by="resume")
+                elif (
+                    gate_stop := await run_origin_gate(cycle, dataset, session, cb, opt.origin_gate)
+                ) is not None:
                     return LoopEnd(gate_stop)
 
         while True:

@@ -40,6 +40,15 @@ acting.
   can-run status. **Rides with:** that arc's first builder. **Re-test:**
   `git grep -n "verify skipped" -- promptpotter/application/diagnostics/verify.py`.
 
+- **PoBB re-decides a round a pause cut, and decides it differently** — capo-pobb paused at a fresh
+  cell past round 2's banked walk and resumed: the resume banks two eliminator decisions beside the
+  first launch's, and one `p_best` reads 0.096135 where the straight run read 0.100021, on the same
+  paired breakdown (the same on `batch/2~3`, before the walk bank). A resumed comparison votes on a
+  number no straight run computed. Action: an interrupted round's eliminator decisions retract on
+  re-entry, and its reading is the one the round opened on. **Rides with:** the eliminator.
+  **Re-test:** drop `capo-pobb` from `scripts/offline_run.py::BOUNDARY_RESUMED`; its `resumed/` leg
+  reads UNMOVED.
+
 ## NEXT ARC
 
 **Rides with:** the next arc's first builder wave.
@@ -589,11 +598,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:**
   the next check-in pass. **Re-test:** a free account's model menu equals
   `free_tier.yaml::task_models`.
-- **`application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag**
-  (`gpt-oss-20b`, ~1 in 6 LEVI replies), and the INVALID card names potter's `l1_generate`. Action: an
-  unclosed block reads to the reply's end; the card names the node that proposed. **Rides with:** the
-  h2h-3 re-run ([`roadmap.md`](roadmap.md) § Optimizer tuning — the standing board). **Re-test:**
-  `marked("<prompt>x")` is `None`.
 - **NEXT — the default host pin is a trial with no verdict.** `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host (`infrastructure/llm/registry.py::_MODEL_PROFILES`) into every
   node config; `route_order: []` opts out. **Decided:** a model keeps its pin only where its realized
@@ -643,35 +647,19 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   at q6 against a 92.5% parent needs at least the cells that could show one parent-level error.
   **Rides with:** any change to `early_stop` / `Selector.admission`. **Re-test:** rerun round 1 of
   `inbox-requires-action-v6__e1bda1`; an arm that is locked in is either elected or not locked.
-- **L1 spends a round on zero candidates**: tenant `crm-extract-names__29f63f` round 2 (parent 97.5% of 40, fields
-  graded with `fields_match`): `l1_generate_r2` returned 5 variants, all no-ops ("every variant is a no-op — zero
-  candidates"), and the round went on to MEASURE 0 candidates. One call bought nothing, and the stall counter is the only
-  thing that moves. Action: a no-op batch is retried once with the no-op named in the prompt, or the round escalates at
-  once instead of closing empty. **Rides with:** any change to `potter/l1/candidate_source.py`. **Re-test:** resume that
-  campaign; round 2 measures at least one candidate or names why it escalated.
 - **A run reads every campaign's ledger, so one stale campaign crashes another**: `crm-extract-names__29f63f`
   crashed entering round 1 on `LedgerUnreadableError` for `inbox-requires-action-v6__e1bda1`'s ledger. The bill
   no longer reads a ledger and `land-data` refuses a tree holding one that does not load, but a desk tree is
   never landed, and `intelligence/earned_blocks.py` and `initialization/loop_start.py::_banked_instruments`
   still read every campaign's ledger after origin scoring is paid. Action: those readers refuse at mint,
   before origin. **Re-test:** with one pre-shape-change campaign on a desk tree, `new` refuses before spending.
-- **A resumed walk re-walks a later proposer's arms**: `runner/round.py::bank_walk` banks the walk
-  whole, and the opener's replay (`potter/l1/candidate_source.py::_generate_or_load`) returns it whole,
-  so `mating` adds its children again and `locus_crossover` re-crosses the banked ones on a shifted rng;
-  L1's replayed readout counts them as its yield. Inert at `mating.offspring: 0`. Action: a replayed
-  walk returns its bank and runs no proposer, its readout banked beside it. **Rides with:** any change
-  to `bank_walk`. **Re-test:** resume a potter round with `offspring: 1` between bank and close; the
-  same arms walk.
 - **A re-read arm has two names**: `runner/measurement.py::ReferencePairs.of_round` names an individual
   by the slot an EARLIER round walked it in, so a population member walked again (CAPO's
   `population_rejoin`, potter's held leader) reads `C2.1` on its pair and `C3.1` on the round card. **Rides with:** any change to
   `arm_name`. **Re-test:** a held leader's round-3 pair names its round-3 slot.
-- **An operator-held prompt field is refused by potter alone**: `bench/children.py::carried_writes`
-  writes any declared prompt field, so GEPA, CAPO, LEVI and an authored arm write a field
-  `NodeSearchNarrowing.prompt_fields_held` holds; only `potter/validators/l1_strict.py::l1_prompt_fields_open`
-  refuses it. Action: the child door refuses a held field. Open: may an operator's own authored arm
-  write a field they held? **Rides with:** any change to `carried_writes`. **Re-test:** a GEPA child
-  writing a held field carries no failure.
+- **An operator's authored arm is refused a field they held**: `bench/children.py::carried_writes`
+  refuses every child a `NodeSearchNarrowing.prompt_fields_held` field, the operator's own arm with
+  them. Open: may that arm write it? **Rides with:** any change to `carried_writes`.
 - **A declared bench is not the held-out count**: `CampaignConfig.dataset_split` `{bench: 100}` held out
   162 rows on the box's `hotpotqa-closedbook`. No shipped recipe adds it a `bench_only` tail and the
   loader dedups rows, so the 62 are in the box's tenant definition; the one code path holding out past
@@ -696,36 +684,18 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   append, yet the nested record already says `mirrored=True`, so no bill or bank counts that call. Action: a
   failed carry raises, or the nested record is written only after the carry lands. **Re-test:** a root
   append that raises leaves the call counted on the account.
-- **A check-in can write framing no node takes**: decomposition fills `upstream_context` /
-  `downstream_context` for any pipeline, and `domain/opt_search_point.py::scored_prompts` refuses at mint
-  where no prompt node declares `problem_description` (`promptpotter-self` hit it; its `task.md` dropped the
-  two). Action: decomposition writes the splice fields only where the schema has a splice target.
-  **Re-test:** a check-in on a params-only backend commits no splice field and mints.
 - **A fork cannot narrow a dead param axis**: `ForkProposal.unlock_schema_field_rename` is the sole
   config a rebase applies (`stand_on` re-elects, it changes no config), so L3's measured ask to drop
   an axis value no arm gained on has no channel. Action: decide whether a narrowed
   `param_allowed_values` is fork-only, and if so name it as a `ForkProposal` member mapped to one
   `ConfigOverrides` edit. **Re-test:** `git grep -n "class ForkProposal" -A20 -- promptpotter`.
-- **The L4 estimator digest does not see the line series**: `CycleResult.bench_round_levels` now spans
-  the line (`runner/bench.py::line_bench_series`), which `domain/l4/proxies.py` reads unchanged, so a
-  rebased cell banked under the per-cycle series and one under the line series share an estimator
-  digest yet differ in what their mean averages. Action: move the line's series into the hashed
-  estimator, or re-key on the wipe. **Re-test:** `python scripts/offline_run.py --digests` before and
-  after a line-series edit.
-- **`AxisIndex.digest` computes what no panel renders**: `panels.py::_r_axis_memory` prints only
-  `_AXIS_MEMORY_LABEL_ORDER`, yet `digest` also builds `dead_queries`, `discriminating`, `bottleneck`,
-  `failure_group_insights`, `volatile` and `improvement_attribution` each round. Action: delete each key
-  no reader takes, or render it. **Re-test:** `git grep -n "digest.get\|\.digest(" -- promptpotter`.
-- **A critique cluster on unmarked rows is dropped into a log** (`l1/critique.py::spanning_clusters`), never
-  healed. Action: reject at the parse boundary with the marked roster in reach, so the repair rung heals it.
-  **Re-test:** a critique naming an unmarked row is re-asked, not thinned.
 - **The fastest hosts refuse the `l1_generate` schema**: Cerebras and Groq (`openai/gpt-oss-*`) answer 400 to
   `L1GenerateOutput`'s inlined JSON schema — Cerebras wants `properties` on every object, Groq strict mode wants
-  every property `required` — so the cheapest fast silicon cannot run an optimizer node. This was found by
-  probing `L1GenerateOutput.model_json_schema()`, not yet the wire schema
-  (`dispatch/l1_wire_schema.py::build_l1_response_schema`). Action: emit the wire schema in the strict-portable
-  subset (closed objects, all-required with nullable optionals). **Re-test:** one `l1_generate` call pinned to
-  Cerebras parses.
+  every property `required`. Every object on the wire comes closed and spelling its `properties` from
+  the response models themselves (`dispatch/l1_wire_schema.py::build_l1_response_schema`); every optional property is still optional, since the wire sends `strict: False`
+  (`infrastructure/llm/openai_compat.py`) and an all-required, nullable schema grows each request and reply.
+  Action: make the wire all-required only together with sending `strict: True`. **Re-test:** one `l1_generate`
+  call pinned to Cerebras parses.
 
 ## Open — from the head-to-head arc
 
@@ -752,10 +722,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `infrastructure/llm/spend_book.py::unreported_on` can re-teach a book its sends but never the cell.
   Action: a hold record per reserved cell. **Rides with:** any change to `spend_book.py::reserved`.
   **Re-test:** `grep -n "emit_spend_hold" promptpotter/infrastructure/llm/spend_book.py`.
-- **A resume from a pause at the origin boundary runs round 0 again** (a second round-0 election,
-  a second `l1_critique`). Open: whether the re-send should read the banked `optimizer_state`.
-  **Rides with:** `DashboardCheckout.over` or the origin round in `runner/run_prep.py`. **Re-test:**
-  `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line.
 - **INVESTIGATE — does an errored cell bias a head-to-head?** `gpt-oss-20b:nitro` can end
   `finish_reason=error` then pass one schema repair; unknown whether the row banks the answer or a
   miss. **Rides with:** the next head-to-head read. **Re-test:** per arm, the hit rate of error rows
@@ -850,13 +816,10 @@ word's `git grep -c` for that sense is 0.
   to dodge a cycle (barrel → search-point → poll → workspace); `lib/theme.ts` mixes chart setup with
   the theme preference.
 
-- **The origin gate holds forever** (seen on the box, 2026-11-01): a justlogic cycle launched from the
-  webapp failed every origin cell (`llm_only`: `output_schema` set, `answer_field` not) and then held at
-  `origin_gate_r0` for 20 h, alive after every window closed, appending a "still waiting" line every
-  10 s (ledger 1.7 MB), and blocking `update.sh`. An origin with no scored cell has nothing to gate.
-  `campaign_config.py::origin_gate` says it HALTS and a plain `resume` overrides; `runner/origin_gate.py`
-  HOLDS a live process instead, and its three answers repeat run verbs (`abort` ≈ leave it ended,
-  `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh). Decide: halt, or keep the hold.
+- **A scored but unhealthy origin still holds a live process**: `runner/origin_gate.py::run_origin_gate`
+  halts an origin with no scored cell, but holds a degraded one, and its three answers repeat run verbs
+  (`abort` ≈ leave it ended, `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh).
+  Open: halt it too, deleting the hold.
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
 - **Three seams owed a re-read:** `webapp/lib/hooks/useCompareWithOrigin.ts` picks the best pointer; `webapp/lib/derivations/spend.ts::readSpend`
@@ -1001,7 +964,6 @@ word's `git grep -c` for that sense is 0.
     as unreported), so `_AgentModel.cost_usd` can read a reported sum below the book's. **Re-test:** one
     5xx then an answer, read the row's `cost_usd` against the ledger.
 - **Seen removing the migrations** (2026-10-30):
-  - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
 
 ## Bypasses — held for one holistic pass

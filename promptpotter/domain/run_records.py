@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import ArmState, Proposal, Proposed
+from promptpotter.domain.arms import ArmRole, ArmState, Proposal, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -66,6 +66,8 @@ class CheckpointKind(enum.StrEnum):
 class BenchCheckpointKind(CheckpointKind):
     FORK_CUT = "fork_cut"
     PANEL_COVERAGE = "panel_coverage"
+    # The operator's pass past the origin the gate stopped: round 0's, standing while it does.
+    ORIGIN_GATE_PASS = "origin_gate_pass"
 
 
 class ResumeCheckpointRecord(FrozenModel):
@@ -250,15 +252,28 @@ class RoundRestatedRecord(RoundStatement):
     record_type: Literal["round_restated"] = "round_restated"
 
 
+class WalkRead(FrozenModel):
+    """An arm a walk read, on the cells it asked in the order its rows came: a replayed walk reads
+    it again off the archive, so the round's later reads of that arm continue the walk they did."""
+
+    individual_id: str
+    cells: list[str]
+    role: ArmRole
+
+
 class RoundProposedRecord(FrozenModel):
     """Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.
 
-    ``submitted`` is the operator's answer at the arm gate: the arms the round measures."""
+    ``submitted`` is the operator's answer at the arm gate: the arms the round measures. ``walked``
+    is the state its walk left — population, slices and the round's outputs — and ``reads`` the arms
+    it read, which a replay seats and reads in place of running any proposer."""
 
     record_type: Literal["round_proposed"] = "round_proposed"
     round: int
     consumed: str
     proposals: list[Proposal]
+    walked: OptimizerState
+    reads: list[WalkRead]
     submitted: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -612,13 +627,10 @@ class LLMCallProgressRecord(FrozenModel):
 
 
 class LLMCallRecord(FrozenModel):
-    """``payload_kind='synthesized'`` is a replay: its messages, response and usage are absent."""
-
     record_type: Literal["llm_call"] = "llm_call"
     node: str
     round: int | None = None
     candidate_idx: int | None = None
-    payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
     usage: TokenAccount | None = None
     payload: dict[str, Any] = Field(default_factory=dict)

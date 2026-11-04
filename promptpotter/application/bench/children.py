@@ -82,6 +82,15 @@ def carried_writes(
         node = schema.get_node(locus.node)
         assert node is not None
         match schema.locus_kind(*locus):
+            case "prompt" if locus.key in node.prompt_fields_held:
+                failures.append(
+                    ValidationFailure(
+                        axis=locus.name,
+                        value=str(value)[:300],
+                        allowed=node.open_prompt_fields,
+                        reason="forbidden_axis",
+                    )
+                )
             case "prompt":
                 prompts[locus] = value
             case "shots":

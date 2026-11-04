@@ -60,20 +60,6 @@ def load_round_audits(cycle_dir: Path, round_nums: list[int]) -> list[RoundAudit
 
 def build_node_block(record: LLMCallRecord) -> NodeBlock:
     payload = record.payload
-    if record.payload_kind == "synthesized":
-        return NodeBlock(
-            input=NodeInput(),
-            output=NodeOutput(response=payload.get("response"), reasoning=None),
-            synthesized=True,
-            timestamp=record.timestamp,
-            config={},
-            model=None,
-            usage=None,
-            prefix=None,
-            duration_s=None,
-            finish_reason=None,
-            schema_repair_errors=[],
-        )
     usage = record.usage
     rendered = "template_name" in payload
     return NodeBlock(
@@ -86,7 +72,6 @@ def build_node_block(record: LLMCallRecord) -> NodeBlock:
         output=NodeOutput(
             response=payload.get("response"), reasoning=payload.get("reasoning") or None
         ),
-        synthesized=False,
         timestamp=record.timestamp,
         config=payload.get("config") or {},
         model=payload.get("model"),

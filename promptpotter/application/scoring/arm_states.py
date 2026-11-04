@@ -117,12 +117,9 @@ def refuse(arm: Measuring) -> Cut:
 
 
 def conclude(
-    arm: Measuring,
-    scored: ScoredWalk,
-    *,
-    elimination: Elimination | None = None,
-    breakage: Broken | None = None,
+    arm: Measuring, scored: ScoredWalk, *, round_num: int, elimination: Elimination | None = None
 ) -> Concluded:
+    """Every walk's end, a broken one's read here: an origin or a parent read breaks as an arm does."""
     fields = _concluded_fields(arm)
     stop = scored.signal.outcome if scored.signal is not None else None
     if stop is None and scored.stopped is WalkEnd.SKIP:
@@ -133,7 +130,13 @@ def conclude(
         assert elimination is not None, "a lock-in is the eliminator's stop"
         return Measured(**fields, locked_in=elimination)
     if stop == "broken":
-        assert breakage is not None, "a broken walk is read by `read_breakage`"
+        assert isinstance(scored.signal, BrokenSignal), "a broken stop is a `BrokenSignal`"
+        breakage = read_breakage(
+            scored.signal,
+            effective_pipeline_params=arm.individual.pipeline_params,
+            round_num=round_num,
+            changes_description=arm.changes_description,
+        )
         return Cut(**fields, reason=breakage)
     assert elimination is not None, "an elimination is the eliminator's stop"
     return Cut(**fields, reason=Eliminated(elimination=elimination))

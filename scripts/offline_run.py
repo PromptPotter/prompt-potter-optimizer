@@ -22,6 +22,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,16 +81,23 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
     OptimizerChoice,
 )
-from promptpotter.domain.command_kinds import ArmRequest, ForkCyclePayload, HeadToHeadRequest
+from promptpotter.domain.command_kinds import (
+    ArmRequest,
+    ForkCyclePayload,
+    HeadToHeadRequest,
+    PauseCyclePayload,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.run_records import BenchCheckpointKind, CycleSeed
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
+from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.archive_queries import (
@@ -109,7 +117,7 @@ from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
@@ -121,6 +129,7 @@ CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
 DIVERGED = "diverged"
 REBASED = "rebased"
+GATED = "gated"
 # Potter with its crossover on: offspring added beside L1's by a draw and by an LLM host.
 CROSSED = "crossed"
 CROSSED_HOSTS = ("l1_generate", "l2_context")
@@ -145,6 +154,7 @@ HARNESS = frozenset(
         RESUMED,
         DIVERGED,
         REBASED,
+        GATED,
         CROSSED,
         f"{CROSSED}-{RESUMED}",
         f"{CROSSED}-l2",
@@ -153,7 +163,16 @@ HARNESS = frozenset(
 )
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
-RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers")
+RESUME_APPENDS = ("phases", "run_phases", "arms", "rulers", "rounds_entered")
+# Which of a round's cells a launch paid and which it replayed, by where each count sits: a
+# reading side's `bought`, a cell row's `cached`, a fold's `cached` and `tokens` — never a key of
+# that name elsewhere, such as the fitness term `evaluators.tokens`.
+READING_SIDES, SIDE_SPLIT = ("a", "b"), ("bought",)
+CELL_ROWS, ROW_SPLIT = ("cells", "overlap_results"), ("cached",)
+FOLDS, FOLD_SPLIT = "folds", ("cached", "tokens")
+# Its eliminator re-decides an interrupted round on resume (`code-debt-cleanup.md`): until that
+# closes its `resumed/` leg pauses at the boundary, every other optimizer's past a banked walk.
+BOUNDARY_RESUMED = ("capo-pobb",)
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 
 BENCH: dict[str, Any] = {
@@ -386,14 +405,18 @@ class ByCallIdentity:
             _recombine(obj, props, filler, call)
         elif node.startswith("L1Critique"):
             # Read off the prompt as a model would: the rows a cluster may span are the `[#id]` marks.
+            # Pairs of them, then one row alone: the parse drops the lone row, and every pair where
+            # the detectable move is wider (`critique_response_model`), keeping the rest.
             ids = _marks(prompt)
+            clusters = [*(ids[k : k + 2] for k in range(0, min(len(ids), 4) - 1, 2)), ids[4:5]]
             obj["failure_highlights"] = [
                 {
-                    "sample_ids": ids[k : k + 2],
+                    "sample_ids": rows,
                     "mechanism": f"negation tracking {call}.{k}",
                     "claim": f"critique {call}: the chain breaks at a negation; said and truth differ",
                 }
-                for k in range(0, min(len(ids), 4), 2)
+                for k, rows in enumerate(clusters)
+                if rows
             ]
             # Read off the prompt's axis list, as a model naming its axis verbatim would.
             axes = _axis_menu(prompt)
@@ -645,11 +668,14 @@ async def run_one(
     out: Path | None = None,
     framing: bool = True,
     pause_after: int | None = None,
+    pause_in_walk: int | None = None,
     bench_trigger: BenchTrigger = "at_end",
     diverge: bool = False,
     crossover: str | None = None,
 ) -> tuple[Path, str]:
-    """The archive is the workspace's, never *out*'s: campaigns in one process share it."""
+    """The archive is the workspace's, never *out*'s: campaigns in one process share it.
+    *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
+    measures, its walk banked, so the resume replays the walk and runs no proposer."""
     out = workspace if out is None else out
     config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, crossover=crossover)
     if not framing:
@@ -662,6 +688,8 @@ async def run_one(
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
     session = await open_session(DATASET, stores=stores)
+    if pause_in_walk is not None:
+        harness.backend.before_answer = pausing_in_walk(stores, pause_in_walk)
     session, result = await run_campaign(
         session,
         config,
@@ -671,7 +699,8 @@ async def run_one(
         mode=RunMode(),
     )
     await session.backend_client.aclose()
-    if pause_after is not None:
+    harness.backend.before_answer = None
+    if pause_after is not None or pause_in_walk is not None:
         if result.stop_reason != StopReason.PAUSED:
             raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
         # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
@@ -693,6 +722,29 @@ async def run_one(
         stores, session, result, harness, out, name=optimizer, bench_trigger=bench_trigger
     )
     return cycle, session.campaign_id
+
+
+def pausing_in_walk(stores: Stores, round_num: int) -> Callable[[], Awaitable[None]]:
+    """The pause an operator presses as the first cell is answered of a round from *round_num* on
+    whose walk banked: a cell measured inside a walk, or replayed, presses nothing."""
+    asked = False
+
+    async def pause() -> None:
+        nonlocal asked
+        at = current_round()
+        if asked or at is None or at < round_num:
+            return
+        (campaign,) = stores.campaigns.list_campaigns(lifecycle="all")
+        hop = campaign.root_hop
+        if stores.campaigns.round_proposals(hop, at) is None:
+            return
+        asked = True
+        payload = PauseCyclePayload(
+            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="offline: inside a walk"
+        )
+        await CommandDispatcher(stores).dispatch(CommandCall(payload))
+
+    return pause
 
 
 async def banked(
@@ -810,6 +862,80 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     if final in (None, StopReason.REBASED):
         raise SystemExit(f"offline run: the line still reads {final}")
     print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
+
+
+async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
+    """An origin the backend refused whole halts at the gate. Resumed still refused, the resume is
+    the operator's override, banked once, each cell its origin walk sends sent once; resumed once it answers,
+    the origin passes on health, each lost cell re-sent once, on no fork. Broken first: the archive
+    then holds no answer to replay."""
+    refused = 0
+    config = campaign_config(optimizer, 1, bench_trigger="at_end")
+    gated = config.optimization.model_copy(update={"origin_gate": "strict"})
+    config = config.model_copy(update={"optimization": gated})
+    samples = synthetic_rows(rows)
+    (workspace / "requests").mkdir()
+    llm = ByCallIdentity(workspace / "requests", text_templates(config), cites=cited_panel(config))
+    backend = FakeBackend(samples)
+    install_network(Router(FakeLLM(llm), backend))
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    stand_in_fetch(stores, samples)
+
+    def passes(hop: CycleHop) -> list[str]:
+        decided = stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
+        return [d.data["by"] for d in decided if d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS]
+
+    for fixed in (False, True):
+        backend.down, backend.sent = True, []
+        session, result = await run_campaign(
+            await open_session(DATASET, stores=stores),
+            config,
+            readout_sink=print,
+            budget=Budget(),
+            mode=RunMode(),
+        )
+        await session.backend_client.aclose()
+        hop, lost = session.hop, {(prompt, query) for prompt, query, _ in backend.sent}
+        if result.stop_reason != StopReason.ORIGIN_GATE or passes(hop):
+            raise SystemExit(f"offline run: a refused origin ended {result.stop_reason}")
+        backend.down, backend.sent = not fixed, []
+        session, result = await run_campaign(
+            await rebound_session(stores, hop),
+            readout_sink=print,
+            budget=Budget(),
+            mode=RunMode(),
+        )
+        await session.backend_client.aclose()
+        said = f"resumed {'answering' if fixed else 'still refused'}"
+        if result.stop_reason == StopReason.ORIGIN_GATE:
+            raise SystemExit(f"offline run: {said}, the origin halted at the gate again")
+        if passes(hop) != ([] if fixed else ["resume"]):
+            raise SystemExit(f"offline run: {said}, round 0 banked passes {passes(hop)}")
+        if not fixed:
+            # Round 0's walk, before the loop opens round 1: one send of a cell is its attempts,
+            # and a second send of it would exceed them.
+            attempts = Counter((p, q) for p, q, at in backend.sent if at in (None, 0))
+            if twice := sorted(q for (_, q), n in attempts.items() if n > SEND_ATTEMPTS):
+                raise SystemExit(f"offline run: {said}, round 0 sent cells {twice} twice")
+            refused = len(attempts)
+            continue
+        # The origin's every send: its lost cells, then those its walk never sent, each once.
+        origin = {prompt for prompt, _ in lost}
+        resent = [(p, q) for p, q, _ in backend.sent if p in origin]
+        if len(resent) != len(set(resent)) or not lost <= set(resent):
+            raise SystemExit(
+                f"offline run: {said}, {len(resent)} origin sends re-measured {len(lost)} lost cells"
+            )
+        cycles = stores.campaigns.campaign_cycles(hop.campaign_id)
+        if session.hop != hop or len(dict(cycles)) != 1:
+            raise SystemExit(f"offline run: {said}, the origin was re-measured onto a fork")
+        if stop_reason_outcome(result.stop_reason).exit_code:
+            raise SystemExit(f"offline run: {said}, the line ended {result.stop_reason}")
+        print(
+            f"gated halts twice; the override banked once, its origin walk sending {refused} "
+            f"cells once each; the fixed origin sent its {len(lost)} lost cells once "
+            f"({len(resent)} origin sends) and ran on to {result.stop_reason}"
+        )
 
 
 def run_terminal(
@@ -1318,10 +1444,31 @@ def child_env(home: Path) -> dict[str, str]:
 
 
 def decided(workspace: Path, *, after: int) -> dict[str, Any]:
-    """Less what a resume legitimately moves: its init records and the checkouts it deleted."""
+    """Less what a resume legitimately moves: its init records, the checkouts it deleted, the round
+    it re-enters, and which of a round's cells it paid and which it replayed, by path (`READING_SIDES`, `CELL_ROWS`, `FOLDS`): a
+    cell answered before a pause inside a round replays on the resume. The harness's call counts
+    stay, so a resume that re-walked a banked round reads MOVED."""
     doc: dict[str, Any] = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))
     kept = {k: v for k, v in doc["ledger"].items() if k not in RESUME_APPENDS}
-    return {**doc, "ledger": kept, "rounds": [r for r in doc["rounds"] if r["round"] > after]}
+
+    def less(node: Any, split: tuple[str, ...]) -> Any:
+        return {k: v for k, v in node.items() if k not in split} if isinstance(node, dict) else node
+
+    def unsplit(node: Any, key: str = "") -> Any:
+        if isinstance(node, list):
+            return [unsplit(v) for v in node]
+        if not isinstance(node, dict):
+            return node
+        if key in CELL_ROWS:
+            return {arm: [less(row, ROW_SPLIT) for row in rows] for arm, rows in node.items()}
+        if key == FOLDS:
+            return {arm: less(fold, FOLD_SPLIT) for arm, fold in node.items()}
+        held = less(node, SIDE_SPLIT) if key in READING_SIDES else node
+        return {k: unsplit(v, k) for k, v in held.items()}
+
+    rounds = [r for r in doc["rounds"] if r["round"] > after]
+    out: dict[str, Any] = unsplit({**doc, "ledger": kept, "rounds": rounds})
+    return out
 
 
 def recombined(workspace: Path, host: str) -> int:
@@ -1406,13 +1553,52 @@ def read_straight_and_resumed(
         return failed + 1
     again = decided(workspace / RESUMED, after=pause_after)
     same = decided(workspace, after=pause_after) == again
-    # A pause at the origin's boundary replays round 0 on resume, which re-records it.
-    failed += not _graded(again["run"]["bench"]) or (pause_after > 0 and not same)
+    failed += not _graded(again["run"]["bench"]) or not same
+    at, inside = paused_at(workspace / RESUMED)
+    # At the boundary it stepped to, or inside a round past it whose walk banked.
+    landed = at == pause_after if name in BOUNDARY_RESUMED else inside and at > pause_after
+    failed += not landed
+    where = f"inside round {at} past its banked walk" if inside else f"after round {at}"
     print(
-        f"{name}: paused after round {pause_after} and resumed, decisions "
-        f"{'UNMOVED' if same else 'MOVED'}"
+        f"{name}: paused {where}{'' if landed else ' (NOT where its leg pauses)'} and resumed, "
+        f"decisions {'UNMOVED' if same else 'MOVED'}"
     )
     return failed
+
+
+def paused_at(workspace: Path) -> tuple[int, bool]:
+    """The round its campaign's pause stood in, off its cycle's own ledger, and whether the pause
+    lay inside it: entered and not yet closed when the pause was declared."""
+    (ledger,) = Path(long_path(workspace)).glob(
+        "projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl"
+    )
+    entered = closed = 0
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        match record.get("record_type"):
+            case "round_entered":
+                entered = record["round"]
+            case "round_closed":
+                closed = record["round"]
+            case "run_phase" if record.get("stop_reason") == StopReason.PAUSED:
+                return entered, closed != entered
+    raise SystemExit(f"offline run: {workspace} declares no pause")
+
+
+def said_leg(
+    failed: dict[str, int], name: str, workspace: Path, leg: Future[int] | None, what: str
+) -> None:
+    """A leg of *name*'s saying its verdict on its log's last line that opens with its directory's
+    name; one never spawned says nothing."""
+    if leg is None:
+        return
+    rc = leg.result()
+    failed[name] += bool(rc)
+    log = workspace / "run.log"
+    lines = log.read_text(encoding="utf-8").splitlines()
+    ended = f"FAILED (exit {rc}) -- {log}" if rc else ""
+    ended = ended or next(ln for ln in reversed(lines) if ln.startswith(f"{workspace.name} "))
+    print(f"{name}: {what}: {ended}")
 
 
 def is_harness(rel: Path) -> bool:
@@ -1469,6 +1655,8 @@ def run_child_leg(args: argparse.Namespace) -> None:
         )
     elif args.rebase:
         asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
+    elif args.gated:
+        asyncio.run(run_gated(args.child, workspace, rows=args.rows))
     else:
         one = run_one(
             args.child,
@@ -1476,6 +1664,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             rounds=args.rounds,
             rows=args.rows,
             pause_after=args.pause_after,
+            pause_in_walk=args.pause_in_walk,
             bench_trigger=args.bench_trigger,
             diverge=args.diverge,
             crossover=args.crossover,
@@ -1518,8 +1707,10 @@ def main() -> int:
     )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
+    ap.add_argument("--pause-in-walk", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--diverge", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--rebase", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--gated", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--crossover", choices=CROSSED_HOSTS, help=argparse.SUPPRESS)
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
@@ -1578,7 +1769,7 @@ def main() -> int:
     tasks = (
         len(due)
         if args.controlled
-        else 2 * len(due) + (len(INTERRUPTED) + 1) * firsts + 4 * potter_legs
+        else 2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 4 * potter_legs
     )
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
@@ -1616,6 +1807,7 @@ def main() -> int:
         if firsts and pause_after
         else None
     )
+    gating = spawn(first, home / first / GATED, "--gated") if firsts else None
     # Only potter's L2 proposes a fork.
     rebasing = spawn("potter", home / "potter" / REBASED, "--rebase") if potter_legs else None
     # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had.
@@ -1638,7 +1830,14 @@ def main() -> int:
         {}
         if args.controlled
         else {
-            name: spawn(name, home / name / RESUMED, f"--pause-after={pause_after}") for name in due
+            name: spawn(
+                name,
+                home / name / RESUMED,
+                f"--pause-after={pause_after}"
+                if name in BOUNDARY_RESUMED
+                else f"--pause-in-walk={pause_after + 1}",
+            )
+            for name in due
         }
     )
     failed = dict.fromkeys(due, 0)
@@ -1664,14 +1863,8 @@ def main() -> int:
             f"{first}: a resume diverged at run init "
             f"{f'FAILED (exit {rc}) -- {log}' if rc else 'forked, its parent REBASED'}"
         )
-    if rebasing is not None:
-        rc = rebasing.result()
-        failed["potter"] += bool(rc)
-        log = home / "potter" / REBASED / "run.log"
-        lines = log.read_text(encoding="utf-8").splitlines()
-        ended = f"FAILED (exit {rc}) -- {log}" if rc else ""
-        ended = ended or next(ln for ln in reversed(lines) if ln.startswith("rebased "))
-        print(f"potter: a line proposing a fork at every L2 fire {ended}")
+    said_leg(failed, first, home / first / GATED, gating, "the origin gate")
+    said_leg(failed, "potter", home / "potter" / REBASED, rebasing, "a line forking at every L2")
     if crossing is not None:
         failed["potter"] += not crossed_legs(home / "potter", crossing, pause_after)
     if args.controlled and not any(failed.values()):

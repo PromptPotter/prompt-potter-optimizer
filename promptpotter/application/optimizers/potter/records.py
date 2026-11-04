@@ -136,7 +136,7 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     l1_yield: float | None = None
     l1_proposed: int = 0
     l1_rejected: dict[str, int] = Field(default_factory=dict)
-    # ``None`` where no call was composed: round 0, a replayed generation.
+    # ``None`` where no call was composed: round 0.
     l1_citable: list[str] | None = None
     l1_exploration_budget: str | None = None
     # The round owns it: a parse failure yields no candidate to charge.

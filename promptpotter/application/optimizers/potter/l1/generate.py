@@ -71,12 +71,10 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
 
 @dataclass(frozen=True)
 class L1Generation:
-    """``citable`` and ``exploration_budget`` are ``None`` where the proposals came back off disk."""
-
     proposals: list[Proposal]
-    parse_failure: str | None = None
-    citable: tuple[str, ...] | None = None
-    exploration_budget: str | None = None
+    parse_failure: str | None
+    citable: tuple[str, ...]
+    exploration_budget: str
 
 
 async def l1_generate(
@@ -123,6 +121,7 @@ async def l1_generate(
     )
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in bundle.demo_pool}
+    hosted = bundle.l2.recombinations if bundle.l2.for_round == bundle.cycle_slice.round_num else []
     response_model = build_l1_response_model(effective_l1_field_names())
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
@@ -206,12 +205,7 @@ async def l1_generate(
         ]
         population.extend(_recombined(children, own, lineage, pipeline_schema, host=None))
     # What L2's last fire named for this round, L1 the node that adds it.
-    if bundle.l2.for_round == bundle.cycle_slice.round_num:
-        population.extend(
-            _recombined(
-                children, bundle.l2.recombinations, lineage, pipeline_schema, host="l2_context"
-            )
-        )
+    population.extend(_recombined(children, hosted, lineage, pipeline_schema, host="l2_context"))
 
     return L1Generation(population, None, citable, budget)
 

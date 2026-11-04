@@ -35,10 +35,10 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | 1 | `pipeline.yaml` → `resolved_prompts["l1_generate/1"]` | The template; cross-check its `{{slots}}` against `injection_table` |
 | 2 | `{cycle_dir}/rounds/round_NNNN.json` | Parsed candidates, scores, `overlap`, critique, each candidate's target `prompts`. No rendered prompt |
 | 3 | `{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` | Did variants stratify or collapse; who was cut first |
-| 4 | `{cycle_dir}/.runtime/ledger.jsonl` | Escalations, decisions, spend. **The only place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record's `template_fields` + `variables`; `llm_call_start` carries `injection_dropped` |
+| 4 | `{cycle_dir}/.runtime/ledger.jsonl` | Escalations, decisions, spend. **The only place the rendered optimizer prompt survives**: each `record_type: "llm_call"` record's `template_fields` + `variables`; `llm_call_start` carries `injection_dropped` |
 | 5 | `{cycle_dir}/dashboard.json` | Composite trajectory + recent rules |
 
-A replayed round's `l1_generate` cache entry is a `payload_kind: "synthesized"` stub — useless as evidence.
+A replayed round runs no proposer: its walk is the `round_proposed` record's `walked` state.
 
 ## Live-run supervision
 

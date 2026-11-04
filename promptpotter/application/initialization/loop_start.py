@@ -328,7 +328,11 @@ async def init_optimization_loop(
         # Only an admitted launch retracts rounds: whatever refuses it raised above.
         session.store.campaigns.rewind_to_round(session.hop, resume_from_round_override)
         session.store.campaigns.leave_comparison(session.hop, ComparisonExit.REWIND)
-    if no_divergence_check and session.state.resumed_from_round > 1:
+    # A round the ledger closed, the origin's included, is replayed, never closed again.
+    replays = (
+        session.store.campaigns.standing_rounds(session.hop, moment=None).last_closed is not None
+    )
+    if no_divergence_check and replays:
         session.store.campaigns.leave_comparison(session.hop, ComparisonExit.NO_DIVERGENCE_CHECK)
     cycle = Cycle.start(
         origin.origin,
@@ -338,8 +342,7 @@ async def init_optimization_loop(
         optimizer=selected,
     )
     forked_from: CycleHop | None = None
-    # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
-    if session.state.resumed_from_round > 1:
+    if replays:
         fork = await resume_with_divergence_check(
             cycle,
             dataset,

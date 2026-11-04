@@ -1,7 +1,8 @@
 """Lost or corrupted measurement.
 
 Owns `infrastructure/store/measurement_archive.py` and `archive_queries.py`,
-`application/maintenance/`, `application/bench/resume_and_fork/` and `application/origin.py`. A
+`application/maintenance/`, `application/bench/resume_and_fork/`, `application/origin.py` and
+`application/runner/origin_gate.py`. A
 replay served to the wrong content, a paid row dropped, a fork that inherits the wrong origin.
 """
 
@@ -68,6 +69,7 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_course,
     subtree_version,
 )
+from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
@@ -84,6 +86,7 @@ from promptpotter.application.origin import (
 )
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
+from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
@@ -116,12 +119,13 @@ from promptpotter.domain.hierarchy import (
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
-from promptpotter.domain.phases import PauseCause, StopReason
+from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
+    BenchCheckpointKind,
     ConfigOverrides,
     CycleSeed,
     ForkDirection,
@@ -1655,7 +1659,14 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             close_round(callbacks.ledger, line[: n + 1], cycle=cycle)
         if consumed:
             callbacks.ledger.append(
-                RoundProposedRecord(round=2, consumed="", proposals=[], submitted=False)
+                RoundProposedRecord(
+                    round=2,
+                    consumed="",
+                    proposals=[],
+                    submitted=False,
+                    walked=cycle.round_state(2),
+                    reads=[],
+                )
             )
         set_cycle(cycle, line=line)
         bound = set_cycle_ledger(callbacks.ledger)
@@ -1708,3 +1719,66 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert fork_direction(read_branch) is ForkDirection.SUPERSEDE, (
         "round 2's banked candidates were generated off the hole and carried across as equivalent"
     )
+
+
+# 4. An origin the gate halted, resumed past it
+
+
+def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    dead = sheet(measurement(i, None, error="boom", error_category="SERVER") for i in range(8))
+    origin = prompted(instruction="origin")
+    hop = CycleHop(campaign_id="cycle_gated__20260101-000000", cycle_id="cycle_gated")
+    stored_campaign(stores, minted_campaign(hop, owner_user_id=str(stores.identity.user_id)))
+    stores.campaigns.mint_cycle(hop)
+
+    def launch(*, replayed: bool, crashes: bool = False) -> StopReason:
+        """A launch as `build_run_observers` opens it, its loop capped before round 1; one that
+        *crashes* writes no ending. The real resume path walks in the offline run's `gated/` leg."""
+        ctx = seat(
+            stores,
+            hop=hop,
+            origin=(origin, lambda _session: dead),
+            optimization={"budget": {"rounds": 0}},
+        )
+        cycle, session = ctx.cycle, ctx.cycle.session
+        session.state.clock = LaunchClock.now()
+        publish_inner_spawn_context(session)
+        ctx.callbacks.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        if replayed:
+            # The origin a resume replays stands on its close (`closed_rounds.py::closed_rounds`).
+            closed = stores.campaigns.standing_rounds(hop, moment=None).rounds[0]
+            set_cycle(
+                cycle,
+                line=[cycle.origin_round.model_copy(update={"at_offset": closed.at_offset})],
+            )
+        bound = set_cycle_ledger(ctx.callbacks.ledger)
+        try:
+            with spending_under(unbounded_spend_book()):
+                end = asyncio.run(run_round_loop(cycle, [], cycle.config, session, ctx.callbacks))
+        finally:
+            reset_cycle_ledger(bound)
+        if not crashes:
+            ctx.callbacks.ledger.append(RunPhaseRecord.stop(end.stop_reason))
+        return end.stop_reason
+
+    def passes() -> list[str]:
+        decided = stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
+        return [d.data["by"] for d in decided if d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS]
+
+    # An origin that scored no cell has nothing to gate: it halts.
+    assert launch(replayed=False) is StopReason.ORIGIN_GATE, "an unscored origin held or ran on"
+    assert passes() == [], "a halt banked a pass"
+    # The resume's own RUNNING retires that ending, yet the pass is read off what it retired; the
+    # launch dies before it writes an ending, so the next one takes up the gate's halt again.
+    assert launch(replayed=True, crashes=True) is StopReason.ROUNDS_BUDGET, (
+        "a resume halted at the gate again"
+    )
+    assert passes() == ["resume"], "the override lived only in the process that took it"
+    assert launch(replayed=True) is StopReason.ROUNDS_BUDGET, "a banked pass was not read"
+    assert passes() == ["resume"], "a resume after a crash banked the override twice"
+    # A later launch, after an ending the gate never made, stands on the pass already banked.
+    assert launch(replayed=True) is StopReason.ROUNDS_BUDGET, "a banked pass was not read"
+    assert passes() == ["resume"], "one override was banked twice"

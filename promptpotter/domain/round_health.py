@@ -133,3 +133,9 @@ class DegradationHealth(FrozenModel):
     node_failure_rates: dict[str, float] = Field(default_factory=dict)
     node_warnings: dict[str, list[str]] = Field(default_factory=dict)
     last_error: str | None = None
+
+    @property
+    def scored_cells(self) -> int:
+        """Sent cells that answered a label and carry a verdict: a ``NO_RESULT`` row (a schema
+        with no answer field, an output failure) is as unscoreable as a hole."""
+        return max(0, self.samples - self.hole_count - self.no_result_count - self.unscored)

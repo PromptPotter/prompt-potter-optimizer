@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from collections.abc import KeysView
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -54,12 +53,6 @@ class SampleIndex:
     def register(self, sample: Sample) -> None:
         self._samples[sample.id] = sample
 
-    def sample(self, sample_id: int) -> Sample | None:
-        return self._samples.get(sample_id)
-
-    def sample_ids(self) -> KeysView[int]:
-        return self._samples.keys()
-
     def _derive(
         self, graded: CellSheet, prior: SampleFoldRow | None
     ) -> tuple[list[tuple[int, bool, bool, str | None]], list[tuple[int, str, str]]]:
@@ -106,12 +99,6 @@ class SampleIndex:
         for row in (self._rows or {}).values():
             self.replay_row(row)
 
-    def hits(self, sample_id: int) -> list[bool]:
-        return self._hits.get(sample_id, [])
-
-    def failure_modes(self, sample_id: int) -> list[str]:
-        return self._failure_modes.get(sample_id, [])
-
     def degradation_count(self, sample_id: int) -> int:
         return self._degradation_counts.get(sample_id, 0)
 
@@ -143,26 +130,6 @@ class SampleIndex:
         self._cache_records = records
         return records
 
-    def dead(
-        self,
-        *,
-        min_observations: int = 1,
-        include_always_hit: bool = True,
-        include_always_miss: bool = True,
-    ) -> list[SampleRecord]:
-        out: list[SampleRecord] = []
-        for r in self.records():
-            if len(self._hits.get(r.sample_id, [])) < min_observations:
-                continue
-            if (include_always_miss and r.hit_rate == 0.0) or (
-                include_always_hit and r.hit_rate == 1.0
-            ):
-                out.append(r)
-        return out
-
-    def discriminating(self, min_variance: float = 0.1) -> list[SampleRecord]:
-        return [r for r in self.records() if r.variance >= min_variance]
-
     def persistent_failures(self, min_streak: int = 3) -> list[SampleRecord]:
         records = []
         for r in self.records():
@@ -190,17 +157,6 @@ class SampleIndex:
                 )
             )
         return clusters[:max_clusters]
-
-    def bottleneck_distribution(self) -> dict[str, float]:
-        counts: dict[str, int] = defaultdict(int)
-        total = 0
-        for modes in self._failure_modes.values():
-            for mode in modes:
-                counts[mode] += 1
-                total += 1
-        if total == 0:
-            return {}
-        return {step: count / total for step, count in sorted(counts.items(), key=lambda x: -x[1])}
 
     def _fold_population(
         self,

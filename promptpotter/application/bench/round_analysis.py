@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.arms import ArmState
     from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
+    from promptpotter.domain.round_health import DegradationHealth
     from promptpotter.domain.scoring import CellSheet, GradedCell
 
 _RANK_BUCKET_KEYS: tuple[str, ...] = ("1", "2-5", "6-10", "11-20", "not_found")
@@ -45,7 +46,7 @@ def ended_on(
     """A round ending on *election*: what it reads off that arm (election, health, overlap,
     diagnostics) stated once, for its selector at the close and for a layer that re-elects it
     (`node_context.py::Lineage.reelected`)."""
-    head, rows = arms[election.ended_on], cells[election.ended_on]
+    head = arms[election.ended_on]
     assert isinstance(head, Concluded), "a round ends on an arm it concluded"
     picked = election.selected is not None
     rr = RoundResult(
@@ -56,13 +57,34 @@ def ended_on(
         cells=cells,
         overlap_results=overlap_results,
         election=election,
-        health=compute_round_health(
-            results=rows.cells,
-            prior_healths=assemble_prior_healths(priors, round),
-            not_attempted=max(0, head.expected_samples - len(rows)) if picked else 0,
-        ),
+        health=head_health(round, head, cells[election.ended_on], picked=picked, priors=priors),
         overlap=OverlapReading.unpaired(overlap, round, picked),
     )
+    return rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, schema)})
+
+
+def head_health(
+    round: int, head: Concluded, rows: CellSheet, *, picked: bool, priors: Sequence[RoundResult]
+) -> DegradationHealth:
+    """A round's health, read off the rows of the arm it ended on: a close and a repair alike."""
+    return compute_round_health(
+        results=rows.cells,
+        prior_healths=assemble_prior_healths(priors, round),
+        not_attempted=max(0, head.expected_samples - len(rows)) if picked else 0,
+        is_origin=round == 0,
+    )
+
+
+def mended_round(
+    rr: RoundResult, priors: Sequence[RoundResult], schema: PipelineSchema | None
+) -> RoundResult:
+    """*rr* with re-measured rows: its health and diagnostics re-read off them, never carried."""
+    head = rr.head
+    assert rr.election is not None and isinstance(head, Concluded), "a round ends on an arm"
+    health = head_health(
+        rr.round, head, rr.results, picked=rr.election.selected is not None, priors=priors
+    )
+    rr = rr.model_copy(update={"health": health})
     return rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, schema)})
 
 

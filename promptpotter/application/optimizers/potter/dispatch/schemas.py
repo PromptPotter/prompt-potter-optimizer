@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import functools
+import logging
 import re
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, cast
 
 from pydantic import (
     AfterValidator,
@@ -13,6 +14,7 @@ from pydantic import (
     Field,
     WithJsonSchema,
     create_model,
+    field_validator,
     model_validator,
 )
 
@@ -29,6 +31,8 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
+
+logger = logging.getLogger(__name__)
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
@@ -94,6 +98,7 @@ CLUSTER_MECHANISM_MAX = 60
 CLUSTER_CLAIM_MAX = 320
 # A cluster is a MECHANISM, and one row shows no mechanism: the next generator rewrites around that row.
 CLUSTER_ROWS_MIN = 2
+CLUSTERS_MAX = 3
 
 
 class VariantEvidenceGrounding(OptimizerResponseModel):
@@ -105,7 +110,7 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
 
 
 class L1Variant(OptimizerResponseModel):
-    """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses, and `l1_invariants` drops that arm alone."""
+    """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses beside one that edits, and `l1_invariants` drops that arm alone."""
 
     # Field order is GENERATION order; optional at the PARSE boundary only, REQUIRED on the wire (`l1_wire_schema.py`).
     evidence_grounding: VariantEvidenceGrounding | None = None
@@ -170,7 +175,8 @@ class L1GenerateOutput(OptimizerResponseModel):
 
 
 def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
-    """``populate_by_name`` stays OFF: the original key must fail, never half-apply a rename."""
+    """``populate_by_name`` stays OFF: the original key must fail, never half-apply a rename. A
+    no-op variant is `l1_invariants.py::detect_invariants`' to read, on resolved node names."""
     variant = _renamed_variant(tuple(sorted(field_names.items())))
     # `__class_getitem__` builds `list[variant]` as a VALUE; the subscript form is a type expression mypy rejects.
     variants_field: Any = (list.__class_getitem__(variant), ...)
@@ -199,12 +205,13 @@ def _renamed_variant(items: tuple[tuple[str, str], ...]) -> type[L1Variant]:
 
 class FailureCluster(OptimizerResponseModel):
     # GENERATION order: the ids commit the cluster to rows before the prose can name one. `minItems`
-    # is advisory on a `strict: False` wire; `l1/critique.py::spanning_clusters` is what decides.
+    # is advisory on a `strict: False` wire; `critique_response_model` drops what it does not hold.
     sample_ids: list[int] = Field(
         json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
         description=(
-            "The rows this cluster spans, by the `[#id]` marks in the panels — at least two. "
-            "Two rows that fail for different reasons are two clusters, never one."
+            "The rows this cluster spans, by the `[#id]` marks in the panels — at least two, and "
+            "as many as DETECTABLE MOVE names; an unmarked id is struck, and a cluster left "
+            "narrower is dropped. Two rows that fail for different reasons are two clusters, never one."
         ),
     )
     mechanism: Annotated[
@@ -224,9 +231,10 @@ class FailureCluster(OptimizerResponseModel):
 
 class L1CritiqueOutput(OptimizerResponseModel):
     # FIRST on purpose: the tail truncates first, and the clusters are what the generator targets.
-    failure_highlights: Annotated[list[FailureCluster], BeforeValidator(_truncate(3))] = Field(
+    # `maxItems` is advisory on a `strict: False` wire: the cap is `_capped`'s, after the drop.
+    failure_highlights: list[FailureCluster] = Field(
         default_factory=list,
-        max_length=3,
+        json_schema_extra={"maxItems": CLUSTERS_MAX},
         description="One per DISTINCT failure cluster, ≤3, largest first.",
     )
     priority_fix: Annotated[
@@ -245,6 +253,12 @@ class L1CritiqueOutput(OptimizerResponseModel):
         description="≤4 axis names from the same list.",
     )
 
+    @field_validator("failure_highlights", mode="after")
+    @classmethod
+    def _capped(cls, clusters: list[FailureCluster]) -> list[FailureCluster]:
+        # As `_truncate` heals an overrun: the reply keeps its first clusters.
+        return clusters[:CLUSTERS_MAX]
+
     @model_validator(mode="after")
     def _one_cluster_per_row(self) -> Self:
         if not self.priority_fix.strip():
@@ -257,6 +271,40 @@ class L1CritiqueOutput(OptimizerResponseModel):
                         f"row {row} sits in clusters {first} and {k}: a row shows one mechanism"
                     )
         return self
+
+
+def critique_response_model(marked: frozenset[int], least: int) -> type[L1CritiqueOutput]:
+    """Each cluster keeps the ids of the *marked* roster it names, and one left spanning fewer
+    than *least* is dropped at parse, said in the log; the cap counts what stands, so a narrow
+    cluster never pushes out a valid one. The reply's valid clusters, fix and axes stand."""
+
+    def _capped(_cls: type, clusters: list[FailureCluster]) -> list[FailureCluster]:
+        # As `_truncate` heals an overrun: one bad cluster never costs the reply a paid repair.
+        kept = [
+            c.model_copy(update={"sample_ids": ids})
+            for c in clusters
+            if len(set(ids := [i for i in c.sample_ids if i in marked])) >= least
+        ]
+        if dropped := len(clusters) - len(kept):
+            logger.info(
+                "critique: %d of %d clusters span fewer than %d marked rows — dropped",
+                dropped,
+                len(clusters),
+                least,
+            )
+        return kept[:CLUSTERS_MAX]
+
+    # Named as the base's, so it replaces the cap rather than run after it.
+    return create_model(
+        "L1CritiqueOutput",
+        __base__=L1CritiqueOutput,
+        __validators__={
+            "_capped": cast(
+                "Callable[..., Any]",
+                field_validator("failure_highlights", mode="after")(classmethod(_capped)),
+            )
+        },
+    )
 
 
 FORK_REASON_MAX = 400

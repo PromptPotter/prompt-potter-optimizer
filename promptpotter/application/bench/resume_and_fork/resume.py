@@ -34,29 +34,33 @@ def _stale_generation(
     hop: CycleHop,
     prior: list[RoundResult],
     resumed_from_round: int,
+    selected: SelectedOptimizer,
 ) -> ReplayMismatch | None:
-    """No recorded digest is a divergence, not a shrug."""
+    """No recorded digest is a divergence, not a shrug; nor is a walk banked by another optimizer
+    or another prompt of its nodes, which its replay would carry in unseen."""
 
     cached = campaign_store.round_proposals(hop, resumed_from_round)
     if cached is None or not prior:
         return None
-    consumed = cached.consumed
-    current = round_document_digest(prior[-1])
-    if consumed == current:
+    recorded = (cached.consumed, cached.walked.manifest, cached.walked.prompt_hashes)
+    current = (round_document_digest(prior[-1]), selected.name, selected.prompt_hashes())
+    if recorded == current:
         return None
     logger.warning(
-        "Round %d's cached candidates were generated from round %d as it read %s, and it "
-        "now reads %s — regenerating on a branch rather than replaying them.",
+        "Round %d's cached candidates were generated from round %d as it read %s by %s, and it "
+        "now reads %s by %s — regenerating on a branch rather than replaying them.",
         resumed_from_round,
         prior[-1].round,
-        consumed or "(unrecorded)",
-        current,
+        recorded[0] or "(unrecorded)",
+        recorded[1],
+        current[0],
+        current[1],
     )
     return ReplayMismatch(
         round_num=resumed_from_round,
         kind="stale_generation",
-        recorded_outcome=consumed,
-        current_outcome=current,
+        recorded_outcome=list(recorded),
+        current_outcome=list(current),
         inputs_ref={"generated_from_round": prior[-1].round},
     )
 
@@ -139,7 +143,7 @@ async def _replay_line(
 
     if not skip_divergence_check:
         optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
-        stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
+        stale = _stale_generation(campaign_store, hop, prior, resumed_from_round, cycle.optimizer)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         # The declaration never moves; the defaults it is a delta over can, under the same name.
         running = cycle.optimizer.treatment(

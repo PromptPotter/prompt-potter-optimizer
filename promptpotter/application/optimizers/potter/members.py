@@ -227,7 +227,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Children, Replay}
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Children}
     # Every bundle member reads the pools through this draw (`NodeContext.drawn`), so L2 lays out
     # what L1 is shown.
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType(
@@ -251,9 +251,8 @@ class L1Generate(LayoutNode, nodes.Proposer):
         # +1: the leader a held round keeps for one more read (`candidate_source.py::rejoining`).
         return knobs.n_variants + knobs.recombine + 1
 
-    def opening(self, ctx: NodeContext, _bench: nodes.RoundOpening) -> nodes.RoundOpening:
+    def opening(self, ctx: NodeContext, bench: nodes.RoundOpening) -> nodes.RoundOpening:
         knobs = ctx.knobs(L1GenerateKnobs)
-        replayed = ctx.read(Replay).banked_proposals() is not None
         # At patience 0 L2 fires every round, which "stall 1/0" would state as a riddle.
         patience = ctx.knobs(EscalationKnobs).l1_patience
         stall = ctx.slice(Ladder).l1_stall_count
@@ -271,7 +270,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
             + knobs.recombine
             + len(rejoining(ctx.read(Lineage))),
             proposer="L1",
-            replayed=replayed,
+            replayed=bench.replayed,
         )
 
     def round_facts(

@@ -4100,7 +4100,6 @@
       },
       "LLMCallRecord": {
         "additionalProperties": false,
-        "description": "``payload_kind='synthesized'`` is a replay: its messages, response and usage are absent.",
         "properties": {
           "call_id": {
             "default": "",
@@ -4127,15 +4126,6 @@
             "additionalProperties": true,
             "title": "Payload",
             "type": "object"
-          },
-          "payload_kind": {
-            "default": "llm_call",
-            "enum": [
-              "llm_call",
-              "synthesized"
-            ],
-            "title": "Payload Kind",
-            "type": "string"
           },
           "record_type": {
             "const": "llm_call",
@@ -7039,7 +7029,7 @@
       },
       "RoundProposedRecord": {
         "additionalProperties": false,
-        "description": "Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.\n\n``submitted`` is the operator's answer at the arm gate: the arms the round measures.",
+        "description": "Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.\n\n``submitted`` is the operator's answer at the arm gate: the arms the round measures. ``walked``\nis the state its walk left — population, slices and the round's outputs — and ``reads`` the arms\nit read, which a replay seats and reads in place of running any proposer.",
         "properties": {
           "consumed": {
             "title": "Consumed",
@@ -7050,6 +7040,13 @@
               "$ref": "#/components/schemas/Proposal"
             },
             "title": "Proposals",
+            "type": "array"
+          },
+          "reads": {
+            "items": {
+              "$ref": "#/components/schemas/WalkRead"
+            },
+            "title": "Reads",
             "type": "array"
           },
           "record_type": {
@@ -7070,12 +7067,17 @@
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
+          },
+          "walked": {
+            "$ref": "#/components/schemas/OptimizerState"
           }
         },
         "required": [
           "round",
           "consumed",
-          "proposals"
+          "proposals",
+          "walked",
+          "reads"
         ],
         "title": "RoundProposedRecord",
         "type": "object"
@@ -9533,6 +9535,39 @@
         ],
         "title": "WalkEnd",
         "type": "string"
+      },
+      "WalkRead": {
+        "additionalProperties": false,
+        "description": "An arm a walk read, on the cells it asked in the order its rows came: a replayed walk reads\nit again off the archive, so the round's later reads of that arm continue the walk they did.",
+        "properties": {
+          "cells": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "individual_id": {
+            "title": "Individual Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "origin",
+              "panel",
+              "parent"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "individual_id",
+          "cells",
+          "role"
+        ],
+        "title": "WalkRead",
+        "type": "object"
       },
       "WallClock": {
         "additionalProperties": false,

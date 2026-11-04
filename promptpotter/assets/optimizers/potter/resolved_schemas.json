@@ -170,7 +170,7 @@
             "additionalProperties": false,
             "properties": {
               "sample_ids": {
-                "description": "The rows this cluster spans, by the `[#id]` marks in the panels — at least two. Two rows that fail for different reasons are two clusters, never one.",
+                "description": "The rows this cluster spans, by the `[#id]` marks in the panels — at least two, and as many as DETECTABLE MOVE names; an unmarked id is struck, and a cluster left narrower is dropped. Two rows that fail for different reasons are two clusters, never one.",
                 "items": {
                   "type": "integer"
                 },

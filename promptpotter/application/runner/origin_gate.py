@@ -1,4 +1,4 @@
-"""``rescore`` re-scores force-fresh, which makes fix-rescore-watch a loop with no re-mint."""
+"""``rescore`` is one force-fresh walk of the origin, which makes fix-rescore-watch a loop with no re-mint."""
 
 from __future__ import annotations
 
@@ -6,21 +6,21 @@ import logging
 import sys
 from typing import TYPE_CHECKING, get_args
 
-from promptpotter.application.datasets.loaders import sample_dataset
+from promptpotter.application.bench.node_context import rewalk_origin
+from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import declare_gate, declare_running
-from promptpotter.application.runner.measurement import rescore_parent
 from promptpotter.application.runner.operator_hold import hold_for_operator
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import origin_gate_tripped
-from promptpotter.domain.phases import GateDecision, StopReason
-from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.domain.phases import STOP_REASON_INFO, GateDecision, StopReason
+from promptpotter.domain.run_records import BenchCheckpointKind
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_callbacks import RunCallbacks
-    from promptpotter.domain.campaign_config import CampaignConfig, OriginGateMode
+    from promptpotter.domain.campaign_config import OriginGateMode
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -29,17 +29,49 @@ logger = logging.getLogger(__name__)
 _DECISIONS: tuple[str, ...] = get_args(GateDecision)
 
 
+def pass_origin_gate(session: Session, *, by: str) -> None:
+    """The operator's override, a decision of round 0: every later launch of the cycle reads it."""
+    ledger = session.state.ledger
+    assert ledger is not None, "build_run_observers must bind state.ledger before the gate"
+    record_decision(
+        ledger,
+        BenchCheckpointKind.ORIGIN_GATE_PASS,
+        {},
+        "proceed",
+        node=None,
+        data={"by": by},
+        round=0,
+    )
+
+
+def origin_gate_passed(session: Session) -> bool:
+    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
+    return any(
+        d.kind == BenchCheckpointKind.ORIGIN_GATE_PASS for d in standing.decisions.get(0, ())
+    )
+
+
 async def run_origin_gate(
     cycle: Cycle,
     dataset: list[Sample],
-    config: CampaignConfig,
     session: Session,
     cb: RunCallbacks,
     mode: OriginGateMode,
 ) -> StopReason | None:
-    """``None`` proceeds into L1; a ``rescore`` re-emits round 0 and a still-unhealthy verdict waits again."""
+    """``None`` proceeds into L1; a ``rescore`` re-emits round 0 and a still-unhealthy verdict waits again.
+    An origin that scored no cell has nothing to gate: it halts, and its resume re-measures it
+    (`repair.py::rewalk_lost_origin`), passing it on that resume if it is still unhealthy; an
+    edited origin is a new campaign or an operator-steered fork at round 0
+    (`OriginSource.FORK_SEED`)."""
     while True:
         grade = cycle.origin_round.health.grade
+        if cycle.origin_round.health.scored_cells == 0:
+            logger.error(
+                "Origin gate: round 0 scored no cell (%s) — halted. %s",
+                cycle.origin_round.health.last_error or "no error recorded",
+                STOP_REASON_INFO[StopReason.ORIGIN_GATE].next_step,
+            )
+            return StopReason.ORIGIN_GATE
         logger.warning(
             "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
             "the webapp modal, the TTY prompt, or `python -m promptpotter origin-gate %s`.",
@@ -69,12 +101,13 @@ async def run_origin_gate(
                 "Origin gate: proceed — entering L1 against a %s origin (operator override).",
                 grade,
             )
+            pass_origin_gate(session, by="proceed")
             declare_running(session)
             return None
 
         logger.warning("Origin gate: re-scoring the origin force-fresh.")
         try:
-            await _rescore_and_reemit(cycle, dataset, config, session, cb)
+            await _rescore_and_reemit(cycle, dataset, session, cb)
         except Exception:
             logger.exception(
                 "Origin gate: re-score failed — staying at the gate. "
@@ -89,19 +122,8 @@ async def run_origin_gate(
 
 
 async def _rescore_and_reemit(
-    cycle: Cycle,
-    dataset: list[Sample],
-    config: CampaignConfig,
-    session: Session,
-    cb: RunCallbacks,
+    cycle: Cycle, dataset: list[Sample], session: Session, cb: RunCallbacks
 ) -> None:
-    scoring_set = sample_dataset(dataset, config.sp_budget_origin)
-    origin = await rescore_parent(
-        RoundContext(cycle=cycle, round_num=0, callbacks=cb),
-        scoring_set,
-        role=MeasurementRole.ORIGIN,
-        force_fresh=True,
-    )
-    # Re-graded as a fresh floor, with no prior track record, as the first origin emit was.
-    cycle.restamp_origin_round(origin)
+    ctx = RoundContext(cycle=cycle, round_num=0, callbacks=cb)
+    await rewalk_origin(ctx, cycle.origin_cells(dataset), force_fresh=True)
     await emit_origin_round(cycle, session, cb)

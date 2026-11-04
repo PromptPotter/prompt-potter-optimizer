@@ -41,10 +41,11 @@ from promptpotter.domain.opt_search_point import (
     taken,
 )
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
+from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
 from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_records import LLMCallRecord, RoundProposedRecord
+from promptpotter.domain.run_records import RoundProposedRecord, WalkRead
 from promptpotter.domain.run_standing import walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -94,9 +95,56 @@ def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submi
             round=round_.round_num,
             consumed=round_document_digest(rounds[-1]) if rounds else "",
             proposals=list(proposals),
+            walked=round_.cycle.round_state(round_.round_num),
+            reads=[
+                WalkRead(
+                    individual_id=walk.arm.state.individual.id,
+                    cells=[
+                        *(held := [cell.key for cell in walk.arm.rows]),
+                        *sorted(walk.asked.difference(held)),
+                    ],
+                    role=walk.arm.state.role,
+                )
+                for walk in round_.walks.values()
+            ],
             submitted=submitted,
         )
     )
+
+
+async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
+    """A replayed walk makes the reads its first walk made, each a replay off the archive."""
+    cycle = round_.cycle
+    pool = {s.key: s for s in cycle.session.state.scoring.require_partition().search}
+    for read in reads:
+        arm = cycle.measured(read.individual_id)
+        cells = [pool[key] for key in read.cells]
+        await measure_as_parent(
+            round_, arm.individual, cycle.points.measured(arm), cells, role=read.role
+        )
+
+
+async def rewalk_origin(
+    round_: RoundContext, scoring_set: list[Sample], *, force_fresh: bool
+) -> None:
+    """Round 0 closes again on ONE walk of the origin over its scoring set, under ORIGIN. The
+    archive never replays an errored cell, so a plain walk sends exactly the holes and the cells
+    never sent; the gate's rescore sends every cell *force_fresh*."""
+    cycle = round_.cycle
+    callbacks = round_.callbacks
+    callbacks.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
+    try:
+        read = await measure_as_parent(
+            round_,
+            cycle.parent,
+            cycle.parent_point,
+            scoring_set,
+            role=MeasurementRole.ORIGIN,
+            force_fresh=force_fresh,
+        )
+    finally:
+        callbacks.on_phase(CampaignPhase.ORIGIN, "exit", round=0)
+    cycle.seat_origin(read, cycle.origin_round.optimizer_state)
 
 
 async def measure_as_parent(
@@ -132,8 +180,8 @@ async def measure_as_parent(
         label=role,
         sample_index=cycle.sample_index,
         measured=MeasuredPass(individual.id, role),
-        force_fresh=force_fresh,
         held=round_.held(key),
+        force_fresh=force_fresh,
     )
     # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.
     if walked.stopped is not None:
@@ -144,7 +192,7 @@ async def measure_as_parent(
             len(cells),
             walked.stopped,
         )
-    read = ReadArm(key, conclude(arm, walked), walked.sheet)
+    read = ReadArm(key, conclude(arm, walked, round_num=round_.round_num), walked.sheet)
     if announce:
         round_.callbacks.on_arm(round_.round_num, key, read.state)
     round_.walked(read, asked)
@@ -442,18 +490,6 @@ class Calls(CycleRead):
             injections=injections or InjectionBreakdown(),
         )
 
-    def note_synthesized_call(self, payload: dict[str, Any]) -> None:
-        """Where a round makes no call, so the audit trail and dashboard still see the node."""
-        if (ledger := self._cycle.session.state.ledger) is not None:
-            ledger.append(
-                LLMCallRecord(
-                    node=self._member.name,
-                    round=self._round.round_num,
-                    payload_kind="synthesized",
-                    payload=payload,
-                )
-            )
-
     async def ask(self, prompt: str, idx: int | None = None) -> str:
         node = self._member.name
         # The seed keys the reuse cache: a resume replays its reply, a repeat anywhere else samples.
@@ -595,7 +631,7 @@ class Children(CycleRead):
 
 
 class Replay(CycleRead):
-    """What a resume re-derives as the run first did: its seeded draws, its decisions, its banked proposals."""
+    """What a resume re-derives as the run first did: its seeded draws and its decisions."""
 
     def rng(self, tag: str = "") -> random.Random:
         return self._cycle.rng(self._round.round_num, f"{self._member.name}{tag}")
@@ -613,9 +649,6 @@ class Replay(CycleRead):
             data=data,
             round=self._round.round_num,
         )
-
-    def banked_proposals(self) -> list[Proposal] | None:
-        return self._cycle.banked_proposals(self._round.round_num)
 
 
 class Progress(CycleRead):

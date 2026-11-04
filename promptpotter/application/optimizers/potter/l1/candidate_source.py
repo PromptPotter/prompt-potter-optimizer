@@ -3,13 +3,11 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import (
-    Calls,
     Frontier,
     Lineage,
-    Replay,
     Ruler,
     Target,
 )
@@ -20,33 +18,15 @@ from promptpotter.application.optimizers.potter.l1.generate import L1Generation,
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.records import L1Readout, L2Memory
 from promptpotter.application.optimizers.potter.validators.l1_invariants import detect_invariants
-from promptpotter.domain.arms import Proposal, candidate_label
+from promptpotter.domain.arms import Proposal
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.wounds import fatal_validation_failures
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
 
 logger = logging.getLogger(__name__)
-
-
-def _summaries(proposals: list[Proposal], round_num: int) -> list[dict[str, Any]]:
-    """``prompt_fields`` nests as the wire's ``{node: {key: value}}``, the node's shots under ``shots``."""
-    return [
-        {
-            "idx": i,
-            "label": candidate_label(round_num, i),
-            "changes_description": cp.individual.lineage.changes_description,
-            "pipeline_overlay": cp.overlay,
-            "prompt_fields": {
-                node: {**p.fields, **({SHOTS_KEY: list(p.shots)} if p.shots else {})}
-                for node, p in cp.individual.prompts.items()
-            },
-        }
-        for i, cp in enumerate(proposals)
-    ]
 
 
 def variants_this_round(n_variants: int, l2: L2Memory) -> int:
@@ -80,7 +60,7 @@ def l1_readout(ctx: NodeContext, generation: L1Generation) -> L1Readout:
         l1_proposed=proposed,
         l1_rejected=dict(rejected),
         l1_parse_failure=generation.parse_failure,
-        l1_citable=None if generation.citable is None else list(generation.citable),
+        l1_citable=list(generation.citable),
         l1_exploration_budget=generation.exploration_budget,
         axis_memory_peaked=sorted(axes.peaked_axes()) if axes else [],
     )
@@ -91,18 +71,17 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
     lineage, target = ctx.read(Lineage), ctx.read(Target)
     # Outside L1's generation: no invariant reads them and its yield never counts them.
     kept = rejoining(lineage)
-    generation = await _generate_or_load(ctx, kept)
+    generation = await _generate(ctx)
     checked = detect_invariants(
         generation.proposals, lineage.parent, parent_point.pipeline_params, lineage.rounds
     )
-    # Every variant a no-op is missing data, not N proposer wounds the stall would count.
+    # A batch moving none of the parent is missing data, not one proposer wound per variant.
     if checked and all(
         any(vf.reason == "no_op_variant" for vf in cp.validation_failures) for cp in checked
     ):
         logger.error("L1 R%d: every variant is a no-op — zero candidates", ctx.round_num)
-        generation = replace(generation, proposals=[], parse_failure=PARSE_FAILURE_ALL_NO_OP)
-        ctx.emit(l1_readout(ctx, generation))
-        return Proposals(proposals=kept)
+        checked = []
+        generation = replace(generation, parse_failure=PARSE_FAILURE_ALL_NO_OP)
     parsed = parse_population(
         checked,
         lineage.parent,
@@ -116,24 +95,7 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
     return Proposals(proposals=[*kept, *generation.proposals])
 
 
-async def _generate_or_load(ctx: NodeContext, kept: list[Proposal]) -> L1Generation:
-    round_num = ctx.round_num
-    calls = ctx.read(Calls)
-    # A round that replays its candidates makes no LLM call. The bank holds the walk whole, *kept*
-    # leading; one holding none of L1's own re-generates, as an unbanked round does.
-    persisted = ctx.read(Replay).banked_proposals()
-    if persisted is not None and len(persisted) > len(kept):
-        logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
-        calls.note_synthesized_call(
-            {
-                "type": "l1_generate",
-                "input": {"source": "loaded_from_disk", "round": round_num},
-                "response": {"candidates": _summaries(persisted, round_num)},
-            }
-        )
-        return L1Generation(persisted[len(kept) :])
-
-    logger.debug("No persisted candidates for round %d — generating fresh", round_num)
+async def _generate(ctx: NodeContext) -> L1Generation:
     l2 = ctx.slice(L2Memory)
     # Unsteered, the call runs at the node's own temperature; `NodeConfig` types a steered one.
     return await l1_generate(

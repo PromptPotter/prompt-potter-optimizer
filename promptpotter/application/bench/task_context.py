@@ -156,15 +156,32 @@ class CheckinOutput(OptimizerResponseModel):
 assert set(PROMPT_FIELDS) <= set(CheckinOutput.model_fields)
 
 
+_SPLICE_FIELDS = ("upstream_context", "downstream_context")
+
+
 def checkin_output(prompt_fields: Iterable[str]) -> type[CheckinOutput]:
-    """A slot for each prompt field a node declares, so a chain bearing none offers the model none.
-    A hidden slot keeps its place and reads empty."""
-    offered = tuple(f for f in PROMPT_FIELDS if f in set(prompt_fields))
-    if offered == PROMPT_FIELDS:
+    """A slot for each prompt field a node declares, so a chain bearing none offers the model none;
+    the splice framing only where ONE node declares its target (`scored_prompts`). A hidden slot
+    keeps its place and reads empty."""
+    declared = list(prompt_fields)
+    offered = tuple(f for f in PROMPT_FIELDS if f in declared)
+    if offered == PROMPT_FIELDS and declared.count("problem_description") == 1:
         return CheckinOutput
     hidden: dict[str, Any] = {
         name: (SkipJsonSchema[str], "") for name in PROMPT_FIELDS if name not in offered
     }
+    if declared.count("problem_description") != 1:
+        # Excluded from the dump the framing commits: a hidden splice reads empty.
+        splices: dict[str, Any] = {
+            name: (SkipJsonSchema[str], Field(default="", exclude=True)) for name in _SPLICE_FIELDS
+        }
+        unspliced = create_model(
+            "CheckinTaskContext",
+            __base__=CheckinTaskContext,
+            __doc__=CheckinTaskContext.__doc__,
+            **splices,
+        )
+        hidden["task_context"] = (unspliced, Field(default_factory=unspliced))
     narrowed = create_model(
         "CheckinOutput", __base__=CheckinOutput, __doc__=CheckinOutput.__doc__, **hidden
     )
@@ -246,13 +263,15 @@ async def commit_task_framing(
     dataset_name: str,
     description: str,
     *,
+    prompt_fields: Iterable[str],
     ledger: CycleEventLog,
 ) -> None:
+    """*prompt_fields*: each the chain's prompt nodes declare, once per node declaring it."""
     context = checkin_call_context(stores, ledger)
     token = set_cycle_ledger(ledger)
     try:
         result, _ = await run_checkin(
-            response_model=CheckinOutput,
+            response_model=checkin_output(prompt_fields),
             consultation_instruction=(
                 "Return a JSON object with exactly these keys. Be concise and actionable."
             ),

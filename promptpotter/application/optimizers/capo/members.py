@@ -493,7 +493,9 @@ class CapoInit(nodes.Proposer):
         return selected.knobs_of(self.name, CapoInitKnobs).size
 
     def refuse_origin(self, origin_results: CellSheet) -> None:
-        if prompt_chars(origin_results) is None:
+        # An origin the backend answered nothing reads nothing: the origin gate halts it, not CAPO.
+        answered = any(not cell.facts.errored for cell in origin_results)
+        if answered and prompt_chars(origin_results) is None:
             raise ValueError(
                 "CAPO's objective charges each cell for its prompt's length, and this pipeline's "
                 "rows carry no target_prompt_chars: it renders no prompt node CAPO could edit"

@@ -20,7 +20,7 @@ Routing: [`dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
 - **Mutate only with cause** — stall, critique / axis-memory evidence, or the frozen `task_context`; a panel speaking against a mutation vetoes it.
 - **L1 never writes `answer_format`**: every potter node reads the target through `dispatch/bundle.py::l1_target_schema` — withdrawn from the wire, rejected at parse (`forbidden_axis`). <!-- probe: git grep -cE "[^(]target\.schema|Target\)\.schema" -- promptpotter/application/optimizers/potter/*.py == 0 -->
 - **Never reorder `L1Variant` alone**: `evidence_grounding` generates before `changes_description` and the overrides; the model, `answer_format` prose and `resolved_schemas` move together.
-- **A cluster spans the detectable move, two rows at least** (`l1/critique.py::spanning_clusters` over `panels.py::detectable_rows`); a variant's edit holds for every row it `targets_rows` — no per-row patch. A reused block still needs `evidence_grounding`.
+- **A cluster spans the detectable move, two rows at least** (`dispatch/schemas.py::critique_response_model` over `panels.py::detectable_rows`; an unmarked id is struck and a cluster left narrower dropped at parse, before the cap, the reply's others kept); a variant's edit holds for every row it `targets_rows` — no per-row patch. A reused block still needs `evidence_grounding`.
 - **`repeat_variant` rejects an idea this cycle measured and lost**, inside `l1_invariants`, never at parse; a round is never emptied, and every rejection names its round on the wound channel.
 
 ## L2 — what `l2_context` may write

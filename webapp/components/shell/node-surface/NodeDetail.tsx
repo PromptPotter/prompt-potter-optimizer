@@ -375,7 +375,6 @@ function CallRun({
   const model = (typeof asked === "string" ? asked : block?.model) || "";
 
   const chips = [
-    { label: "call", value: block?.synthesized ? "none — banked answer replayed" : "" },
     { label: "model", value: model },
     { label: "dur", value: block ? fmtSecs(block.duration_s) : "" },
     {

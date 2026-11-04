@@ -25,7 +25,7 @@ from promptpotter.domain.phase_views import (
     InitExitView,
     VerifyGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
+from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.results import RoundCells
 from promptpotter.domain.ruler import LevelSeries
@@ -179,6 +179,8 @@ class CycleFacts(NamedTuple):
     minted: CycleMintedRecord | None = None
     ended: RunPhaseRecord | None = None
     paused: RunPhaseRecord | None = None
+    # The ending the standing launch retired; a pause or an ending of its own clears it.
+    resumed_ending: StopReason | None = None
     final: CycleFinalRecord | None = None
     superseded_by: str | None = None
     error: ErrorRecord | None = None
@@ -233,11 +235,17 @@ class _CycleFacts:
             case CycleMintedRecord():
                 held = held._replace(minted=record)
             case RunPhaseRecord(run_phase=RunPhase.TERMINAL):
-                held = held._replace(ended=record, paused=None)
+                held = held._replace(ended=record, paused=None, resumed_ending=None)
             case RunPhaseRecord():
+                paused = record.run_phase is RunPhase.PAUSED
                 held = held._replace(
                     ended=None,
-                    paused=record if record.run_phase is RunPhase.PAUSED else None,
+                    paused=record if paused else None,
+                    resumed_ending=None
+                    if paused
+                    else held.ended.stop_reason
+                    if held.ended is not None
+                    else held.resumed_ending,
                     final=None,
                     superseded_by=None,
                     error=None,

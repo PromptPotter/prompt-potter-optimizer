@@ -10758,11 +10758,6 @@
             "title": "Schema Repair Errors",
             "type": "array"
           },
-          "synthesized": {
-            "description": "No call was made: `output` is the node's banked answer, replayed on a resume, and every field below it is empty.",
-            "title": "Synthesized",
-            "type": "boolean"
-          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -10781,7 +10776,6 @@
         "required": [
           "input",
           "output",
-          "synthesized",
           "timestamp",
           "config",
           "model",

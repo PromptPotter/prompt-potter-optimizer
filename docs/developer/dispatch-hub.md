@@ -33,7 +33,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 - **`diagnostics`** ← a STATUS prefix, the fenced `RoundDiagnostics` body (`compute_round_diagnostics`, least-actionable last), and EVOLUTION — the one progress view on the one comparable column (`domain/run_standing.py::rounds_without_advance`, each round's `overlap.advance`). No accuracy column: a round's accuracy sits on cells the next round re-picks.
 - **`l1_wounds`** [fenced] ← the last measured round's arms + `Cycle.runtime_failures` ([`self-healing-internals.md`](self-healing-internals.md)); its runtime config shows only the keys L1 may set.
 - **`guard_breaches`** ← `L2Memory.guard_breaches`, `L3Memory.guard_breaches`. Evidence values render only where they name a closed vocabulary; an LLM-authored placeholder reports its size, so no untrusted content reaches the unfenced block.
-- **`critique`** ← `bundle.digest.critique`. **A cluster spans at least two rows the panels marked as `detectable_move` names, or it is not one**: `l1/critique.py::spanning_clusters` decides against `panels.py::clustered_sample_ids` and `panels.py::detectable_rows`. The generator answers `targets_rows` as `[#id]` marks, scored by `validators/l1_behavior.py` — an id is checkable, a label is coined freely.
+- **`critique`** ← `bundle.digest.critique`. **A cluster spans at least two rows the panels marked as `detectable_move` names, or it is not one**: `dispatch/schemas.py::critique_response_model` drops it at parse, keeping the reply's others, against `panels.py::clustered_sample_ids` and `panels.py::detectable_rows`. The generator answers `targets_rows` as `[#id]` marks, scored by `validators/l1_behavior.py` — an id is checkable, a label is coined freely.
 
 **Strategic, persistent:**
 

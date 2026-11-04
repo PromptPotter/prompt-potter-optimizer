@@ -1719,6 +1719,17 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert review is not None and review.open_prompt_fields == ["instruction"], (
         "a held prompt field withdrew another than itself"
     )
+    # The child door every member's child passes refuses the held field, never writes it.
+    held_writes, _, held_refusals = carried_writes(
+        one_held,
+        prompt_loci={Locus("review", "rubric"): "x", Locus("review", "instruction"): "y"},
+        overlay={},
+        demo=None,
+    )
+    assert list(held_writes) == [Locus("review", "instruction")], "a held field was written"
+    assert [(f.axis, f.reason) for f in held_refusals] == [("review.rubric", "forbidden_axis")], (
+        "a held field's write carried no refusal"
+    )
     all_held = two.narrow(
         {
             n.name: NodeSearchNarrowing(param_keys=[], prompt_fields_held=list(n.prompt_fields))

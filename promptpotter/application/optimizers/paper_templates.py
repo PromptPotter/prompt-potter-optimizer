@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode
 
 
-_PROMPT = re.compile(r"<prompt>(.*?)</prompt>", re.DOTALL)
+_PROMPT = re.compile(r"<prompt>(.*?)(?:</prompt>|\Z)", re.DOTALL)
 
 
 def task_description(ctx: NodeContext, node: PipelineNode) -> str:
@@ -50,7 +50,7 @@ def rewritten(ctx: NodeContext, node: PipelineNode, text: str) -> dict[Locus, st
 
 
 def marked(text: str) -> str | None:
-    """The last ``<prompt>`` block: an answer comes after any echo of the template's example."""
+    """The last ``<prompt>`` block: an answer comes after any echo of the template's example; an unclosed one reads to the reply's end."""
     found = [m.strip() for m in _PROMPT.findall(text) if m.strip()]
     return found[-1] if found else None
 

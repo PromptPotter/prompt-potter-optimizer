@@ -879,9 +879,6 @@ export interface ValidationFailure {
 export interface NodeBlock {
   input: NodeInput;
   output: NodeOutput;
-  /** No call was made: `output` is the node's banked answer, replayed on a resume,
-   * and every field below it is empty. */
-  synthesized: boolean;
   timestamp: string;
   /** The config the call ASKED for — the only place a model's routing suffix
    * survives. */
@@ -4902,7 +4899,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "token_budget": { label: "Token budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Raise the token cap above what is already spent, then resume.", grades_selection: true, cli_command: "`set-limits --max-tokens <above what is already spent>`, then `resume`" },
   "host_allowance": { label: "Host allowance used up", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The box's allowance for this account is spent: a resume sends on the account's own key, and a backend's sends still run on the box's key.", grades_selection: true, cli_command: "`resume`" },
   "wall_clock": { label: "Wall clock reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Resuming runs another launch under the same clock; the run limits move it.", grades_selection: true, cli_command: "`resume`; `set-limits --max-wall-clock` moves it" },
-  "origin_gate": { label: "Origin gate (unhealthy origin)", outcome: "halted", category: "operator", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
+  "origin_gate": { label: "Origin gate (unhealthy origin)", outcome: "halted", category: "operator", halts_mid_round: false, has_traceback: false, next_step: "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the gate grades it again; an origin still unhealthy when resumed passes on that resume. An edited origin is a new campaign or an operator-steered fork at round 0: resuming refuses it.", grades_selection: true, cli_command: "`resume` once the backend answers; an edited origin is `new <dataset>` or `resume --steer NODE.PARAM=VALUE`" },
   "backend_unreachable": { label: "Backend unreachable", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "The unreached cell is a hole, not a score: restore the backend or the network it needs, then resuming re-measures it.", grades_selection: true, cli_command: "`resume`" },
   "provider_credit_exhausted": { label: "Provider out of credit", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Raise the provider key's limit or top up its credit, then resume; a refused cell is a hole it re-measures.", grades_selection: true, cli_command: "`resume`" },
   "provider_throttled": { label: "Provider rate-limited", outcome: "halted", category: "external", halts_mid_round: true, has_traceback: false, next_step: "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait out its quota, then resume; the refused cell is a hole it re-measures.", grades_selection: true, cli_command: "`route_order` names the host; then `resume`" },

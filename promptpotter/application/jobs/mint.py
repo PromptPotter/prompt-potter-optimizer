@@ -727,6 +727,9 @@ async def _mint_after_framing(
                 session.store,
                 session.dataset_name,
                 description,
+                prompt_fields=(
+                    f for node in session.pipeline_schema.prompt_nodes() for f in node.prompt_fields
+                ),
                 ledger=checkin_ledger,
             )
         logger.info("Committed task framing for %s from its check-in", session.dataset_name)

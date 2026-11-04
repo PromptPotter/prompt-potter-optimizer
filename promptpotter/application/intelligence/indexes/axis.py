@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
@@ -66,13 +66,6 @@ def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
 
 
 @shapes_optimizer_prompt
-def _fmt_bottleneck(bottleneck: dict[str, float] | None) -> str | None:
-    if not bottleneck:
-        return None
-    return "; ".join(f"{step}: {frac:.0%}" for step, frac in bottleneck.items())
-
-
-@shapes_optimizer_prompt
 def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
     intractable = [q for q in persistent if q.hit_rate == 0]
     chronic = [q for q in persistent if q.hit_rate > 0]
@@ -108,30 +101,6 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     return out or None
 
 
-def _flips(rounds: Sequence[RoundResult]) -> list[dict[str, Any]]:
-    """Each sample whose hit moved between consecutive rounds, read off the rounds alone so a resume reads the same."""
-    out: list[dict[str, Any]] = []
-    for prev, rr in pairwise(rounds):
-        if not (prev.results and rr.results):
-            continue
-        first = next(iter(rr.panel.values()), None)
-        desc = "" if first is None else first.changes_description
-        prev_hits = {key: cell.hit for key, cell in prev.results.by_key().items()}
-        out.extend(
-            {
-                "sample_key": key,
-                "query": cell.facts.query,
-                "round": rr.round,
-                "changes_description": desc[:80],
-                "old_hit": prev_hits[key],
-                "new_hit": cell.hit,
-            }
-            for key, cell in rr.results.by_key().items()
-            if key in prev_hits and cell.hit != prev_hits[key]
-        )
-    return out
-
-
 class AxisIndex:
     """Ranks the loci of the cycle's own measured arms; its failure readings remember as its
     sample index does."""
@@ -143,8 +112,6 @@ class AxisIndex:
             lambda: defaultdict(list),
         )
         self._axis_kinds: dict[str, LocusKind] = {}
-        self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
-        self._flips: list[dict[str, Any]] = []
 
     @shapes_optimizer_prompt
     def peaked_axes(self) -> frozenset[str]:
@@ -223,10 +190,7 @@ class AxisIndex:
                 )
 
         clusters = self.sample_index.failure_clusters(2)
-        dead = self.sample_index.dead(include_always_hit=False)
-        disc = self.sample_index.discriminating()
         persistent = self.sample_index.persistent_failures(min_streak=3)
-        bottleneck = self.sample_index.bottleneck_distribution()
         exhausted = self._exhausted_axes(only)
         exhausted_str = (
             "; ".join(
@@ -237,109 +201,26 @@ class AxisIndex:
             if exhausted
             else None
         )
-        peaked = self.peaked_axes()
-
-        fg_lines: list[str] = []
-        for a in rankings5[:3]:
-            corr = self._axis_failure_group_deltas.get(a.axis, {})
-            if corr:
-                parts = [
-                    f"{m}: {d:+.0%}" for m, d in sorted(corr.items(), key=lambda x: -abs(x[1]))[:3]
-                ]
-                fg_lines.append(f"{a.axis} → {', '.join(parts)}")
-
-        flips = self._flips[-50:] if rankings5 else []
-        # Counted by sample key: two samples may phrase the same question, so the text is only a LABEL.
-        flip_counts = Counter(f["sample_key"] for f in flips)
-        flip_labels = {f["sample_key"]: str(f.get("query", "")) for f in flips}
-        volatile = [
-            (flip_labels.get(key, ""), n) for key, n in flip_counts.most_common(5) if n >= 2
-        ]
-
         return _collect(
-            ("axis_rankings", _fmt_axis_rankings(rankings5, peaked) if rankings5 else None),
+            (
+                "axis_rankings",
+                _fmt_axis_rankings(rankings5, self.peaked_axes()) if rankings5 else None,
+            ),
             ("top_values", top_vals_str),
+            ("exhausted_axes", exhausted_str),
+            (
+                "persistent_failures",
+                _fmt_persistent_failures(persistent) if persistent else None,
+            ),
             # One cluster partitions nothing: on a single-node pipeline it is the node, at 100%.
             (
                 "failure_clusters",
                 _fmt_clusters(clusters, with_counts=True) if len(clusters) > 1 else None,
             ),
-            ("dead_queries", f"{len(dead)} queries never hit" if dead else None),
-            (
-                "discriminating_queries",
-                f"{len(disc)} queries vary across configs" if disc else None,
-            ),
-            ("bottleneck_distribution", _fmt_bottleneck(bottleneck)),
-            (
-                "persistent_failures",
-                _fmt_persistent_failures(persistent) if persistent else None,
-            ),
-            ("failure_group_insights", "; ".join(fg_lines) if fg_lines else None),
-            (
-                "volatile_queries",
-                "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile) if volatile else None,
-            ),
-            ("exhausted_axes", exhausted_str),
-            ("improvement_attribution", self._format_recent_attributions(limit=3)),
         )
-
-    @shapes_optimizer_prompt
-    def _format_recent_attributions(self, limit: int = 5) -> str | None:
-        positive = [f for f in self._flips if f["new_hit"] and not f["old_hit"]]
-        if not positive:
-            return None
-        recent = positive[-limit:]
-        parts = [
-            f"  Round {f['round']}: {f['query'][:50]} started hitting "
-            f"after: {f['changes_description']}"
-            for f in recent
-        ]
-        return f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
-
-    def _recompute_failure_group_correlations(self) -> None:
-        clusters = self.sample_index.failure_clusters(5)
-        if not clusters:
-            self._axis_failure_group_deltas = {}
-            return
-
-        groups: dict[str, set[int]] = {}
-        for cluster in clusters:
-            mode = cluster.failure_mode
-            sids: set[int] = set()
-            for sid in self.sample_index.sample_ids():
-                modes = self.sample_index.failure_modes(sid)
-                if modes and Counter(modes).most_common(1)[0][0] == mode:
-                    sids.add(sid)
-            if sids:
-                groups[mode] = sids
-
-        if not groups:
-            self._axis_failure_group_deltas = {}
-            return
-
-        def _hit_rate(sids: set[int]) -> float:
-            rates = [sum(h) / len(h) for sid in sids if (h := self.sample_index.hits(sid))]
-            return sum(rates) / len(sids) if sids else 0.0
-
-        hit_rates = {name: _hit_rate(sids) for name, sids in groups.items()}
-
-        new_deltas: dict[str, dict[str, float]] = {}
-        for axis, values in self._axis_values.items():
-            if len(values) < 2:
-                continue
-            impact = self._compute_axis_impact(axis, values)
-            if not (impact and impact.effect_size > NOISE_THRESHOLD):
-                continue
-            for group_name, hit_rate in hit_rates.items():
-                corr = impact.effect_size * (1 - hit_rate)
-                if corr > 0.005:
-                    new_deltas.setdefault(axis, {})[group_name] = round(corr, 4)
-
-        self._axis_failure_group_deltas = new_deltas
 
     def refresh(self, rounds: Sequence[RoundResult]) -> None:
         """An arm with no accuracy is skipped: folded as 0.0 it manufactures ``effect_size``."""
-        self._flips = _flips(rounds)
         self._axis_values = defaultdict(lambda: defaultdict(list))
         self._axis_kinds = {}
         for rr in rounds:
@@ -351,7 +232,6 @@ class AxisIndex:
                     self._axis_kinds[locus.name] = self._schema.locus_kind(*locus)
                     # Keyed whole: two prompts sharing a preview are two values.
                     self._axis_values[locus.name][str(value)].append(fold.accuracy)
-        self._recompute_failure_group_correlations()
 
     @shapes_optimizer_prompt
     def _compute_axis_impact(

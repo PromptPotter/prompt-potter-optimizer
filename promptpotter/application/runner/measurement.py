@@ -13,7 +13,6 @@ from promptpotter.application.runner.overlap import read_origin_panel, round_ori
 from promptpotter.application.scoring.arm_states import (
     conclude,
     measuring,
-    read_breakage,
     refuse,
 )
 from promptpotter.application.scoring.metrics import arm_folds
@@ -52,7 +51,6 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.run_standing import LineStep
 from promptpotter.domain.scoring import NO_CELLS
-from promptpotter.domain.validators import BrokenSignal
 from promptpotter.shared.measurement_context import (
     MeasuredPass,
     MeasurementRole,
@@ -72,7 +70,7 @@ if TYPE_CHECKING:
         RoundContext,
         Selector,
     )
-    from promptpotter.domain.arms import ArmRole, Measuring, Proposed
+    from promptpotter.domain.arms import Measuring, Proposed
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.phases import StopReason
@@ -82,24 +80,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.validators import StopRule
 
 logger = logging.getLogger(__name__)
-
-
-async def rescore_parent(
-    round_: RoundContext,
-    scoring_set: list[Sample],
-    *,
-    role: ArmRole,
-    force_fresh: bool = False,
-) -> ReadArm:
-    cycle = round_.cycle
-    return await measure_as_parent(
-        round_,
-        cycle.parent,
-        cycle.parent_point,
-        scoring_set,
-        role=role,
-        force_fresh=force_fresh,
-    )
 
 
 async def measure_population(
@@ -135,7 +115,9 @@ async def measure_population(
         # Nothing the cut left can be elected, so the round is unwound as an unkept cut is.
         if not cells or not any(readable(key, held) for key in rows):
             raise StopLoop(cut)
-    parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
+    parent = await measure_as_parent(
+        ctx, cycle.parent, cycle.parent_point, cells, role=MeasurementRole.PARENT
+    )
     origin_panel_slots = round_origin_panel(cycle, pool)
     on_panel = await read_origin_panel(
         cycle,
@@ -520,20 +502,10 @@ def _conclude_arm(
     scored = close_walk(walk)
     results, signal = scored.sheet, scored.signal
     elimination = race.judge(signal, key, labels) if race is not None else None
-    breakage = (
-        read_breakage(
-            signal,
-            effective_pipeline_params=arm.individual.pipeline_params,
-            round_num=ctx.round_num,
-            changes_description=arm.changes_description,
-        )
-        if isinstance(signal, BrokenSignal)
-        else None
-    )
     # Every cell taken, or locked in, so a later arm races the leader, caught up where it stopped;
     # never a walk the gateway gave up on, whose rows are synthetic.
     gave_up = signal is not None and signal.check_name == SCORING_ERROR_ABORT
     locked = signal is not None and signal.outcome == "locked_in"
     if race is not None and (scored.stopped is None or locked) and not gave_up:
         race.admit(key, results.cells, sp)
-    return conclude(arm, scored, elimination=elimination, breakage=breakage), results
+    return conclude(arm, scored, round_num=ctx.round_num, elimination=elimination), results

@@ -46,10 +46,6 @@ class NodeBlock(FrozenModel):
 
     input: NodeInput
     output: NodeOutput
-    synthesized: bool = Field(
-        description="No call was made: `output` is the node's banked answer, replayed on a "
-        "resume, and every field below it is empty."
-    )
     timestamp: str
     config: dict[str, Any] = Field(
         description="The config the call ASKED for — the only place a model's routing suffix "

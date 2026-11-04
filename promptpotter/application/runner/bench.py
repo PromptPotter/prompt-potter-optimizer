@@ -42,6 +42,7 @@ from promptpotter.domain.bench import (
     bench_status,
 )
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.l4.proxies import line_round_levels, spent_on_line
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -172,14 +173,14 @@ def bench_series(
 
 
 class LineSpan(NamedTuple):
-    """One cycle of a line: the L1 rounds it stood on, and the first of them it ran itself."""
+    """One cycle of a line: every round it stood on, and the round its fork cut at."""
 
     rounds: list[RoundResult]
-    cut: int
+    cut_round: int | None
 
     @property
     def own(self) -> list[RoundResult]:
-        return [rr for rr in self.rounds if rr.round >= self.cut]
+        return [rr for rr in self.rounds if spent_on_line(rr.round, self.cut_round)]
 
 
 def line_spans(stores: Stores, scorer: Scorer, hop: CycleHop) -> list[LineSpan]:
@@ -188,23 +189,23 @@ def line_spans(stores: Stores, scorer: Scorer, hop: CycleHop) -> list[LineSpan]:
     for at in stores.campaigns.line_to(hop):
         index = stores.campaigns.load(at, moment=None)
         assert index is not None, "a cycle on a line folds to an index"
-        rounds = [rr for rr in closed_rounds(stores, at, scorer, moment=None) if rr.round > 0]
-        spans.append(LineSpan(rounds, 1 if index.cut_round is None else index.cut_round))
+        spans.append(LineSpan(closed_rounds(stores, at, scorer, moment=None), index.cut_round))
     return spans
 
 
 def line_bench_series(
     stores: Stores, passes: BenchPasses | None, scorer: Scorer, spans: Sequence[LineSpan]
 ) -> tuple[float | None, list[float | None]]:
-    """`bench_series` per round the line spent, in the order spent."""
+    """`bench_series` per cycle of the line, folded by the hashed `proxies.py::line_round_levels`."""
     if passes is None:
         return None, []
     origin: float | None = None
-    levels: list[float | None] = []
+    per_cycle: list[tuple[list[tuple[int, float | None]], int | None]] = []
     for span in spans:
         origin, series = bench_series(stores, passes, scorer, rounds=span.rounds)
-        levels += [lvl for rr, lvl in zip(span.rounds, series, strict=True) if rr.round >= span.cut]
-    return origin, levels
+        rounds = [rr.round for rr in span.rounds]
+        per_cycle.append((list(zip(rounds, series, strict=True)), span.cut_round))
+    return origin, line_round_levels(per_cycle)
 
 
 def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) -> MemberRows | None:

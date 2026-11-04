@@ -655,9 +655,13 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopCategory.OPERATOR,
         False,
         False,
-        "",
+        "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the "
+        "gate grades it again; an origin still unhealthy when resumed passes on that resume. An "
+        "edited origin is a new campaign or an operator-steered fork at round 0: resuming "
+        "refuses it.",
         True,
-        "",
+        "`resume` once the backend answers; an edited origin is `new <dataset>` or "
+        "`resume --steer NODE.PARAM=VALUE`",
     ),
     StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
         "Backend unreachable",
@@ -784,6 +788,14 @@ if _missing_stop_info:
         f"STOP_REASON_INFO is missing rows for {sorted(r.value for r in _missing_stop_info)} — "
         "every StopReason needs a label + outcome (domain/phases.py)."
     )
+# A next step every surface words has the terminal's spelling, and the terminal none of its own.
+_unspelled = sorted(
+    r.value
+    for r, info in STOP_REASON_INFO.items()
+    if bool(info.next_step) != bool(info.cli_command)
+)
+if _unspelled:
+    raise RuntimeError(f"STOP_REASON_INFO rows {_unspelled} word a next step one surface lacks")
 
 
 # A pause the run raises on itself names its own cause, whatever else reached the process.

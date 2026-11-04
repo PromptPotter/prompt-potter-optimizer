@@ -284,15 +284,6 @@ def _vs_parent(reading: PairedReading | None) -> str | None:
     return f"  {pick.label} vs its parent {parent.label}: {moved}, {_SIDE_VERDICT[est.side]}"
 
 
-_AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
-    "axis_rankings",
-    "top_values",
-    "exhausted_axes",
-    "persistent_failures",
-    "failure_clusters",
-)
-
-
 def _critique_is_all_prompt_field(b: InjectionBundle) -> bool:
     critique = b.digest.critique
     sa = (critique.get("suggested_axes") if critique else None) or []
@@ -322,9 +313,8 @@ def _r_axis_memory(b: InjectionBundle) -> list[Item]:
             "CRITIQUE IS SEMANTIC: config-axis rankings hidden, target a prompt-field axis):"
         )
     lines = [header]
-    for key in _AXIS_MEMORY_LABEL_ORDER:
-        val = digest.get(key)
-        if val is None or (semantic and key == "top_values"):
+    for key, val in digest.items():
+        if semantic and key == "top_values":
             continue
         label = key.replace("_", " ")
         lines.append(f"  {label}: {val}")

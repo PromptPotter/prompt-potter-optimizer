@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    L1_HELD_PROMPT_FIELDS,
     OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
     SCHEMA_DESCRIPTION_MAX_CHARS,
 )
@@ -55,17 +56,20 @@ def l1_blocks_in_pool(
 def l1_prompt_fields_open(
     prompt_edit: Mapping[Locus, str], *, pipeline_schema: PipelineSchema
 ) -> list[ValidationFailure]:
-    """Per node, against ITS open fields: a node the roster bears no prompt on opens none."""
-    open_by_node = {n.name: n.open_prompt_fields for n in pipeline_schema.prompt_nodes()}
+    """Potter's own `L1_HELD_PROMPT_FIELDS` alone, each node's open fields its ``allowed``: an
+    operator's hold and an undeclared field are the child door's (`carried_writes`)."""
+    nodes = {n.name: n for n in pipeline_schema.prompt_nodes()}
     return [
         ValidationFailure(
             axis=locus.name,
             value=value[:300],
-            allowed=open_by_node.get(locus.node, []),
+            allowed=node.open_prompt_fields,
             reason="forbidden_axis",
         )
         for locus, value in prompt_edit.items()
-        if locus.key not in open_by_node.get(locus.node, [])
+        if locus.key in L1_HELD_PROMPT_FIELDS
+        and (node := nodes.get(locus.node)) is not None
+        and locus.key in node.prompt_fields
     ]
 
 

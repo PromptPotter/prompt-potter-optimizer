@@ -2772,8 +2772,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         )
         assert outcome(1.0, RoundAdvance.ADVANCED) is StopReason.PERFECT
 
-    # A response whose every variant restates its parent is zero candidates, booked once as
-    # that: never one proposer wound per variant, which the ladder would read as L1's yield.
     with _peer_cycle(
         workspace(tmp_path / "restated"),
         _PEER_HOP,
@@ -2790,6 +2788,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             "changes_description": "restate the parent",
         }
         offline.llm.says = lambda _body: json.dumps({"variants": [variant, variant]})
+        offline.llm.sent.clear()
         generating = NodeContext(
             RoundContext(cycle=cycle, round_num=1, callbacks=callbacks),
             optimizers.NODE_MEMBERS.get("l1_generate"),
@@ -2800,6 +2799,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
         readout = cycle.output(L1Readout, 1)
     assert proposed.proposals == [], "a round of no-op variants measured a candidate"
+    assert len(offline.llm.sent) == 1, "a batch the invariants read as no-ops bought a repair"
     assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
         PARSE_FAILURE_ALL_NO_OP,
         0,

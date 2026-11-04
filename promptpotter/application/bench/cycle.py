@@ -8,13 +8,14 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bench.difficulty import DifficultyView
-from promptpotter.application.bench.round_analysis import compute_round_diagnostics
+from promptpotter.application.bench.round_analysis import compute_round_diagnostics, head_health
+from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
-from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext, Proposal
+from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
 from promptpotter.domain.cycle_paths import CycleHop
@@ -25,9 +26,8 @@ from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import Election, RoundOutcome, RoundResult
-from promptpotter.domain.results_health import compute_round_health
 from promptpotter.domain.ruler import RulerStamp
-from promptpotter.domain.run_records import ResumeCheckpointRecord
+from promptpotter.domain.run_records import ResumeCheckpointRecord, RoundProposedRecord
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.bench import BenchPasses
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
 
 
@@ -89,8 +90,6 @@ def _origin_round(
     schema: PipelineSchema,
 ) -> RoundResult:
     key, arm, results = origin_arm.key, origin_arm.state, origin_arm.rows
-    # An abort pads no error rows onto the tail.
-    not_attempted = max(0, arm.expected_samples - len(results))
     origin = RoundResult(
         round=0,
         arms={key: arm},
@@ -106,9 +105,8 @@ def _origin_round(
             elects_on=elects_on,
             ruler=ruler,
         ),
-        health=compute_round_health(
-            results=results.cells, prior_healths=[], is_origin=True, not_attempted=not_attempted
-        ),
+        # An abort pads no error rows onto the tail: the cells never sent are the panel's shortfall.
+        health=head_health(0, arm, results, picked=True, priors=()),
         overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, 0, False),
         optimizer_state=optimizer_state,
     )
@@ -116,6 +114,16 @@ def _origin_round(
         return origin
     # Without them round 1 opens blind to the origin's per-sample failure pattern.
     return origin.model_copy(update={"diagnostics": compute_round_diagnostics(origin, schema)})
+
+
+def _origin_fit(difficulty: DifficultyView, origin: ReadArm) -> dict[ArmKey, ArmFit]:
+    """The origin read as a fresh floor, on the scale the cycle stands on."""
+    reading = difficulty.scale.frontier(origin.rows)
+    if reading is None:
+        return {}
+    return {
+        origin.key: ArmFit(theta=reading.theta, theta_se=reading.se, theta_caveat=reading.caveat)
+    }
 
 
 def _assert_overlay_preserved(
@@ -171,38 +179,21 @@ class Cycle:
         config: CampaignConfig,
         optimizer: SelectedOptimizer,
     ) -> Cycle:
-        schema = session.pipeline_schema
-        origin_sheet = origin.rows
-        optimizer.refuse_origin(origin_sheet)
-        slices = SliceMap(optimizer.slices)
         sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)
-        # Hashed here because the parent advances with every round's head.
-        difficulty = DifficultyView.open(session, config, origin=sp.sp_hash(schema))
-        reading = difficulty.scale.frontier(origin_sheet)
-        origin_round = _origin_round(
-            origin,
-            fit={}
-            if reading is None
-            else {
-                origin.key: ArmFit(
-                    theta=reading.theta, theta_se=reading.se, theta_caveat=reading.caveat
-                )
-            },
-            ruler=difficulty.stamp,
-            optimizer_state=None,
-            elects_on=optimizer.elects_on,
-            schema=schema,
-        )
-        return cls(
+        cycle = cls(
             session=session,
             config=config,
             optimizer=optimizer,
-            slices=slices,
-            difficulty=difficulty,
-            _rounds=[origin_round],
+            slices=SliceMap(optimizer.slices),
+            # Hashed here because the parent advances with every round's head.
+            difficulty=DifficultyView.open(
+                session, config, origin=sp.sp_hash(session.pipeline_schema)
+            ),
             framing=framing,
         )
+        cycle.seat_origin(origin, None)
+        return cycle
 
     def rng(self, round_num: int, tag: str) -> random.Random:
         """A function of the run's seed, *round_num* and *tag* alone, so a resume redraws the same."""
@@ -213,6 +204,10 @@ class Cycle:
     @property
     def origin_round(self) -> RoundResult:
         return self.rounds[0]
+
+    def origin_cells(self, dataset: list[Sample]) -> list[Sample]:
+        """The cells the origin's walk draws of *dataset*, as its first walk drew them (`origin.py`)."""
+        return sample_dataset(dataset, self.config.sp_budget_origin)
 
     @property
     def selection(self) -> RoundResult:
@@ -260,26 +255,24 @@ class Cycle:
             self._pool_theta[memo] = None if read is None or read.caveat else read.theta
         return self._pool_theta[memo]
 
-    def _seat_origin(self, parent: ReadArm, optimizer_state: OptimizerState | None) -> None:
-        """The origin's θ is carried, not re-fit: round 0 closes on the scale it opened on."""
-        election = self.origin_round.election
-        assert election is not None, "round 0 elects the origin it adopted"
+    def seat_origin(self, origin: ReadArm, optimizer_state: OptimizerState | None) -> None:
+        """Round 0 on *origin*'s rows, read as a floor on the scale the cycle stands on, and left
+        open so it closes in place (`round.py::emit_origin_round`). Every door filing the origin's
+        answers lands here, so the optimizer refuses an origin it cannot run here."""
+        self.optimizer.refuse_origin(origin.rows)
         self.restate_rounds(
             [
                 _origin_round(
-                    parent,
-                    fit=election.fit,
-                    ruler=election.ruler,
+                    origin,
+                    fit=_origin_fit(self.difficulty, origin),
+                    ruler=self.difficulty.stamp,
                     optimizer_state=optimizer_state,
-                    elects_on=election.elects_on,
+                    elects_on=self.optimizer.elects_on,
                     schema=self.session.pipeline_schema,
                 ),
                 *self._rounds[1:],
             ]
         )
-
-    def restamp_origin_round(self, parent: ReadArm) -> None:
-        self._seat_origin(parent, self.origin_round.optimizer_state)
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
         assert priors, "a cut at round 0 reopens the origin; a replay seats a closed round"
@@ -317,10 +310,11 @@ class Cycle:
         assert origin.election is not None and head is not None, "round 0 ends on its origin"
         key = origin.election.ended_on
         self.restate_rounds([origin])
-        self._seat_origin(ReadArm(key, head, origin.rows(key)), None)
+        # On the scale round 0 opened on, so its θ re-reads as it was read.
+        self.difficulty.seat(origin.election.ruler)
+        self.seat_origin(ReadArm(key, head, origin.rows(key)), None)
         self.population = []
         self.slices = SliceMap(self.optimizer.slices)
-        self.difficulty.seat(origin.election.ruler)
 
     @property
     def rounds(self) -> Sequence[RoundResult]:
@@ -384,10 +378,15 @@ class Cycle:
             cells = merge_known_outcomes(cells, rr.results)
         return cells
 
-    def banked_proposals(self, round_num: int) -> list[Proposal] | None:
+    def banked_walk(self, round_num: int) -> RoundProposedRecord | None:
         session = self.session
-        proposed = session.store.campaigns.round_proposals(session.hop, round_num)
-        return None if proposed is None else list(proposed.proposals)
+        return session.store.campaigns.round_proposals(session.hop, round_num)
+
+    def seat_walk(self, round_num: int, walked: OptimizerState) -> None:
+        """A replayed walk runs no proposer: the cycle takes up the state its first walk left."""
+        self.population = list(walked.population)
+        self.slices.seat(walked)
+        self.outputs[round_num] = dict(walked.outputs)
 
     def _held(self, round_num: int) -> RoundResult | None:
         return next((rr for rr in self.rounds if rr.round == round_num), None)
@@ -411,16 +410,23 @@ class Cycle:
         return held.model_copy(update={"optimizer_state": held.optimizer_state.holding(output)})
 
     def close_state(self, round_num: int) -> OptimizerState:
-        """The ONE builder of a round's state: its slices as they stand, every output kind it carries."""
+        """`round_state`, the round's pending outputs taken: none may stand for another round."""
         if stray := sorted(r for r in self.outputs if r != round_num):
             raise ValueError(f"round {round_num} closes with outputs pending for rounds {stray}")
+        state = self.round_state(round_num)
+        self.outputs.pop(round_num, None)
+        return state
+
+    def round_state(self, round_num: int) -> OptimizerState:
+        """The ONE builder of a round's state: its slices as they stand, every output kind it
+        carries, the pending ones left pending. A walk banks it as its close does."""
         selected = self.optimizer
         held = self._held(round_num)
-        # A round 0 every launch re-closes keeps what an earlier close banked.
+        # A round closed again on re-measured rows (`seat_origin`) keeps what its close banked.
         banked = (
             {} if held is None or held.optimizer_state is None else held.optimizer_state.outputs
         )
-        produced = {**banked, **self.outputs.pop(round_num, {})}
+        produced = {**banked, **self.outputs.get(round_num, {})}
         return OptimizerState(
             manifest=selected.name,
             population=list(self.population),

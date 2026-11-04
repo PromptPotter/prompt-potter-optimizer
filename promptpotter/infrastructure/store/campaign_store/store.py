@@ -487,6 +487,10 @@ class CampaignStore:
     def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
         return read_cycle_index(self.cycle_dir(hop), moment=moment)
 
+    def resumed_ending(self, hop: CycleHop) -> StopReason | None:
+        """What the standing launch took up: its own declaration retired that ending."""
+        return scan_cycle_facts(self.ledger(hop)).resumed_ending
+
     def adopt_ledger(self, hop: CycleHop, ledger: Path) -> None:
         """A MOVE, never a copy: what a draft billed is the cycle's first lines."""
         target = self.ledger(hop)

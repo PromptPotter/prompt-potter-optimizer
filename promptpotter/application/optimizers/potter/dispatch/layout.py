@@ -118,7 +118,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
         floor=L1Layout(
             problem_description=[
-                # The rows a cluster must span, or `l1/critique.py::spanning_clusters` drops it.
+                # The rows a cluster must span, or `schemas.py::critique_response_model` drops it.
                 "detectable_move",
                 "confounds",
                 "budget_state",

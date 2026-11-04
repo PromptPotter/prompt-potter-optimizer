@@ -20,8 +20,10 @@ from urllib.parse import urlsplit
 import httpx
 
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.infrastructure import backend as backend_wire
 from promptpotter.infrastructure.llm.pricing import UPSTREAM_URL
 from promptpotter.infrastructure.llm.registry import keyed_specs
+from promptpotter.infrastructure.llm.telemetry import current_round
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -239,6 +241,12 @@ class FakeBackend:
         self.hardness = hardness
         self.faults = {path: list(script) for path, script in (faults or {}).items()}
         self.asked: list[str] = []
+        # Every cell asked, as (prompt, query, round asking, ``None`` outside a round's loop);
+        # while `down`, each is refused as a 500.
+        self.sent: list[tuple[str, str, int | None]] = []
+        self.down = False
+        # Awaited before each cell is answered, inside the run's own task: an operator acting mid-walk.
+        self.before_answer: Callable[[], Awaitable[None]] | None = None
 
     def respond(
         self, request: httpx.Request, body: bytes
@@ -270,7 +278,24 @@ class FakeBackend:
             case "/sessions":
                 answer = {"status": "success", "data": {"terms_count": 0}}
             case "/matches":
-                answer = self.matches(json.loads(body))
+                payload = json.loads(body)
+                self.sent.append(
+                    (
+                        str(payload["node_config"]["llm_only"]["prompt"]),
+                        payload["query"],
+                        current_round(),
+                    )
+                )
+                if self.down:
+                    return _json(500, {"detail": "offline: the backend is down"}, request)
+                answer = self.matches(payload)
+                if (hook := self.before_answer) is not None:
+
+                    async def answered() -> httpx.Response:
+                        await hook()
+                        return _json(200, answer, request)
+
+                    return answered()
             case _:
                 return None
         return _json(200, answer, request)
@@ -406,7 +431,8 @@ def _refuse_resolve(*_: object, **__: object) -> Any:
 
 
 def install_network(router: Router) -> Callable[[], None]:
-    """Answers every client in this process from *router*; the callable returned restores them."""
+    """Answers every client in this process from *router*, and sleeps no backend resend's wait;
+    the callable returned restores them."""
 
     def sent(request: httpx.Request, body: bytes) -> httpx.Response | Awaitable[httpx.Response]:
         try:
@@ -439,17 +465,25 @@ def install_network(router: Router) -> Callable[[], None]:
         router.unrouted.add(f"urlopen {target}")
         raise urllib.error.URLError("offline run")
 
+    async def unslept(total_sec: float, label: str) -> None:  # noqa: ARG001 -- held_wait's signature
+        await asyncio.sleep(0)
+
+    # The backend's own binding of `send_pacing.py::held_wait`, which it resends after.
+    wire = vars(backend_wire)
     real = (
         httpx.AsyncHTTPTransport.handle_async_request,
         httpx.HTTPTransport.handle_request,
         urllib.request.urlopen,
         socket.getaddrinfo,
+        wire["held_wait"],
     )
     httpx.AsyncHTTPTransport.handle_async_request = handle_async_request  # type: ignore[method-assign,assignment]
     httpx.HTTPTransport.handle_request = handle_request  # type: ignore[method-assign,assignment]
     urllib.request.urlopen = urlopen
     # Every client above is answered before it resolves a name; one that is not fails here.
     socket.getaddrinfo = _refuse_resolve
+    # A refusal answered in-process costs no wall clock: the resend's wait is decided, not slept.
+    wire["held_wait"] = unslept
 
     def restore() -> None:
         (
@@ -457,6 +491,7 @@ def install_network(router: Router) -> Callable[[], None]:
             httpx.HTTPTransport.handle_request,  # type: ignore[method-assign]
             urllib.request.urlopen,
             socket.getaddrinfo,
+            wire["held_wait"],
         ) = real
 
     return restore

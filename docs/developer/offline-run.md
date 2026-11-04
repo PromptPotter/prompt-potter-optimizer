@@ -32,13 +32,14 @@ One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the 
 | `requests/NNNN_<node>_<k>.json` | every optimizer LLM request as sent, in arrival order, beside the fake's answer |
 | `decisions.json` | every decision the run made, canonical (ids mapped to labels, timestamps and hashes dropped); `harness` adds the stop reason, unrouted URLs and call counts |
 | `run.log` | the child's stdout and stderr |
-| `resumed/` | the same campaign paused at a round boundary and ended on a session rebuilt from disk |
+| `resumed/` | the same campaign paused at the first fresh cell measured past a banked walk, round 2 on, and ended on a session rebuilt from disk: the resume replays the walk, its reads included, and runs no proposer (`scripts/offline_run.py::BOUNDARY_RESUMED` pause at the round boundary instead); the round it paused in is read off its ledger (`scripts/offline_run.py::paused_at`) |
 | `diverged/` | the first optimizer's campaign resumed with `--fork-on-divergence` under an edited proposer prompt, then forked twice more (the multi-course sidebar fixture) |
 | `rebased/` | potter's campaign resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire; fails unless the line forks and ends on a stop other than `REBASED` within its budget |
+| `gated/` | the first optimizer's campaign with the backend refusing every cell, halted at the origin gate twice: resumed still refused, the resume passes the gate once as the operator's override, each cell its origin walk sends sent once; resumed answering, the origin passes on health, each lost cell sent once, on no fork; a refusal's resend wait is not slept (`scripts/offline_world.py::install_network`) (`scripts/offline_run.py::run_gated`) |
 | `interrupted/`, `interrupted-twice/` | the first optimizer's one-round campaign under one and two SIGINTs, then `resume`d |
 | `controlled/arms/requests/`, `controlled/arm-<optimizer>/` | a head-to-head's arms, minted in one act |
 
-**The run fails unless the resumed campaign decides what the uninterrupted one decided** — every round, the result and the bench headline equal, less the init records a resume appends. The interrupted legs are the Ctrl+C contract, run: `new` exits 130 with its slot released and its producer lock dropped, and `resume` ends the cycle on a single `start-run`. A campaign ending on a failed stop (`domain/phases.py::stop_reason_outcome`) fails its leg.
+**The run fails unless the resumed campaign decides what the uninterrupted one decided** — every round, the result, the bench headline and every optimizer call count equal, less the init records a resume appends and which of a round's cells it paid or replayed. The interrupted legs are the Ctrl+C contract, run: `new` exits 130 with its slot released and its producer lock dropped, and `resume` ends the cycle on a single `start-run`. A campaign ending on a failed stop (`domain/phases.py::stop_reason_outcome`) fails its leg.
 
 ## Proving parity
 

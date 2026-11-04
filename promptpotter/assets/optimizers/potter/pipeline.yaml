@@ -255,8 +255,8 @@ resolved_prompts:
 
 
       failure_highlights: ONE ENTRY PER CLUSTER, largest first. A cluster is a MECHANISM that at least
-      two rows a panel marks `[#id]` share, and as many as DETECTABLE MOVE names, or it is dropped
-      mechanically: read every row of FAILING SAMPLES and put each id in the cluster whose mechanism
+      two rows a panel marks `[#id]` share, and as many as DETECTABLE MOVE names; an id no panel marks
+      is struck, and a cluster left narrower is dropped mechanically; the other clusters stand: read every row of FAILING SAMPLES and put each id in the cluster whose mechanism
       it shows; a row sharing none is no cluster and is left out. The next L1 targets a cluster by its
       rows and writes ONE edit that must hold for every row the cluster spans, so claim the mechanism
       in GENERAL terms and name the decisive step the rows' reasoning shares, as SAMPLE TRANSCRIPTS
@@ -431,8 +431,8 @@ resolved_prompts:
       then spends the round arguing with you instead of testing a hypothesis. Commit to ONE node — do NOT
       weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: the fewest
       backup axes, from the same list. failure_highlights: clusters,
-      each a MECHANISM at least two inner runs share, and as many as DETECTABLE MOVE names, or it is
-      dropped mechanically, spanned by the `[#id]` marks of INNER RUN
+      each a MECHANISM at least two inner runs share, and as many as DETECTABLE MOVE names (an id no
+      panel marks is struck, and a cluster left narrower is dropped mechanically), spanned by the `[#id]` marks of INNER RUN
       NARRATIVES, its claim quoting concrete inner evidence ('the inner critique proposed the same axis
       2 rounds running, flat trajectory') — these are what L2 and the next outer L1 steer on. Be terse:
       a long answer is truncated and discarded.

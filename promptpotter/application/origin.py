@@ -147,6 +147,21 @@ def try_inherit_fork_origin(
     )
 
 
+def standing_origin(session: Session, resolved_origin: OptSearchPoint) -> ReadArm | None:
+    """A line whose round 0 stands launches on it, never a second pass: its holes are the repair's
+    to re-send, once (`repair.py::apply_correction`)."""
+    origin = closed_round(
+        session.store, session.hop, 0, session.state.scoring.require_scorer(), moment=None
+    )
+    head = None if origin is None else origin.head
+    if origin is None or origin.election is None or head is None:
+        return None
+    if head.individual.id != resolved_origin.id:
+        return None
+    key = origin.election.ended_on
+    return ReadArm(key, head, origin.rows(key))
+
+
 _SEED_ORIGIN_LINEAGE = {
     OriginSource.FORK_SEED: "Operator-steered fork — edited searchpoint as origin",
     OriginSource.CAMPAIGN_ORIGIN: "Fresh campaign minted from a chosen prior origin",
@@ -206,6 +221,8 @@ async def establish_campaign_origin(
     )
     if inherited is not None:
         return inherited
+    if (standing := standing_origin(session, resolved_origin)) is not None:
+        return CampaignOrigin(origin=standing, framing=framing)
     proposed = Proposed(role=MeasurementRole.ORIGIN, slot=ORIGIN_SLOT, individual=resolved_origin)
     key = ArmKey(resolved_origin.id)
 
@@ -226,7 +243,8 @@ async def establish_campaign_origin(
             stopped=None,
         )
         return CampaignOrigin(
-            origin=ReadArm(key, conclude(unmeasured, nothing), NO_CELLS), framing=framing
+            origin=ReadArm(key, conclude(unmeasured, nothing, round_num=0), NO_CELLS),
+            framing=framing,
         )
 
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
@@ -275,7 +293,7 @@ async def establish_campaign_origin(
             sheet = session.state.scoring.require_scorer().sheet(cell.facts for cell in sheet)
             scores = compute_composite_fitness(sheet, pipeline_schema)
         # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
-        state = conclude(arm, replace(scored, sheet=sheet, scores=scores))
+        state = conclude(arm, replace(scored, sheet=sheet, scores=scores), round_num=0)
         listener.on_arm(0, key, state)
     finally:
         listener.on_phase(CampaignPhase.ORIGIN, "exit", round=0)

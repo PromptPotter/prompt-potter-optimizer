@@ -123,6 +123,19 @@ def parent_level_series(result: CycleResult) -> list[float]:
     return [] if held is None else _held_forward(held[1], result)
 
 
+def spent_on_line(rnd: int, cut_round: int | None) -> bool:
+    """A round its cycle ran itself (from *cut_round* on, a fork's), never the origin it is differenced against."""
+    return rnd > 0 and (cut_round is None or rnd >= cut_round)
+
+
+def line_round_levels(
+    spans: Iterable[tuple[Sequence[tuple[int, float | None]], int | None]],
+) -> list[float | None]:
+    """Each cycle's whole ``(round, level)`` series and its cut round, oldest first: the line's
+    `CycleResult.bench_round_levels`, every round in the order the line spent it."""
+    return [level for series, cut in spans for rnd, level in series if spent_on_line(rnd, cut)]
+
+
 def bench_level_series(result: CycleResult) -> list[float]:
     """Empty where any round's bench pass read nothing: a hole held forward scores a pass nobody read."""
     levels = result.bench_round_levels
