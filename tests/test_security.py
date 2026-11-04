@@ -43,8 +43,10 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from offline_world import Router
 from pydantic import SecretStr
+from starlette.types import Receive, Scope, Send
 
 from promptpotter.application import account, health, site_records
+from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.jobs import quota
@@ -147,7 +149,11 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
 )
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
-from promptpotter.infrastructure.store.site_records import SiteRecord, SiteRecordStore
+from promptpotter.infrastructure.store.site_records import (
+    SiteRecord,
+    SiteRecordStore,
+    default_site_record_store,
+)
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User, UserStore, count_accounts
 from promptpotter.main import API_ROUTERS, app
@@ -159,6 +165,7 @@ from promptpotter.presentation.api.middleware.oidc import (
     SESSION_COOKIE_NAME,
     identity_of_session,
 )
+from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
 from promptpotter.presentation.cli.commands.cycles import cmd_cycles
 from promptpotter.presentation.cli.commands.result import said_text
@@ -525,6 +532,25 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
                 continue
             answer = anonymous.request(method, re.sub(r"\{[^}]+\}", "x", path))
             assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
+
+    # A stranger's request is kept beside the website's visits; a signed-in person's is their own
+    # trail's, and a query is kept only where nothing answered, so a served sign-in code never lands.
+    async def answering(scope: Scope, _receive: Receive, send: Send) -> None:
+        if scope["path"] == "/signed-in":
+            scope.setdefault("state", {})["identity_ctx"] = who("ada-id")
+        status = 404 if scope["path"].endswith(".env") else 200
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    stranger = TestClient(OutsideVisitsMiddleware(answering), client=("34.178.107.69", 50000))
+    stranger.get("/api/v1/auth/callback/google?code=one-time-sign-in-code")
+    stranger.get("/.env?probe=1")
+    stranger.get("/signed-in")
+    TestClient(OutsideVisitsMiddleware(answering)).get("/from-this-side")
+    kept = [(r.row["path"], r.row["query"]) for r in default_site_record_store().kept(APP_VISITS)]
+    assert kept == [("/api/v1/auth/callback/google", ""), ("/.env", "probe=1")], (
+        "an outside visit kept a served query, a signed-in request, or one from this side"
+    )
     asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
 
 
