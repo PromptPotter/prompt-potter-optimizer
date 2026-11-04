@@ -428,10 +428,10 @@ class PipelineNode(FrozenModel):
         return "number" if t in ("number", "integer") else "bool" if t == "boolean" else "string"
 
 
-# Stamped BY the merge (last writer wins), never diffed against it; `identity` is unoverridable, so no surface edits one.
-ParamSource = Literal[
-    "backend", "dataset", "campaign", "model_floor", "seed", "evolved", "identity", "unset"
-]
+# Declared in fold order: a later layer wins (`pipeline_resolve.py::ParamLayers`).
+ParamLayer = Literal["dataset", "campaign", "seed", "model_floor", "identity", "evolved"]
+# Stamped BY the fold, never diffed against it; `identity` is unoverridable, so no surface edits one.
+ParamSource = Literal[ParamLayer, "unset"]
 
 
 class NodeConfigParam(FrozenModel):
@@ -649,6 +649,21 @@ class NodeSearchNarrowing(FrozenModel):
     param_keys: list[str] | None = None
     prompt_fields_held: list[str] = Field(default_factory=list)
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
+
+    def over(self, later: "NodeSearchNarrowing") -> "NodeSearchNarrowing":
+        """*later* laid on this one by part, as ``PipelineSchema.narrow`` lays this one on the dataset's."""
+        keys = later.param_keys
+        if self.param_keys is not None:
+            keys = (
+                list(self.param_keys) if keys is None else [k for k in keys if k in self.param_keys]
+            )
+        held = [*self.prompt_fields_held]
+        held += [f for f in later.prompt_fields_held if f not in held]
+        return NodeSearchNarrowing(
+            param_keys=keys,
+            prompt_fields_held=held,
+            param_allowed_values={**self.param_allowed_values, **later.param_allowed_values},
+        )
 
 
 class ParamIntent(FrozenModel):

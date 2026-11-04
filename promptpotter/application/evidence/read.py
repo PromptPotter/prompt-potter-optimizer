@@ -63,7 +63,7 @@ from promptpotter.application.evidence.subjects import (
 )
 from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.closed_rounds import (
     campaign_scorer,
     cycle_bank,
@@ -822,7 +822,7 @@ def _cycle_facts(stores: Stores, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
         raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None, "a subject resolves through its campaign's directory"
-    opt = resolve_campaign_config(stores, campaign, hop).optimization
+    opt = cycle_config(stores, campaign, hop).config.optimization
     scale = (
         None
         if series is None

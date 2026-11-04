@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
-from collections.abc import Mapping, MutableMapping, Sequence
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, assert_never
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, NamedTuple, assert_never, get_args
 
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
 from promptpotter import connectors
-from promptpotter.application import optimizers
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
-    scorer_of,
     with_optimization,
 )
 from promptpotter.application.datasets.draft_campaign import (
@@ -26,10 +23,10 @@ from promptpotter.application.datasets.draft_campaign import (
     split_overlay,
 )
 from promptpotter.application.datasets.prompts import (
-    dataset_declared_nodes,
     declared_origin_prompts,
     has_dataset_prompts,
-    load_dataset_node_overlay,
+    pipeline_declared_nodes,
+    pipeline_node_overlay,
 )
 from promptpotter.application.datasets.startability import draft_samples
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
@@ -38,15 +35,15 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.knobs import bench_defaults_pin
-from promptpotter.application.optimizer_manifest import (
-    SelectedOptimizer,
-    node_prompt,
-    prompt_edits,
-    prompt_key,
-    resolve_optimizer,
-    select_optimizer,
+from promptpotter.application.optimizers.nodes import MintFacts, admits
+from promptpotter.application.pipeline_responses import (
+    CampaignPipelineResponse,
+    DatasetPipelineResponse,
+    ForkPreviewResponse,
+    SteerVerdict,
+    measurement_node,
+    optimizer_setup,
 )
-from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts, admits
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
 from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.scoring.formula.matchers import matcher_of
@@ -57,12 +54,12 @@ from promptpotter.domain.bench import partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
-    OptimizationConfig,
-    apply_cycle_seed,
+    CycleConfig,
     effective_config,
+    scoring_locked,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS, render_prompt
+from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
@@ -70,6 +67,7 @@ from promptpotter.domain.pipeline_overlay import (
     merge_pipeline_params,
     node_config_items,
     normalize_model_id,
+    permitted_models_from_narrowing,
     steers_disallowed_model,
 )
 from promptpotter.domain.pipeline_parsing import (
@@ -85,22 +83,20 @@ from promptpotter.domain.pipeline_schema import (
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
-    NodeReach,
     NodeSearchNarrowing,
+    ParamLayer,
     ParamSource,
     PipelineView,
     reach_map,
 )
-from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
-from promptpotter.domain.prompt_block import PackRefusal
-from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
-from promptpotter.domain.said import Tone
-from promptpotter.domain.search_point import (
-    SHOTS_KEY,
-    missing_template_vars,
-    strip_rendered_prompt,
+from promptpotter.domain.run_records import (
+    DefaultsDrift,
+    DefaultsPin,
+    PipelineRead,
+    ScoringLockedRecord,
 )
-from promptpotter.domain.strict_model import RequestBody, StrictModel
+from promptpotter.domain.scoring import ScoringFormulaError
+from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
@@ -110,7 +106,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_connector,
     dataset_experiment,
     declared_pipelines,
-    definition_version,
     resolve_dataset,
     runnable_definition,
 )
@@ -121,30 +116,26 @@ from promptpotter.shared.errors import (
     DatasetAccessError,
     LedgerUnreadableError,
     ManifestUnreadableError,
-    NotFoundError,
     PayloadInvalidError,
     StoredConfigInvalidError,
     validation_reason,
 )
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
-from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.optimizers.nodes import Initializer
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Pool, PoolEntry
     from promptpotter.domain.prompt_block import Presumption
-    from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.spend import Budget
     from promptpotter.domain.treatment import Treatment
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import ResolvedRun
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -155,86 +146,93 @@ whole term → judge mapping. Twin of `connectors/harbor.py::INSTRUMENT_KEY`, na
 that one says which task bytes ran and this one which grader read the answer. Both are identity,
 neither a tunable — nothing may put either in `param_keys`."""
 
-
-def resolve_pipeline_config_params(
-    active: list[str],
-    campaign_overlay: Mapping[str, Any],
-    dataset: ResolvedDataset | None,
-    schema: PipelineSchema,
-    judges: Mapping[str, JudgeSpec] | None = None,
-    *,
-    experiment: Mapping[str, Any] | None,
-    stores: Stores | None,
-    workspace: Path | None,
-    base_config: Mapping[str, Any] | None = None,
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
-) -> dict[str, Any]:
-    params = merge_declared_layers(
-        active,
-        campaign_overlay,
-        None if dataset is None else dataset.directory,
-        schema,
-        workspace=workspace,
-        base_config=base_config,
-        provenance=provenance,
-    )
-    return apply_identity_layer(
-        params,
-        active,
-        dataset,
-        schema,
-        stores=stores,
-        judges=judges,
-        experiment=experiment,
-        provenance=provenance,
-    )
+PARAM_LAYERS: tuple[ParamLayer, ...] = get_args(ParamLayer)
 
 
-def merge_declared_layers(
-    active: list[str],
-    campaign_overlay: Mapping[str, Any],
-    dataset_dir: Path | None,
-    schema: PipelineSchema,
-    *,
-    workspace: Path | None,
-    base_config: Mapping[str, Any] | None = None,
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
-) -> dict[str, Any]:
-    pipeline_params: dict[str, Any] = {"steps": list(active)}
-    if base_config is not None:
-        pipeline_params = apply_node_overlay(
-            pipeline_params,
-            {node: cfg for node, cfg in base_config.items() if node in active},
-            schema,
-            source="backend",
-            provenance=provenance,
-        )
-    if dataset_dir is not None:
-        dataset_overlay = {
-            node: cfg
-            for node, cfg in load_dataset_node_overlay(dataset_dir).items()
-            if node in active
+@dataclass(frozen=True)
+class FoldedParams:
+    params: dict[str, Any]
+    provenance: dict[str, dict[str, ParamSource]]
+
+    @property
+    def identity_keys(self) -> dict[str, frozenset[str]]:
+        return {
+            node: owned
+            for node, stamps in self.provenance.items()
+            if (owned := frozenset(k for k, source in stamps.items() if source == "identity"))
         }
-        pipeline_params = apply_node_overlay(
-            pipeline_params, dataset_overlay, schema, source="dataset", provenance=provenance
-        )
-    valid_overrides: dict[str, Any] = {}
-    for key, value in campaign_overlay.items():
-        if isinstance(value, dict) and key in active:
-            valid_overrides[key] = value
-        elif isinstance(value, dict):
-            logger.debug("merge_declared_layers: skipping override for inactive node %r", key)
-        else:
-            logger.warning(
-                "merge_declared_layers: ignoring non-nested override %r=%r "
-                '(use {"node_name": {"param": value}} format)',
-                key,
-                value,
+
+
+@dataclass(frozen=True)
+class ParamLayers:
+    """What a subject's nodes run with, as ONE fold over `PARAM_LAYERS` in their declared order.
+    A subject picks its layers by the data it lays: an empty layer lays nothing. Only the chain's
+    steps are laid; the floors are read off the params laid before them."""
+
+    steps: list[str]
+    schema: PipelineSchema
+    workspace: Path | None
+    dataset: Mapping[str, Any] = field(default_factory=dict)
+    campaign: Mapping[str, Any] = field(default_factory=dict)
+    seed: Mapping[str, Any] = field(default_factory=dict)
+    identity: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    evolved: Mapping[str, Any] = field(default_factory=dict)
+    # A measured point's params: the identity it ran under stands over the one recomputed today.
+    recorded: Mapping[str, Any] = field(default_factory=dict)
+
+    def fold(self) -> FoldedParams:
+        params: dict[str, Any] = {"steps": list(self.steps)}
+        provenance: dict[str, dict[str, ParamSource]] = {}
+        for source in PARAM_LAYERS:
+            laid = {
+                node: dict(cfg)
+                for node, cfg in node_config_items(dict(self._layer(source, params)))
+                if node in self.steps
+            }
+            params = apply_node_overlay(
+                params, laid, self.schema, source=source, provenance=provenance
             )
-    pipeline_params = apply_node_overlay(
-        pipeline_params, valid_overrides, schema, source="campaign", provenance=provenance
-    )
-    return _apply_model_floors(pipeline_params, active, schema, workspace, provenance)
+        return FoldedParams(params, provenance)
+
+    def _layer(self, source: ParamLayer, params: dict[str, Any]) -> Mapping[str, Any]:
+        match source:
+            case "dataset":
+                return self.dataset
+            case "campaign":
+                return self.campaign
+            case "seed":
+                return self.seed
+            case "model_floor":
+                return self._floors(params)
+            case "identity":
+                return self._identity()
+            case "evolved":
+                return self.evolved
+            case _:
+                assert_never(source)
+
+    def _identity(self) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for node, cfg in self.identity.items():
+            ran = self.recorded.get(node)
+            ran = ran if isinstance(ran, dict) else {}
+            out[node] = {k: ran.get(k, v) for k, v in cfg.items()}
+        return out
+
+    def _floors(self, params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        answering = schema_as_run(self.schema, params, self.steps, self.workspace)
+        floors: dict[str, dict[str, Any]] = {}
+        for name in self.steps:
+            node = answering.get_node(name)
+            cfg = params.get(name)
+            if node is None or not isinstance(cfg, dict) or "reasoning_effort" in cfg:
+                continue
+            if "reasoning_effort" not in node.param_keys | node.param_keys_held:
+                continue
+            floor = answering.effort_floor(node, model=None)
+            if floor is not None:
+                floors[name] = {"reasoning_effort": floor}
+        return floors
 
 
 def _routed_as_run(
@@ -293,51 +291,6 @@ def schema_as_run(
             }
         }
     )
-
-
-def _apply_model_floors(
-    pipeline_params: dict[str, Any],
-    active: list[str],
-    schema: PipelineSchema,
-    workspace: Path | None,
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None,
-) -> dict[str, Any]:
-    answering = schema_as_run(schema, pipeline_params, active, workspace)
-    floors: dict[str, dict[str, Any]] = {}
-    for name in active:
-        node = answering.get_node(name)
-        cfg = pipeline_params.get(name)
-        if node is None or not isinstance(cfg, dict) or "reasoning_effort" in cfg:
-            continue
-        if "reasoning_effort" not in node.param_keys | node.param_keys_held:
-            continue
-        floor = answering.effort_floor(node, model=None)
-        if floor is not None:
-            floors[name] = {"reasoning_effort": floor}
-    return apply_node_overlay(
-        pipeline_params, floors, schema, source="model_floor", provenance=provenance
-    )
-
-
-def apply_identity_layer(
-    pipeline_params: dict[str, Any],
-    active: list[str],
-    dataset: ResolvedDataset | None,
-    schema: PipelineSchema,
-    *,
-    stores: Stores | None,
-    judges: Mapping[str, JudgeSpec] | None,
-    experiment: Mapping[str, Any] | None,
-    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
-) -> dict[str, Any]:
-    # LAST and unoverridable: the connector's and the judges' ONE channel into the archive key.
-    contributions = _identity_contributions(stores, dataset, experiment, judges, active)
-    identity = {node: cfg for node, cfg in contributions.items() if node in active}
-    if identity:
-        pipeline_params = apply_node_overlay(
-            pipeline_params, identity, schema, source="identity", provenance=provenance
-        )
-    return pipeline_params
 
 
 def overlay_dataset_pipeline(served: Mapping[str, Any], local: Mapping[str, Any]) -> dict[str, Any]:
@@ -443,20 +396,19 @@ def experiment_outside_run(
     return None if read is None else read.experiment
 
 
-def _identity_contributions(
+def identity_layer(
     stores: Stores | None,
-    dataset: ResolvedDataset | None,
+    connector: Connector | None,
     experiment: Mapping[str, Any] | None,
     judges: Mapping[str, JudgeSpec] | None,
     active: list[str],
 ) -> dict[str, dict[str, Any]]:
+    """The connector's and the judges' ONE channel into the archive key."""
     out: dict[str, dict[str, Any]] = {}
-    if dataset is not None:
-        connector = dataset_connector(dataset)
-        if connector is not None and connector.identity_config is not None:
-            if stores is None:
-                raise ValueError(f"{dataset.name}: its connector's identity needs the stores")
-            out.update(connector.identity_config(stores, dataset, experiment))
+    if connector is not None and connector.identity_config is not None:
+        if stores is None:
+            raise ValueError(f"{connector.name}: its identity needs the stores")
+        out.update(connector.identity_config(stores, experiment))
     if judges and active:
         # The TERMINAL step: a judge grades the answer that node emits.
         out.setdefault(active[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
@@ -468,7 +420,7 @@ def _resolve_active_schema(
     *,
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
-    dataset_dir: Path | None,
+    declared: frozenset[str],
     workspace: Path | None = None,
 ) -> tuple[list[str], PipelineSchema]:
     active = pipeline_schema.active_steps_excluding(exclude)
@@ -478,7 +430,6 @@ def _resolve_active_schema(
         filtered = pipeline_schema.filter_to_steps(active)
     # Declared UNION the running chain: `promptpotter-self/panel` declares `l2_context` / `l3_plan`
     # off-chain on purpose, and a dataset declaring fewer nodes than it runs must lose none.
-    declared = dataset_declared_nodes(dataset_dir) if dataset_dir is not None else frozenset()
     if declared:
         keep = declared | set(filtered.active_steps)
         filtered = filtered.filter_to_steps(sorted(keep))
@@ -572,199 +523,6 @@ def _validate_model_ownership(
             )
 
 
-class NodeKnobs(StrictModel):
-    node: str = Field(description="The manifest node that owns these knobs")
-    kind: str = Field(description="The node's type: sampler | eliminator | selector | …")
-    keys: list[str] = Field(
-        description="Its knobs' keys, in declared order, each a row of `node_config_schema[node]`"
-    )
-
-
-class KnobRef(StrictModel):
-    """One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`."""
-
-    node: str = Field(description="The manifest node that owns the knob")
-    knob: str = Field(description="The knob's name under `nodes.{node}.config`")
-
-
-class PoolDraw(StrictModel):
-    """The nodes that read a pool under one knob: one knob, one access, however many readers."""
-
-    switch: KnobRef = Field(description="The knob that sets `access`")
-    access: Access = Field(
-        description="How they draw under this config: `off` not at all, `open` a window to "
-        "suggest from, `closed` an entry's id only"
-    )
-    nodes: list[str] = Field(
-        description="Every node reading the pool as this knob sets it, in walk order; potter's "
-        "critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what L1 sees"
-    )
-
-
-class PoolFill(StrictModel):
-    """One part of a candidate a pool's entries in play reach: the place a surface draws the pool."""
-
-    part: str = Field(description="A prompt field a target prompt node opens to search, or `shots`")
-    entries: int = Field(description="How many entries in play land there")
-    most: int | None = Field(
-        description="The most one candidate carries there: the shots any member writing them may "
-        "attach; null for a field, whose text a candidate takes or adapts"
-    )
-
-
-class PackOffer(StrictModel):
-    """One block pack this account reads, as a pool's `packs` knob names it."""
-
-    name: str = Field(description="The value `packs` holds for it")
-    entries: int = Field(
-        description="The pool entries it holds that this run admits, one per part a snippet suits"
-    )
-    on: bool = Field(description="Whether `packs` names it under this config")
-
-
-class PoolRow(StrictModel):
-    pool: str = Field(description="The pool's state kind, e.g. `block_pool`")
-    source: PoolSource = Field(description="Where its entries come from")
-    initializer: str = Field(description="The run-init node writing it once, before round 0")
-    active: list[str] = Field(description="The initializer's `active` paths: the entries in play")
-    offered: list[PoolOffer] = Field(
-        description="Every path `active` may name — `*` first, each leading run of an entry's "
-        "group before what it holds, each entry id — with what it reads as and the entries it "
-        "keeps; a demo pool's are the split its Start draws, none before that split is known"
-    )
-    drawn_by: list[PoolDraw]
-    fills: list[PoolFill] = Field(
-        description="The candidate parts its entries in play reach under this config, in render "
-        "order, shots last: empty where no member draws it or nothing is in play, and then a "
-        "surface draws the pool nowhere"
-    )
-    packs: list[PackOffer] = Field(
-        description="The block packs it may draw from, the install's and the account's, in name "
-        "order; none for a pool no pack feeds or no member draws, and none before the facts a "
-        "Start mints against are known"
-    )
-    refused: list[PackRefusal] = Field(
-        description="The packs it would offer but refuses, each with why, served beside `packs`: "
-        "one bad pack never hides the rest"
-    )
-
-
-class OptimizerNodePrompt(StrictModel):
-    """The prompt an optimizer node runs under a config, before any L4 override."""
-
-    fields: dict[str, str] = Field(description="Every prompt field by name, its edits laid on")
-    edited: list[str] = Field(
-        description="The fields this config sets over the template, each written to "
-        "`optimization.nodes.{node}.config.{field}`"
-    )
-    version: str = Field(description="The `prompt_version` the node's config names")
-    versions_declared: int = Field(
-        description="How many versions the manifest declares for the node's prompt family — a "
-        "surface showing this one says so where there are more"
-    )
-
-
-class ProposerRow(StrictModel):
-    node: str = Field(description="The manifest node making the arms")
-    makes: str = Field(description="What its arms are, in plain words: the manifest node's `makes`")
-
-
-class OptimizerSetup(StrictModel):
-    """What the selected optimizer runs under a config, derived once for check-in and campaign."""
-
-    main: list[KnobRef] = Field(description="The knobs a setup surface leads with, in order")
-    knobs: list[NodeKnobs] = Field(
-        description="Every member taking a knob, in declared order, but a pool initializer: its "
-        "knobs are its `pools` row"
-    )
-    prompts: dict[str, OptimizerNodePrompt] = Field(
-        description="By node, each node running a prompt; a node naming no `prompt_family` has "
-        "no entry"
-    )
-    arms_per_round: int = Field(description="Arms each round tests")
-    proposers: list[ProposerRow] = Field(
-        description="The nodes making each round's arms under this config, in walk order: one "
-        "that opens or adds arms and adds none here is off, and absent"
-    )
-    pools: list[PoolRow] = Field(description="What the members draw from")
-    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
-        description="Per optimizer node, its typed config rows at this config — an llm node's "
-        "call config and prompt fields, a member's knobs: what its pipeline graph and node detail "
-        "draw"
-    )
-    reach: dict[str, NodeReach] = Field(
-        description="Where the search reaches per optimizer node at this config, summed off "
-        "`node_config_schema`"
-    )
-
-
-class CampaignPipelineResponse(StrictModel):
-    """One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.
-    The peer of ``resolve_dataset`` one question up: that seam answers which bytes are on disk,
-    this one which values a campaign runs (``architecture.md`` § Two resolution seams)."""
-
-    campaign_id: str
-    cycle_id: str
-    dataset_name: str
-    connector: str
-    backend_type: str
-    self_optimization: bool = Field(
-        description="This campaign optimizes the optimizer itself (L4): one measured row is a "
-        "whole inner campaign, so it has no registered backend and no per-sample data of its own"
-    )
-    optimizer: str = Field(
-        description="The optimizer manifest the addressed course runs — the one answer a surface "
-        "reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included"
-    )
-    optimizer_setup: OptimizerSetup = Field(
-        description="That optimizer as the addressed course runs it — the manifest's knobs under "
-        "the campaign's and the cycle seed's overlays, its arms and its pools"
-    )
-    params: dict[str, Any] = Field(
-        description="Resolved config as the engine holds it — the bytes each arm of a round file "
-        "carries as `resolved_params`, which makes that field this endpoint's check"
-    )
-    node_config_schema: dict[str, list[NodeConfigParam]]
-    view: PipelineView | None
-    node_output_schema: dict[str, NodeOutputSchema | None]
-    model_capabilities: CapabilityMenu = Field(
-        description="Keyed by the provider and model each node's rows carry AT this searchpoint"
-    )
-    reach: dict[str, NodeReach]
-    nests: list[NestedPipelineRef] = Field(
-        description="The inner pipelines this chain nests, one per dataset its cells measure — "
-        "the L4 drill-in, on this read"
-    )
-    is_single_node: bool
-
-
-def _identity_keys(
-    provenance: Mapping[str, dict[str, ParamSource]],
-) -> dict[str, frozenset[str]]:
-    return {
-        node: owned
-        for node, stamps in provenance.items()
-        if (owned := frozenset(k for k, source in stamps.items() if source == "identity"))
-    }
-
-
-def _recorded_identity(
-    params: dict[str, Any],
-    recorded: Mapping[str, Any],
-    provenance: Mapping[str, dict[str, ParamSource]],
-) -> dict[str, Any]:
-    """A MEASURED point keeps the identity it ran under; recomputing is right only on the run path."""
-    out = dict(params)
-    for node, owned in _identity_keys(provenance).items():
-        node_recorded = recorded.get(node)
-        if not isinstance(node_recorded, dict):
-            continue
-        merged = dict(out.get(node) or {})
-        merged.update({k: node_recorded[k] for k in owned if k in node_recorded})
-        out[node] = merged
-    return out
-
-
 def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], dict[str, Any]]:
     """(sparse delta, complete config): the complete one read as a delta stamps every param ``evolved``."""
     if at.kind != "candidate" or not at.cycle_id:
@@ -778,21 +536,12 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], d
     return {}, {}
 
 
-def measurement_node(view: PipelineView | None) -> str | None:
-    return next((n.id for n in (view.nodes if view else []) if n.kind == "measurement"), None)
-
-
 def nested_pipeline_refs(
-    dataset: ResolvedDataset,
-    experiment: Mapping[str, Any] | None,
-    view: PipelineView | None,
+    backend_type: str, experiment: Mapping[str, Any] | None, view: PipelineView | None
 ) -> list[NestedPipelineRef]:
     """One per dataset the cells' inner campaigns measure, by name."""
     node = measurement_node(view)
-    connector = dataset_connector(dataset)
-    if node is None or experiment is None or connector is None:
-        return []
-    if not is_self_optimization(connector.name):
+    if node is None or experiment is None or not is_self_optimization(backend_type):
         return []
     resolved = parse_resolved(experiment)
     return [
@@ -817,19 +566,6 @@ def resolved_output_schemas(
             parse_resolved_schema({"json_schema": js}) if isinstance(js, dict) and js else declared
         )
     return out
-
-
-def _dataset_of(stores: Stores, campaign: Campaign) -> ResolvedDataset | None:
-    try:
-        return resolve_dataset(stores, campaign.dataset_name)
-    except DatasetAccessError:
-        # A campaign outlives its dataset dir; its frozen config still answers.
-        return None
-
-
-def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[str, str]:
-    lock = stores.campaigns.last(hop, ScoringLockedRecord)
-    return lock.locked if lock is not None and lock.declared == scoring else scoring
 
 
 def draft_config(stores: Stores, draft: DraftCampaign, declared: PipelineSchema) -> CampaignConfig:
@@ -884,11 +620,6 @@ def _draft_declared(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
     return with_optimization(declared, draft.optimization_overrides).model_copy(update=update)
 
 
-def _locked(stores: Stores, hop: CycleHop, config: CampaignConfig) -> CampaignConfig:
-    locked = _criterion_locked(stores, hop, config.scoring)
-    return config if locked == config.scoring else config.model_copy(update={"scoring": locked})
-
-
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
     """The one answer to whether what the declaration is a delta over moved since its mint."""
     declared = DefaultsPin(
@@ -898,10 +629,9 @@ def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift |
     return None if now == declared else DefaultsDrift(declared=declared, running=now)
 
 
-def resolve_campaign_config(
-    stores: Stores, campaign: Campaign, hop: CycleHop | None
-) -> CampaignConfig:
-    """The declaration's effective config, the criterion its dials lock on the origin laid on."""
+def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> CycleConfig:
+    """The declaration's effective config under every seed of *hop*'s line, the criterion its dials
+    lock on the origin laid on; ``None`` is the declaration alone, which no cycle's seed moved."""
     try:
         declared = effective_config(campaign.declaration)
     except ValidationError as exc:
@@ -909,10 +639,11 @@ def resolve_campaign_config(
             path=f"campaigns/{campaign.campaign_id}/campaign.json::declaration",
             reason=validation_reason(exc, shown=1),
         ) from exc
-    root = _locked(stores, campaign.root_hop, declared)
+    campaigns = stores.campaigns
     if hop is None:
-        return root
-    return _locked(stores, hop, apply_cycle_seed(root, stores.campaigns.read_cycle_seed(hop)))
+        root_lock = campaigns.last(campaign.root_hop, ScoringLockedRecord)
+        return CycleConfig.laid(scoring_locked(declared, root_lock), [])
+    return CycleConfig.laid(declared, campaigns.read_laid_spans(hop))
 
 
 @dataclass(frozen=True)
@@ -921,35 +652,22 @@ class _Merge:
     filtered: PipelineSchema
     active: list[str]
     cfg: CampaignConfig
-    params: dict[str, Any]
-    provenance: dict[str, dict[str, ParamSource]]
+    layers: ParamLayers
     # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
 
 
 @dataclass(frozen=True)
 class _CampaignMerge(_Merge):
-    dataset: ResolvedDataset | None
     hop: CycleHop
     # What its mint recorded run init read: the laid declaration, and the panel it measured.
     declaration: dict[str, Any]
     experiment: dict[str, Any] | None
-    seed: CycleSeed | None
-
-    def with_seed(self, params: dict[str, Any]) -> dict[str, Any]:
-        if self.seed is None or not self.seed.pipeline_overlay:
-            return params
-        return apply_node_overlay(
-            params,
-            self.seed.pipeline_overlay,
-            self.filtered,
-            source="seed",
-            provenance=self.provenance,
-        )
 
 
 def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> _Merge:
-    declared = parse_pipeline_response(served.over(_draft_local(stores, draft)))
+    local = _draft_local(stores, draft)
+    declared = parse_pipeline_response(served.over(local))
     cfg = draft_config(stores, draft, declared)
     # Still the operator's own layer here, where a fresh upload's Start files it in `dataset.yaml::pipeline`.
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
@@ -957,17 +675,7 @@ def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -
         declared,
         exclude=list(cfg.exclude_nodes),
         narrowing={**cfg.optimizer_narrowing, **narrowing},
-        dataset_dir=None,
-    )
-    provenance: dict[str, dict[str, ParamSource]] = {}
-    params = merge_declared_layers(
-        active,
-        merge_pipeline_params(cfg.pipeline_overlay, overrides, None) or {},
-        None,
-        filtered,
-        workspace=stores.base_dir,
-        base_config={n.name: dict(n.current_config) for n in filtered.declared_nodes},
-        provenance=provenance,
+        declared=pipeline_declared_nodes(local),
     )
     return _Merge(
         # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
@@ -975,8 +683,14 @@ def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -
         filtered=filtered,
         active=active,
         cfg=cfg,
-        params=params,
-        provenance=provenance,
+        layers=ParamLayers(
+            steps=active,
+            schema=filtered,
+            workspace=stores.base_dir,
+            dataset=pipeline_node_overlay(local),
+            campaign=merge_pipeline_params(cfg.pipeline_overlay, overrides, None) or {},
+            identity=identity_layer(None, None, None, cfg.judges, active),
+        ),
         free=_task_fenced(stores, served.connector),
     )
 
@@ -987,50 +701,56 @@ def _task_fenced(stores: Stores, connector: str) -> bool:
 
 
 def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _CampaignMerge:
-    dataset = _dataset_of(stores, campaign)
-    dataset_dir = None if dataset is None else dataset.directory
+    """Off its mint's records alone, so a campaign outlives its dataset dir; lays no identity:
+    what a point is keyed by is the subject's to add."""
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
-    # What the cycle ran is what its mint recorded, never today's files or backend.
     resolved = stores.campaigns.read_resolved_run(hop)
-    if resolved.declaration is None:
-        raise LedgerUnreadableError(
-            ledger=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
-            offset=None,
-            reason="it holds no resolved run, which its mint appends before the campaign exists",
-            campaign_id=hop.campaign_id,
-        )
-    schema = parse_pipeline_response(resolved.declaration)
-    seed = stores.campaigns.read_cycle_seed(hop)
-    cfg = resolve_campaign_config(stores, campaign, hop)
+    read = _recorded_read(resolved, hop)
+    schema = parse_pipeline_response(read.declaration)
+    cycle = cycle_config(stores, campaign, hop)
+    cfg = cycle.config
     active, filtered = _resolve_active_schema(
         schema,
         exclude=list(cfg.exclude_nodes),
         narrowing=cfg.optimizer_narrowing,
-        dataset_dir=dataset_dir,
-    )
-    provenance: dict[str, dict[str, ParamSource]] = {}
-    params = merge_declared_layers(
-        active,
-        cfg.pipeline_overlay,
-        dataset_dir,
-        filtered,
-        workspace=stores.base_dir,
-        provenance=provenance,
+        declared=read.declared_nodes,
     )
     return _CampaignMerge(
         declared=schema,
         filtered=filtered,
         active=active,
         cfg=cfg,
-        params=params,
-        provenance=provenance,
+        layers=ParamLayers(
+            steps=active,
+            schema=filtered,
+            workspace=stores.base_dir,
+            dataset=read.dataset_overlay,
+            campaign=cfg.pipeline_overlay,
+            seed=cycle.seed_overlay,
+        ),
         free=_task_fenced(stores, campaign.connector),
-        dataset=dataset,
         hop=hop,
-        declaration=resolved.declaration,
+        declaration=read.declaration,
         experiment=resolved.experiment,
-        seed=seed,
     )
+
+
+def recorded_schema(stores: Stores, hop: CycleHop) -> PipelineSchema:
+    """What *hop* ran, as its mint recorded run init read it; never today's files or backend."""
+    return parse_pipeline_response(
+        _recorded_read(stores.campaigns.read_resolved_run(hop), hop).declaration
+    )
+
+
+def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
+    if resolved.read is None:
+        raise LedgerUnreadableError(
+            ledger=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
+            offset=None,
+            reason="it holds no resolved run, which its mint appends before the campaign exists",
+            campaign_id=hop.campaign_id,
+        )
+    return resolved.read
 
 
 def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> CapabilityMenu:
@@ -1068,140 +788,10 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
     )
 
 
-def _pool_draws(selected: SelectedOptimizer, pool: type[Pool]) -> list[PoolDraw]:
-    grouped: dict[tuple[str, str], PoolDraw] = {}
-    for member in selected.members:
-        if not isinstance(draw := member.draws.get(pool), KnobDraw):
-            continue
-        ref = KnobRef(node=selected.knob_owner(member, draw.knobs), knob=draw.knob)
-        held = grouped.setdefault(
-            (ref.node, ref.knob),
-            PoolDraw(switch=ref, access=selected.access(member, pool), nodes=[]),
-        )
-        held.nodes.append(member.name)
-    return list(grouped.values())
-
-
-def _pool_fills(
-    selected: SelectedOptimizer, initializer: Initializer, held: list[PoolEntry], opened: set[str]
-) -> list[PoolFill]:
-    in_play = set(kept(initializer.active(selected), ((e.id, e.group) for e in held)))
-    landed = Counter(initializer.pool.part(e) for e in held if e.id in in_play)
-    return [
-        PoolFill(
-            part=part,
-            entries=landed[part],
-            most=selected.shot_cap if part == SHOTS_KEY else None,
-        )
-        for part in (*PROMPT_FIELDS, SHOTS_KEY)
-        if landed[part] and part in opened
-    ]
-
-
-def _pack_offers(
-    selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
-) -> tuple[list[PackOffer], list[PackRefusal]]:
-    if (named := initializer.packs(selected)) is None or mint is None:
-        return [], []
-    shelved = mint.shelf.shelved()
-    offered = [
-        PackOffer(
-            name=name,
-            entries=len(mint.shelf.entries([name], admits=mint.admits)),
-            on=name in named,
-        )
-        for name, pack in shelved.items()
-        if not isinstance(pack, PackRefusal)
-    ]
-    return offered, [pack for pack in shelved.values() if isinstance(pack, PackRefusal)]
-
-
-def _opened_parts(target: PipelineSchema) -> set[str]:
-    nodes = target.prompt_nodes()
-    return {f for node in nodes for f in node.open_prompt_fields} | (
-        {SHOTS_KEY} if nodes else set()
-    )
-
-
-def _node_knobs(selected: SelectedOptimizer) -> list[NodeKnobs]:
-    nodes: list[NodeKnobs] = []
-    initializers = {initializer.name for initializer in selected.plan.initializers}
-    for node in selected.member_nodes:
-        keys = optimizers.NODE_MEMBERS.get(node).knobs.model_fields
-        if node in initializers or not keys:
-            continue
-        nodes.append(NodeKnobs(node=node, kind=str(selected.node(node).kind), keys=list(keys)))
-    return nodes
-
-
-def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]:
-    out: dict[str, OptimizerNodePrompt] = {}
-    declared = list(selected.manifest.resolved_prompts)
-    for node in selected.schema.declared_nodes:
-        config = selected.node_config(node.name)
-        if prompt_key(config) is None:
-            continue
-        family = str(config["prompt_family"])
-        out[node.name] = OptimizerNodePrompt(
-            fields=node_prompt(node.name, config, selected.manifest).model_dump(),
-            edited=list(prompt_edits(config)),
-            version=str(config.get("prompt_version") or ""),
-            versions_declared=sum(k.partition("/")[0] == family for k in declared),
-        )
-    return out
-
-
-def _pool_row(
-    selected: SelectedOptimizer,
-    initializer: Initializer,
-    mint: MintFacts | None,
-    opened: set[str],
-) -> PoolRow:
-    held = initializer.held(selected, mint)
-    drawn = any(initializer.pool in selected.draws(member) for member in selected.members)
-    packs, refused = _pack_offers(selected, initializer, mint) if drawn else ([], [])
-    return PoolRow(
-        pool=initializer.pool.kind,
-        source=initializer.pool.source,
-        initializer=initializer.name,
-        active=initializer.active(selected),
-        offered=offers(held),
-        drawn_by=_pool_draws(selected, initializer.pool),
-        fills=_pool_fills(selected, initializer, held, opened) if drawn else [],
-        packs=packs,
-        refused=refused,
-    )
-
-
-def optimizer_setup(
-    cfg: CampaignConfig, mint: MintFacts | None, target: PipelineSchema
-) -> OptimizerSetup:
-    selected = select_optimizer(cfg.optimization)
-    opened = _opened_parts(target)
-    rows = selected.schema.node_config_schema(selected.steered_axes)
-    return OptimizerSetup(
-        main=[
-            KnobRef(node=node, knob=knob)
-            for node, _, knob in (ref.partition(".") for ref in selected.manifest.main)
-        ],
-        knobs=_node_knobs(selected),
-        prompts=_node_prompts(selected),
-        arms_per_round=selected.arms_per_round,
-        proposers=[
-            ProposerRow(node=p.name, makes=selected.makes(p))
-            for p in selected.plan.proposers
-            if p.proposes == "edits" or p.arms(selected) > 0
-        ],
-        pools=[_pool_row(selected, i, mint, opened) for i in selected.plan.initializers],
-        node_config_schema=rows,
-        reach=reach_map(rows),
-    )
-
-
-def _rows(m: _Merge, params: dict[str, Any]) -> dict[str, list[NodeConfigParam]]:
+def _rows(m: _Merge, folded: FoldedParams) -> dict[str, list[NodeConfigParam]]:
     return m.filtered.node_config_schema(
-        values={n: c for n, c in params.items() if isinstance(c, dict)},
-        sources=m.provenance,
+        values={n: c for n, c in folded.params.items() if isinstance(c, dict)},
+        sources=folded.provenance,
         model_menu=_admitted_menu(m),
         declared=m.declared,
     )
@@ -1223,7 +813,7 @@ def _admitted_menu(m: _Merge) -> list[str]:
 
 def _response(
     m: _Merge,
-    params: dict[str, Any],
+    folded: FoldedParams,
     workspace: Path,
     *,
     campaign_id: str,
@@ -1234,7 +824,7 @@ def _response(
     nests: list[NestedPipelineRef],
     mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
-    rows = _rows(m, params)
+    rows = _rows(m, folded)
     return CampaignPipelineResponse(
         campaign_id=campaign_id,
         cycle_id=cycle_id,
@@ -1244,11 +834,11 @@ def _response(
         self_optimization=is_self_optimization(backend_type),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.cfg, mint, m.filtered),
-        params=params,
+        params=folded.params,
         node_config_schema=rows,
         view=m.filtered.view,
-        node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=_served_menu(m, params, workspace),
+        node_output_schema=resolved_output_schemas(m.filtered, folded.params),
+        model_capabilities=_served_menu(m, folded.params, workspace),
         reach=reach_map(rows),
         nests=nests,
         is_single_node=m.filtered.is_single_node,
@@ -1261,7 +851,7 @@ def resolve_pipeline_for_draft(
     m = _draft_merge(stores, draft, served)
     return _response(
         m,
-        _draft_params(m),
+        m.layers.fold(),
         stores.base_dir,
         # A draft is no campaign and runs no cycle until its Start mints both.
         campaign_id=draft.draft_id,
@@ -1288,21 +878,8 @@ class DraftPipeline(NamedTuple):
 
 def draft_pipeline(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftPipeline:
     m = _draft_merge(stores, draft, served)
-    params = _draft_params(m)
-    return DraftPipeline(params, _rows(m, params), m.filtered, m.declared, m.cfg)
-
-
-def _draft_params(m: _Merge) -> dict[str, Any]:
-    return apply_identity_layer(
-        m.params,
-        m.active,
-        None,
-        m.filtered,
-        stores=None,
-        judges=m.cfg.judges,
-        experiment=None,
-        provenance=m.provenance,
-    )
+    folded = m.layers.fold()
+    return DraftPipeline(folded.params, _rows(m, folded), m.filtered, m.declared, m.cfg)
 
 
 def resolve_pipeline_for_campaign(
@@ -1313,29 +890,23 @@ def resolve_pipeline_for_campaign(
 ) -> CampaignPipelineResponse:
     """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
     m = _campaign_merge(stores, campaign, at)
-    # The recorded roster alone: a live resolve recomputes a banked identity off one it never ran.
-    params = apply_identity_layer(
-        m.params,
-        m.active,
-        m.dataset,
-        m.filtered,
-        stores=stores,
-        judges=m.cfg.judges,
-        experiment=m.experiment,
-        provenance=m.provenance,
-    )
-    params = m.with_seed(params)
     evolved, measured = _evolved_overlay(stores, at)
-    if evolved:
-        params = apply_node_overlay(
-            params, evolved, m.filtered, source="evolved", provenance=m.provenance
-        )
-    # LAST: a measured point's identity is a fact of the measurement, not of today's files.
-    if measured:
-        params = _recorded_identity(params, measured, m.provenance)
+    folded = replace(
+        m.layers,
+        # The recorded roster alone: a live resolve recomputes a banked identity off one it never ran.
+        identity=identity_layer(
+            stores,
+            connectors.CONNECTORS.get(campaign.connector),
+            m.experiment,
+            m.cfg.judges,
+            m.active,
+        ),
+        evolved=evolved,
+        recorded=measured,
+    ).fold()
     return _response(
         m,
-        params,
+        folded,
         stores.base_dir,
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
@@ -1343,9 +914,7 @@ def resolve_pipeline_for_campaign(
         connector=m.declaration["backend_name"],
         # The campaign's DECLARED kind — one definition serves every campaign on the slug.
         backend_type=campaign.connector,
-        nests=[]
-        if m.dataset is None
-        else nested_pipeline_refs(m.dataset, m.experiment, m.filtered.view),
+        nests=nested_pipeline_refs(campaign.connector, m.experiment, m.filtered.view),
         mint=_cycle_mint(stores, m),
     )
 
@@ -1374,38 +943,6 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
     return resolve_pipeline_for_campaign(leaf, owned_campaign(leaf, campaign_id), at=spec)
 
 
-class ForkPreviewRequest(RequestBody):
-    pipeline_overlay: dict[str, Any] = Field(
-        description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
-    )
-
-
-SteerOutside = Literal["babysat", "refused"]
-SteerVerdict = Literal["clean", SteerOutside]
-
-
-class SteerOutsideInfo(NamedTuple):
-    title: str
-    detail: str
-    tone: Tone
-
-
-STEER_OUTSIDE_INFO: dict[SteerOutside, SteerOutsideInfo] = {
-    "babysat": SteerOutsideInfo(
-        "This steer leaves what the campaign permits, so the branch goes grade C.",
-        "Steering to it marks this branch — and every round after it — operator-babysat: excluded "
-        "from clean comparison, origin reuse, and the L4 rollup. The measurement is still "
-        "recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.",
-        "warn",
-    ),
-    "refused": SteerOutsideInfo(
-        "This steer leaves what the campaign permits.",
-        "Steering outside it is a babysit act this account may not take. Pick a permitted model.",
-        "danger",
-    ),
-}
-
-
 def steer_verdict(
     stores: Stores, narrowing: Mapping[str, NodeSearchNarrowing], overlay: dict[str, Any] | None
 ) -> SteerVerdict:
@@ -1415,39 +952,13 @@ def steer_verdict(
     return "babysat" if has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP) else "refused"
 
 
-class ForkPreviewResponse(StrictModel):
-    """What `POST /commands/fork-cycle` would decide about this steer, asked without forking."""
-
-    steer: SteerVerdict = Field(
-        description=(
-            "`clean` where the overlay stays inside the campaign's declared `optimizer_narrowing`. "
-            "Outside it — a responder never sanctioned, or a cost lever no permitted set can "
-            "sanction — the fork is the babysit act: `babysat` for a caller holding "
-            "`campaign.babysit` (the branch is graded C), `refused` for any other."
-        )
-    )
-
-
 def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> ForkPreviewResponse:
-    narrowing = resolve_campaign_config(
+    narrowing = cycle_config(
         stores, owned_campaign(stores, campaign_id), None
-    ).optimizer_narrowing
-    return ForkPreviewResponse(steer=steer_verdict(stores, narrowing, overlay))
-
-
-class DatasetPipelineResponse(StrictModel):
-    """One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology
-    only: the level a ``nests`` pointer names, which no campaign has to have run."""
-
-    connector: str
-    view: PipelineView | None
-    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
-        description="Every param each node carries, valueless — what `reach` is summed over"
-    )
-    reach: dict[str, NodeReach]
-    nests: list[NestedPipelineRef] = Field(
-        description="The pipelines this one nests in turn, one per dataset its cells measure; the "
-        "only wire naming them before a cell has spawned"
+    ).config.optimizer_narrowing
+    return ForkPreviewResponse(
+        steer=steer_verdict(stores, narrowing, overlay),
+        permitted=permitted_models_from_narrowing(narrowing),
     )
 
 
@@ -1458,11 +969,12 @@ async def resolve_pipeline_for_dataset(
     experiment = experiment_outside_run(stores, dataset)
     declared = await dataset_pipeline(stores, dataset, experiment=experiment)
     cfg = load_dataset_campaign_config(dataset.directory)
+    definition = runnable_definition(dataset.directory)
     _, filtered = _resolve_active_schema(
         parse_pipeline_response(declared),
         exclude=list(cfg.exclude_nodes),
         narrowing=cfg.optimizer_narrowing,
-        dataset_dir=dataset.directory,
+        declared=pipeline_declared_nodes(definition.pipeline),
     )
     rows = filtered.node_config_schema()
     return DatasetPipelineResponse(
@@ -1470,86 +982,20 @@ async def resolve_pipeline_for_dataset(
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),
-        nests=nested_pipeline_refs(dataset, experiment, filtered.view),
+        nests=nested_pipeline_refs(definition.backend_type, experiment, filtered.view),
     )
-
-
-class OptimizerPipelineResponse(StrictModel):
-    """An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs, prompts and node rows included, is `OptimizerSetup`."""
-
-    view: PipelineView | None = Field(
-        description="The graph topology — the same shape a campaign pipeline serves"
-    )
-    measurement_node: str | None = Field(
-        description="The node of `view` that runs the measurement — where a campaign's pipeline "
-        "nests under this graph, as each `nests[].node` names it per campaign. Null where the manifest "
-        "declares no measurement node."
-    )
-    node_output_schema: dict[str, NodeOutputSchema | None]
-    model_capabilities: CapabilityMenu = Field(
-        description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
-        "it accepts and what a round costs are the facts every other node's rows need too"
-    )
-
-
-def resolve_pipeline_for_optimizer(stores: Stores, optimizer: str) -> OptimizerPipelineResponse:
-    schema = resolve_optimizer(optimizer, {}, gate="off").schema
-    return OptimizerPipelineResponse(
-        view=schema.view,
-        measurement_node=measurement_node(schema.view),
-        node_output_schema=schema.node_output_schemas(),
-        # Per tenant: a hand-authored catalogue override lives in their workspace.
-        model_capabilities=resolve_schema_menu(schema, workspace=stores.base_dir),
-    )
-
-
-class OptimizerEntry(StrictModel):
-    """One optimizer this install can run, as a picker offers it."""
-
-    name: str = Field(description="The manifest name, as `optimization.optimizer` names it")
-    version: str = Field(description="The manifest's own version")
-    paper: str | None = Field(
-        description="The citation a paper preset reproduces; its declared knob values are that "
-        "paper's configuration. Null for an optimizer reproducing none"
-    )
-    origin: str | None = Field(
-        description="The installed package that registered it, as `<distribution>: <entry point>`; "
-        "null for one shipped with PromptPotter"
-    )
-
-
-class OptimizerRoster(StrictModel):
-    """The optimizers this install can run, the default first: one per manifest the registry holds."""
-
-    default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
-    optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
-
-
-def optimizer_roster() -> OptimizerRoster:
-    default = OptimizationConfig.model_fields["optimizer"].default
-    names = sorted(optimizers.MANIFESTS.table, key=lambda n: (n != default, n))
-    origins = optimizers.MANIFESTS.origins
-    entries = []
-    for name in names:
-        selected = resolve_optimizer(name, {}, gate="off")
-        origin = None if origins[name] == BUILT_IN else origins[name]
-        entries.append(
-            OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)
-        )
-    return OptimizerRoster(default=default, optimizers=entries)
 
 
 # A prompt, a description and a nested value are no setting one line can print.
 _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
+# The typed refusals a root's own data raises; any other exception is a defect and propagates.
 _ROOT_UNRESOLVED = (
-    OSError,
-    ValueError,
-    KeyError,
-    TypeError,
-    NotFoundError,
+    DatasetAccessError,
     StoredConfigInvalidError,
+    LedgerUnreadableError,
     ManifestUnreadableError,
     PayloadInvalidError,
+    ScoringFormulaError,
 )
 
 
@@ -1573,36 +1019,46 @@ def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith |
     )
 
 
-def line_config(stores: Stores, campaign: Campaign, hop: CycleHop) -> CampaignConfig | None:
-    """``None`` is a row whose config-bound readings are served null, never a failed list."""
+class LineConfig(NamedTuple):
+    """``config`` ``None`` serves a row's config-bound readings null, never a failed list."""
+
+    config: CampaignConfig | None
+    # Why it did not resolve; ``None`` where it did, or names no formula and so grades nothing.
+    unread: str | None
+
+
+def line_config(stores: Stores, campaign: Campaign, hop: CycleHop) -> LineConfig:
+    """Compiles no scorer: a formula's own refusal is the bench's, the one reading that grades."""
     try:
-        config = resolve_campaign_config(stores, campaign, hop)
-        # A config naming no formula resolves and still grades nothing.
-        scorer_of(config, verifier_graded=False)
-    except _ROOT_UNRESOLVED:
-        # Silent: `campaign_runs_with` logs the same root's cause, once per change.
-        return None
-    return config
+        config = cycle_config(stores, campaign, hop).config
+        if not split_scoring_block(config.scoring, judge_instrument=None).per_sample:
+            return LineConfig(None, None)
+    except _ROOT_UNRESOLVED as exc:
+        return LineConfig(None, str(exc))
+    return LineConfig(config, None)
 
 
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
-    seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
-    declaration = stores.campaigns.read_resolved_run(campaign.root_hop).declaration
-    lock = stores.campaigns.last(campaign.root_hop, ScoringLockedRecord)
+    cycle = cycle_config(stores, campaign, campaign.root_hop)
+    read = stores.campaigns.read_resolved_run(campaign.root_hop).read
     return (
-        campaign.declaration.digest,
-        None if lock is None else stable_hash(lock.locked),
+        stable_hash(cycle.config.model_dump(mode="json")),
+        stable_hash(cycle.seed_overlay),
         campaign.root_cycle_id,
-        definition_version(stores, campaign.dataset_name),
-        None if declaration is None else stable_hash(declaration),
-        None if seed is None else stable_hash(seed.model_dump(mode="json")),
+        stable_hash(
+            None
+            if read is None
+            else [read.declaration, read.dataset_overlay, sorted(read.declared_nodes)]
+        ),
     )
 
 
 def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
     m = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
-    stripped = strip_rendered_prompt(m.with_seed(m.params))
+    # What the root SENDS: no identity layer, which keys a cell and is never sent.
+    folded = m.layers.fold()
+    stripped = strip_rendered_prompt(folded.params)
     nodes = {n.name: n for n in m.filtered.declared_nodes}
     out: list[RunsWithParam] = []
     by_vendor: dict[str, list[str]] = {}
@@ -1615,7 +1071,9 @@ def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
             if kind not in _RUNS_WITH_KINDS:
                 continue
             out.append(
-                RunsWithParam(node=name, key=key, value=cfg[key], source=m.provenance[name][key])
+                RunsWithParam(
+                    node=name, key=key, value=cfg[key], source=folded.provenance[name][key]
+                )
             )
             if kind == "model" and cfg[key] is not None:
                 models = by_vendor.setdefault(_vendor_of(cfg[key]), [])
@@ -1633,8 +1091,8 @@ def _vendor_of(model: str) -> str:
     return normalize_model_id(model).partition("/")[0]
 
 
-def configure_and_apply_pipeline(session: Session, campaign_config: CampaignConfig) -> Session:
-
+def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Session:
+    campaign_config = cycle.config
     exclude = list(campaign_config.exclude_nodes)
     dataset_name = session.measured_dataset
     dataset = session.dataset
@@ -1644,22 +1102,25 @@ def configure_and_apply_pipeline(session: Session, campaign_config: CampaignConf
         session.pipeline_schema,
         exclude=exclude,
         narrowing=campaign_config.optimizer_narrowing,
-        dataset_dir=dataset_dir,
+        declared=session.pipeline_read.declared_nodes,
         workspace=session.store.base_dir,
     )
-
-    provenance: dict[str, dict[str, ParamSource]] = {}
-    pipeline_params = resolve_pipeline_config_params(
-        active,
-        campaign_config.pipeline_overlay,
-        dataset,
-        filtered,
-        judges=campaign_config.judges,
-        experiment=session.backend_client.workload.experiment,
-        stores=session.store,
+    folded = ParamLayers(
+        steps=active,
+        schema=filtered,
         workspace=session.store.base_dir,
-        provenance=provenance,
-    )
+        dataset=session.pipeline_read.dataset_overlay,
+        campaign=campaign_config.pipeline_overlay,
+        seed=cycle.seed_overlay,
+        identity=identity_layer(
+            session.store,
+            session.backend_client.connector,
+            session.backend_client.workload.experiment,
+            campaign_config.judges,
+            active,
+        ),
+    ).fold()
+    pipeline_params = folded.params
 
     ships_prompts = dataset_dir is not None and has_dataset_prompts(dataset_dir)
     _validate_prompt_reach(
@@ -1688,14 +1149,9 @@ def configure_and_apply_pipeline(session: Session, campaign_config: CampaignConf
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
     logger.info("Active nodes: %s%s", ", ".join(active), excl_str)
 
-    as_run = schema_as_run(filtered, pipeline_params, active, session.store.base_dir)
-    # A bound cycle's seed is laid LAST, over the campaign's overrides, for that cycle alone.
-    seed = session.store.campaigns.read_cycle_seed(session.hop) if session.cycle_id else None
-    if seed is not None and seed.pipeline_overlay:
-        pipeline_params = apply_node_overlay(pipeline_params, seed.pipeline_overlay, as_run)
     return replace(
         session,
-        pipeline_schema=as_run,
+        pipeline_schema=schema_as_run(filtered, pipeline_params, active, session.store.base_dir),
         pipeline_params=pipeline_params,
-        identity_keys=_identity_keys(provenance),
+        identity_keys=folded.identity_keys,
     )

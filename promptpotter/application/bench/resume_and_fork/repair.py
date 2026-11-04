@@ -318,7 +318,7 @@ async def apply_correction(
         cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], callbacks
     )
     repair_target = mint_fork(
-        campaign_store,
+        session.store,
         hop,
         cut.resume_at,
         trigger=ForkTrigger.SCORING_DIVERGENCE,

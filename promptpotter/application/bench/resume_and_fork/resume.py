@@ -166,7 +166,7 @@ async def _replay_line(
                     },
                 )
             new_cycle_id = mint_fork(
-                campaign_store,
+                session.store,
                 hop,
                 div.round_num,
                 trigger=ForkTrigger.SCORING_DIVERGENCE,

@@ -22,7 +22,6 @@ from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     resolved_overrides,
 )
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
@@ -40,7 +39,7 @@ from promptpotter.application.runner.inner.tasks import (
 from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.arm_reading import ArmFit, order_floor
 from promptpotter.domain.arms import Cut, Measured
-from promptpotter.domain.campaign_config import CampaignConfig, effective_config
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_facts import SeriesGap, series_reason_head
@@ -344,7 +343,7 @@ def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
 
 def _continue_inner_campaign(
     session: Session, campaign: Campaign, train_data: Sequence[Sample]
-) -> tuple[Session, SelectedOptimizer]:
+) -> tuple[Session, CycleConfig, SelectedOptimizer]:
     """``stop_reason_outcome`` governs scoring, never resumption."""
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
@@ -364,7 +363,7 @@ def _continue_inner_campaign(
         )
     bound = session.bound(hop, purpose=campaign.declaration.purpose)
     try:
-        optimizer = resolve_resume(bound, campaign, train_data)
+        plan = resolve_resume(bound, campaign, train_data)
     except ConfigDriftError as drift:
         raise CellUnscoreableError(str(drift), spent={}) from drift
 
@@ -376,7 +375,7 @@ def _continue_inner_campaign(
         _banked_inner_rounds(store, campaign.root_hop),
         run.run_phase,
     )
-    return configure_and_apply_pipeline(bound, effective_config(campaign.declaration)), optimizer
+    return plan.session, plan.cycle, plan.optimizer
 
 
 def _cells(ctx: InnerSpawnContext) -> InnerCells:
@@ -386,7 +385,7 @@ def _cells(ctx: InnerSpawnContext) -> InnerCells:
 
 class _Opened(NamedTuple):
     session: Session
-    config: CampaignConfig
+    cycle: CycleConfig
     train_data: list[Sample]
     # The constant-answer floor over the bank the seat drew.
     bank_floor: float | None
@@ -438,12 +437,10 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
             campaign_id=cell.campaign_id,
             billed=None,
         )
-        session, optimizer = minted.session, minted.optimizer
+        session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
     else:
-        session, optimizer = _continue_inner_campaign(session, campaign, train_data)
-    return _Opened(
-        session, effective_config(declaration), train_data, class_floor(search), optimizer
-    )
+        session, cycle, optimizer = _continue_inner_campaign(session, campaign, train_data)
+    return _Opened(session, cycle, train_data, class_floor(search), optimizer)
 
 
 async def _run_inner_campaign(
@@ -456,7 +453,7 @@ async def _run_inner_campaign(
     # Over the mint too: the treatment it declares hashes the overridden prompts.
     with binding_prompt_overrides(cell.overrides):
         opened = await _open_seat(cell, store)
-        session, config = opened.session, opened.config
+        session, config = opened.session, opened.cycle.config
         session.store.campaigns.record_spawned(session.hop, SpawnedBy.model_validate(spawned_by))
         minted.append(session.hop)
         observers = build_run_observers(session=session, campaign_config=config)
@@ -470,7 +467,7 @@ async def _run_inner_campaign(
             ) as held:
                 _, result = await run_optimization(
                     opened.train_data,
-                    config,
+                    opened.cycle,
                     session=session,
                     observers=observers,
                     budget=held,

@@ -6,7 +6,7 @@ import time
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.bench import (
     BenchLine,
     declare_bench,
@@ -192,7 +192,7 @@ def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
 
 
 def read_cycle_bench(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
-    return cycle_bench(stores, campaign, hop, resolve_campaign_config(stores, campaign, hop))
+    return cycle_bench(stores, campaign, hop, cycle_config(stores, campaign, hop).config)
 
 
 def cycle_bench(

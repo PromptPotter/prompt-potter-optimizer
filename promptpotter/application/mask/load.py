@@ -12,7 +12,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.formula.compiler import (
     origin_anchors,
@@ -196,7 +196,7 @@ def load_mask_record(
         lines[cid] = scan_standing_rounds(
             ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
         )
-        own = scorer_of(resolve_campaign_config(stores, campaign, hop), verifier_graded=False)
+        own = scorer_of(cycle_config(stores, campaign, hop).config, verifier_graded=False)
         files[cid] = {
             closed.round: closed for closed in closed_rounds(stores, hop, own, moment=None)
         }
@@ -210,7 +210,7 @@ def load_mask_record(
         ]
         formula = realize_dials(
             parse_dials(lens.body),
-            _dial_anchors(resolve_campaign_config(stores, campaign, None), origin_rows),
+            _dial_anchors(cycle_config(stores, campaign, None).config, origin_rows),
         )
     overrides = lens_overrides(formula)
 
@@ -221,7 +221,7 @@ def load_mask_record(
         crowns = lines[cid].crowns
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
         scorer = scorer_of(
-            apply_config_overrides(resolve_campaign_config(stores, campaign, hop), overrides),
+            apply_config_overrides(cycle_config(stores, campaign, hop).config, overrides),
             verifier_graded=False,
         )
         # The mask names slots in the bank the cycle drew; its rows pair on keys.

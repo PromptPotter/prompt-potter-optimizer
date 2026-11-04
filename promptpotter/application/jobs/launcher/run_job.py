@@ -23,10 +23,7 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.mint import resolve_resume
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
-    resolve_campaign_config,
-)
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.paths import JOB_LOGS_DIR, READOUT_POINTER, user_data_root
@@ -49,7 +46,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CycleConfig
     from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger(__name__)
@@ -136,7 +133,7 @@ async def run_held_job(
     job_registry: JobRegistry,
     job_id: str,
     session: Session,
-    campaign_config: CampaignConfig,
+    cycle: CycleConfig,
     *,
     mode: RunMode,
     budget: HeldBudget,
@@ -146,7 +143,7 @@ async def run_held_job(
     job_registry.mark_started(job_id)
     try:
         observers = build_run_observers(
-            session=session, campaign_config=campaign_config, readout_sink=readout_sink
+            session=session, campaign_config=cycle.config, readout_sink=readout_sink
         )
     except BaseException as exc:
         # `hop=None`: nothing of this launch reached the cycle, whose own producer may still be running it.
@@ -155,7 +152,7 @@ async def run_held_job(
     try:
         _, result = await run_optimization(
             list(session.bank.samples),
-            campaign_config,
+            cycle,
             session=session,
             observers=observers,
             mode=mode,
@@ -187,7 +184,7 @@ class HeldRun:
     job_registry: JobRegistry
     job_id: str
     session: Session
-    campaign_config: CampaignConfig
+    cycle: CycleConfig
     budget: HeldBudget
     optimizer: SelectedOptimizer
 
@@ -208,7 +205,7 @@ class HeldRun:
             job_registry=job_registry,
             job_id=job_id,
             session=session,
-            campaign_config=resolve_campaign_config(stores, campaign, hop),
+            cycle=cycle_config(stores, campaign, hop),
             budget=budget,
             optimizer=minted.optimizer,
         )
@@ -242,7 +239,7 @@ class HeldRun:
             self.job_registry,
             self.job_id,
             self.session,
-            self.campaign_config,
+            self.cycle,
             mode=mode,
             budget=self.budget,
             optimizer=self.optimizer,
@@ -252,10 +249,10 @@ class HeldRun:
 
 async def open_held_cycle(
     stores: Stores, campaign: Campaign, hop: CycleHop
-) -> tuple[Session, CampaignConfig, SelectedOptimizer]:
-    bound, campaign_config = await bind_cycle_session(stores, campaign, hop)
-    optimizer = resolve_resume(bound, campaign, bound.bank.samples)
-    return configure_and_apply_pipeline(bound, campaign_config), campaign_config, optimizer
+) -> tuple[Session, CycleConfig, SelectedOptimizer]:
+    bound = await bind_cycle_session(stores, campaign, hop)
+    plan = resolve_resume(bound, campaign, bound.bank.samples)
+    return plan.session, plan.cycle, plan.optimizer
 
 
 async def run_job(spec: JobSpec) -> StopOutcome | None:
@@ -277,7 +274,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
         if campaign is None:
             raise NotFoundError(f"campaign not found: {spec.hop.campaign_id}")
-        session, campaign_config, optimizer = await open_held_cycle(stores, campaign, spec.hop)
+        session, cycle, optimizer = await open_held_cycle(stores, campaign, spec.hop)
     except BaseException as exc:
         logger.exception("job %s could not bind its session", spec.job_id)
         release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
@@ -288,7 +285,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
             job_registry,
             spec.job_id,
             session,
-            campaign_config,
+            cycle,
             mode=spec.mode,
             budget=spec.budget,
             optimizer=optimizer,

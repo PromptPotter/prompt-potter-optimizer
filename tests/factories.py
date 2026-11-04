@@ -105,7 +105,12 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     flat_ruler_id,
 )
-from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    PipelineRead,
+    RunPhaseRecord,
+    SampleScoredRecord,
+    TokenUsageRecord,
+)
 from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
@@ -419,6 +424,7 @@ def loop_session(
         if client is None
         else client,
         pipeline_schema=schema,
+        pipeline_read=PipelineRead(declaration={}, dataset_overlay={}, declared_nodes=frozenset()),
         bank=Bank.of(samples),
         dataset_name=schema.name if dataset_name is None else dataset_name,
         dataset=dataset,
@@ -573,11 +579,15 @@ def stored_campaign(stores: Stores, campaign: Campaign) -> None:
     node = {"type": "llm", "config": {"model": "m"}}
     stores.campaigns.write_resolved_run(
         campaign.root_hop,
-        declaration={
-            "backend_name": "termnorm",
-            "nodes": {"a": node},
-            "pipelines": {"default": ["a"]},
-        },
+        PipelineRead(
+            declaration={
+                "backend_name": "termnorm",
+                "nodes": {"a": node},
+                "pipelines": {"default": ["a"]},
+            },
+            dataset_overlay={},
+            declared_nodes=frozenset(),
+        ),
         experiment=None,
         model_capabilities={},
     )

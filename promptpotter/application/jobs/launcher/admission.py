@@ -23,7 +23,7 @@ from promptpotter.application.jobs.quota import (
     share_campaign_ceiling,
 )
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.termination import run_stop_reason
@@ -647,7 +647,7 @@ def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-    config = resolve_campaign_config(stores, campaign, hop)
+    config = cycle_config(stores, campaign, hop).config
     return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)
 
 
@@ -656,5 +656,5 @@ def campaign_sends(stores: Stores, hop: CycleHop) -> tuple[Send, ...]:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-    config = resolve_campaign_config(stores, campaign, hop)
+    config = cycle_config(stores, campaign, hop).config
     return sends_on(stores, config, campaign.connector)

@@ -43,7 +43,11 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
 )
 from promptpotter.application.served_dashboard import fork_remainder
-from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    CycleConfig,
+    apply_config_overrides,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import STOP_REASON_INFO, PauseCause, StopReason
 from promptpotter.domain.results import CycleResult
@@ -250,7 +254,7 @@ def _mint_and_rebase_fork(
     held = store.standing_rounds(parent, moment=None).rounds
     learned = held[max(held)].close.optimizer_state
     new_cycle_id = mint_fork(
-        campaign_store=store,
+        session.store,
         parent=parent,
         fork_from_round=cut,
         trigger=rebase_req.trigger,
@@ -317,7 +321,7 @@ async def _run_line(
 
 async def run_optimization(
     dataset: list[Sample],
-    campaign_config: CampaignConfig,
+    cycle: CycleConfig,
     *,
     session: Session,
     observers: RunObservers,
@@ -332,6 +336,7 @@ async def run_optimization(
     """
     if not session.cycle_id:
         raise RuntimeError("run_optimization runs a minted cycle: bind its session first")
+    campaign_config = cycle.config
     session.state.clock = LaunchClock.now()
     try:
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
@@ -361,7 +366,7 @@ async def run_optimization(
             try:
                 prep = await prepare_run(
                     dataset,
-                    campaign_config,
+                    cycle,
                     session=session,
                     partition=partition,
                     observers=observers,

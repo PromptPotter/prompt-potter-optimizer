@@ -9,7 +9,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## Origin = conservative floor
 
-**Every tunable in `dataset.yaml` `pipeline.nodes.{name}.config` starts at its FLOOR** — low `temperature`, minimal `thinking_budget`, no costly scaffolding; L1 expands upward on evidence. **`reasoning_effort`'s floor is the model's, so the overlay never spells one** (`pipeline_resolve.py::_apply_model_floors`). Starting points: [`../../../../docs/operations/datasets.md`](../../../../docs/operations/datasets.md) § The model a dataset runs.
+**Every tunable in `dataset.yaml` `pipeline.nodes.{name}.config` starts at its FLOOR** — low `temperature`, minimal `thinking_budget`, no costly scaffolding; L1 expands upward on evidence. **`reasoning_effort`'s floor is the model's, so the overlay never spells one** (`pipeline_resolve.py::ParamLayers`, its `model_floor` layer). Starting points: [`../../../../docs/operations/datasets.md`](../../../../docs/operations/datasets.md) § The model a dataset runs.
 
 ## Cycle stop conditions
 

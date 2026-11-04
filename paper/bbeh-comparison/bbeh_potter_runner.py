@@ -26,7 +26,7 @@ from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     priced_pairs,
 )
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
@@ -104,7 +104,7 @@ async def run_bbeh_campaign(
             sp_budget_round=sp_budget_round,
         )
         # Read only: the mint configures the session it is handed, as every launch does.
-        configured = configure_and_apply_pipeline(session, campaign_config)
+        configured = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
         pipeline_params = configured.pipeline_params
         # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather

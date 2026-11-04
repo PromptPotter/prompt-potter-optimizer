@@ -2458,7 +2458,7 @@ export interface NodeConfigParam {
   never_axis: '' | 'cost_lever' | 'schema_owned';
   movable_by: ('proposer' | 'optimizer')[];
   held: boolean;
-  source: 'backend' | 'dataset' | 'campaign' | 'model_floor' | 'seed' | 'evolved' | 'identity' | 'unset';
+  source: 'dataset' | 'campaign' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
   permitted: string[];
   permitted_stated: boolean;
 }
@@ -2683,6 +2683,8 @@ export interface ForkPreviewResponse {
    * `babysat` for a caller holding `campaign.babysit` (the branch is graded
    * C), `refused` for any other. */
   steer: 'clean' | 'babysat' | 'refused';
+  /** Each node's permitted models, the set `steer` is decided against */
+  permitted: Record<string, string[]>;
 }
 
 /** Built off the couplings the pre-run preflight warning reads, so no surface disagrees with */
@@ -3117,7 +3119,7 @@ export interface RunsWithParam {
   /** The config grid's own param key (`NodeConfigParam.key`) */
   key: string;
   value: unknown;
-  source: 'backend' | 'dataset' | 'campaign' | 'model_floor' | 'seed' | 'evolved' | 'identity' | 'unset';
+  source: 'dataset' | 'campaign' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
 }
 
 /** The models of one vendor that a campaign's root course runs. */
@@ -4211,8 +4213,9 @@ export interface CampaignConfig {
    * carries. `param_allowed_values['model']` is also the ONE permitted model
    * set: what the optimizer may pick, and what a human fork may steer to
    * without tainting the branch. A steer outside it is a `campaign.babysit`
-   * act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing
-   * declared for a node = nothing sanctioned there, the restrictive default. */
+   * act — warned + graded C (`steer_verdict`, asked when a fork's seed is
+   * parsed). Nothing declared for a node = nothing sanctioned there, the
+   * restrictive default. */
   optimizer_narrowing: Record<string, NodeSearchNarrowing>;
   scoring: string | Record<string, string> | null;
   /** LLM-as-judge graders for datasets whose answer is free text, where no
@@ -5238,7 +5241,7 @@ export const SIGN_IN_REFUSAL_INFO: Record<"state_invalid_or_expired" | "code_exc
   "accounts_full": { label: "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.", tone: "warn" },
 };
 
-// Mirror of application/pipeline_resolve.py::STEER_OUTSIDE_INFO.
+// Mirror of application/pipeline_responses.py::STEER_OUTSIDE_INFO.
 export const STEER_OUTSIDE_INFO: Record<"babysat" | "refused", SteerOutsideInfo> = {
   "babysat": { title: "This steer leaves what the campaign permits, so the branch goes grade C.", detail: "Steering to it marks this branch — and every round after it — operator-babysat: excluded from clean comparison, origin reuse, and the L4 rollup. The measurement is still recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.", tone: "warn" },
   "refused": { title: "This steer leaves what the campaign permits.", detail: "Steering outside it is a babysit act this account may not take. Pick a permitted model.", tone: "danger" },

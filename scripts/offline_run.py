@@ -579,7 +579,11 @@ async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
     # Each cut leaves the fork a round of its own to close under the campaign's rounds cap.
     for from_round in (rounds - 2, rounds - 1):
         cycle_id = mint_operator_fork(
-            stores=stores, hop=fork, from_round=from_round, seed=CycleSeed(), keep_rounds=True
+            stores=stores,
+            hop=fork,
+            from_round=from_round,
+            seed=CycleSeed(),
+            keep_rounds=True,
         )
         fork = CycleHop(campaign_id=fork.campaign_id, cycle_id=cycle_id)
         session, result = await run_campaign(

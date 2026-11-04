@@ -12,6 +12,7 @@ from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
+from promptpotter.domain.run_records import PipelineRead
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import HeldBudget
@@ -99,8 +100,8 @@ class Session:
     backend_id: str
     backend_client: BackendClient
     pipeline_schema: PipelineSchema
-    # Run init's read: the served pipeline under the dataset's definition; `init_cycle` records it.
-    pipeline_declaration: dict[str, Any] = field(default_factory=dict)
+    # Recorded whole by `record_resolved_run`, at the mint and at every `init_cycle`.
+    pipeline_read: PipelineRead
     # What init read of the backend's revision; `None` where its connector checks none.
     backend_revision: BackendRevision | None = None
     # The label's bank at init; a bound cycle's is the one it drew, never re-cut.
@@ -131,7 +132,7 @@ class Session:
     def record_resolved_run(self) -> None:
         self.store.campaigns.write_resolved_run(
             self.hop,
-            declaration=self.pipeline_declaration,
+            self.pipeline_read,
             experiment=self.backend_client.workload.experiment,
             model_capabilities=self.pipeline_schema.model_capabilities,
         )

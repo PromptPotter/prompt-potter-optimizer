@@ -28,6 +28,7 @@ from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     campaign_admits,
     configure_and_apply_pipeline,
+    cycle_config,
     defaults_drift,
     mint_facts,
 )
@@ -60,7 +61,8 @@ from promptpotter.domain.campaign import (
     SharedPart,
 )
 from promptpotter.domain.campaign_config import (
-    apply_cycle_seed,
+    CycleConfig,
+    LaidSpan,
     declare_run,
     effective_config,
 )
@@ -154,8 +156,8 @@ class CyclePlan:
     partition: BankPartition
     # The draw every later read of the cycle restores, written by the seam that mints it.
     drawn: PartitionRecord
-    # What the cycle runs under: a mint writes it, a minted cycle's ledger holds it.
-    seed: CycleSeed | None
+    # What the cycle runs under: a mint writes its seed, a minted cycle's ledger holds it.
+    cycle: CycleConfig
     # Configured as the declaration runs; a mint binds it to the cycle.
     session: Session
 
@@ -183,7 +185,7 @@ class CyclePlan:
 class MintedCycle:
     cycle_id: str
     campaign_id: str
-    campaign_config: CampaignConfig
+    cycle: CycleConfig
     session: Session
     optimizer: SelectedOptimizer
 
@@ -220,25 +222,32 @@ def resolve_cycle_plan(
     *,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> CyclePlan:
-    """Bound to a cycle, what it RUNS: its root's origin under its own seed, which the configure lays."""
-    campaign_config = effective_config(declaration)
+    """Bound to a cycle, what it RUNS: its line's seeds, the origin among them, as the configure lays them."""
     schema = session.pipeline_schema
-    configured = configure_and_apply_pipeline(session, campaign_config)
-    pipeline_params = configured.pipeline_params
-    hop = session.hop if session.cycle_id else None
-    runs_under: CycleSeed | None = None
-    if hop is not None:
-        assert origin_override is None, "a minted cycle's origin is its campaign root's seed"
-        campaigns = session.store.campaigns
-        campaign = campaigns.load_campaign(hop.campaign_id)
+    if session.cycle_id:
+        assert origin_override is None, "a minted cycle's origin is its line's seeds"
+        campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
         assert campaign is not None, "a hop names a minted campaign"
-        root_seed = campaigns.read_cycle_seed(campaign.root_hop)
-        origin_override = (root_seed.origin_prompts or None) if root_seed else None
-        runs_under = campaigns.read_cycle_seed(hop)
-    runs = apply_cycle_seed(campaign_config, runs_under)
-    selected = select_optimizer(runs.optimization)
+        cycle = cycle_config(session.store, campaign, session.hop)
+    else:
+        spans = (
+            [
+                LaidSpan(
+                    seed=CycleSeed(
+                        origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN
+                    ),
+                    scoring_lock=None,
+                )
+            ]
+            if origin_override
+            else []
+        )
+        cycle = CycleConfig.laid(effective_config(declaration), spans)
+    configured = configure_and_apply_pipeline(session, cycle)
+    pipeline_params = configured.pipeline_params
+    selected = select_optimizer(cycle.config.optimization)
     partition = refuse_unrunnable(
-        runs,
+        cycle.config,
         selected,
         dataset,
         pipeline_params,
@@ -246,28 +255,23 @@ def resolve_cycle_plan(
         fence=free_fence(session.store, declaration.environment.connector),
         shelf=session.store.block_packs,
     )
-    seed = (
-        CycleSeed(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
-        if origin_override
-        else None
-    )
     return CyclePlan(
         declaration=declaration,
         schema=schema,
         pipeline_params=pipeline_params,
         origin=resolve_origin_opt_search_point(
             dataset_dir=None if session.dataset is None else session.dataset.directory,
-            seed=seed,
+            seed=cycle.origin,
             pipeline_params=pipeline_params,
             schema=schema,
         ),
-        framing=campaign_framing(session.store, campaign_config, session.dataset),
+        framing=campaign_framing(session.store, cycle.config, session.dataset),
         optimizer=selected,
-        admits=campaign_admits(runs, configured.pipeline_schema),
+        admits=campaign_admits(cycle.config, configured.pipeline_schema),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
         drawn=partition.record(dataset_hash=session.bank.dataset_hash),
-        seed=seed if hop is None else runs_under,
+        cycle=cycle,
         session=configured,
     )
 
@@ -339,18 +343,17 @@ def _revision_moved(
     return f"the backend reports revision {now or 'none'}, not the {ran} it ran under"
 
 
-def resolve_resume(
-    session: Session, campaign: Campaign, dataset: Sequence[Sample]
-) -> SelectedOptimizer:
-    """*session* is bound to the cycle the resume runs; its refusals are that cycle's, asked of the selection it answers."""
+def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
+    """*session* is bound to the cycle the resume runs; the plan is that cycle's, configured, every
+    refusal asked of the selection it answers."""
     plan = resolve_cycle_plan(session, campaign.declaration, dataset)
     checked = plan
-    if plan.seed is not None and plan.seed.pipeline_overlay:
-        # A steering seed is its cycle's declared delta: the root's own content is what is checked.
+    if session.hop != campaign.root_hop:
+        # A fork's seed is its cycle's declared delta: the root's own content is what is checked.
         root = session.bound(campaign.root_hop, purpose=session.purpose)
         checked = resolve_cycle_plan(root, campaign.declaration, dataset)
     if campaign.root_content_hash == checked.origin_hash:
-        return plan.optimizer
+        return plan
     campaigns = session.store.campaigns
     recorded = campaigns.read_resolved_run(campaign.root_hop)
     wired = campaigns.read_run_wiring(campaign.root_hop)
@@ -481,7 +484,7 @@ async def arm_plans(
         measured = measured_cell_price(plan.session, plan.pipeline_params)
         refuse_arm_below_round(
             _arm_of(plan),
-            effective_config(plan.declaration),
+            plan.cycle.config,
             plan.optimizer,
             search=len(plan.partition.search),
             cell_usd=None if bound is None else bound.usd,
@@ -520,13 +523,12 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     validate_path_component(hop.cycle_id)
     validate_path_component(hop.campaign_id)
     declaration = plan.declaration
-    campaign_config = effective_config(declaration)
     now = utcnow_iso()
     session = plan.session
     campaigns = session.store.campaigns
     if billed is not None:
         campaigns.adopt_ledger(hop, billed)
-    _write_plan(session.store, hop, plan.drawn, plan.seed)
+    _write_plan(session.store, hop, plan.drawn, plan.cycle.own_seed)
     session = session.bound(hop, purpose=declaration.purpose)
     # What the origin hash was taken under, appended before the campaign is visible, so every
     # reader of it finds what its run init read.
@@ -548,7 +550,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
         )
     )
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-    declare_run_wiring(session, campaign_config, ledger, selected=plan.optimizer, tracing=None)
+    declare_run_wiring(session, plan.cycle.config, ledger, selected=plan.optimizer, tracing=None)
     campaigns.mint_cycle(hop)
     save_active_pointer(session.store.base_dir, hop)
     # So `dashboard.json` stands from the mint on, through the window before the loop starts.
@@ -564,7 +566,7 @@ def mint(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCyc
     return MintedCycle(
         cycle_id=hop.cycle_id,
         campaign_id=campaign_id,
-        campaign_config=effective_config(plan.declaration),
+        cycle=plan.cycle,
         session=_mint_campaign(plan, hop=hop, billed=billed),
         optimizer=plan.optimizer,
     )
@@ -606,9 +608,7 @@ async def _mint_framed(
     *,
     task_text: str | None,
 ) -> list[MintedCycle]:
-    description = _description_to_decompose(
-        session, effective_config(plans[0].declaration), task_text
-    )
+    description = _description_to_decompose(session, plans[0].cycle.config, task_text)
     if description is None:
         minted = _mint_all(plans, campaign_ids, billed=None)
     else:
@@ -666,9 +666,7 @@ async def _mint_after_framing(
         framed = [
             replace(
                 plan,
-                framing=campaign_framing(
-                    session.store, effective_config(plan.declaration), session.dataset
-                ),
+                framing=campaign_framing(session.store, plan.cycle.config, session.dataset),
             )
             for plan in plans
         ]

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_drafts
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
+from promptpotter.application.pipeline_resolve import LineConfig, campaign_runs_with, line_config
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
@@ -20,7 +20,6 @@ from promptpotter.domain.campaign import (
     LifecycleFilter,
     ceiling_meter,
 )
-from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_index import STATUS_MARK_INFO, CycleIndex, RunStatus
 from promptpotter.domain.cycle_paths import (
     CycleHop,
@@ -52,6 +51,7 @@ from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
 from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.said import Said
+from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
@@ -71,6 +71,7 @@ _MINT_WORDS: dict[CourseKind, str] = {
 }
 _UNRESOLVED = "Its root pipeline did not resolve, so its settings and bench are unread."
 _UNMINTED = "Its line course has no mint record, so its rounds and standing are unread."
+_UNSCORED = "Its config did not resolve, so its limits and bench are unread."
 
 
 def _course_label(mint: CourseKind, cycle_id: str) -> str:
@@ -192,8 +193,12 @@ def _course_figures(
     return rows
 
 
-def _course_lines(runs_with: CampaignRunsWith | None) -> list[Said]:
-    return [] if runs_with is not None else [caveat_row("unresolved", _UNRESOLVED)]
+def _course_lines(runs_with: CampaignRunsWith | None, line: LineConfig) -> list[Said]:
+    if runs_with is None:
+        return [caveat_row("unresolved", _UNRESOLVED)]
+    if line.unread is not None:
+        return [caveat_row("unscored", _UNSCORED, detail=line.unread)]
+    return []
 
 
 def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Said]:
@@ -252,13 +257,13 @@ def course_entry(
     holder: CycleHop,
     moment: Moment | None,
     runs_with: CampaignRunsWith | None,
-    config: CampaignConfig | None,
+    line: LineConfig,
     bench: BenchScore | None,
 ) -> HierarchyCourse:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
     # The producer as it is now: a moment replays the record, never a process.
     run = derive_run_state(cycle_dir)
-    limits = binding_run_limits(stores, hop, config, run)
+    limits = binding_run_limits(stores, hop, line.config, run)
     # Before its first launch a course declares no wiring, so its campaign's declared cap binds.
     cap = (
         (None if runs_with is None else runs_with.budget_rounds)
@@ -314,7 +319,7 @@ def course_entry(
         label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
         tags=tags,
         figures=_course_figures(state.status, facts, cap, runs_with, on_line=hop == holder),
-        lines=_course_lines(runs_with),
+        lines=_course_lines(runs_with, line),
         state=state,
         span=HierarchySpan(
             opened_at=index.created_at,
@@ -399,13 +404,14 @@ def campaign_entry(
     moment = held.moment
     holder = stores.campaigns.line_holder(campaign.root_hop, moment=moment)
     runs_with = campaign_runs_with(stores, campaign)
-    config = line_config(stores, campaign, holder)
+    held_line = line_config(stores, campaign, holder)
+    bench: BenchScore | None = None
     # The bench passes are read whole, so a replayed moment has no bench reading, as on the dashboard.
-    bench = (
-        cycle_bench(stores, campaign, holder, config)
-        if moment is None and config is not None
-        else None
-    )
+    if moment is None and held_line.config is not None:
+        try:
+            bench = cycle_bench(stores, campaign, holder, held_line.config)
+        except ScoringFormulaError as exc:
+            held_line = LineConfig(None, str(exc))
     courses: dict[str, HierarchyCourse] = {}
     for hop, index, now in held.courses:
         if depth == 0 and hop != holder:
@@ -420,7 +426,7 @@ def campaign_entry(
             holder=holder,
             moment=moment,
             runs_with=runs_with,
-            config=config if hop == holder else line_config(stores, campaign, hop),
+            line=held_line if hop == holder else line_config(stores, campaign, hop),
             bench=bench if hop == holder else None,
         )
     line = courses.get(holder.cycle_id)

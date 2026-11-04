@@ -107,7 +107,7 @@ node and the selector.
 **One served shape, drawn at three moments** — class tag, pool roster, grouping and nesting are served, never
 derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED).
 
-- **Check-in**: `pipeline_resolve.py::OptimizerSetup` — the manifest's `main` knobs first, each knob's
+- **Check-in**: `pipeline_responses.py::OptimizerSetup` — the manifest's `main` knobs first, each knob's
   declared value beside its value under the draft, each node's optimizer prompt under the draft (a field
   edit is one more knob), the mix with each proposer named by its manifest node's `makes` (the load
   refuses a `default` proposer declaring none), and the pools, each with its active subset and its drawing knobs with

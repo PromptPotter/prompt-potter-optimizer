@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
     import httpx
 
-    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -212,8 +211,7 @@ class Connector:
     ``dataset.yaml::pipeline`` overlays it."""
 
     identity_config: (
-        Callable[[Stores, ResolvedDataset, Mapping[str, Any] | None], dict[str, dict[str, Any]]]
-        | None
+        Callable[[Stores, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
     ) = None
     """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
 

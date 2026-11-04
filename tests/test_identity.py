@@ -46,6 +46,7 @@ from promptpotter.application.bench.children import (
     overlay_failures,
 )
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
+from promptpotter.application.bench.resume_and_fork.fork_siblings import declare_steered_values
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
@@ -100,15 +101,16 @@ from promptpotter.application.optimizers.potter.l1.population import parse_popul
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
 from promptpotter.application.pipeline_resolve import (
+    ParamLayers,
     campaign_admits,
+    cycle_config,
     dataset_pipeline,
     defaults_drift,
     draft_config,
     draft_pipeline,
     draft_served,
     experiment_outside_run,
-    resolve_campaign_config,
-    resolve_pipeline_config_params,
+    identity_layer,
     resolved_output_schemas,
 )
 from promptpotter.application.run_observers import declare_run_wiring
@@ -129,6 +131,8 @@ from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_par
 from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
+    CycleConfig,
+    LaidSpan,
     OptimizationConfig,
     declare_run,
     effective_config,
@@ -182,7 +186,12 @@ from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
+from promptpotter.domain.run_records import (
+    ConfigOverrides,
+    CycleSeed,
+    PipelineRead,
+    ScoringLockedRecord,
+)
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
@@ -292,17 +301,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     active = schema.active_steps_excluding([])
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
+        identity = identity_layer(None, None, None, judges, active)
         return schema.sp_hash(
-            resolve_pipeline_config_params(
-                active,
-                {},
-                None,
-                schema,
-                judges=judges,
-                experiment=None,
-                stores=None,
-                workspace=None,
-            )
+            ParamLayers(steps=active, schema=schema, workspace=None, identity=identity)
+            .fold()
+            .params
         )
 
     def judge(name: str, model: str) -> JudgeSpec:
@@ -716,7 +719,6 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
     # A cell is keyed by its own instrument and no other cell's: adding an inner dataset re-keys no
     # banked cell, and an edit to a seat's dataset re-keys that seat alone, off the tier it runs.
-    outer = _install("promptpotter-self/panel")
     panel: dict[str, Any] = {
         "inner_benchmark": "innerbench",
         "inner_benchmark_config": {
@@ -743,7 +745,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
         resolved = resolve(built_stores, declared)
         rows = samples_from_dicts(extract(resolved))
-        return {s.query: s.key for s in rows}, identity_of(built_stores, outer, resolved)
+        return {s.query: s.key for s in rows}, identity_of(built_stores, resolved)
 
     before, fingerprint = keyed(panel)
     other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
@@ -1026,19 +1028,19 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     stores.campaigns.create_campaign(campaign)
     stores.campaigns.mint_cycle(campaign.root_hop)
-    ran = resolve_campaign_config(stores, campaign, campaign.root_hop)
+    ran = cycle_config(stores, campaign, campaign.root_hop).config
     assert (ran.optimization.optimizer, ran.optimization.budget.rounds) == ("potter", 12), (
         "a campaign ran its dataset file's later config instead of the one it froze"
     )
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
     ledger.append(ScoringLockedRecord(declared={"dials": "other"}, locked={"per_cell": "0"}))
-    assert resolve_campaign_config(stores, campaign, campaign.root_hop).scoring == dials, (
+    assert cycle_config(stores, campaign, campaign.root_hop).config.scoring == dials, (
         "a lock declared off other dials governed this campaign"
     )
     locked = {"per_sample": "exact", "per_cell": "correct - 0.1 * cost"}
     ledger.append(ScoringLockedRecord(declared=dials, locked=locked))
     for hop in (None, campaign.root_hop):
-        assert resolve_campaign_config(stores, campaign, hop).scoring == locked, (
+        assert cycle_config(stores, campaign, hop).config.scoring == locked, (
             f"{hop}: the criterion its origin locked rides the root's ledger, and every cycle "
             "runs under it"
         )
@@ -1047,11 +1049,51 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
     stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
-    forked = resolve_campaign_config(stores, campaign, campaign.root_hop)
+    forked = cycle_config(stores, campaign, campaign.root_hop).config
     assert forked.optimization.budget.rounds == 4, "a seed's override did not reach its cycle"
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
         "a seed's narrowing replaced the nodes it did not name"
     )
+    # A steer lays over the campaign's narrowing by part: its closed axes stay closed, its held
+    # fields held, and the steered model joins the menu without sanctioning the steer.
+    probe = _connector_config(
+        optimizer_narrowing={
+            "solve": {
+                "param_keys": [],
+                "prompt_fields_held": ["instruction"],
+                "param_allowed_values": {"model": ["a", "b"]},
+            }
+        }
+    )
+    steering = declare_steered_values(
+        CycleSeed(pipeline_overlay={"solve": {"model": "x"}}), probe.optimizer_narrowing
+    )
+    laid = CycleConfig.laid(probe, [LaidSpan(seed=steering, scoring_lock=None)])
+    assert laid.config.optimizer_narrowing["solve"] == NodeSearchNarrowing(
+        param_keys=[],
+        prompt_fields_held=["instruction"],
+        param_allowed_values={"model": ["x", "a", "b"]},
+    ), "a steer reopened an axis, released a held field or dropped a permitted model"
+    assert laid.babysat, "a seed widening its own menu sanctioned the steer the campaign never did"
+    # An onward seed lays by part over its parent's laid narrowing: a subset of a closed axis
+    # stays closed, and a held field joins the ones its line held.
+    onward = CycleSeed(
+        config_overrides=ConfigOverrides(budget=Budget(rounds=2)),
+        optimizer_narrowing={
+            "solve": NodeSearchNarrowing(param_keys=["model"], prompt_fields_held=["persona"])
+        },
+    )
+    grand = CycleConfig.laid(
+        probe, [LaidSpan(seed=s, scoring_lock=None) for s in (steering, onward)]
+    )
+    assert (grand.seed_overlay, grand.babysat) == (laid.seed_overlay, True), (
+        "a fork of a steered fork ran without its parent's steer"
+    )
+    onward_laid = grand.config.optimizer_narrowing["solve"]
+    assert (onward_laid.param_keys, onward_laid.prompt_fields_held) == (
+        [],
+        ["instruction", "persona"],
+    ), "an onward seed reopened its parent's closed axis or released a field its line held"
 
     # A fork closes the axis its operator closed on the forked cycle's own menu: ticks equal to
     # the ROOT's whole menu still close the rung only the fork's menu carries.
@@ -1066,6 +1108,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         }
         return {"backend_name": "termnorm", "nodes": {"a": node}, "pipelines": {"default": ["a"]}}
 
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("fk") / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}},
+    )
     steered = minted_campaign(
         CycleHop(campaign_id="fk__000001", cycle_id="cycle_root"),
         config=_connector_config(),
@@ -1078,13 +1124,15 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         stores.campaigns.mint_cycle(hop)
         stores.campaigns.write_resolved_run(
             hop,
-            declaration=declaring(rungs),
+            PipelineRead(
+                declaration=declaring(rungs), dataset_overlay={}, declared_nodes=frozenset()
+            ),
             experiment=None,
             model_capabilities={},
         )
     fork_seed = parse_cycle_seed(
         ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
-        resolve_campaign_config(stores, steered, None),
+        cycle_config(stores, steered, None).config,
         stores,
         steered,
         fork,
@@ -1095,6 +1143,20 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             param_allowed_values={"reasoning_effort": ["low", "high"]},
         )
     }, "the fork left open a rung its operator closed"
+    # A seed never steers outside the menu it states itself.
+    with pytest.raises(PayloadInvalidError):
+        parse_cycle_seed(
+            ForkSeed.model_validate(
+                {
+                    "node_narrowing": {"a": rows},
+                    "pipeline_overlay": {"a": {"reasoning_effort": "xhigh"}},
+                }
+            ),
+            cycle_config(stores, steered, None).config,
+            stores,
+            steered,
+            fork,
+        )
     # A steer the campaign never sanctioned cannot pass as a clean fork.
     sanctioning = {
         "l1_generate": NodeSearchNarrowing(param_allowed_values={"model": ["openai/gpt-oss-120b"]})
@@ -1230,7 +1292,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     stores.campaigns.create_campaign(as_campaign)
     stores.campaigns.mint_cycle(as_campaign.root_hop)
     assert (
-        resolve_campaign_config(stores, as_campaign, as_campaign.root_hop).model_dump()
+        cycle_config(stores, as_campaign, as_campaign.root_hop).config.model_dump()
         == effective_config(l4_arm).model_dump()
     ), "an arm runs another config than a campaign declared that way"
     held_campaign = minted_campaign(
@@ -1332,7 +1394,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     stores.campaigns.write_resolved_run(
         held_campaign.root_hop,
-        declaration={},
+        opened.pipeline_read,
         experiment=None,
         model_capabilities={"": {"m": floored}},
     )

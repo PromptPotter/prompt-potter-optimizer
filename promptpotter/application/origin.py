@@ -26,7 +26,7 @@ from promptpotter.application.scoring.formula.compiler import (
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk, score_search_point
 from promptpotter.domain.arms import ArmSlot, Concluded, Proposed
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
@@ -68,7 +68,7 @@ class CampaignOrigin(NamedTuple):
 def lock_criterion(
     session: Session, campaign_config: CampaignConfig, origin_rows: CellSheet
 ) -> dict[str, str] | None:
-    """Locked once: ``pipeline_resolve.py::resolve_campaign_config`` reads the record back."""
+    """Locked once: ``pipeline_resolve.py::cycle_config`` reads the record back."""
     block = campaign_config.scoring
     if not isinstance(block, dict) or DIALS_KEY not in block:
         return None
@@ -93,7 +93,6 @@ def try_inherit_fork_origin(
     # A non-locked param edit changes what the origin measures → re-score.
     if seed.pipeline_overlay and not overlay_is_locked_axis_only(seed.pipeline_overlay):
         return None
-
     store = session.store.campaigns
     index = store.load(session.hop, moment=None)
     if index is None or index.fork is None or index.parent_cycle_id is None:
@@ -189,12 +188,12 @@ async def establish_campaign_origin(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    seed: CycleSeed | None,
+    cycle: CycleConfig,
     listener: RunCallbacks,
 ) -> CampaignOrigin:
     resolved_origin = resolve_origin_opt_search_point(
         dataset_dir=None if session.dataset is None else session.dataset.directory,
-        seed=seed,
+        seed=cycle.origin,
         pipeline_params=session.pipeline_params,
         schema=session.pipeline_schema,
     )
@@ -203,7 +202,7 @@ async def establish_campaign_origin(
     pipeline_schema = session.pipeline_schema
     sp = session.points(framing).job(resolved_origin)
     inherited = try_inherit_fork_origin(
-        session, seed, resolved_origin=resolved_origin, sp=sp, framing=framing
+        session, cycle.own_seed, resolved_origin=resolved_origin, sp=sp, framing=framing
     )
     if inherited is not None:
         return inherited

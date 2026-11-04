@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -66,7 +65,7 @@ def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) 
 
 
 def _identity_config(
-    stores: Stores, _dataset: ResolvedDataset, experiment: Mapping[str, Any] | None
+    stores: Stores, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     """What reads every cell's number alike; what measures ONE cell is in its pin (`_instrument`)."""
     cells = _inner_cells(stores, experiment)

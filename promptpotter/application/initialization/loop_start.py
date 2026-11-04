@@ -16,7 +16,7 @@ from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, cycle_config
 from promptpotter.application.preflight import refuse_below_reasoning_floor, run_preflight_checks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.spawn_context import (
@@ -168,8 +168,9 @@ async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-    bound, config = await bind_cycle_session(stores, campaign, hop)
-    session = configure_and_apply_pipeline(bound, config)
+    cycle = cycle_config(stores, campaign, hop)
+    session = configure_and_apply_pipeline(await bind_cycle_session(stores, campaign, hop), cycle)
+    config = cycle.config
     # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
     session.state.control = RunControl(enclosing=(stores.campaigns.cycle_dir(hop),))
     # As `run_optimization` does: a pp-self point's connector dispatches no inner run without it.

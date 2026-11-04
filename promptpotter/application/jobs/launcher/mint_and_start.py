@@ -36,7 +36,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
@@ -143,7 +143,7 @@ class ExistingCycle:
         ).backend_type
 
     def declared_budget(self, stores: Stores) -> Budget:
-        return resolve_campaign_config(stores, self.campaign, self.hop).optimization.budget
+        return cycle_config(stores, self.campaign, self.hop).config.optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
         return campaign_sends(stores, self.hop)
@@ -225,7 +225,7 @@ async def hold_existing_cycle(
     campaign, hop = request.campaign, request.hop
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        session, campaign_config, optimizer = await open_held_cycle(stores, campaign, hop)
+        session, cycle, optimizer = await open_held_cycle(stores, campaign, hop)
     except BaseException as exc:
         # `hop=None`: a refusal stamps nothing on the cycle, so it stays as resumable as it was.
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=None)
@@ -234,7 +234,7 @@ async def hold_existing_cycle(
         job_registry=job_registry,
         job_id=job.job_id,
         session=session,
-        campaign_config=campaign_config,
+        cycle=cycle,
         budget=held,
         optimizer=optimizer,
     )

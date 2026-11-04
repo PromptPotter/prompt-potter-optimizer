@@ -79,7 +79,7 @@ Peak concurrency (34) is a brief burst, not sustained throughput — average uti
 - Replay-ladder now re-sends only on a fatal code (`needs_rerun`/`classify_result(...).is_fatal`), not on any pipeline warning — no longer discards a gradeable cached row over an advisory (`sample_measurement.py`, `query_loop.py`).
 - 600s outage wait: a connection-never-made error now polls `GET /status` for up to `BACKEND_OUTAGE_S=600` before declaring `backend_unreachable`, instead of ~15s of exp backoff (`backend.py::_reachable_within`). **Does not cover the 503 "LLM request timeout" shape that actually sank 37b160 (#1 above) — that gap is still open.**
 - `origin-gate` CLI verb exists (`cli/commands/lifecycle.py::cmd_origin_gate`) — but note ec354d/763db8/c3e73f were all still answered through gate waits, i.e. this verb wasn't what closed today's gate time.
-- Reasoning-effort floor per model: a dataset no longer hardcodes one `reasoning_effort` rung; `pipeline_resolve.py::_apply_model_floors` floors it per the model actually running the node.
+- Reasoning-effort floor per model: a dataset no longer hardcodes one `reasoning_effort` rung; the `model_floor` layer of `pipeline_resolve.py::ParamLayers` floors it per the model actually running the node.
 - Lean justlogic origin: `datasets/justlogic-d234/pipeline.yaml` dropped the verbose reasoning-trace instruction and `reasoning_effort: low` pin; C0's median tokens dropped 1546→692 (55%), which is consistent with 4d70b3's fast per-cell median (1.41s).
 
 **Still open (from this data):**

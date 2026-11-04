@@ -6,7 +6,7 @@ from pydantic import Field
 from promptpotter.application.cycle_addressing import active_pointer
 from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
 from promptpotter.application.library import LibraryResponse, library
-from promptpotter.application.pipeline_resolve import (
+from promptpotter.application.pipeline_responses import (
     OptimizerPipelineResponse,
     OptimizerRoster,
     optimizer_roster,

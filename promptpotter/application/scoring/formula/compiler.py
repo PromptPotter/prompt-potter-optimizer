@@ -443,7 +443,7 @@ def compile_scorer(
 ) -> Scorer:
     """``verifier_graded`` has no default: ``False`` would read as armed wherever a caller forgot it."""
     if not per_sample:
-        raise ValueError(
+        raise ScoringFormulaError(
             "compile_scorer: scoring formula is required. "
             "Set ``campaign_config.scoring`` (e.g. "
             '"label_match(predicted, ground_truth)") — a trace carries a prediction '
@@ -602,7 +602,7 @@ def split_scoring_block(
     if isinstance(block, dict):
         unknown = set(block) - {"per_sample", "per_cell", DIALS_KEY}
         if unknown:
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"campaign scoring block names {sorted(unknown)}. It carries 'per_sample' (the "
                 "cell's correctness) and 'per_cell' (the composite θ is fit on). 'id' is DERIVED "
                 "from both — a hand-set one naming only 'per_sample' pooled two composites' grades "
@@ -610,7 +610,7 @@ def split_scoring_block(
                 "latency or reliability term meaned over a panel cannot say which prompt provoked it."
             )
         if DIALS_KEY in block and "per_cell" in block:
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"campaign scoring block carries both '{DIALS_KEY}' and 'per_cell'. Dials DECLARE "
                 "the composite and the origin's measurement turns them into 'per_cell'; a block "
                 "naming both says two criteria."

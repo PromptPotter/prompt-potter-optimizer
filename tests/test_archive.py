@@ -60,6 +60,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.launching import parse_cycle_seed
 from promptpotter.application.cycle_reads import open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
@@ -81,6 +82,7 @@ from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
@@ -96,7 +98,7 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
     apply_config_overrides,
 )
-from promptpotter.domain.command_kinds import DeleteCampaignPayload
+from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkSeed
 from promptpotter.domain.cycle_paths import (
     CycleDir,
     CycleHop,
@@ -162,7 +164,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     standing,
 )
 from promptpotter.infrastructure.store.read_model import append_row
-from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
+from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, owned_campaign
 from promptpotter.shared.errors import ConflictError, LedgerUnreadableError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -953,7 +955,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     def inherit(fields: dict[str, str]) -> Any:
         # Resolved as `establish_campaign_origin` does: the fork seed wins.
         seed = CycleSeed(
-            origin_prompts=prompted(**fields).prompts, origin_source=OriginSource.FORK_SEED
+            origin_prompts=prompted(**fields).prompts,
+            origin_source=OriginSource.FORK_SEED,
         )
         resolved = resolve_origin_opt_search_point(seed=seed, pipeline_params=None, schema=solving)
         return try_inherit_fork_origin(
@@ -973,7 +976,16 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     # An applied scenario forks at its round, keeps the parent's holdout and carries its criterion.
     scenario, scenario_log = _minted(stores, "cycle_applyscenario")
-    stored_campaign(stores, minted_campaign(scenario, owner_user_id=str(stores.identity.user_id)))
+    permits_m = CampaignConfig.model_validate(
+        {
+            "optimization": {"degradation_threshold": 0.4},
+            "optimizer_narrowing": {"a": {"param_allowed_values": {"model": ["m"]}}},
+        }
+    )
+    stored_campaign(
+        stores,
+        minted_campaign(scenario, config=permits_m, owner_user_id=str(stores.identity.user_id)),
+    )
     scenario_rounds: list[RoundResult] = []
     scenario_pick = ArmKey(
         [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
@@ -1003,11 +1015,45 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         2,
         RoundArm(round=1, arm=scenario_pick),
     ), "a rewind's record names another arm than the pick its parent's line stood on"
-    seed = store.read_cycle_seed(applied)
-    assert seed is not None
+    seed = store.read_laid_spans(applied)[-1].seed
+    assert seed is not None, "a rewind's seed rode no record of its own"
     base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
     assert apply_config_overrides(base, seed.config_overrides).scoring == criterion
     assert base.scoring is None, "applying a scenario wrote through to its base config"
+    # A steer outside what the campaign permits is the babysit act, and a fork of that fork lays
+    # its seed over its parent's: a steer back inside the menu still runs babysat, and its mint
+    # stamps the intervention every answer it files is graded by.
+    campaign = owned_campaign(stores, scenario.campaign_id)
+
+    def steered_fork(hop: CycleHop, model: str) -> CycleHop:
+        seed = parse_cycle_seed(
+            ForkSeed(pipeline_overlay={"a": {"model": model}}),
+            cycle_config(stores, campaign, None).config,
+            stores,
+            campaign,
+            hop,
+        )
+        cycle_id = mint_operator_fork(
+            stores=stores, hop=hop, from_round=2, seed=seed, keep_rounds=True
+        )
+        return hop.model_copy(update={"cycle_id": cycle_id})
+
+    babysat = steered_fork(applied, "x")
+    assert cycle_config(stores, campaign, babysat).babysat, "an unpermitted steer forked clean"
+    back = steered_fork(babysat, "m")
+    onward = cycle_config(stores, campaign, back)
+    assert (onward.seed_overlay, onward.babysat, onward.config.scoring) == (
+        {"a": {"model": "m"}},
+        True,
+        criterion,
+    ), "a fork steering back inside the menu dropped what its line laid, or ran clean"
+    for hop in (babysat, back):
+        index = store.load(hop, moment=None)
+        assert index is not None and index.human_intervened, (
+            f"{hop.cycle_id} runs babysat and its mint stamped no intervention"
+        )
+    clean = store.load(applied, moment=None)
+    assert clean is not None and not clean.human_intervened, "a clean fork was stamped babysat"
 
     # A fork's own ledger displaces its parent's prefix once.
     displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")

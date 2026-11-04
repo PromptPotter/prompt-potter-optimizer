@@ -41,15 +41,16 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
+    cycle_config,
     draft_pipeline,
     draft_served,
-    resolve_campaign_config,
     resolve_pipeline_for_campaign,
     steer_verdict,
 )
-from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ComparisonExit, CycleSeed, OriginSource
@@ -92,6 +93,22 @@ def parse_cycle_seed(
             }
         except ValueError as exc:
             raise PayloadInvalidError(f"payload.seed.node_narrowing invalid: {exc}") from exc
+    verdict = steer_verdict(stores, campaign.optimizer_narrowing, sent.pipeline_overlay)
+    if verdict == "refused":
+        logger.warning(
+            "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
+            acting_principal(stores.identity).id,
+            CAMPAIGN_BABYSIT_CAP,
+        )
+        raise NotFoundError("Not found", code="not_found")
+    for node, cfg in node_config_items(sent.pipeline_overlay):
+        allowed = narrowing[node].param_allowed_values if node in narrowing else {}
+        for param, value in cfg.items():
+            if param in allowed and str(value) not in allowed[param]:
+                raise PayloadInvalidError(
+                    f"payload.seed steers {node}.{param}={value!r} outside its own "
+                    f"node_narrowing {allowed[param]}"
+                )
     seed = CycleSeed(
         origin_prompts=sent.origin_prompts,
         pipeline_overlay=sent.pipeline_overlay,
@@ -99,8 +116,11 @@ def parse_cycle_seed(
         config_overrides=sent.config_overrides,
         origin_source=OriginSource.FORK_SEED,
     )
-    # Refuses a node knob the manifest rejects before a fork is minted.
-    select_optimizer(apply_cycle_seed(campaign, seed).optimization)
+    # Over what *hop* runs, so a knob its parent's seed set refuses before a fork is minted.
+    parent = cycle_config(stores, of, hop).config
+    select_optimizer(
+        CycleConfig.laid(parent, [LaidSpan(seed=seed, scoring_lock=None)]).config.optimization
+    )
     return seed
 
 
@@ -168,16 +188,8 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         dispatched.hop,
     )
     stores = dispatcher.stores
-    campaign_config = resolve_campaign_config(stores, campaign, None)
+    campaign_config = cycle_config(stores, campaign, None).config
     seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
-    overlay = seed.pipeline_overlay
-    if steer_verdict(stores, campaign_config.optimizer_narrowing, overlay) == "refused":
-        logger.warning(
-            "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
-            acting_principal(stores.identity).id,
-            CAMPAIGN_BABYSIT_CAP,
-        )
-        raise NotFoundError("Not found", code="not_found")
 
     async def _apply_fork() -> Launched:
         new_cycle_id = mint_operator_fork(

@@ -31,7 +31,7 @@ Steps: retrieve = `evidence_retrieval` (no gold; never reads the answer); ground
 
 ## Identity — a judge that changed must re-cut the key
 
-**`Judge.fingerprint` hashes the rubric text — never trust a hand-bumped version**; `_identity_contributions` folds term → judge into `sp_hash`.
+**`Judge.fingerprint` hashes the rubric text — never trust a hand-bumped version**; `pipeline_resolve.py::identity_layer` folds term → judge into `sp_hash`.
 **The scorer id folds the same digest** (`judge_instrument` → `auto_scorer_id`), so one formula over two graders is two scorers.
 
 ## Emit absence, never zero

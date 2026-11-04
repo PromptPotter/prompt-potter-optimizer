@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import LaunchState
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.results import RoundOutcome, RoundResult
@@ -40,7 +40,7 @@ def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:
     if campaign is None:
         return None
     return scorer_of(
-        resolve_campaign_config(stores, campaign, campaign.root_hop), verifier_graded=False
+        cycle_config(stores, campaign, campaign.root_hop).config, verifier_graded=False
     )
 
 

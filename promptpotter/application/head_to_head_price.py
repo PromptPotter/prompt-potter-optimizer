@@ -22,6 +22,7 @@ from promptpotter.application.preflight import (
 )
 from promptpotter.application.runner.campaign_result import line_launches
 from promptpotter.application.scoring.sample_measurement import measured_cell_price
+from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.command_kinds import MintHeadToHeadPayload
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.spend import Budget, CellPrice
@@ -160,7 +161,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     first = heads[0].head_to_head
     # Every arm runs one environment (`SharedPart.environment`): the first resolves what all run.
     config = arm_config(source.declared, first, first.arms[0])
-    session = configure_and_apply_pipeline(source.session, config)
+    session = configure_and_apply_pipeline(source.session, CycleConfig.laid(config, []))
     partition = cycle_partition(session, session.bank.samples, config)
     cell = measured_cell_price(session, session.pipeline_params or {})
     if cell is None:

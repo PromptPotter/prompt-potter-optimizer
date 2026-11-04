@@ -7,7 +7,7 @@ from pydantic import Field
 
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -410,7 +410,7 @@ def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkR
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     run = derive_run_state(cycle_dir_for(stores.base_dir, hop))
-    config = None if campaign is None else resolve_campaign_config(stores, campaign, hop)
+    config = None if campaign is None else cycle_config(stores, campaign, hop).config
     return _remainder(stores, hop, binding_run_limits(stores, hop, config, run))
 
 
@@ -564,7 +564,7 @@ def served_dashboard(
         )
     if at is not None:
         return _serve(state, hop=hop, run=run, meter=meter, standing=None)
-    config = None if campaign is None else resolve_campaign_config(stores, campaign, hop)
+    config = None if campaign is None else cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, state.run_limits)
     armed = standing_controls(cycle_path)
     return _serve(

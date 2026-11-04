@@ -18,13 +18,9 @@ from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import ceiling_meter
-from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.pipeline_overlay import (
-    overlay_sets_model_outside_allowed,
-    permitted_models_from_narrowing,
-)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.llm.send_pacing import set_abort_check
@@ -43,7 +39,7 @@ class PreparedRun:
 
 async def prepare_run(
     dataset: list[Sample],
-    campaign_config: CampaignConfig,
+    cycle: CycleConfig,
     *,
     session: Session,
     partition: BankPartition,
@@ -53,17 +49,8 @@ async def prepare_run(
 ) -> PreparedRun:
     cb = observers.callbacks
 
-    seed = session.store.campaigns.read_cycle_seed(session.hop)
-    if seed is not None:
-        campaign_config = apply_cycle_seed(campaign_config, seed)
-        if overlay_sets_model_outside_allowed(
-            seed.pipeline_overlay,
-            permitted_models_from_narrowing(campaign_config.optimizer_narrowing),
-        ):
-            # Stamped here: the mint seam cannot, the index being created at init.
-            session.record_intervention("disallowed_model_override")
-
-    # LAST, after the seed's other knobs; SET, never a `min`: admission already layered seed and standing.
+    campaign_config = cycle.config
+    # SET, never a `min`: admission already layered seed and standing.
     campaign_config = campaign_config.model_copy(
         update={
             "optimization": campaign_config.optimization.model_copy(
@@ -108,7 +95,7 @@ async def prepare_run(
         session,
         dataset,
         campaign_config,
-        seed=seed,
+        cycle=cycle,
         listener=cb,
     )
     if origin.locked_scoring is not None:

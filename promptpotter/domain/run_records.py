@@ -887,7 +887,7 @@ OPERATOR_ORIGIN_SOURCES = frozenset(OriginSource) - {OriginSource.REPLAYED}
 
 
 class CycleSeed(FrozenModel):
-    """``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only."""
+    """One cycle's own delta, laid over its parent's laid seeds (`CycleConfig.laid`)."""
 
     origin_prompts: dict[str, NodePrompt] = Field(
         default_factory=dict,
@@ -896,10 +896,9 @@ class CycleSeed(FrozenModel):
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
         default_factory=dict,
-        description="Per-fork search-space lock edits (param-key subset + "
-        "allowed-values) — overrides the campaign's mint-time narrowing for this "
-        "cycle only, the cycle-level peer of the campaign-wide "
-        "`CampaignConfig.optimizer_narrowing`. Empty for an unedited fork or a "
+        description="Per-fork search-space lock edits, laid on its parent's by part "
+        "(`NodeSearchNarrowing.over`): `param_keys` subsets, `prompt_fields_held` joins, "
+        "`param_allowed_values` replaces per param. Empty for an unedited fork or a "
         "campaign-from-origin seed.",
     )
     config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
@@ -1082,19 +1081,27 @@ class ScoringLockedRecord(FrozenModel):
 
 
 class CycleSeedRecord(FrozenModel):
-    """A fork inherits its parent's seed VIRTUALLY yet appends its own, which one scan returns."""
+    """Each cycle's own, LAST wins on its ledger; a cycle runs every one its chain holds, in order."""
 
     record_type: Literal["cycle_seed"] = "cycle_seed"
     seed: CycleSeed
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class PipelineRead(FrozenModel):
+    """What run init read: the served pipeline with the dataset's definition laid on."""
+
+    declaration: dict[str, Any]
+    # The definition's half of that read, which a campaign outliving its dataset dir still folds.
+    dataset_overlay: dict[str, dict[str, Any]]
+    declared_nodes: frozenset[str]
+
+
 class ResolvedRunRecord(FrozenModel):
-    """What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST."""
+    """What a run init resolved, read over the chain: the read LAST wins, the roster FIRST."""
 
     record_type: Literal["resolved_run"] = "resolved_run"
-    # What run init read: the served pipeline with the dataset's definition laid on.
-    declaration: dict[str, Any]
+    read: PipelineRead
     # The roster a connector only NAMES can move under its name; the one every round measured stands.
     experiment: dict[str, Any] | None
     # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
@@ -1109,7 +1116,6 @@ class ForkSpec(FrozenModel):
     # The parent arm the fork branches from, resolved at the mint (`fork_siblings.py::fork_edge`):
     # the one its caller named, else the pick the parent's line stood on going into the cut round.
     from_candidate: RoundArm
-    seed: CycleSeed | None = None
     # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_DIRECTION`).
     direction: ForkDirection | None = None
 

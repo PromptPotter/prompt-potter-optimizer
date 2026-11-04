@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from promptpotter.application import origin_listing
 from promptpotter.application.origin_listing import DatasetIndexEntry
-from promptpotter.application.pipeline_resolve import (
-    DatasetPipelineResponse,
-    resolve_pipeline_for_dataset,
-)
+from promptpotter.application.pipeline_resolve import resolve_pipeline_for_dataset
+from promptpotter.application.pipeline_responses import DatasetPipelineResponse
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import (
     StoresDep,

@@ -169,6 +169,10 @@ class BackendClient:
         )
 
     @property
+    def connector(self) -> Connector:
+        return self._connector
+
+    @property
     def execution(self) -> ConnectorExecution:
         return self._connector.execution
 

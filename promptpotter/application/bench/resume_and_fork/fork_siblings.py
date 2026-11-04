@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.served_dashboard import fork_remainder
-from promptpotter.domain.campaign_config import effective_config
+from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -46,13 +47,23 @@ logger = logging.getLogger(__name__)
 
 
 def _fork_sibling_setup(
-    campaign_store: CampaignStore,
+    stores: Stores,
     parent: CycleHop,
     child: CycleHop,
     *,
     from_round: int,
     payload: ForkSpec,
+    seed: CycleSeed | None,
 ) -> None:
+    campaign_store = stores.campaigns
+    campaign = campaign_store.load_campaign(child.campaign_id)
+    if campaign is None:
+        raise ConflictError(f"campaign {child.campaign_id} holds no manifest to fork under")
+    # Decided before anything is written: a refusal here leaves no minted, unstamped child.
+    babysat = CycleConfig.laid(
+        cycle_config(stores, campaign, None).config,
+        [*cycle_config(stores, campaign, parent).spans, LaidSpan(seed=seed, scoring_lock=None)],
+    ).babysat
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
@@ -84,9 +95,12 @@ def _fork_sibling_setup(
         cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
         cut_round=from_round,
     )
-    if payload.seed is not None:
+    if seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
-        campaign_store.write_cycle_seed(child, payload.seed)
+        campaign_store.write_cycle_seed(child, seed)
+    # decisions.md § 0005: stamped once, at the mint every fork takes, its own steer or its line's.
+    if babysat:
+        campaign_store.record_intervention(child, kind="disallowed_model_override")
 
 
 def _next_diag_sibling_id(
@@ -156,7 +170,7 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
 
 
 def mint_fork(
-    campaign_store: CampaignStore,
+    stores: Stores,
     parent: CycleHop,
     fork_from_round: int,
     *,
@@ -167,6 +181,7 @@ def mint_fork(
     seed: CycleSeed | None = None,
 ) -> str:
     """``fork_from_round`` is how many parent rounds the cut lifts, recorded as its ``cut_round``."""
+    campaign_store = stores.campaigns
     direction = FORK_DIRECTION[trigger]
     # Only a superseding cut continues the parent's line, so only it lifts the parent's rounds.
     if direction is not ForkDirection.SUPERSEDE and fork_from_round != 0:
@@ -180,16 +195,15 @@ def mint_fork(
             "so no fork can stand on it"
         )
     edge = fork_edge(campaign_store.standing_rounds(parent, moment=None), fork_from_round, named)
-    payload = ForkSpec(
-        trigger=trigger, reason=reason, issued_by=issued_by, from_candidate=edge, seed=seed
-    )
+    payload = ForkSpec(trigger=trigger, reason=reason, issued_by=issued_by, from_candidate=edge)
     child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
     _fork_sibling_setup(
-        campaign_store,
+        stores,
         parent,
         child,
         from_round=fork_from_round,
         payload=payload,
+        seed=seed,
     )
     # An offshoot's parent keeps running, hence the DIRECTION.
     if direction is ForkDirection.SUPERSEDE:
@@ -221,7 +235,7 @@ def declare_steered_values(
 
 def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
     return mint_fork(
-        stores.campaigns,
+        stores,
         hop,
         0,
         trigger=ForkTrigger.OPERATOR_DIAG,
@@ -241,13 +255,16 @@ def mint_operator_fork(
     reason: str = "",
 ) -> str:
     campaign = owned_campaign(stores, hop.campaign_id)
-    seed = declare_steered_values(seed, effective_config(campaign.declaration).optimizer_narrowing)
+    # Against the parent's laid narrowing, so the child lays over what its parent ran.
+    seed = declare_steered_values(
+        seed, cycle_config(stores, campaign, hop).config.optimizer_narrowing
+    )
     if not keep_rounds:
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
         caps = fork_remainder(stores, hop).under(seed.config_overrides)
         seed = seed.model_copy(update={"config_overrides": caps})
     return mint_fork(
-        stores.campaigns,
+        stores,
         hop,
         from_round if keep_rounds else 0,
         trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,

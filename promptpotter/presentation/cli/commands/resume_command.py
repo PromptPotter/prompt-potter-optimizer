@@ -8,9 +8,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import ConfigDriftError
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import fork_preview, recorded_schema
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
     ForkCyclePayload,
@@ -19,10 +18,6 @@ from promptpotter.domain.command_kinds import (
     StartRunPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.pipeline_overlay import (
-    permitted_models_from_narrowing,
-    steers_disallowed_model,
-)
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.presentation.cli.commands.launch import (
@@ -167,18 +162,11 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
 
 async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
-    # The overlay is typed by the backend's own schema, which only a session holds.
-    typing_session = await init_services(
-        dataset_name=ctx.campaign.dataset_name,
-        identity=ctx.store.identity,
-    )
-    overlay = _steer_overlay(args.steer, typing_session.pipeline_schema)
-
-    # The fork-cycle applier's own gate, over the ROOT's config: `ctx.campaign_config` is the one the seed moved.
-    narrowing = resolve_campaign_config(ctx.store, ctx.campaign, None).optimizer_narrowing
-    disallowed = steers_disallowed_model(narrowing, overlay)
+    overlay = _steer_overlay(args.steer, recorded_schema(ctx.store, ctx.hop))
+    preview = fork_preview(ctx.store, ctx.campaign_id, overlay)
+    disallowed = preview.steer != "clean"
     if disallowed:
-        permitted = permitted_models_from_narrowing(narrowing)
+        permitted = preview.permitted
         steered = ", ".join(
             f"{node}.{param}={value!r}"
             for node, cfg in sorted(overlay.items())

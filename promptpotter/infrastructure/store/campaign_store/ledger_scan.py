@@ -52,6 +52,7 @@ from promptpotter.domain.run_records import (
     LaunchReleasedRecord,
     LeftComparisonRecord,
     PhaseRecord,
+    PipelineRead,
     PricedKeyRecord,
     RaceCatchUpRecord,
     ResolvedRunRecord,
@@ -115,7 +116,7 @@ def _last(record: type[StrictModel]) -> type[_Last]:
 
 @dataclass(frozen=True)
 class ResolvedRun:
-    declaration: dict[str, Any] | None = None
+    read: PipelineRead | None = None
     experiment: dict[str, Any] | None = None
     # The cycle whose ledger landed the roster that stands.
     experiment_cycle_id: str | None = None
@@ -124,7 +125,7 @@ class ResolvedRun:
     def then(self, later: ResolvedRun) -> ResolvedRun:
         first = self if self.experiment else later
         return ResolvedRun(
-            declaration=later.declaration or self.declaration,
+            read=self.read if later.read is None else later.read,
             experiment=first.experiment,
             experiment_cycle_id=first.experiment_cycle_id,
             model_capabilities=later.model_capabilities or self.model_capabilities,
@@ -140,9 +141,7 @@ class _ResolvedRun:
     def feed(self, record: ResolvedRunRecord) -> None:
         self._found = self._found.then(
             ResolvedRun(
-                record.declaration,
-                record.experiment,
-                model_capabilities=record.model_capabilities,
+                record.read, record.experiment, model_capabilities=record.model_capabilities
             )
         )
 
@@ -917,6 +916,14 @@ def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R
         own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_last(record), span.until)
         found = found if own is None else cast("R", own)
     return found
+
+
+def scan_each_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> list[R | None]:
+    """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
+    return [
+        cast("R | None", LedgerIndex.of(span.path, LEDGER_FOLDS).view(_last(record), span.until))
+        for span in spans
+    ]
 
 
 def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:

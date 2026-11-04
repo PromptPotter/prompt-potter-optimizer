@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 
@@ -19,14 +19,12 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
+from promptpotter.domain.pipeline_overlay import merge_pipeline_params, steers_disallowed_model
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
+from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel
-
-if TYPE_CHECKING:
-    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 DEFAULT_ORIGIN_BUDGET: int = 40
 
@@ -363,8 +361,8 @@ class CampaignConfig(StrictModel):
         "no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE "
         "permitted model set: what the optimizer may pick, and what a human fork may steer to "
         "without tainting the branch. A steer outside it is a `campaign.babysit` act — warned "
-        "+ graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = "
-        "nothing sanctioned there, the restrictive default.",
+        "+ graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for "
+        "a node = nothing sanctioned there, the restrictive default.",
     )
     scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
     judges: Annotated[dict[str, JudgeSpec], Knob(Scope.DATA, Estimand.GATE)] = Field(
@@ -565,10 +563,70 @@ def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -
     return config.model_copy(update=top_updates)
 
 
-def apply_cycle_seed(config: CampaignConfig, seed: CycleSeed | None) -> CampaignConfig:
-    if seed is None:
+def scoring_locked(config: CampaignConfig, lock: ScoringLockedRecord | None) -> CampaignConfig:
+    if lock is None or lock.declared != config.scoring:
         return config
-    config = apply_config_overrides(config, seed.config_overrides)
-    return config.model_copy(
-        update={"optimizer_narrowing": {**config.optimizer_narrowing, **seed.optimizer_narrowing}}
-    )
+    return config.model_copy(update={"scoring": lock.locked})
+
+
+def _narrowed(
+    held: Mapping[str, NodeSearchNarrowing], later: Mapping[str, NodeSearchNarrowing]
+) -> dict[str, NodeSearchNarrowing]:
+    out = dict(held)
+    for node, narrowing in later.items():
+        out[node] = out[node].over(narrowing) if node in out else narrowing
+    return out
+
+
+class LaidSpan(FrozenModel):
+    """One ledger of a cycle's chain: its own last seed, then the criterion its origin locked."""
+
+    seed: CycleSeed | None
+    scoring_lock: ScoringLockedRecord | None
+
+
+class CycleConfig(FrozenModel):
+    """What one cycle runs: its chain's spans laid in order over the declaration, each child's over
+    its parent's, so no reader lays a part of one again. Built by ``laid`` alone."""
+
+    config: CampaignConfig
+    # One per ledger of the cycle's chain, its root's first and its own last.
+    spans: tuple[LaidSpan, ...]
+    seed_overlay: dict[str, Any]
+    # The babysit act (decisions.md § 0005): a seed of the line steers outside the declaration.
+    babysat: bool
+
+    @classmethod
+    def laid(cls, declared: CampaignConfig, spans: Sequence[LaidSpan]) -> CycleConfig:
+        config = declared
+        overlay: dict[str, Any] = {}
+        babysat = False
+        for span in spans:
+            if (seed := span.seed) is not None:
+                config = apply_config_overrides(config, seed.config_overrides)
+                narrowing = _narrowed(config.optimizer_narrowing, seed.optimizer_narrowing)
+                config = config.model_copy(update={"optimizer_narrowing": narrowing})
+                overlay = merge_pipeline_params(overlay, seed.pipeline_overlay, None) or {}
+                # Per seed: a later steer back inside the menu leaves its parent's act standing.
+                babysat |= steers_disallowed_model(
+                    declared.optimizer_narrowing, seed.pipeline_overlay
+                )
+            config = scoring_locked(config, span.scoring_lock)
+        return cls(config=config, spans=tuple(spans), seed_overlay=overlay, babysat=babysat)
+
+    @property
+    def own_seed(self) -> CycleSeed | None:
+        """The seed the cycle's own ledger holds; ``None`` where it wrote none."""
+        return self.spans[-1].seed if self.spans else None
+
+    @property
+    def origin(self) -> CycleSeed | None:
+        """The last seed that stated C0's prompts: a child that states none runs its parent's."""
+        return next(
+            (
+                span.seed
+                for span in reversed(self.spans)
+                if span.seed is not None and span.seed.origin_prompts
+            ),
+            None,
+        )

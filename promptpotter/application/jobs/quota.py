@@ -737,20 +737,17 @@ def declare_run_budget(
     hop: CycleHop | None,
     requested: Budget,
 ) -> tuple[Budget, Budget]:
-    """Composed BEFORE admission; second, the axes an operator named (campaign, cycle, *requested*)."""
-    seed = Budget()
+    """*declared* is the cycle's, its seed laid (`CycleConfig`), so composed BEFORE admission;
+    second, the axes an operator named (campaign, cycle, *requested*)."""
     asked = Budget()
     if hop is not None:
-        cycle_seed = stores.campaigns.read_cycle_seed(hop)
-        if cycle_seed is not None:
-            seed = cycle_seed.config_overrides.budget
         if stores.campaigns.load_campaign(hop.campaign_id) is None:
             raise NotFoundError(f"campaign not found: {hop.campaign_id}")
         asked = stores.campaigns.read_campaign_ceiling(hop).over(
             stores.campaigns.read_standing_budget(hop).budget
         )
     asked = asked.over(requested)
-    return declared.over(seed, asked), asked
+    return declared.over(asked), asked
 
 
 def next_launch_budget(config: CampaignConfig, *, stores: Stores, hop: CycleHop) -> Budget:

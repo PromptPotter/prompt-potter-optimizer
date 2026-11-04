@@ -33,7 +33,7 @@ from promptpotter.application.datasets.tabular_ingest import (
     read_tabular,
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
-from promptpotter.application.pipeline_resolve import draft_served, resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config, draft_served
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
@@ -155,7 +155,7 @@ async def draft_from_dataset(
         # A merge, not a replacement: the origin's declaration names only what its layers set.
         pipeline_overlay = merge_node_blocks(
             pipeline_overlay,
-            overlay_from_campaign_config(resolve_campaign_config(stores, origin_campaign, None)),
+            overlay_from_campaign_config(cycle_config(stores, origin_campaign, None).config),
         )
 
     authored_prompts = {
@@ -211,8 +211,8 @@ async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignW
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
     overrides: dict[str, Any] = {"reused_origin_id": origin_id}
-    seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
-    if seed is not None and seed.origin_prompts:
+    seed = cycle_config(stores, campaign, campaign.root_hop).origin
+    if seed is not None:
         overrides["origin_prompts"] = {
             node: dict(prompt.fields) for node, prompt in seed.origin_prompts.items()
         }

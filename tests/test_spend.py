@@ -116,7 +116,7 @@ from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.campaign_result import line_run
@@ -147,6 +147,7 @@ from promptpotter.domain.arms import CutKind
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
+    CycleConfig,
     OptimizationConfig,
     merge_config_layers,
 )
@@ -959,7 +960,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         job_registry=spawned,
         job_id=held.job_id,
         session=loop_session(stores, pipeline_schema([]), [], hop=hop),
-        campaign_config=launched_config,
+        cycle=CycleConfig.laid(launched_config, []),
         budget=held,
         optimizer=select_optimizer(launched_config.optimization),
     )
@@ -3359,7 +3360,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     assert len({c.root_content_hash for c in arms.values()}) == 1, (
         "two arms of one head-to-head searched from different origins"
     )
-    ran = {k: resolve_campaign_config(stores, c, c.root_hop).optimization for k, c in arms.items()}
+    ran = {k: cycle_config(stores, c, c.root_hop).config.optimization for k, c in arms.items()}
     assert {k: (o.budget.usd, o.budget.rounds) for k, o in ran.items()} == {
         "capo": (50.0, 1),
         "capo-b3": (50.0, 1),

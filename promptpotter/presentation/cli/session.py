@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.cycle_paths import CycleHop
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        return resolve_campaign_config(self.store, self.campaign, self.hop)
+        return cycle_config(self.store, self.campaign, self.hop).config
 
 
 def load_session(store: Stores, hop: CycleHop) -> SessionCtx:

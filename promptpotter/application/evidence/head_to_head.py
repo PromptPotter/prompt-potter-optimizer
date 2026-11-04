@@ -10,7 +10,7 @@ from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.bench import bench_members, pair_on_bench, read_bench
 from promptpotter.application.runner.campaign_result import (
     bench_line,
@@ -410,7 +410,7 @@ def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
     graders = {
         scorer.id: scorer
         for scorer in (
-            scorer_of(resolve_campaign_config(stores, c, c.root_hop), verifier_graded=False)
+            scorer_of(cycle_config(stores, c, c.root_hop).config, verifier_graded=False)
             for stores, c in campaigns
         )
     }
@@ -432,7 +432,7 @@ def head_to_head(
         return None
     campaigns = [_campaign(entry) for entry in entries]
     configs = [
-        resolve_campaign_config(e.stores, c, c.root_hop)
+        cycle_config(e.stores, c, c.root_hop).config
         for e, c in zip(entries, campaigns, strict=True)
     ]
     scorer, record = grader

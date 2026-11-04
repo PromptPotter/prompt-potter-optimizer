@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.stores import Stores
 
 HARNESS_NODE = "harness"
@@ -94,7 +93,7 @@ def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None
 
 
 def _identity_config(
-    _stores: Stores, _dataset: ResolvedDataset, _experiment: Mapping[str, Any] | None
+    _stores: Stores, _experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     return {HARNESS_NODE: {INSTRUMENT_KEY: stable_hash(settings.N8N_HARNESS_URL)}}
 

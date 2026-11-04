@@ -56,30 +56,8 @@ acting.
 
 ### Config resolution and run scope (backbone hunt 2026-10-31, ranked by impact radius)
 
-**Rides with:** one arc; 1 and 2 together remove most of 3 and the read-path fallbacks, 4 absorbs 7.
+**Rides with:** one arc; 4 absorbs 7.
 
-1. **Pipeline params resolve as one layered fold spelled five ways** — `application/pipeline_resolve.py`:
-   `configure_and_apply_pipeline` (run), `_campaign_merge` + `resolve_pipeline_for_campaign`,
-   `_draft_merge` (lays backend `base_config`, which the run never lays), `_runs_with` (no identity
-   layer), `resolve_pipeline_for_dataset` each lay a different subset in a different order; the run's
-   seed goes on after the floors without provenance, so a seeded model is never re-floored and a served
-   "what this point ran" can differ from what was sent. `provenance` is an out-parameter threaded
-   through six functions. Action: one `ParamLayers` value — an ordered declared list (backend, dataset,
-   campaign, floor, identity, seed, evolved, recorded) each subject picks by data, provenance a product
-   of the fold; the served response models move out of the module. **Re-test:**
-   `git grep -c "apply_node_overlay(" -- promptpotter/application/pipeline_resolve.py` is 1.
-2. **`CycleSeed` is a four-part delta each reader re-lays** — `read_cycle_seed(` at 9 sites;
-   `domain/campaign_config.py::apply_cycle_seed` lays only `config_overrides` + `optimizer_narrowing`,
-   `pipeline_overlay` is laid at 4 sites, `origin_prompts` again in `mint.py::resolve_cycle_plan`;
-   `resolve_resume` resolves the plan twice to strip the seed off. Action: the seed folds whole into the
-   cycle's effective config, read once by 1. **Re-test:** `git grep -c "read_cycle_seed(" -- promptpotter` is 1.
-3. **The babysit verdict is computed at four sites against two narrowings** — `commands/launching.py::fork_cycle`,
-   `pipeline_resolve.py::fork_preview`, CLI `resume_command.py::_fork_operator_steer` read the root's
-   narrowing; `runner/run_prep.py::prepare_run` stamps after `apply_cycle_seed` (the seed's own
-   `ForkSeed.node_narrowing`), so a fork widening the narrowing and steering in one seed can pass one and
-   fail the other. The CLI also boots `init_services` only to type `--steer`. Action: the applier decides
-   once and stamps the verdict on the seed record; CLI and preview read it. **Re-test:** a fork seed
-   whose `node_narrowing` admits the steered model; read the cycle's interventions.
 4. **Run scope is ~21 ambient `ContextVar`s bound piecemeal** — telemetry, send pacing, spend book,
    optimizer manifest, archive memory scope, coupon, measurement context, judges, spawn, harbor;
    `set_cycle_ledger` bound at 6 sites, `bind_memory_scope` sets without a reset token, one ledger with
@@ -97,16 +75,14 @@ acting.
    `_DETERMINISM`, `_OPTIMIZER_PROMPT_OVERRIDES`; `llm_node_manifest` tries the check-in manifest then
    `bound_optimizer()`; `resolve_optimizer(..., gate="off")` ×3; `_single_model` depends on node order.
    Action: selection rides `RunScope` (4), keyed by node, no fallback. **Re-test:** `git grep -n 'gate="off"' -- promptpotter`.
-8. **A broad exception tuple turns programming errors into "did not resolve"** —
-   `pipeline_resolve.py::_ROOT_UNRESOLVED` catches `ValueError, KeyError, TypeError, OSError`;
-   `line_config` swallows silently, `application/hierarchy.py::_UNRESOLVED` serves it as data. It omits
-   `LedgerUnreadableError`, which a root with no resolved run now raises, so one bad campaign fails the
-   whole hierarchy listing instead of its own row. Action: catch typed `DatasetAccessError` /
-   `StoredConfigInvalidError` / `LedgerUnreadableError` only, each served as its row's typed refusal.
-   **Re-test:** read `_ROOT_UNRESOLVED`.
-9. **Reads fall back from the recorded fact to today's files** — `_dataset_of` swallowing
-   `DatasetAccessError`; `parse_cycle_seed` builds a whole served response to read schema rows. Action: a
-   minted cycle's recorded declaration or a refusal; the write path reads 1's fold. **Re-test:** read `pipeline_resolve.py::_dataset_of`.
+8. **A root's typed refusal is served as one generic caveat** — `pipeline_resolve.py::campaign_runs_with`
+   and `line_config` answer `None` for any `_ROOT_UNRESOLVED`, and `application/hierarchy.py::_UNRESOLVED`
+   serves the same sentence whichever refusal it was. Action: the refusal rides the row, its message
+   served. **Re-test:** read `application/hierarchy.py::_UNRESOLVED`.
+9. **A minted cycle's dataset layer is read off today's definition** — `pipeline_resolve.py::_campaign_merge`
+   lays the dataset's `node.config` and declared nodes from `dataset.yaml` as it stands; `ResolvedRun`
+   records the laid declaration but not the layer the run sent. Action: run init records the dataset
+   layer; a read lays the recorded one. **Re-test:** `git grep -n "runnable_definition" -- promptpotter/application/pipeline_resolve.py`.
 10. **Engine decisions narrated into `logger.warning`** — `bench/resume_and_fork/repair.py`, `origin_gate.py`,
     `termination.py`, `escalation/firing.py`. Action: each decision a field of its step's record.
     **Re-test:** `git grep -c "logger.warning" -- promptpotter/application/bench/resume_and_fork/repair.py`.
@@ -120,7 +96,7 @@ acting.
 
 Grouped by the arc each would ride; workaround comments and dead top-level names came back clean.
 
-**A. The pipeline carrier is typed.** **Rides with:** § Config resolution and run scope #1 (`ParamLayers`).
+**A. The pipeline carrier is typed.** **Rides with:** the next change to `pipeline_resolve.py::ParamLayers`.
 - **`pipeline_params` is an untyped `dict[str, Any]`**: engine keys (`model`, `provider`,
   `route_order`, `max_tokens`, …) are string-read with mixed tolerance (`cfg["model"]`,
   `cfg.get("model")`, `str(cfg.get("model", ""))`); the reserved `steps` list shares the bag with the
@@ -693,7 +669,7 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   and no node. **Rides with:** the next change to the heartbeat record. **Re-test:**
   `git grep -n '"backend_scoring"' promptpotter`.
 - **An optimizer's measurement node is derived twice**: `optimizer_manifest.py::RoundPlan.measurement`
-  (the gateway `default` walks) and `pipeline_resolve.py::measurement_node(view)` (the first
+  (the gateway `default` walks) and `pipeline_responses.py::measurement_node(view)` (the first
   `measurement` node of the view), which serves `OptimizerPipelineResponse.measurement_node` as
   nullable though no admitted manifest lacks one. **Rides with:** the next change to that response.
   **Re-test:** `git grep -n "measurement_node(schema.view)" promptpotter`.

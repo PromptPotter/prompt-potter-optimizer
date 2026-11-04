@@ -114,7 +114,17 @@ export function SteerForkPanel({
         {(verdict) => {
           if (verdict.steer === "clean") return null;
           const { title, detail, tone } = STEER_OUTSIDE_INFO[verdict.steer];
-          return <Said tone={tone} label={title} detail={detail} />;
+          // The set the verdict compared against, never the editor's rows.
+          const permitted = Object.entries(verdict.permitted)
+            .map(([node, models]) => `${node}: ${models.join(", ")}`)
+            .join(" · ");
+          return (
+            <Said
+              tone={tone}
+              label={title}
+              detail={`${detail} Permitted — ${permitted || "no model on any node"}.`}
+            />
+          );
         }}
       </ReadState>
 

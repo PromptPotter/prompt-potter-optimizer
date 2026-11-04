@@ -20,6 +20,7 @@ from promptpotter.domain.campaign import (
     LifecycleStatus,
     ceiling_meter,
 )
+from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
@@ -44,12 +45,14 @@ from promptpotter.domain.run_records import (
     LaunchClaimRecord,
     LaunchReleasedRecord,
     LeftComparisonRecord,
+    PipelineRead,
     ResolvedRunRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundRestatedRecord,
     RunPhaseRecord,
     RunWiringRecord,
+    ScoringLockedRecord,
     SpawnedBy,
     SpawnedRecord,
     StandingBudgetRecord,
@@ -78,6 +81,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_campaign_ceiling,
     scan_cycle_facts,
     scan_cycle_share,
+    scan_each_last,
     scan_last,
     scan_launch_claim,
     scan_ledger_metered,
@@ -500,7 +504,7 @@ class CampaignStore:
                 parent=parent_address(self.cycle_dir(child), parent_dir),
                 forked_at_offset=cut,
                 cut_round=cut_round,
-                fork=spec.model_copy(update={"seed": None}),
+                fork=spec,
             ),
         )
         self._append(child, RoundEnteredRecord(round=cut_round, rewound=True))
@@ -738,9 +742,17 @@ class CampaignStore:
         """The cycle's OWN last *record*: a fork inherits none from its parent's prefix."""
         return scan_last([LedgerSpan(self.ledger(hop))], record)
 
-    def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
-        record = self.last(hop, CycleSeedRecord)
-        return None if record is None else record.seed
+    def read_laid_spans(self, hop: CycleHop) -> list[LaidSpan]:
+        """One per ledger of *hop*'s chain, its root's first: a child's lays over its parent's."""
+        chain = self._chain(hop)
+        return [
+            LaidSpan(seed=None if record is None else record.seed, scoring_lock=lock)
+            for record, lock in zip(
+                scan_each_last(chain, CycleSeedRecord),
+                scan_each_last(chain, ScoringLockedRecord),
+                strict=True,
+            )
+        ]
 
     def write_standing_budget(
         self, hop: CycleHop, budget: Budget, *, pause_at_round: int | None
@@ -777,8 +789,8 @@ class CampaignStore:
     def write_resolved_run(
         self,
         hop: CycleHop,
+        read: PipelineRead,
         *,
-        declaration: dict[str, Any],
         experiment: Mapping[str, Any] | None,
         model_capabilities: CapabilityMenu,
     ) -> None:
@@ -794,16 +806,11 @@ class CampaignStore:
                 hop.campaign_id,
                 held.experiment_cycle_id,
             )
-        resolved = ResolvedRun(declaration, doc, model_capabilities=model_capabilities)
-        landed = held.then(resolved)
+        landed = held.then(ResolvedRun(read, doc, model_capabilities=model_capabilities))
         if panel_moved or landed != held:
             self._append(
                 hop,
-                ResolvedRunRecord(
-                    declaration=declaration,
-                    experiment=doc,
-                    model_capabilities=model_capabilities,
-                ),
+                ResolvedRunRecord(read=read, experiment=doc, model_capabilities=model_capabilities),
             )
 
     def read_resolved_run(self, hop: CycleHop) -> ResolvedRun:

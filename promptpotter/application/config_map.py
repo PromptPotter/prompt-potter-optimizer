@@ -13,7 +13,7 @@ from promptpotter.application.knobs import (
     resolve_knob_states,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     Estimand,
@@ -72,7 +72,7 @@ class ConfigMapResponse(StrictModel):
 
 def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
     campaign = owned_campaign(stores, campaign_id)
-    return config_map(resolve_campaign_config(stores, campaign, campaign.root_hop))
+    return config_map(cycle_config(stores, campaign, campaign.root_hop).config)
 
 
 def config_map(config: CampaignConfig) -> ConfigMapResponse:

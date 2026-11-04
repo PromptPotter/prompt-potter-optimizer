@@ -1,36 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.infrastructure.store.dataset_access import (
-    read_dataset_origin,
-    read_dataset_pipeline,
-)
+from promptpotter.infrastructure.store.dataset_access import read_dataset_origin
 from promptpotter.shared.errors import PayloadInvalidError
 
 
-def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
-    raw = read_dataset_pipeline(dataset_dir)
-    if not raw:
-        return {}
+def pipeline_node_overlay(pipeline: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
-    for node_name, node_def in (raw.get("nodes") or {}).items():
+    for node_name, node_def in (pipeline.get("nodes") or {}).items():
         cfg = node_def.get("config") if isinstance(node_def, dict) else None
         if isinstance(cfg, dict) and cfg:
             out[node_name] = dict(cfg)
     return out
 
 
-def dataset_declared_nodes(dataset_dir: Path) -> frozenset[str]:
-    """Empty where the dataset declares no nodes: "no opinion", never "no nodes"."""
-    raw = read_dataset_pipeline(dataset_dir)
-    if not raw:
-        return frozenset()
-    return frozenset(raw.get("nodes") or {})
+def pipeline_declared_nodes(pipeline: Mapping[str, Any]) -> frozenset[str]:
+    """Empty where the definition declares no nodes: "no opinion", never "no nodes"."""
+    return frozenset(pipeline.get("nodes") or {})
 
 
 def has_dataset_prompts(dataset_dir: Path) -> bool:

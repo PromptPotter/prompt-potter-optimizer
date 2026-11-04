@@ -26,10 +26,6 @@ from promptpotter.application.jobs.mint import (
 from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
-from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
-    resolve_campaign_config,
-)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.views.readout import StatusFn
@@ -182,9 +178,9 @@ async def run_campaign(
         campaign = session.store.campaigns.load_campaign(session.campaign_id)
         if campaign is None:
             raise NotFoundError(f"campaign not found: {session.campaign_id}")
-        resumed = resolve_resume(session, campaign, session.bank.samples)
-        campaign_config = resolve_campaign_config(session.store, campaign, session.hop)
-        session = configure_and_apply_pipeline(session, campaign_config)
+        plan = resolve_resume(session, campaign, session.bank.samples)
+        session, cycle, resumed = plan.session, plan.cycle, plan.optimizer
+        campaign_config = cycle.config
         connector = campaign.connector
     else:
         if campaign_config is None:
@@ -215,7 +211,7 @@ async def run_campaign(
                 campaign_id=fresh_campaign_id(session),
                 task_text=None,
             )
-            session, optimizer = minted.session, minted.optimizer
+            session, optimizer, cycle = minted.session, minted.optimizer, minted.cycle
             land_job(
                 session.store,
                 JobRegistry.attach(session.store.jobs_dir),
@@ -225,11 +221,11 @@ async def run_campaign(
             )
         return await run_optimization(
             list(session.bank.samples),
-            campaign_config,
+            cycle,
             session=session,
             observers=build_run_observers(
                 session=session,
-                campaign_config=campaign_config,
+                campaign_config=cycle.config,
                 readout_sink=readout_sink,
             ),
             langfuse_session_id=langfuse_session_id,
@@ -275,7 +271,7 @@ async def run_head_to_head(
                 job_registry,
                 held.job_id,
                 held.session,
-                held.campaign_config,
+                held.cycle,
                 mode=mode,
                 budget=held.budget,
                 optimizer=held.optimizer,

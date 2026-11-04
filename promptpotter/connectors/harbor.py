@@ -97,7 +97,6 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
-    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -472,7 +471,7 @@ def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _identity_config(
-    _stores: Stores, _dataset: ResolvedDataset, experiment: Mapping[str, Any] | None
+    _stores: Stores, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     if experiment is None:
         raise ValueError("harbor connector: no panel on this machine to fingerprint.")

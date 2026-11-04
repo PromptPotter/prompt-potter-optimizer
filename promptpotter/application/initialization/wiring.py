@@ -17,14 +17,14 @@ from promptpotter.application.datasets.loaders import (
     resolve_bank,
     samples_from_dicts,
 )
+from promptpotter.application.datasets.prompts import (
+    pipeline_declared_nodes,
+    pipeline_node_overlay,
+)
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import resolve_optimizer
-from promptpotter.application.pipeline_resolve import (
-    ServedPipeline,
-    resolve_campaign_config,
-    served_pipeline,
-)
+from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.run_observers import check_every_record_reported
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
@@ -33,7 +33,7 @@ from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InPro
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.run_records import BackendRevision
+from promptpotter.domain.run_records import BackendRevision, PipelineRead
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
@@ -52,7 +52,6 @@ from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
 
 logger = logging.getLogger(__name__)
@@ -245,7 +244,11 @@ async def init_services(
         backend_id=connector.name,
         backend_client=client,
         pipeline_schema=pipeline_schema,
-        pipeline_declaration=declaration,
+        pipeline_read=PipelineRead(
+            declaration=declaration,
+            dataset_overlay=pipeline_node_overlay(definition.pipeline),
+            declared_nodes=pipeline_declared_nodes(definition.pipeline),
+        ),
         backend_revision=backend_revision,
         bank=bank,
         candidate_library=candidate_library,
@@ -261,12 +264,11 @@ async def bind_cycle_session(
     stores: Stores,
     campaign: Campaign,
     hop: CycleHop,
-) -> tuple[Session, CampaignConfig]:
+) -> Session:
     """Bound, never configured: a resume's drift refusal reads the schema before the config lands."""
     session = await init_services(
         dataset_name=campaign.dataset_name,
         identity=stores.identity,
         stores=stores,
     )
-    bound = session.bound(hop, purpose=campaign.declaration.purpose)
-    return bound, resolve_campaign_config(stores, campaign, hop)
+    return session.bound(hop, purpose=campaign.declaration.purpose)

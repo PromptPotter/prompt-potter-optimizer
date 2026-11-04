@@ -24,13 +24,13 @@ from promptpotter.application.jobs.quota import (
     launch_refusal,
 )
 from promptpotter.application.pipeline_resolve import (
-    OptimizerSetup,
     ServedPipeline,
     draft_pipeline,
     draft_sends,
     draft_served,
     resolve_pipeline_for_draft,
 )
+from promptpotter.application.pipeline_responses import OptimizerSetup
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch, OptimizationOverrides

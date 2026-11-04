@@ -2333,7 +2333,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeSearchNarrowing"
             },
-            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
+            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing",
             "type": "object"
           },
@@ -7099,6 +7099,17 @@
         "additionalProperties": false,
         "description": "What `POST /commands/fork-cycle` would decide about this steer, asked without forking.",
         "properties": {
+          "permitted": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Each node's permitted models, the set `steer` is decided against",
+            "title": "Permitted",
+            "type": "object"
+          },
           "steer": {
             "description": "`clean` where the overlay stays inside the campaign's declared `optimizer_narrowing`. Outside it — a responder never sanctioned, or a cost lever no permitted set can sanction — the fork is the babysit act: `babysat` for a caller holding `campaign.babysit` (the branch is graded C), `refused` for any other.",
             "enum": [
@@ -7111,7 +7122,8 @@
           }
         },
         "required": [
-          "steer"
+          "steer",
+          "permitted"
         ],
         "title": "ForkPreviewResponse",
         "type": "object"
@@ -10876,13 +10888,12 @@
           "source": {
             "default": "unset",
             "enum": [
-              "backend",
               "dataset",
               "campaign",
-              "model_floor",
               "seed",
-              "evolved",
+              "model_floor",
               "identity",
+              "evolved",
               "unset"
             ],
             "title": "Source",
@@ -14249,13 +14260,12 @@
           },
           "source": {
             "enum": [
-              "backend",
               "dataset",
               "campaign",
-              "model_floor",
               "seed",
-              "evolved",
+              "model_floor",
               "identity",
+              "evolved",
               "unset"
             ],
             "title": "Source",

@@ -2797,7 +2797,7 @@
       },
       "CycleSeed": {
         "additionalProperties": false,
-        "description": "``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only.",
+        "description": "One cycle's own delta, laid over its parent's laid seeds (`CycleConfig.laid`).",
         "properties": {
           "config_overrides": {
             "$ref": "#/components/schemas/ConfigOverrides"
@@ -2806,7 +2806,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeSearchNarrowing"
             },
-            "description": "Per-fork search-space lock edits (param-key subset + allowed-values) — overrides the campaign's mint-time narrowing for this cycle only, the cycle-level peer of the campaign-wide `CampaignConfig.optimizer_narrowing`. Empty for an unedited fork or a campaign-from-origin seed.",
+            "description": "Per-fork search-space lock edits, laid on its parent's by part (`NodeSearchNarrowing.over`): `param_keys` subsets, `prompt_fields_held` joins, `param_allowed_values` replaces per param. Empty for an unedited fork or a campaign-from-origin seed.",
             "title": "Optimizer Narrowing",
             "type": "object"
           },
@@ -2834,7 +2834,7 @@
       },
       "CycleSeedRecord": {
         "additionalProperties": false,
-        "description": "A fork inherits its parent's seed VIRTUALLY yet appends its own, which one scan returns.",
+        "description": "Each cycle's own, LAST wins on its ledger; a cycle runs every one its chain holds, in order.",
         "properties": {
           "record_type": {
             "const": "cycle_seed",
@@ -3745,17 +3745,6 @@
           "reason": {
             "title": "Reason",
             "type": "string"
-          },
-          "seed": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CycleSeed"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
           },
           "trigger": {
             "$ref": "#/components/schemas/ForkTrigger"
@@ -6098,6 +6087,40 @@
         "title": "PhaseRecord",
         "type": "object"
       },
+      "PipelineRead": {
+        "additionalProperties": false,
+        "description": "What run init read: the served pipeline with the dataset's definition laid on.",
+        "properties": {
+          "dataset_overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Dataset Overlay",
+            "type": "object"
+          },
+          "declaration": {
+            "additionalProperties": true,
+            "title": "Declaration",
+            "type": "object"
+          },
+          "declared_nodes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Declared Nodes",
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "declaration",
+          "dataset_overlay",
+          "declared_nodes"
+        ],
+        "title": "PipelineRead",
+        "type": "object"
+      },
       "PrefixReading": {
         "additionalProperties": false,
         "description": "A provider's prefix-cache discount as every surface reads it, served whole.",
@@ -6581,13 +6604,8 @@
       },
       "ResolvedRunRecord": {
         "additionalProperties": false,
-        "description": "What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST.",
+        "description": "What a run init resolved, read over the chain: the read LAST wins, the roster FIRST.",
         "properties": {
-          "declaration": {
-            "additionalProperties": true,
-            "title": "Declaration",
-            "type": "object"
-          },
           "experiment": {
             "anyOf": [
               {
@@ -6610,6 +6628,9 @@
             "title": "Model Capabilities",
             "type": "object"
           },
+          "read": {
+            "$ref": "#/components/schemas/PipelineRead"
+          },
           "record_type": {
             "const": "resolved_run",
             "default": "resolved_run",
@@ -6622,7 +6643,7 @@
           }
         },
         "required": [
-          "declaration",
+          "read",
           "experiment",
           "model_capabilities"
         ],
