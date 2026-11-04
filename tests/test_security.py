@@ -162,6 +162,7 @@ from promptpotter.presentation.api.deps import (
     require_site_records_token,
 )
 from promptpotter.presentation.api.middleware.oidc import (
+    OWNER_DEVICE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     identity_of_session,
 )
@@ -534,7 +535,8 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
             assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
 
     # A stranger's request is kept beside the website's visits; a signed-in person's is their own
-    # trail's, and a query is kept only where nothing answered, so a served sign-in code never lands.
+    # trail's, and so is the admin's marked browser signed out. A query is kept only where nothing
+    # answered, so a served sign-in code never lands.
     async def answering(scope: Scope, _receive: Receive, send: Send) -> None:
         if scope["path"] == "/signed-in":
             scope.setdefault("state", {})["identity_ctx"] = who("ada-id")
@@ -546,10 +548,11 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     stranger.get("/api/v1/auth/callback/google?code=one-time-sign-in-code")
     stranger.get("/.env?probe=1")
     stranger.get("/signed-in")
+    stranger.get("/login", headers={"cookie": f"{OWNER_DEVICE_COOKIE_NAME}=1"})
     TestClient(OutsideVisitsMiddleware(answering)).get("/from-this-side")
     kept = [(r.row["path"], r.row["query"]) for r in default_site_record_store().kept(APP_VISITS)]
     assert kept == [("/api/v1/auth/callback/google", ""), ("/.env", "probe=1")], (
-        "an outside visit kept a served query, a signed-in request, or one from this side"
+        "an outside visit kept a served query, a signed-in request, the admin's browser, or this side"
     )
     asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
 

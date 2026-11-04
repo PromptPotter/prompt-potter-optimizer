@@ -21,6 +21,9 @@ from promptpotter.shared.identity import (
 )
 
 SESSION_COOKIE_NAME = "promptpotter_session"
+# The browser the box's admin signed in from, on the parent domain, so the public site's visit log
+# and this app's own count it as the owner rather than a visitor. It grants nothing.
+OWNER_DEVICE_COOKIE_NAME = "pp-self"
 
 
 def resolve_access_state(email: str | None, bundle: IdentityBundle) -> AccessState:

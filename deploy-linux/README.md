@@ -306,6 +306,11 @@ nothing answered, so a served sign-in code is never written), for 90 days. The d
 visitors by country, and is kept by date in `site_records/app_visit_digests.jsonl`. It rings only
 when a scanner's probe was answered.
 
+**Your own browser is never a visitor.** Signing in as `HOST_ADMIN_EMAIL` leaves a `pp-self` cookie
+on the parent domain (`app.example.com` → `example.com`). This app's record skips that browser
+signed out, and the public site flags its visits `self`, so the morning briefing never counts you.
+`?self=1` on any site page marks a browser that never signs in; `?self=0` takes the mark off.
+
 | You send | Effect |
 |---|---|
 | `/block <email>` · `/unblock <email>` · `/blocked` | Withdraw access (every command refused from the next request), give it back, list. |

@@ -6,9 +6,11 @@ import asyncio
 import ipaddress
 
 from starlette.datastructures import Headers
+from starlette.requests import cookie_parser
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application.app_visits import keep_visit
+from promptpotter.presentation.api.middleware.oidc import OWNER_DEVICE_COOKIE_NAME
 from promptpotter.shared.errors import graceful
 
 _SITE_RECORDS = "/api/v1/site-records/"
@@ -27,6 +29,9 @@ def _kept(scope: Scope, status: int) -> bool:
     path: str = scope.get("path", "")
     if scope.get("state", {}).get("identity_ctx") is not None:
         # A signed-in person's requests are their own trail's.
+        return False
+    if cookie_parser(Headers(scope=scope).get("cookie", "")).get(OWNER_DEVICE_COOKIE_NAME):
+        # The admin's own browser, signed out.
         return False
     if path.startswith(_SITE_RECORDS) and status < 400:
         # The website's own sender, holding its token.

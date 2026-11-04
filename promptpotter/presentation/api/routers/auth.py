@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import logging
 import secrets
 from typing import Annotated
@@ -54,6 +55,7 @@ from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
 )
 from promptpotter.presentation.api.middleware.oidc import (
+    OWNER_DEVICE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     identity_of_session,
     resolve_access_state,
@@ -79,6 +81,8 @@ auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 # `provider.state.nonce` of the sign-in this browser started; the callback honours no other.
 OAUTH_FLOW_COOKIE_NAME = "promptpotter_oauth_flow"
 _OAUTH_FLOW_TTL_S = 600
+# The longest a browser keeps a cookie; each of the admin's sign-ins renews it.
+_OWNER_DEVICE_TTL_S = 400 * 24 * 60 * 60
 
 
 class ConnectedAccount(StrictModel):
@@ -153,6 +157,32 @@ def _set_auth_cookie(
         value=value,
         max_age=max_age,
         httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        path="/",
+    )
+
+
+def _parent_domain(host: str) -> str | None:
+    try:
+        ipaddress.ip_address(host)
+        return None
+    except ValueError:
+        labels = host.split(".")
+        return ".".join(labels[1:]) if len(labels) > 2 else None
+
+
+def _mark_owner_device(response: Response, request: Request) -> None:
+    """On the parent domain (`app.example.com` → `example.com`), where the public site reads it.
+
+    Script-readable, because the site's `?self=0` takes it off. A bare name or an address keeps it on
+    this host.
+    """
+    response.set_cookie(
+        key=OWNER_DEVICE_COOKIE_NAME,
+        value="1",
+        max_age=_OWNER_DEVICE_TTL_S,
+        domain=_parent_domain(request.url.hostname or ""),
         secure=request.url.scheme == "https",
         samesite="lax",
         path="/",
@@ -237,9 +267,10 @@ async def callback(
     # A blocked account still gets a session: the session seam empties its capabilities per request.
     user_id = derive_user_id(identity.issuer, identity.subject)
     access_state = resolve_access_state(identity.email, bundle)
+    host_admin = _is_declared_host_admin(identity.email, identity.issuer)
     if access_state == "blocked":
         logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
-    elif _is_declared_host_admin(identity.email, identity.issuer):
+    elif host_admin:
         # The marker names the box's own tenant, so who writes it is declared, never inferred from arrival order.
         maybe_claim_default(
             projects_root=default_projects_root(),
@@ -286,6 +317,8 @@ async def callback(
         response, request, key=SESSION_COOKIE_NAME, value=session_id, max_age=60 * 60 * 24 * 7
     )
     response.delete_cookie(OAUTH_FLOW_COOKIE_NAME, path="/")
+    if host_admin:
+        _mark_owner_device(response, request)
     return response
 
 
