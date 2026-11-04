@@ -15,6 +15,7 @@ from promptpotter.application import optimizers
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.domain.said import Tone
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -170,11 +171,13 @@ class CouplingSeverityInfo(NamedTuple):
     tone: Tone
 
 
-COUPLING_SEVERITY_INFO: dict[CouplingSeverity, CouplingSeverityInfo] = {
-    "collision": CouplingSeverityInfo("danger"),
-    "inert": CouplingSeverityInfo("attention"),
-    "info": CouplingSeverityInfo("quiet"),
-}
+COUPLING_SEVERITY_INFO: Worded[CouplingSeverity, CouplingSeverityInfo] = Worded(
+    {
+        "collision": CouplingSeverityInfo("danger"),
+        "inert": CouplingSeverityInfo("attention"),
+        "info": CouplingSeverityInfo("quiet"),
+    }
+)
 
 
 @dataclass(frozen=True)

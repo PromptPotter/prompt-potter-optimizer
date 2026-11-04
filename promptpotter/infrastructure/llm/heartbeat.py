@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def waiting_on(client: LLMClientBase, model: str | None, *, role: str) -> str:
+def silence_detail(client: LLMClientBase, model: str | None, *, role: str) -> str:
     name = model or "(unnamed)"
     held = client.pushback(model) if model else None
     if held is not None and held.since is not None:
@@ -30,7 +30,9 @@ def waiting_on(client: LLMClientBase, model: str | None, *, role: str) -> str:
 
 
 HEARTBEAT_INTERVAL_S = 10.0
-"""`webapp/lib/format.ts::fmtGap` derives its threshold from this: change one, re-read the other."""
+"""How often an open call beats. `runtime_flags.py::RECENT_STEP_S` and `WEDGED_AFTER_S` are
+counted in beats; `webapp/lib/format.ts::fmtGap` reads the served `RECENT_STEP_S`, never this."""
+assert SUSPEND_GRACE_S > HEARTBEAT_INTERVAL_S, "a late tick would read as a suspend"
 
 
 async def heartbeat(

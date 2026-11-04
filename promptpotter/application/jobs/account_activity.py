@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
@@ -9,21 +9,32 @@ from promptpotter.domain.spend import KEY_SOURCE_LABELS, bill_is_floor, calls_ra
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import UsageRow, account_usage
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.worded import Worded
 
 ActivityWindow = Literal["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]
 ActivityGroupBy = Literal["model", "api_key"]
 
-_WINDOW_SECONDS: dict[ActivityWindow, int] = {
-    "15m": 15 * 60,
-    "30m": 30 * 60,
-    "1h": 60 * 60,
-    "3h": 3 * 60 * 60,
-    "1d": 24 * 60 * 60,
-    "2d": 2 * 24 * 60 * 60,
-    "1w": 7 * 24 * 60 * 60,
-    "1mo": 30 * 24 * 60 * 60,
-    "1y": 365 * 24 * 60 * 60,
-}
+
+class ActivityWindowInfo(NamedTuple):
+    label: str
+    seconds: int
+
+
+_DAY_S = 24 * 60 * 60
+#: Every window the activity read takes, in pick order.
+ACTIVITY_WINDOW_INFO: Worded[ActivityWindow, ActivityWindowInfo] = Worded(
+    {
+        "15m": ActivityWindowInfo("Past 15 min", 15 * 60),
+        "30m": ActivityWindowInfo("Past 30 min", 30 * 60),
+        "1h": ActivityWindowInfo("Past hour", 60 * 60),
+        "3h": ActivityWindowInfo("Past 3 hours", 3 * 60 * 60),
+        "1d": ActivityWindowInfo("Past day", _DAY_S),
+        "2d": ActivityWindowInfo("Past 2 days", 2 * _DAY_S),
+        "1w": ActivityWindowInfo("Past week", 7 * _DAY_S),
+        "1mo": ActivityWindowInfo("Past month", 30 * _DAY_S),
+        "1y": ActivityWindowInfo("Past year", 365 * _DAY_S),
+    }
+)
 _N_BUCKETS = 30
 
 
@@ -95,7 +106,7 @@ def _peak[N: (int, float)](totals: list[N]) -> N | None:
 def account_activity(
     stores: Stores, *, window: ActivityWindow, group_by: ActivityGroupBy
 ) -> ActivityResponse:
-    span_s = _WINDOW_SECONDS[window]
+    span_s = ACTIVITY_WINDOW_INFO[window].seconds
     until = time.time()
     since = until - span_s
     width = span_s / _N_BUCKETS

@@ -109,6 +109,8 @@ def _top_level_defs(tree: ast.Module) -> list[tuple[str, ast.stmt]]:
         elif isinstance(stmt, ast.Assign | ast.AnnAssign):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             defs.extend((t.id, stmt) for t in targets if isinstance(t, ast.Name))
+        elif isinstance(stmt, ast.TypeAlias):
+            defs.append((stmt.name.id, stmt))
     return defs
 
 

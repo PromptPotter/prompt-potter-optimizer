@@ -33,7 +33,7 @@ export const FAMILIES: Record<FamilyId, Family> = {
   node: { label: "Node", pane: (key) => <NodePane nodeKey={key} /> },
   files: { label: "Files", pane: () => <FilesPane /> },
   compare: { label: "Compare", pane: () => <ComparePane /> },
-  account: { label: "Account", pane: (key) => <AccountView section={key} /> },
+  account: { label: "Account", pane: (key) => <AccountView tab={key} /> },
   campaigns: { label: "Campaigns", pane: null },
 };
 

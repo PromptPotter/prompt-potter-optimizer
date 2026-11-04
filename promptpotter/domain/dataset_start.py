@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 
 from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.worded import Worded
 
 
 class StartBlock(StrEnum):
@@ -17,14 +18,16 @@ class StartBlock(StrEnum):
     BACKEND_UNREACHABLE = "backend_unreachable"
 
 
-START_BLOCK_WORDS: dict[StartBlock, str] = {
-    StartBlock.VERIFIER_GRADED: "Each sample is graded by running a verifier rather than by a "
-    "labelled answer, so it is launched from the command line, not from here.",
-    StartBlock.EMPTY: "It holds no row with both a query and an answer.",
-    StartBlock.MISSING_EXTRA: "It runs through a Python extra this install lacks.",
-    StartBlock.UNREADABLE: "Its samples could not be read on this install.",
-    StartBlock.BACKEND_UNREACHABLE: "Its backend is not answering; it opens once the backend is up.",
-}
+START_BLOCK_WORDS: Worded[StartBlock, str] = Worded(
+    {
+        StartBlock.VERIFIER_GRADED: "Each sample is graded by running a verifier rather than by a "
+        "labelled answer, so it is launched from the command line, not from here.",
+        StartBlock.EMPTY: "It holds no row with both a query and an answer.",
+        StartBlock.MISSING_EXTRA: "It runs through a Python extra this install lacks.",
+        StartBlock.UNREADABLE: "Its samples could not be read on this install.",
+        StartBlock.BACKEND_UNREACHABLE: "Its backend is not answering; it opens once the backend is up.",
+    }
+)
 assert START_BLOCK_WORDS.keys() == set(StartBlock)
 
 

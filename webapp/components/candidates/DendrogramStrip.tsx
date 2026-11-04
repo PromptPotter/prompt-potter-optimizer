@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
-import { barValueLabel, type DisplayMetric } from "@/lib/derivations";
+import { barValueLabel } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/api/types.generated";
 import { cssPct, PLACEHOLDER } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";

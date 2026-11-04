@@ -1,5 +1,6 @@
 import type { MeasuredUnit, VerificationMark } from "@/lib/api/types";
-import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
+import { barLevel, barStarted } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/api/types.generated";
 import { unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 

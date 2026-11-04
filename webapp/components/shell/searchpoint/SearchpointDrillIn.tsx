@@ -1,16 +1,20 @@
 import type { ReactNode } from "react";
 import type { ArmReading, VerificationMark } from "@/lib/api/types";
-import { READING_STATE_INFO } from "@/lib/api/types.generated";
+import {
+  PREFIX_STATE_TITLES,
+  READING_STATE_INFO,
+  type ReadingState,
+} from "@/lib/api/types.generated";
 import type { NodeSchemaReading } from "@/lib/types";
 import { NOT_SEPARABLE, readPaired, type ObserveConfig } from "@/lib/derivations";
-import { TERMS } from "@/lib/terms";
-import { Term } from "@/components/ui";
+import { Said, Term } from "@/components/ui";
 import {
   fmtLiftBand,
   fmtPct1,
   fmtThetaSe,
   fmtUnit,
   PLACEHOLDER,
+  sideTone,
 } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 
@@ -76,7 +80,7 @@ export function SearchpointDrillIn({
                 hint="This same searchpoint on the held-out bench set: questions no round of the search ever read, so no candidate was chosen on them. A different set of questions from the accuracy above, so the two rates are not differenced. Any bench lift is against the ORIGIN, not the parent."
                 v={
                   benchPass?.failed_as != null
-                    ? `failed · ${READING_STATE_INFO[benchPass.failed_as].sentence}`
+                    ? <FailedPass state={benchPass.failed_as} />
                     : benchPass != null
                     ? `${fmtPct1(benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
@@ -106,7 +110,7 @@ export function SearchpointDrillIn({
                     {paired.estimate.side !== "spans" ? (
                       " clears 0"
                     ) : (
-                      <span className="l4-eff-flat"> — {NOT_SEPARABLE}</span>
+                      <span className={sideTone(null)}> — {NOT_SEPARABLE}</span>
                     )}
                   </>
                 }
@@ -139,11 +143,15 @@ export function SearchpointDrillIn({
                 v={`${fmtUnit("tokens", reading.tokens.input)} in · ${fmtUnit("tokens", reading.tokens.output)} out${
                   reading.panel.cached ? ` · ${reading.panel.cached} replayed` : ""
                 }`}
-                hint={TERMS.cache_replayed}
+                hint={PREFIX_STATE_TITLES.replayed}
               />
             )}
             {reading.prefix != null && (
-              <Fact k="prefix" v={reading.prefix.badge} hint={TERMS.cache_prefix} />
+              <Fact
+                k="prefix"
+                v={reading.prefix.badge}
+                hint={PREFIX_STATE_TITLES[reading.prefix.state]}
+              />
             )}
           </>
         )}
@@ -152,6 +160,12 @@ export function SearchpointDrillIn({
       {actions && <div className="inspector-actions">{actions}</div>}
     </>
   );
+}
+
+// A pass that read nothing, as its served row words it: a fault sounds, any other reason stays quiet.
+function FailedPass({ state }: { state: ReadingState }) {
+  const { label, sentence, fault } = READING_STATE_INFO[state];
+  return <Said tone={fault ? "danger" : "quiet"} label={label} sub={sentence} />;
 }
 
 // The 95% band, blank where the served reading carries none.

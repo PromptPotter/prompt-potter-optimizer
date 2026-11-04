@@ -9,7 +9,7 @@ from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, Bench
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.spend import CeilingMeter
+from promptpotter.domain.spend import Budget, CeilingMeter, campaign_cap_lines, metered_line
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verify_pass import VerifyPass, VerifyReading, VerifyStrategy
 
@@ -161,6 +161,23 @@ class RunSpendView(FrozenModel):
     # This cycle's part of the caps, what its run's book bound at the stop.
     usd_share: float | None
     token_share: int | None
+
+    def meter_lines(self) -> list[str]:
+        """The metered line, then the cap lines beside it."""
+        cap = Budget(usd=self.usd_cap, tokens=self.token_cap)
+        return [
+            metered_line(
+                self.meter,
+                metered=Budget.amount(self.metered_usd, self.metered_tokens),
+                cap=cap,
+                share=Budget(usd=self.usd_share, tokens=self.token_share),
+            ),
+            *campaign_cap_lines(
+                self.meter,
+                campaign=Budget.amount(self.campaign_metered_usd, self.campaign_metered_tokens),
+                cap=cap,
+            ),
+        ]
 
 
 class RoundCompleteView(FrozenModel):

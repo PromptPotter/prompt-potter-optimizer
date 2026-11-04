@@ -18,15 +18,18 @@ from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.identity import Principal
+from promptpotter.shared.worded import Worded
 
 SubjectKind = Literal["campaign", "course", "candidate"]
 
 _SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "course": 2, "candidate": 3}
-SUBJECT_KIND_LABELS: dict[SubjectKind, str] = {
-    "campaign": "origin",
-    "course": "branch head",
-    "candidate": "searchpoint",
-}
+SUBJECT_KIND_LABELS: Worded[SubjectKind, str] = Worded(
+    {
+        "campaign": "origin",
+        "course": "branch head",
+        "candidate": "searchpoint",
+    }
+)
 assert SUBJECT_KIND_LABELS.keys() == _SUBJECT_ARITY.keys()
 
 

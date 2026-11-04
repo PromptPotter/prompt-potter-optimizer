@@ -29,13 +29,21 @@ from promptpotter.domain.round_health import HEALTH_GRADE_INFO
 from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.said import Said, pinned
+from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import anchored_criterion_dials
-from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
+from promptpotter.domain.spend import (
+    Budget,
+    CeilingMeter,
+    MeteredSpend,
+    campaign_cap_lines,
+    metered_line,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardFacts,
     LiveDashboardState,
+    WaitingOn,
 )
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_state,
@@ -50,6 +58,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import duration_words
+from promptpotter.shared.worded import Worded
 
 
 class WarmingDashboard(StrictModel):
@@ -95,22 +104,24 @@ LookaheadWord = Literal[
     "depth_one",
     "depth_many",
 ]
-LOOKAHEAD_WORDS: dict[LookaheadWord, str] = {
-    "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to "
-    "overlap.",
-    "settled": "not available now",
-    "no_further_cell": "holds no further cell",
-    "more_affordable": "more affordable",
-    "holds_every_round": "Every round, scoring holds as many calls as the stop rules allow, up to "
-    "{ceiling}. A cut discards at most one call. The measurement is unchanged and the cycle is "
-    "NOT marked babysat.",
-    "holds_this_round": "Runs this round's scoring with this many calls in flight, up to "
-    "{pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged "
-    "and the cycle is NOT marked babysat.",
-    "discarded": "{discards} discarded so far.",
-    "depth_one": "One at a time",
-    "depth_many": "Hold {cells} in flight",
-}
+LOOKAHEAD_WORDS: Worded[LookaheadWord, str] = Worded(
+    {
+        "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to "
+        "overlap.",
+        "settled": "not available now",
+        "no_further_cell": "holds no further cell",
+        "more_affordable": "more affordable",
+        "holds_every_round": "Every round, scoring holds as many calls as the stop rules allow, up to "
+        "{ceiling}. A cut discards at most one call. The measurement is unchanged and the cycle is "
+        "NOT marked babysat.",
+        "holds_this_round": "Runs this round's scoring with this many calls in flight, up to "
+        "{pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged "
+        "and the cycle is NOT marked babysat.",
+        "discarded": "{discards} discarded so far.",
+        "depth_one": "One at a time",
+        "depth_many": "Hold {cells} in flight",
+    }
+)
 
 
 class LookaheadDepth(StrictModel):
@@ -283,14 +294,15 @@ class ServedDashboard(DashboardFacts):
     spend_metered_by_round: dict[str, MeteredSpend] | None = Field(
         description="`spend_metered` per round, in round order."
     )
-    campaign_metered_usd: float | None = Field(
-        description="What the campaign's ceiling has counted in its meter, every cycle of it "
-        "once, deleted ones included — the figure `run_limits.budget.usd` binds, of which "
-        "`spend_metered` is this cycle's own. Null on a replay and where the manifest is gone."
+    metered_line: str | None = Field(
+        description="This cycle's spend in the campaign's meter, capped or not, a replay included "
+        "— `domain/spend.py::metered_line`, the CLI's stop line; null where the manifest is gone."
     )
-    campaign_metered_tokens: int | None = Field(
-        description="The same count in billed tokens, the figure `run_limits.budget.tokens` "
-        "binds; null with `campaign_metered_usd`."
+    cap_lines: list[str] = Field(
+        description="Beside `metered_line`: what the campaign's ceiling has counted in its meter, "
+        "every cycle of it once and deleted ones included, against each cap it bounds — "
+        "`domain/spend.py::campaign_cap_lines`; empty where nothing is capped, on a replay and "
+        "where the manifest is gone."
     )
     allotment: Budget | None = Field(
         description="This cycle's share of the campaign's ceiling — the most it may have metered "
@@ -308,6 +320,10 @@ class ServedDashboard(DashboardFacts):
         "replay."
     )
     round_axis: RoundAxis
+    held_call: Said | None = Field(
+        description="The call holding the walk and for how long (`held_call`); null until a call "
+        "has run past `CALL_HOLDS_AFTER_S`, and where its cell is unknown."
+    )
     said: Said | None = Field(
         description="The run's pinned line (`run_said`), its producer among the rows; null where "
         "nothing needs the operator."
@@ -323,6 +339,23 @@ def producer_row(producer: ProducerReading) -> Said:
         tone=info.tone,
         label=info.label,
         detail=None if info.detail is None else info.detail + clocked,
+    )
+
+
+def held_call(producer: ProducerReading, waiting: WaitingOn | None) -> Said | None:
+    """THE holding predicate: the open call has run long (`call_holds`) AND its cell is known."""
+    if not producer.call_holds or producer.open_for_s is None or waiting is None:
+        return None
+    held = duration_words(producer.open_for_s)
+    holder = "the pass" if waiting.label is None else waiting.label
+    # The label is the fact that moves, short enough for a phone row; the holder rides `sub`.
+    return Said(
+        key="held_call",
+        tone="attention",
+        label=f"held {held}",
+        sub=holder,
+        detail=f"Waiting {held} on {holder}, sample {sample_tag(waiting.position)}. Calls are taken in "
+        "walk order, so this one holds every call behind it.",
     )
 
 
@@ -482,7 +515,6 @@ def _serve(
         banked["run_limits"] = standing.run_limits
         if not run.producer.appending:
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
-            banked["waiting_on"] = None
             in_flight = allowed = 0
         if standing.orphaned:
             banked["verification"] = [
@@ -528,13 +560,23 @@ def _serve(
             key: MeteredSpend.of(spent, meter)
             for key, spent in sorted(state.spend_by_round.items(), key=lambda kv: int(kv[0]))
         },
-        campaign_metered_usd=None if campaign_metered is None else campaign_metered.usd_amount,
-        campaign_metered_tokens=None if campaign_metered is None else campaign_metered.token_amount,
+        metered_line=None
+        if meter is None
+        else metered_line(
+            meter,
+            metered=state.spend.metered(meter),
+            cap=Budget() if standing is None else standing.run_limits.budget,
+            share=Budget() if standing is None else standing.allotment or Budget(),
+        ),
+        cap_lines=[]
+        if meter is None or standing is None or campaign_metered is None
+        else campaign_cap_lines(meter, campaign=campaign_metered, cap=standing.run_limits.budget),
         allotment=None if standing is None else standing.allotment,
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
         walk=_walk(state, hop, live=live),
         round_axis=axis,
+        held_call=held_call(run.producer, state.waiting_on if live else None),
         said=run_said(
             state.error,
             run.run_phase,

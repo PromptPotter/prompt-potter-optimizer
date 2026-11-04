@@ -9,6 +9,7 @@ from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -189,10 +190,6 @@ PRODUCER_STATE_INFO: dict[ProducerState, ProducerStateInfo] = {
     ProducerState.ABSENT: ProducerStateInfo("quiet", "No producer", None),
 }
 
-# The cell an open call holds (`WaitingOn`): `pass` stands for an arm where none owns it.
-type WaitingOnWord = Literal["pass", "sample"]
-WAITING_ON_WORDS: dict[WaitingOnWord, str] = {"pass": "pass", "sample": "sample"}
-
 _missing_producer_info = set(ProducerState) - set(PRODUCER_STATE_INFO)
 if _missing_producer_info:
     raise RuntimeError(
@@ -217,13 +214,8 @@ class ProducerReading(FrozenModel):
         description="Seconds since the last ledger record that was not a heartbeat; null unless "
         "appending."
     )
-    open_for_s: float | None = Field(
-        description="Seconds the cell the round waits on has been open; null where none is."
-    )
-    call_holds: bool = Field(
-        description="That cell has been open past `CALL_HOLDS_AFTER_S`: calls are taken in walk "
-        "order, so it is what holds every call behind it."
-    )
+    # Off the wire: its one reader is the served `held_call`, which words it.
+    open_for_s: float | None = Field(None, exclude=True)
 
     @classmethod
     def of(
@@ -242,8 +234,13 @@ class ProducerReading(FrozenModel):
             appending=appending,
             silent_for_s=silent_s,
             open_for_s=open_s,
-            call_holds=open_s is not None and open_s >= CALL_HOLDS_AFTER_S,
         )
+
+    @property
+    def call_holds(self) -> bool:
+        """The waited-on cell has been open past `CALL_HOLDS_AFTER_S`: calls are taken in walk order,
+        so it holds every call behind it."""
+        return self.open_for_s is not None and self.open_for_s >= CALL_HOLDS_AFTER_S
 
 
 # Read by the served admission and the refusing command alike (``CyclePayload.inner_refusal``).
@@ -340,59 +337,61 @@ class RunPhaseInfo(NamedTuple):
 
 QUEUE_STARTS_ITSELF = "it starts by itself when a slot frees"
 
-RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
-    RunPhase.QUEUED: RunPhaseInfo(
-        "Queued",
-        False,
-        False,
-        False,
-        2,
-        None,
-        f"Queued — {QUEUE_STARTS_ITSELF}.",
-        "waiting for a machine slot",
-    ),
-    RunPhase.STARTING: RunPhaseInfo(
-        "Starting",
-        False,
-        False,
-        False,
-        1,
-        None,
-        "Starting up…",
-        "coming up",
-    ),
-    RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", ""),
-    # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
-    RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", "", ""),
-    # Asked to pause, an attached producer runs on to its checkpoint.
-    RunPhase.PAUSED: RunPhaseInfo(
-        "Paused",
-        False,
-        False,
-        False,
-        2,
-        "resume",
-        "",
-        "stopping at its next checkpoint",
-    ),
-    # Blocked on the operator, so it leads the dock.
-    RunPhase.GATE: RunPhaseInfo(
-        "Holding",
-        False,
-        False,
-        True,
-        0,
-        None,
-        "Holding for you — the chat says what it waits on.",
-        "awaiting your decision",
-    ),
-    RunPhase.DETACHED: RunPhaseInfo(
-        "Detached", False, False, False, 3, "start", "", "producer gone"
-    ),
-    RunPhase.TERMINAL: RunPhaseInfo(
-        "Ended", False, True, False, 3, "start", "", "writing its last files"
-    ),
-}
+RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
+    {
+        RunPhase.QUEUED: RunPhaseInfo(
+            "Queued",
+            False,
+            False,
+            False,
+            2,
+            None,
+            f"Queued — {QUEUE_STARTS_ITSELF}.",
+            "waiting for a machine slot",
+        ),
+        RunPhase.STARTING: RunPhaseInfo(
+            "Starting",
+            False,
+            False,
+            False,
+            1,
+            None,
+            "Starting up…",
+            "coming up",
+        ),
+        RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", ""),
+        # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
+        RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", "", ""),
+        # Asked to pause, an attached producer runs on to its checkpoint.
+        RunPhase.PAUSED: RunPhaseInfo(
+            "Paused",
+            False,
+            False,
+            False,
+            2,
+            "resume",
+            "",
+            "stopping at its next checkpoint",
+        ),
+        # Blocked on the operator, so it leads the dock.
+        RunPhase.GATE: RunPhaseInfo(
+            "Holding",
+            False,
+            False,
+            True,
+            0,
+            None,
+            "Holding for you — the chat says what it waits on.",
+            "awaiting your decision",
+        ),
+        RunPhase.DETACHED: RunPhaseInfo(
+            "Detached", False, False, False, 3, "start", "", "producer gone"
+        ),
+        RunPhase.TERMINAL: RunPhaseInfo(
+            "Ended", False, True, False, 3, "start", "", "writing its last files"
+        ),
+    }
+)
 
 _missing_phase_info = set(RunPhase) - set(RUN_PHASE_INFO)
 if _missing_phase_info:
@@ -465,17 +464,20 @@ class DashboardState(enum.StrEnum):
     STOPPED = "stopped"
 
 
-DASHBOARD_STATE_PAUSE_WORDS: dict[DashboardState, str] = {
-    DashboardState.INIT: "starting up",
-    DashboardState.ORIGIN: "scoring origin",
-    DashboardState.PROPOSING: "generating candidates",
-    DashboardState.SCORING: "scoring samples",
-    DashboardState.BETWEEN_SAMPLES: "scoring samples",
-    DashboardState.BETWEEN_CANDIDATES: "scoring samples",
-    DashboardState.OPTIMIZER_STEP: "",
-    DashboardState.BENCH: "grading on the bench set",
-    DashboardState.STOPPED: "",
-}
+#: What a pause waits on, every state worded; a served `optimizer_step` names its step in place.
+DASHBOARD_STATE_PAUSE_WORDS: Worded[DashboardState, str] = Worded(
+    {
+        DashboardState.INIT: "starting up",
+        DashboardState.ORIGIN: "scoring origin",
+        DashboardState.PROPOSING: "generating candidates",
+        DashboardState.SCORING: "scoring samples",
+        DashboardState.BETWEEN_SAMPLES: "scoring samples",
+        DashboardState.BETWEEN_CANDIDATES: "scoring samples",
+        DashboardState.OPTIMIZER_STEP: "the optimizer's step",
+        DashboardState.BENCH: "grading on the bench set",
+        DashboardState.STOPPED: "the current round",
+    }
+)
 assert set(DASHBOARD_STATE_PAUSE_WORDS) == set(DashboardState)
 
 
@@ -517,270 +519,286 @@ class StopReasonInfo(NamedTuple):
 
 # `halts_mid_round` follows WHERE a stop is raised, never severity. `next_step` states the fact past
 # the stop in every surface's words, naming no verb or file; `cli_command` is the terminal's spelling.
-STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
-    StopReason.PERFECT: StopReasonInfo(
-        "Perfect score",
-        StopOutcome.SUCCESS,
-        StopCategory.SEARCH,
-        False,
-        False,
-        "This is one round's panel, not the dataset: verify the winner on more cells.",
-        True,
-        "`verify`",
-    ),
-    StopReason.ROUNDS_BUDGET: StopReasonInfo(
-        "Rounds budget reached",
-        StopOutcome.SUCCESS,
-        StopCategory.LIMIT,
-        False,
-        False,
-        "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; "
-        "else read the review.",
-        True,
-        "`set-limits --max-rounds <more>`, then `resume`; else read `review.md`",
-    ),
-    StopReason.TARGET_HIT: StopReasonInfo(
-        "Target reached", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
-    ),
-    StopReason.LIVES_EXHAUSTED: StopReasonInfo(
-        "Out of lives", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
-    ),
-    StopReason.HARD_CAP: StopReasonInfo(
-        "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True, ""
-    ),
-    StopReason.DIAG_COMPLETE: StopReasonInfo(
-        "Diagnostic complete", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
-    ),
-    StopReason.CONVERGED: StopReasonInfo(
-        "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
-    ),
-    StopReason.OPTIMIZER_EXHAUSTED: StopReasonInfo(
-        "Optimizer out of moves",
-        StopOutcome.SUCCESS,
-        StopCategory.SEARCH,
-        False,
-        False,
-        "",
-        True,
-        "",
-    ),
-    StopReason.REBASED: StopReasonInfo(
-        "Rebased to fork", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", False, ""
-    ),
-    StopReason.PAUSED: StopReasonInfo(
-        "Paused",
-        StopOutcome.PAUSED,
-        StopCategory.OPERATOR,
-        True,
-        False,
-        "Resuming picks it up at the next checkpoint.",
-        False,
-        "`resume`",
-    ),
-    # Unlike PAUSED the round is discarded, not persisted partial: `resume` alone re-buys the cut.
-    StopReason.PANEL_CUT: StopReasonInfo(
-        "Panel cut by a declared bound",
-        StopOutcome.PAUSED,
-        StopCategory.LIMIT,
-        False,
-        False,
-        "Cells were cut at their time bound. Give them room (the connector's cell envelope, or "
-        "the backend deadline their rows name) before resuming, or turn the panel gate off to "
-        "elect on the holed panel.",
-        False,
-        "`Connector.cell_envelope_s` or `optimization.panel_gate: off`, then `resume`",
-    ),
-    StopReason.ADAPTER_OWED: StopReasonInfo(
-        "Adapter output owed",
-        StopOutcome.PAUSED,
-        StopCategory.FAILURE,
-        True,
-        False,
-        "The round before's adapter landed nothing in its re-runs; resuming re-runs it before "
-        "the next walk.",
-        False,
-        "`resume`",
-    ),
-    StopReason.OPTIMIZER_ABORT: StopReasonInfo(
-        "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True, ""
-    ),
-    # The counter is CUMULATIVE across resume: a new ceiling must clear what it already counted.
-    StopReason.SPEND_BUDGET: StopReasonInfo(
-        "Spend budget reached",
-        StopOutcome.HALTED,
-        StopCategory.BUDGET,
-        True,
-        False,
-        "The spend cap counts every launch so far: raise it above what it already counts, then "
-        "resume.",
-        True,
-        "`set-limits --max-usd <above what the cap already counts>`, then `resume`",
-    ),
-    StopReason.TOKEN_BUDGET: StopReasonInfo(
-        "Token budget reached",
-        StopOutcome.HALTED,
-        StopCategory.BUDGET,
-        True,
-        False,
-        "Raise the token cap above what is already spent, then resume.",
-        True,
-        "`set-limits --max-tokens <above what is already spent>`, then `resume`",
-    ),
-    # Not SPEND_BUDGET: `set-limits` moves the campaign's ceiling, never the host's coupon.
-    StopReason.HOST_ALLOWANCE: StopReasonInfo(
-        "Host allowance used up",
-        StopOutcome.HALTED,
-        StopCategory.BUDGET,
-        True,
-        False,
-        "The box's allowance for this account is spent: a resume sends on the account's own key, "
-        "and a backend's sends still run on the box's key.",
-        True,
-        "`resume`",
-    ),
-    # A cell still open at the edge was cut; each launch's clock starts afresh.
-    StopReason.WALL_CLOCK: StopReasonInfo(
-        "Wall clock reached",
-        StopOutcome.HALTED,
-        StopCategory.BUDGET,
-        True,
-        False,
-        "Resuming runs another launch under the same clock; the run limits move it.",
-        True,
-        "`resume`; `set-limits --max-wall-clock` moves it",
-    ),
-    StopReason.ORIGIN_GATE: StopReasonInfo(
-        "Origin gate (unhealthy origin)",
-        StopOutcome.HALTED,
-        StopCategory.OPERATOR,
-        False,
-        False,
-        "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the "
-        "gate grades it again; an origin still unhealthy when resumed passes on that resume. An "
-        "edited origin is a new campaign or an operator-steered fork at round 0: resuming "
-        "refuses it.",
-        True,
-        "`resume` once the backend answers; an edited origin is `new <dataset>` or "
-        "`resume --steer NODE.PARAM=VALUE`",
-    ),
-    StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
-        "Backend unreachable",
-        StopOutcome.HALTED,
-        StopCategory.EXTERNAL,
-        True,
-        False,
-        "The unreached cell is a hole, not a score: restore the backend or the network it "
-        "needs, then resuming re-measures it.",
-        True,
-        "`resume`",
-    ),
-    # Not SPEND_BUDGET: that ceiling is ours and `set-limits` moves it. This one is the provider's.
-    StopReason.PROVIDER_CREDIT: StopReasonInfo(
-        "Provider out of credit",
-        StopOutcome.HALTED,
-        StopCategory.EXTERNAL,
-        True,
-        False,
-        "Raise the provider key's limit or top up its credit, then resume; a refused cell is a "
-        "hole it re-measures.",
-        True,
-        "`resume`",
-    ),
-    # Not BACKEND_UNREACHABLE: the provider answered, with a refusal the run already waited out.
-    StopReason.PROVIDER_THROTTLED: StopReasonInfo(
-        "Provider rate-limited",
-        StopOutcome.HALTED,
-        StopCategory.EXTERNAL,
-        True,
-        False,
-        "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait "
-        "out its quota, then resume; the refused cell is a hole it re-measures.",
-        True,
-        "`route_order` names the host; then `resume`",
-    ),
-    # Not BACKEND_UNREACHABLE: the send was refused before it left, for want of a price.
-    StopReason.PRICE_LIST_UNREACHABLE: StopReasonInfo(
-        "Price list unreachable",
-        StopOutcome.HALTED,
-        StopCategory.EXTERNAL,
-        True,
-        False,
-        "Nothing was sent and the backend is untouched: the gateway's host price list did not "
-        "answer, so no send under the USD ceiling could be priced. Resume once it answers; a "
-        "refused cell is a hole it re-measures.",
-        True,
-        "`resume`",
-    ),
-    # Not SPEND_BUDGET: no ceiling was reached; the send has no price to hold.
-    StopReason.NO_RATE: StopReasonInfo(
-        "No rate under the spend cap",
-        StopOutcome.HALTED,
-        StopCategory.BUDGET,
-        True,
-        False,
-        "Nothing was sent: no rate bounds the call, so the dollar cap cannot be enforced for it. "
-        "Run it on a provider and model the rate table prices, or drop the dollar cap and bound "
-        "the run in tokens; then resume.",
-        True,
-        "`nodes.{node}.config`, or `budget: {usd: null, tokens: N}`; then `resume`",
-    ),
-    StopReason.CRASHED: StopReasonInfo(
-        "Crashed",
-        StopOutcome.FAILED,
-        StopCategory.FAILURE,
-        True,
-        True,
-        "The run raised an error it did not expect, and its traceback is kept; resuming re-runs "
-        "from the last closed round.",
-        False,
-        "`resume`; the traceback is `index.json::error.traceback`",
-    ),
-    # Not CRASHED: the run declined the operator's own input (`PayloadInvalidError`).
-    StopReason.INPUT_REFUSED: StopReasonInfo(
-        "Input refused",
-        StopOutcome.FAILED,
-        StopCategory.FAILURE,
-        True,
-        False,
-        "The run declined its input at run init, so nothing was searched. A spend cap under one "
-        "round is raised in the run limits or met by narrowing the round's nodes; then resume.",
-        False,
-        "`set-limits --max-usd`, or narrow `optimization.nodes`; then `resume`",
-    ),
-    # A JOB's ending, never a cycle's: the launch left before it held a run.
-    StopReason.NOT_ADMITTED: StopReasonInfo(
-        "Not admitted", StopOutcome.HALTED, StopCategory.LIMIT, False, False, "", False, ""
-    ),
-    # Declared by the REAPER; mid-round because a vanished process died at an arbitrary point.
-    StopReason.PRODUCER_VANISHED: StopReasonInfo(
-        "Producer vanished", StopOutcome.FAILED, StopCategory.FAILURE, True, False, "", False, ""
-    ),
-    # Like OPTIMIZER_TIMEOUT, caught by TYPE at the round loop: the closed rounds' selection stands.
-    StopReason.RENDER_ERROR: StopReasonInfo(
-        "Render error", StopOutcome.FAILED, StopCategory.FAILURE, True, True, "", True, ""
-    ),
-    StopReason.DIVERGED: StopReasonInfo(
-        "Diverged",
-        StopOutcome.FAILED,
-        StopCategory.FAILURE,
-        False,
-        False,
-        "A recorded decision no longer replays under the edited config: fork here to branch "
-        "under it, or revert the edit to continue.",
-        False,
-        "`resume --fork-on-divergence`, or revert the config edit",
-    ),
-    StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
-        "Optimizer timeout",
-        StopOutcome.FAILED,
-        StopCategory.FAILURE,
-        True,
-        False,
-        "",
-        True,
-        "",
-    ),
-}
+STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
+    {
+        StopReason.PERFECT: StopReasonInfo(
+            "Perfect score",
+            StopOutcome.SUCCESS,
+            StopCategory.SEARCH,
+            False,
+            False,
+            "This is one round's panel, not the dataset: verify the winner on more cells.",
+            True,
+            "`verify`",
+        ),
+        StopReason.ROUNDS_BUDGET: StopReasonInfo(
+            "Rounds budget reached",
+            StopOutcome.SUCCESS,
+            StopCategory.LIMIT,
+            False,
+            False,
+            "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; "
+            "else read the review.",
+            True,
+            "`set-limits --max-rounds <more>`, then `resume`; else read `review.md`",
+        ),
+        StopReason.TARGET_HIT: StopReasonInfo(
+            "Target reached", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
+        ),
+        StopReason.LIVES_EXHAUSTED: StopReasonInfo(
+            "Out of lives", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
+        ),
+        StopReason.HARD_CAP: StopReasonInfo(
+            "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True, ""
+        ),
+        StopReason.DIAG_COMPLETE: StopReasonInfo(
+            "Diagnostic complete",
+            StopOutcome.SUCCESS,
+            StopCategory.SEARCH,
+            False,
+            False,
+            "",
+            True,
+            "",
+        ),
+        StopReason.CONVERGED: StopReasonInfo(
+            "Converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True, ""
+        ),
+        StopReason.OPTIMIZER_EXHAUSTED: StopReasonInfo(
+            "Optimizer out of moves",
+            StopOutcome.SUCCESS,
+            StopCategory.SEARCH,
+            False,
+            False,
+            "",
+            True,
+            "",
+        ),
+        StopReason.REBASED: StopReasonInfo(
+            "Rebased to fork", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", False, ""
+        ),
+        StopReason.PAUSED: StopReasonInfo(
+            "Paused",
+            StopOutcome.PAUSED,
+            StopCategory.OPERATOR,
+            True,
+            False,
+            "Resuming picks it up at the next checkpoint.",
+            False,
+            "`resume`",
+        ),
+        # Unlike PAUSED the round is discarded, not persisted partial: `resume` alone re-buys the cut.
+        StopReason.PANEL_CUT: StopReasonInfo(
+            "Panel cut by a declared bound",
+            StopOutcome.PAUSED,
+            StopCategory.LIMIT,
+            False,
+            False,
+            "Cells were cut at their time bound. Give them room (the connector's cell envelope, or "
+            "the backend deadline their rows name) before resuming, or turn the panel gate off to "
+            "elect on the holed panel.",
+            False,
+            "`Connector.cell_envelope_s` or `optimization.panel_gate: off`, then `resume`",
+        ),
+        StopReason.ADAPTER_OWED: StopReasonInfo(
+            "Adapter output owed",
+            StopOutcome.PAUSED,
+            StopCategory.FAILURE,
+            True,
+            False,
+            "The round before's adapter landed nothing in its re-runs; resuming re-runs it before "
+            "the next walk.",
+            False,
+            "`resume`",
+        ),
+        StopReason.OPTIMIZER_ABORT: StopReasonInfo(
+            "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True, ""
+        ),
+        # The counter is CUMULATIVE across resume: a new ceiling must clear what it already counted.
+        StopReason.SPEND_BUDGET: StopReasonInfo(
+            "Spend budget reached",
+            StopOutcome.HALTED,
+            StopCategory.BUDGET,
+            True,
+            False,
+            "The spend cap counts every launch so far: raise it above what it already counts, then "
+            "resume.",
+            True,
+            "`set-limits --max-usd <above what the cap already counts>`, then `resume`",
+        ),
+        StopReason.TOKEN_BUDGET: StopReasonInfo(
+            "Token budget reached",
+            StopOutcome.HALTED,
+            StopCategory.BUDGET,
+            True,
+            False,
+            "Raise the token cap above what is already spent, then resume.",
+            True,
+            "`set-limits --max-tokens <above what is already spent>`, then `resume`",
+        ),
+        # Not SPEND_BUDGET: `set-limits` moves the campaign's ceiling, never the host's coupon.
+        StopReason.HOST_ALLOWANCE: StopReasonInfo(
+            "Host allowance used up",
+            StopOutcome.HALTED,
+            StopCategory.BUDGET,
+            True,
+            False,
+            "The box's allowance for this account is spent: a resume sends on the account's own key, "
+            "and a backend's sends still run on the box's key.",
+            True,
+            "`resume`",
+        ),
+        # A cell still open at the edge was cut; each launch's clock starts afresh.
+        StopReason.WALL_CLOCK: StopReasonInfo(
+            "Wall clock reached",
+            StopOutcome.HALTED,
+            StopCategory.BUDGET,
+            True,
+            False,
+            "Resuming runs another launch under the same clock; the run limits move it.",
+            True,
+            "`resume`; `set-limits --max-wall-clock` moves it",
+        ),
+        StopReason.ORIGIN_GATE: StopReasonInfo(
+            "Origin gate (unhealthy origin)",
+            StopOutcome.HALTED,
+            StopCategory.OPERATOR,
+            False,
+            False,
+            "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the "
+            "gate grades it again; an origin still unhealthy when resumed passes on that resume. "
+            "An edited origin is a new campaign or an operator-steered fork at round 0: resuming "
+            "refuses it.",
+            True,
+            "`resume` once the backend answers; an edited origin is `new <dataset>` or "
+            "`resume --steer NODE.PARAM=VALUE`",
+        ),
+        StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
+            "Backend unreachable",
+            StopOutcome.HALTED,
+            StopCategory.EXTERNAL,
+            True,
+            False,
+            "The unreached cell is a hole, not a score: restore the backend or the network it "
+            "needs, then resuming re-measures it.",
+            True,
+            "`resume`",
+        ),
+        # Not SPEND_BUDGET: that ceiling is ours and `set-limits` moves it. This one is the provider's.
+        StopReason.PROVIDER_CREDIT: StopReasonInfo(
+            "Provider out of credit",
+            StopOutcome.HALTED,
+            StopCategory.EXTERNAL,
+            True,
+            False,
+            "Raise the provider key's limit or top up its credit, then resume; a refused cell is a "
+            "hole it re-measures.",
+            True,
+            "`resume`",
+        ),
+        # Not BACKEND_UNREACHABLE: the provider answered, with a refusal the run already waited out.
+        StopReason.PROVIDER_THROTTLED: StopReasonInfo(
+            "Provider rate-limited",
+            StopOutcome.HALTED,
+            StopCategory.EXTERNAL,
+            True,
+            False,
+            "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait "
+            "out its quota, then resume; the refused cell is a hole it re-measures.",
+            True,
+            "`route_order` names the host; then `resume`",
+        ),
+        # Not BACKEND_UNREACHABLE: the send was refused before it left, for want of a price.
+        StopReason.PRICE_LIST_UNREACHABLE: StopReasonInfo(
+            "Price list unreachable",
+            StopOutcome.HALTED,
+            StopCategory.EXTERNAL,
+            True,
+            False,
+            "Nothing was sent and the backend is untouched: the gateway's host price list did not "
+            "answer, so no send under the USD ceiling could be priced. Resume once it answers; a "
+            "refused cell is a hole it re-measures.",
+            True,
+            "`resume`",
+        ),
+        # Not SPEND_BUDGET: no ceiling was reached; the send has no price to hold.
+        StopReason.NO_RATE: StopReasonInfo(
+            "No rate under the spend cap",
+            StopOutcome.HALTED,
+            StopCategory.BUDGET,
+            True,
+            False,
+            "Nothing was sent: no rate bounds the call, so the dollar cap cannot be enforced for it. "
+            "Run it on a provider and model the rate table prices, or drop the dollar cap and bound "
+            "the run in tokens; then resume.",
+            True,
+            "`nodes.{node}.config`, or `budget: {usd: null, tokens: N}`; then `resume`",
+        ),
+        StopReason.CRASHED: StopReasonInfo(
+            "Crashed",
+            StopOutcome.FAILED,
+            StopCategory.FAILURE,
+            True,
+            True,
+            "The run raised an error it did not expect, and its traceback is kept; resuming re-runs "
+            "from the last closed round.",
+            False,
+            "`resume`; the traceback is `index.json::error.traceback`",
+        ),
+        # Not CRASHED: the run declined the operator's own input (`PayloadInvalidError`).
+        StopReason.INPUT_REFUSED: StopReasonInfo(
+            "Input refused",
+            StopOutcome.FAILED,
+            StopCategory.FAILURE,
+            True,
+            False,
+            "The run declined its input at run init, so nothing was searched. A spend cap under one "
+            "round is raised in the run limits or met by narrowing the round's nodes; then resume.",
+            False,
+            "`set-limits --max-usd`, or narrow `optimization.nodes`; then `resume`",
+        ),
+        # A JOB's ending, never a cycle's: the launch left before it held a run.
+        StopReason.NOT_ADMITTED: StopReasonInfo(
+            "Not admitted", StopOutcome.HALTED, StopCategory.LIMIT, False, False, "", False, ""
+        ),
+        # Declared by the REAPER; mid-round because a vanished process died at an arbitrary point.
+        StopReason.PRODUCER_VANISHED: StopReasonInfo(
+            "Producer vanished",
+            StopOutcome.FAILED,
+            StopCategory.FAILURE,
+            True,
+            False,
+            "",
+            False,
+            "",
+        ),
+        # Like OPTIMIZER_TIMEOUT, caught by TYPE at the round loop: the closed rounds' selection stands.
+        StopReason.RENDER_ERROR: StopReasonInfo(
+            "Render error", StopOutcome.FAILED, StopCategory.FAILURE, True, True, "", True, ""
+        ),
+        StopReason.DIVERGED: StopReasonInfo(
+            "Diverged",
+            StopOutcome.FAILED,
+            StopCategory.FAILURE,
+            False,
+            False,
+            "A recorded decision no longer replays under the edited config: fork here to branch "
+            "under it, or revert the edit to continue.",
+            False,
+            "`resume --fork-on-divergence`, or revert the config edit",
+        ),
+        StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
+            "Optimizer timeout",
+            StopOutcome.FAILED,
+            StopCategory.FAILURE,
+            True,
+            False,
+            "",
+            True,
+            "",
+        ),
+    }
+)
 
 _missing_stop_info = set(StopReason) - set(STOP_REASON_INFO)
 if _missing_stop_info:

@@ -50,7 +50,8 @@ class User(FrozenModel):
     max_campaigns_per_day: int = Field(default=1000, ge=1)
     demo_mode_enabled: bool = Field(
         default=True,
-        description="Surface the built-in try-and-learn demo dataset in the collection. On by default for new users; toggled in Account → Preferences.",
+        description="Surface the built-in try-and-learn demo dataset in the collection. On by "
+        "default for new users; the account toggles it in its preferences.",
     )
     created_at: str
 

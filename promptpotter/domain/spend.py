@@ -26,6 +26,7 @@ from promptpotter.domain.strict_model import (
 )
 from promptpotter.domain.wire_record import ALWAYS, WireRecord
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     # Type-only: the record's module imports this one for `TokenUsageKind`.
@@ -136,16 +137,18 @@ class TokenAccount(FrozenModel):
 
 PrefixState = Literal["discounted", "cold", "unreported", "replayed"]
 
-PREFIX_STATE_TITLES: dict[PrefixState, str] = {
-    "discounted": "The provider served this share of the input off its own prompt-prefix cache, "
-    "billed at a discount. Unrelated to 📖, which means no provider was reached at all.",
-    "cold": "The provider reported its cache accounting and served none of this input from it — "
-    "the prefix was cold. A measurement, not a missing one.",
-    "unreported": "This provider reported no cache accounting, so whether it collected the prefix "
-    "is unknown. Not the same as no hit.",
-    "replayed": "Replayed from our own archive — no provider was reached, so there is no discount "
-    "to report.",
-}
+PREFIX_STATE_TITLES: Worded[PrefixState, str] = Worded(
+    {
+        "discounted": "The provider served this share of the input off its own prompt-prefix cache, "
+        "billed at a discount. Unrelated to 📖, which means no provider was reached at all.",
+        "cold": "The provider reported its cache accounting and served none of this input from it — "
+        "the prefix was cold. A measurement, not a missing one.",
+        "unreported": "This provider reported no cache accounting, so whether it collected the prefix "
+        "is unknown. Not the same as no hit.",
+        "replayed": "Replayed from our own archive — no provider was reached, so the cell cost "
+        "nothing and there is no discount to report.",
+    }
+)
 if set(PREFIX_STATE_TITLES) != set(get_args(PrefixState)):
     raise RuntimeError("PREFIX_STATE_TITLES is out of step with PrefixState (domain/spend.py)")
 
@@ -172,22 +175,24 @@ def prefix_reading(share: float | None, *, replayed: bool) -> PrefixReading:
 
 
 # A bucket each, never an exemption: folded into a neighbour, a kind's cost reads as that one's.
-TokenUsageKind = Literal["optimizer", "backend", "judge", "diagnostic", "bench"]
+type TokenUsageKind = Literal["optimizer", "backend", "judge", "diagnostic", "bench"]
 
 #: In DISPLAY ORDER.
-SPEND_KIND_LABELS: dict[TokenUsageKind, str] = {
-    "backend": "Connector",
-    "optimizer": "Optimizer",
-    "judge": "Judge",
-    "diagnostic": "Diagnostic",
-    "bench": "Bench",
-}
-if set(SPEND_KIND_LABELS) != set(get_args(TokenUsageKind)):
+SPEND_KIND_LABELS: Worded[TokenUsageKind, str] = Worded(
+    {
+        "backend": "Connector",
+        "optimizer": "Optimizer",
+        "judge": "Judge",
+        "diagnostic": "Diagnostic",
+        "bench": "Bench",
+    }
+)
+if set(SPEND_KIND_LABELS) != set(get_args(TokenUsageKind.__value__)):
     raise RuntimeError("SPEND_KIND_LABELS is out of step with TokenUsageKind (domain/spend.py)")
 
 # Whose wallet a send drew: the box's key under the account's coupon, or the account's own key.
 KeySource = Literal["host", "user"]
-KEY_SOURCE_LABELS: dict[KeySource, str] = {"host": "host key", "user": "own key"}
+KEY_SOURCE_LABELS: Worded[KeySource, str] = Worded({"host": "host key", "user": "own key"})
 
 
 def draws_coupon(paid_by: KeySource | None) -> bool:
@@ -200,10 +205,12 @@ CeilingMeter = Literal["bill", "search_incurred"]
 
 RATE_PRICED_LABEL = "priced at our rate"
 
-CEILING_METER_LABELS: dict[CeilingMeter, str] = {
-    "bill": f"billed + {RATE_PRICED_LABEL}",
-    "search_incurred": "search incurred",
-}
+CEILING_METER_LABELS: Worded[CeilingMeter, str] = Worded(
+    {
+        "bill": f"billed + {RATE_PRICED_LABEL}",
+        "search_incurred": "search incurred",
+    }
+)
 
 # A pass whose ROLE files its spend, whatever each of its calls would otherwise bank as.
 ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
@@ -324,19 +331,48 @@ def _cap_axis(axis: str, title: str, unit: str, scale: float, step: float) -> Ca
     )
 
 
+type CapAxis = Literal["usd", "tokens", "rounds", "wall_clock_s"]
+
 #: THE run cap axes, on every surface that sets or shows one.
-CAP_AXIS_INFO: dict[str, CapAxisInfo] = {
-    "usd": _cap_axis("usd", "Spend cap", "USD", 1, 0.01),
-    "tokens": _cap_axis("tokens", "Token cap", "tokens", 1, 1000),
-    "rounds": _cap_axis("rounds", "Round cap", "rounds", 1, 1),
-    "wall_clock_s": _cap_axis("wall_clock_s", "Wall-clock cap", "minutes", 60, 5),
-}
-assert list(CAP_AXIS_INFO) == list(Budget.model_fields)
+CAP_AXIS_INFO: Worded[CapAxis, CapAxisInfo] = Worded(
+    {
+        "usd": _cap_axis("usd", "Spend cap", "USD", 1, 0.01),
+        "tokens": _cap_axis("tokens", "Token cap", "tokens", 1, 1000),
+        "rounds": _cap_axis("rounds", "Round cap", "rounds", 1, 1),
+        "wall_clock_s": _cap_axis("wall_clock_s", "Wall-clock cap", "minutes", 60, 5),
+    }
+)
+assert list(CAP_AXIS_INFO) == list(Budget.model_fields) == list(get_args(CapAxis.__value__))
 
 
 def usd_text(usd: float) -> str:
     """THE money wording, `webapp/lib/format.ts::fmtUsd`'s: four places under a dollar, else two."""
     return f"${usd:.4f}" if usd < 1 else f"${usd:.2f}"
+
+
+def metered_line(meter: CeilingMeter, *, metered: Budget, cap: Budget, share: Budget) -> str:
+    """THE cycle's spend in its campaign's meter, said on every run, capped or not, a replay
+    included: *metered* is this cycle's, *share* its part of the caps; tokens where they bind."""
+    usd = "" if share.usd is None else f" of its {usd_text(share.usd)} share"
+    said = f"this cycle {usd_text(metered.usd_amount)}{usd}"
+    if cap.tokens is not None:
+        tokens = "" if share.tokens is None else f" of its {share.tokens:,} share"
+        said += f", {metered.token_amount:,} tokens{tokens}"
+    return f"{said} {CEILING_METER_LABELS[meter]}"
+
+
+def campaign_cap_lines(meter: CeilingMeter, *, campaign: Budget, cap: Budget) -> list[str]:
+    """THE cap lines, beside `metered_line`: the CAMPAIGN's metered spend, every cycle's, against
+    each cap it bounds."""
+    counted = CEILING_METER_LABELS[meter]
+    lines: list[str] = []
+    if cap.usd is not None:
+        lines.append(
+            f"campaign cap {usd_text(campaign.usd_amount)} of {usd_text(cap.usd)} {counted}"
+        )
+    if cap.tokens is not None:
+        lines.append(f"campaign cap {campaign.token_amount:,} of {cap.tokens:,} tokens {counted}")
+    return lines
 
 
 def money_text(budget: Budget, *, on: Budget | None = None) -> str:
@@ -608,7 +644,7 @@ class SpendBucket(StrictModel):
 
 
 def _bucket_per_kind() -> dict[TokenUsageKind, SpendBucket]:
-    return {kind: SpendBucket() for kind in get_args(TokenUsageKind)}
+    return {kind: SpendBucket() for kind in get_args(TokenUsageKind.__value__)}
 
 
 def spend_slot[K, M: StrictModel](held: dict[K, M], key: K, make: type[M]) -> M:
@@ -816,7 +852,7 @@ class MeteredSpend(StrictModel):
 SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
 
 METER_KINDS: dict[CeilingMeter, tuple[TokenUsageKind, ...]] = {
-    "bill": get_args(TokenUsageKind),
+    "bill": get_args(TokenUsageKind.__value__),
     "search_incurred": SEARCH_KINDS,
 }
 

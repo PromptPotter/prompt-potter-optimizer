@@ -1,7 +1,8 @@
 @layer ui {
-/* Inline by default, so a Term inside running text does not break its line. */
+/* Inline, never an atomic box: a Term inside running text keeps its line, and a clipped line
+   ellipsizes through it. */
 .wrap {
-  display: inline-block;
+  display: inline;
 }
 
 .block {

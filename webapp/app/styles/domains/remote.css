@@ -102,7 +102,8 @@
 .remote-panel .row{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-14);padding:var(--space-6) 0;border-bottom:1px solid var(--color-border)}
 .remote-panel .row:last-child{border-bottom:none}
 .remote-panel .lbl{color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600;flex-shrink:0}
-.remote-panel .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:var(--text-sm);text-align:right;word-break:break-all}
+.remote-panel .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:var(--text-sm);text-align:right;min-width:0;overflow-wrap:anywhere}
+.remote-panel .val.said{margin:0}
 
 .run-limits-control{display:flex;flex-direction:column;gap:var(--space-6);padding-top:4px}
 .run-limits-control-used{color:var(--color-text-secondary);font-weight:400}

@@ -232,7 +232,7 @@
           "facts": {
             "description": "The evidence, in reading order.",
             "items": {
-              "$ref": "#/components/schemas/DecisionFact"
+              "$ref": "#/components/schemas/Said"
             },
             "title": "Facts",
             "type": "array"
@@ -566,6 +566,14 @@
         ],
         "title": "ArchiveCampaignPayload",
         "type": "object"
+      },
+      "ArchiveMode": {
+        "enum": [
+          "compact",
+          "restore",
+          "purge-cold"
+        ],
+        "type": "string"
       },
       "ArchiveReport": {
         "additionalProperties": false,
@@ -1779,7 +1787,7 @@
           "inner",
           "no_manifest",
           "held_elsewhere",
-          "not_held",
+          "no_holdout",
           "in_flight",
           "selecting",
           "origin_unscored",
@@ -2282,15 +2290,9 @@
             "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search split and there is no bench score."
           },
           "display_metric": {
+            "$ref": "#/components/schemas/DisplayMetric",
             "default": "accuracy",
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`.",
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Display Metric",
-            "type": "string"
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "items": {
@@ -3715,13 +3717,7 @@
             "title": "Dataset"
           },
           "mode": {
-            "enum": [
-              "compact",
-              "restore",
-              "purge-cold"
-            ],
-            "title": "Mode",
-            "type": "string"
+            "$ref": "#/components/schemas/ArchiveMode"
           }
         },
         "required": [
@@ -4199,19 +4195,13 @@
           "elects_on": {
             "anyOf": [
               {
-                "enum": [
-                  "accuracy",
-                  "composite",
-                  "ability"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/DisplayMetric"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on accuracy.",
-            "title": "Elects On"
+            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on accuracy."
           },
           "mint": {
             "$ref": "#/components/schemas/CourseKind",
@@ -4872,15 +4862,8 @@
             "type": "integer"
           },
           "hit_spread": {
-            "description": "How often those cells got the sample right: `never`, `partly` or `always` — `unmeasured` where the scope holds no graded cell of it. Served, because the two thresholds are the scorer's.",
-            "enum": [
-              "unmeasured",
-              "never",
-              "partly",
-              "always"
-            ],
-            "title": "Hit Spread",
-            "type": "string"
+            "$ref": "#/components/schemas/HitSpread",
+            "description": "How often those cells got the sample right: `never`, `partly` or `always` — `unmeasured` where the scope holds no graded cell of it. Served, because the two thresholds are the scorer's."
           },
           "mean_fitness": {
             "anyOf": [
@@ -5064,30 +5047,6 @@
           "decision"
         ],
         "title": "DecisionAction",
-        "type": "object"
-      },
-      "DecisionFact": {
-        "additionalProperties": false,
-        "description": "One labelled line of the evidence behind a hold.",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "tone": {
-            "$ref": "#/components/schemas/Tone",
-            "default": "quiet"
-          },
-          "value": {
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "value"
-        ],
-        "title": "DecisionFact",
         "type": "object"
       },
       "DefaultsDrift": {
@@ -5301,6 +5260,14 @@
         ],
         "title": "DiscardDraftPayload",
         "type": "object"
+      },
+      "DisplayMetric": {
+        "enum": [
+          "accuracy",
+          "composite",
+          "ability"
+        ],
+        "type": "string"
       },
       "DraftCampaignWire": {
         "additionalProperties": false,
@@ -5924,13 +5891,7 @@
             "type": "integer"
           },
           "elects_on": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Elects On",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           },
           "ended_on": {
             "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
@@ -6019,23 +5980,11 @@
             "description": "The pick's θ on its electing round."
           },
           "elects_on": {
-            "description": "What the electing round's selector ranked on.",
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Elects On",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric",
+            "description": "What the electing round's selector ranked on."
           },
           "reads_on": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Reads On",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           }
         },
         "required": [
@@ -8457,6 +8406,15 @@
         "title": "HierarchyTag",
         "type": "object"
       },
+      "HitSpread": {
+        "enum": [
+          "unmeasured",
+          "never",
+          "partly",
+          "always"
+        ],
+        "type": "string"
+      },
       "IndividualLineage": {
         "additionalProperties": false,
         "description": "The provenance of one mint: its edges, variations and words; it names no individual.",
@@ -9861,18 +9819,7 @@
             "type": "string"
           },
           "unit": {
-            "enum": [
-              "rate",
-              "score",
-              "theta",
-              "seconds",
-              "usd",
-              "tokens",
-              "rank",
-              "rounds"
-            ],
-            "title": "Unit",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurandUnit"
           }
         },
         "required": [
@@ -9892,6 +9839,19 @@
           "expr"
         ],
         "title": "MeasurandKind",
+        "type": "string"
+      },
+      "MeasurandUnit": {
+        "enum": [
+          "rate",
+          "score",
+          "theta",
+          "seconds",
+          "usd",
+          "tokens",
+          "rank",
+          "rounds"
+        ],
         "type": "string"
       },
       "Measured": {
@@ -10219,13 +10179,7 @@
               "$ref": "#/components/schemas/KindSpend"
             },
             "propertyNames": {
-              "enum": [
-                "optimizer",
-                "backend",
-                "judge",
-                "diagnostic",
-                "bench"
-              ]
+              "$ref": "#/components/schemas/TokenUsageKind"
             },
             "title": "Kinds",
             "type": "object"
@@ -10390,18 +10344,7 @@
             "type": "boolean"
           },
           "unit": {
-            "enum": [
-              "rate",
-              "score",
-              "theta",
-              "seconds",
-              "usd",
-              "tokens",
-              "rank",
-              "rounds"
-            ],
-            "title": "Unit",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurandUnit"
           }
         },
         "required": [
@@ -13086,23 +13029,6 @@
             "title": "Attached",
             "type": "boolean"
           },
-          "call_holds": {
-            "description": "That cell has been open past `CALL_HOLDS_AFTER_S`: calls are taken in walk order, so it is what holds every call behind it.",
-            "title": "Call Holds",
-            "type": "boolean"
-          },
-          "open_for_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Seconds the cell the round waits on has been open; null where none is.",
-            "title": "Open For S"
-          },
           "silent_for_s": {
             "anyOf": [
               {
@@ -13123,9 +13049,7 @@
           "state",
           "attached",
           "appending",
-          "silent_for_s",
-          "open_for_s",
-          "call_holds"
+          "silent_for_s"
         ],
         "title": "ProducerReading",
         "type": "object"
@@ -13606,6 +13530,7 @@
           "not_asked",
           "pending",
           "not_held",
+          "no_holdout",
           "held_elsewhere",
           "pass_stopped",
           "past_tolerance",
@@ -13833,19 +13758,13 @@
           "elects_on": {
             "anyOf": [
               {
-                "enum": [
-                  "accuracy",
-                  "composite",
-                  "ability"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/DisplayMetric"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on accuracy.",
-            "title": "Elects On"
+            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on accuracy."
           },
           "round": {
             "title": "Round",
@@ -14903,29 +14822,13 @@
             "title": "Campaign Id",
             "type": "string"
           },
-          "campaign_metered_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The same count in billed tokens, the figure `run_limits.budget.tokens` binds; null with `campaign_metered_usd`.",
-            "title": "Campaign Metered Tokens"
-          },
-          "campaign_metered_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the campaign's ceiling has counted in its meter, every cycle of it once, deleted ones included — the figure `run_limits.budget.usd` binds, of which `spend_metered` is this cycle's own. Null on a replay and where the manifest is gone.",
-            "title": "Campaign Metered Usd"
+          "cap_lines": {
+            "description": "Beside `metered_line`: what the campaign's ceiling has counted in its meter, every cycle of it once and deleted ones included, against each cap it bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is capped, on a replay and where the manifest is gone.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Cap Lines",
+            "type": "array"
           },
           "catch_up_log": {
             "items": {
@@ -15010,13 +14913,7 @@
             "type": "integer"
           },
           "display_metric": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Display Metric",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           },
           "error_count": {
             "default": 0,
@@ -15033,6 +14930,17 @@
               }
             ],
             "description": "What an offshoot of this cycle starts under; null on a replay."
+          },
+          "held_call": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The call holding the walk and for how long (`held_call`); null until a call has run past `CALL_HOLDS_AFTER_S`, and where its cell is unknown."
           },
           "langfuse_trace_url": {
             "anyOf": [
@@ -15065,6 +14973,18 @@
                 "type": "null"
               }
             ]
+          },
+          "metered_line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This cycle's spend in the campaign's meter, capped or not, a replay included — `domain/spend.py::metered_line`, the CLI's stop line; null where the manifest is gone.",
+            "title": "Metered Line"
           },
           "observed": {
             "anyOf": [
@@ -15235,16 +15155,6 @@
             "title": "Verification",
             "type": "array"
           },
-          "waiting_on": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WaitingOn"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "walk": {
             "anyOf": [
               {
@@ -15280,13 +15190,14 @@
           "lookahead",
           "spend_metered",
           "spend_metered_by_round",
-          "campaign_metered_usd",
-          "campaign_metered_tokens",
+          "metered_line",
+          "cap_lines",
           "allotment",
           "fork_remainder",
           "observed",
           "walk",
           "round_axis",
+          "held_call",
           "said"
         ],
         "title": "ServedDashboard",
@@ -15799,13 +15710,7 @@
               "$ref": "#/components/schemas/SpendBucket"
             },
             "propertyNames": {
-              "enum": [
-                "optimizer",
-                "backend",
-                "judge",
-                "diagnostic",
-                "bench"
-              ]
+              "$ref": "#/components/schemas/TokenUsageKind"
             },
             "title": "By Kind",
             "type": "object"
@@ -16901,19 +16806,13 @@
           "elects_on": {
             "anyOf": [
               {
-                "enum": [
-                  "accuracy",
-                  "composite",
-                  "ability"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/DisplayMetric"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on accuracy.",
-            "title": "Elects On"
+            "description": "The column the course's newest election elected on; null before its first. `ability`: its rounds are won on θ, not on accuracy."
           },
           "from_candidate": {
             "anyOf": [
@@ -17151,6 +17050,16 @@
         },
         "title": "TokenAccount",
         "type": "object"
+      },
+      "TokenUsageKind": {
+        "enum": [
+          "optimizer",
+          "backend",
+          "judge",
+          "diagnostic",
+          "bench"
+        ],
+        "type": "string"
       },
       "Tone": {
         "enum": [
@@ -17701,34 +17610,6 @@
           "held_absent"
         ],
         "title": "VerifyReading",
-        "type": "object"
-      },
-      "WaitingOn": {
-        "additionalProperties": false,
-        "description": "The cell the producer's open call holds — worded `WAITING_ON_WORDS` on every surface.",
-        "properties": {
-          "label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The owning arm's label; null for a pass no arm owns.",
-            "title": "Label"
-          },
-          "position": {
-            "title": "Position",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "label",
-          "position"
-        ],
-        "title": "WaitingOn",
         "type": "object"
       },
       "WalkEnd": {

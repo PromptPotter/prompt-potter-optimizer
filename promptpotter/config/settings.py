@@ -58,11 +58,13 @@ def _git_head(checkout: Path) -> str:
     refs = git_dir / common.read_text(encoding="utf-8").strip() if common.is_file() else git_dir
     if (loose := refs / ref).is_file():
         return loose.read_text(encoding="utf-8").strip()
-    for line in (refs / "packed-refs").read_text(encoding="utf-8").splitlines():
-        sha, _, name = line.partition(" ")
-        if name == ref:
-            return sha
-    raise RuntimeError(f"{checkout}: HEAD names {ref}, which no ref under {refs} holds")
+    packed = refs / "packed-refs"
+    lines = packed.read_text(encoding="utf-8").splitlines() if packed.is_file() else []
+    # A ref neither file holds is a branch with no commit yet: git names no head there either.
+    return next(
+        (sha for sha, _, name in (line.partition(" ") for line in lines) if name == ref),
+        UNVERSIONED,
+    )
 
 
 def _code_revision() -> str:

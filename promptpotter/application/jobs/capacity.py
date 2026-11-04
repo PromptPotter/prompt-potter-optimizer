@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.send_pacing import throttle_stall_seconds
+from promptpotter.shared.worded import Worded
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,11 @@ class SlotBound(StrEnum):
 
 
 # `{name}` stands for the served model's field of that name.
-SLOT_BOUND_WORDS: dict[SlotBound, str] = {
-    SlotBound.THROTTLE: "admitting {capacity} of {ceiling} while the provider throttle is saturated",
-    SlotBound.MACHINE: "This account's limit of {max_concurrent_cycles} is above the machine's "
-    "{ceiling}, so the machine is what binds.",
-}
+SLOT_BOUND_WORDS: Worded[SlotBound, str] = Worded(
+    {
+        SlotBound.THROTTLE: "admitting {capacity} of {ceiling} while the provider throttle is saturated",
+        SlotBound.MACHINE: "This account's limit of {max_concurrent_cycles} is above the machine's "
+        "{ceiling}, so the machine is what binds.",
+    }
+)
 assert SLOT_BOUND_WORDS.keys() == set(SlotBound)

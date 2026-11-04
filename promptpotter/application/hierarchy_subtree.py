@@ -661,23 +661,35 @@ def _read_under(
     samples = read_samples(lens, samples)
     # Every course is cut at the moment's wall clock; its offset is only the viewed leaf's line.
     instant = None if moment is None else moment.instant
+    # (the tag a toolbar badge carries, the clause the sentence behind it reads)
     under = [
-        *([f"the {lens.spelling} lens"] if lens is not None else []),
-        *([f"a {len(samples)}-sample set"] if samples else []),
+        *(
+            [("abort off" if lens.kind == "abort" else "re-scored", f"the {lens.spelling} lens")]
+            if lens is not None
+            else []
+        ),
+        *([("sample set", f"a {len(samples)}-sample set")] if samples else []),
         *(
             []
             if instant is None
             else [
-                f"the moment {datetime.fromtimestamp(instant, UTC).isoformat(timespec='seconds')}"
-                if math.isfinite(instant)
-                else "a moment before its ledger's first timestamp"
+                (
+                    "rewound",
+                    f"the moment {datetime.fromtimestamp(instant, UTC).isoformat(timespec='seconds')}"
+                    if math.isfinite(instant)
+                    else "a moment before its ledger's first timestamp",
+                )
             ]
         ),
     ]
     if not under:
         return root
     read_under = Said(
-        key="read_under", tone="attention", label=f"Read under {' and '.join(under)}."
+        key="read_under",
+        tone="attention",
+        label=" · ".join(tag for tag, _ in under),
+        detail=f"Read under {' and '.join(clause for _, clause in under)}, not the realized "
+        "record.",
     )
     return _restamped(
         root,

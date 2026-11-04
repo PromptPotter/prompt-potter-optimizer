@@ -50,7 +50,7 @@ from promptpotter.domain.pipeline_schema import (
     dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, money_text
+from promptpotter.domain.spend import CAP_AXIS_INFO, Budget, CapAxis, money_text
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NoApiKeyError
@@ -330,7 +330,7 @@ def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
     }
 
 
-def _cap(budget: dict[str, Any], axis: str, bound: float | None = None) -> dict[str, Any]:
+def _cap(budget: dict[str, Any], axis: CapAxis, bound: float | None = None) -> dict[str, Any]:
     """Bounded at what admission takes, never defaulted to it: a default below the campaign's own
     ceiling is a clamp, and a clamped run halts mid-campaign."""
     field = _field(budget, axis, CAP_AXIS_INFO[axis].title)

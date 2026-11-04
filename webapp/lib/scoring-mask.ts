@@ -1,4 +1,5 @@
 import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
+import { wordRows } from "@/lib/api/words";
 import { createModuleStore } from "@/lib/state/module-store";
 
 // A dial at weight 0 is off, so the weights ARE the selection.
@@ -8,7 +9,9 @@ export type ScoringMask =
 
 export const NO_DIALS: ScoringMask = { kind: "dials", weights: {} };
 
-export const DIAL_TERMS: readonly CellTermMeta[] = CELL_TERM_META.filter((m) => m.dial !== null);
+export const DIAL_TERMS: readonly CellTermMeta[] = wordRows(CELL_TERM_META)
+  .map(([, m]) => m)
+  .filter((m) => m.dial !== null);
 
 // The spelling `compiler.py::parse_dials` reads; served vocabulary order, so one set is one string.
 export function dialsText(weights: Readonly<Record<string, number>>): string {

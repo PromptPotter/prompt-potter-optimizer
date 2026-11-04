@@ -153,7 +153,7 @@
 .spend-buckets dl>div{display:flex;justify-content:space-between;gap:var(--space-12)}
 .spend-buckets dt{color:var(--color-text-secondary)}
 .spend-buckets dd{margin:0;font-variant-numeric:tabular-nums}
-.spend-buckets-total{border-top:0.5px solid var(--color-border);padding-top:var(--space-4);font-weight:600}
+.spend-buckets-total{margin:0 0 var(--space-4);border-top:0.5px solid var(--color-border);padding-top:var(--space-4);font-weight:600;overflow-wrap:anywhere}
 .spend-buckets .spend-buckets-beside dt,.spend-buckets .spend-buckets-beside dd{color:var(--color-text-secondary)}
 .rowhover-heading{margin-bottom:var(--space-4)}
 .rowhover-source{margin-left:var(--space-6);color:var(--color-text-secondary)}

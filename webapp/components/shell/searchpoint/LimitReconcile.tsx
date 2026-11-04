@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Budget, OptimizerLimit, RunLimitOverrides } from "@/lib/api";
-import { budgetAxis, capLines, readSpend } from "@/lib/derivations";
+import { budgetAxis } from "@/lib/derivations";
 import { CAP_AXIS_INFO } from "@/lib/api/types.generated";
 import { capInput, capText, parseCap, parseCapIn, type CapBounds } from "@/lib/run-limits";
 import type { CyclePath } from "@/lib/ids";
@@ -33,9 +33,8 @@ export function LimitReconcile({
   const rl = dash?.run_limits ?? null;
   const declared = rl?.optimizer ?? [];
   const [f, setF] = useState<Fields>({ rounds: "", wallClock: "", optimizer: {} });
-  const spend = readSpend(dash);
-  const { budgetUsd: usdCap, budgetTokens: tokenCap } = spend;
-  const caps = capLines(spend);
+  const caps = dash?.cap_lines ?? [];
+  const capped = rl != null && (budgetAxis(rl.budget, "usd") != null || budgetAxis(rl.budget, "tokens") != null);
   const parentWallClock = rl ? budgetAxis(rl.budget, "wall_clock_s") : null;
 
   const set = (next: Fields) => {
@@ -105,7 +104,7 @@ export function LimitReconcile({
       <div className="limit-row">
         <span className="limit-label">{CAP_AXIS_INFO.usd.title}</span>
         <small className="limit-note">
-          {usdCap == null && tokenCap == null
+          {!capped
             ? "the campaign is uncapped — set its cap on the run's controls"
             : `${caps.length ? caps.join(" · ") : "the campaign's cap"} — one cap the fork shares with every live cycle, never a remainder`}
         </small>

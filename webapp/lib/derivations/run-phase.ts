@@ -6,14 +6,12 @@ import type {
   RunStatus,
   SampleLookahead,
   StopReason,
-  WaitingOn,
 } from "@/lib/api/types.generated";
 import {
   DASHBOARD_STATE_PAUSE_WORDS,
   LOOKAHEAD_WORDS,
   RUN_PHASE_INFO,
   STOP_REASON_INFO,
-  WAITING_ON_WORDS,
 } from "@/lib/api/types.generated";
 import { filled } from "@/lib/format";
 
@@ -48,11 +46,6 @@ export function pauseNextStep(pause: PauseReading): string {
     : STOP_REASON_INFO[pause.stop_reason].next_step;
 }
 
-/** The cell an open call holds: its arm, or a pass no arm owns, and its sample. */
-export function waitingText(waiting: WaitingOn): string {
-  return `${waiting.label ?? WAITING_ON_WORDS.pass} · ${WAITING_ON_WORDS.sample} ${waiting.position}`;
-}
-
 /** How many more cells the spend limits admit, where money holds the walk. */
 export function affordableText(affordable: number): string {
   return affordable <= 0
@@ -71,13 +64,8 @@ export function lookaheadDepthLabel(d: LookaheadDepth): string {
   return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : filled(LOOKAHEAD_WORDS.depth_many, d);
 }
 
-export function phasePauseLabel(
-  state: DashboardState | null | undefined,
-  optimizerStep: string | null | undefined,
-): string {
-  if (state == null) return "the current round";
-  return (
-    (state === "optimizer_step" ? optimizerStep : DASHBOARD_STATE_PAUSE_WORDS[state]) ||
-    "the current round"
-  );
+export function phasePauseLabel(state: DashboardState, optimizerStep: string | null): string {
+  return state === "optimizer_step" && optimizerStep !== null
+    ? optimizerStep
+    : DASHBOARD_STATE_PAUSE_WORDS[state];
 }

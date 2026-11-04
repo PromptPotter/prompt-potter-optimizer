@@ -3,7 +3,7 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { CyclePath } from "@/lib/ids";
-import { FailureLine } from "@/components/ui";
+import { FailureLine, Said } from "@/components/ui";
 import type { ActivityDecision, ActivityItem, DecisionAction } from "@/lib/api/types";
 
 export function LiveSegment({
@@ -61,14 +61,13 @@ export function LiveSegment({
           <div className="chat-decision-title">{decision.title}</div>
           <p className="chat-decision-lead">{decision.lead}</p>
           {decision.facts.length > 0 ? (
-            <dl className="chat-decision-verdict">
+            <ul className="chat-decision-verdict">
               {decision.facts.map((f) => (
-                <div key={f.label}>
-                  <dt>{f.label}</dt>
-                  <dd className={cx(f.tone === "danger" && "chat-decision-error")}>{f.value}</dd>
-                </div>
+                <li key={f.key}>
+                  <Said tone={f.tone} label={f.label} value={f.value} sub={f.sub} detail={f.detail} />
+                </li>
               ))}
-            </dl>
+            </ul>
           ) : null}
           {decision.reasons.length > 0 ? (
             <ul className="chat-decision-reasons">

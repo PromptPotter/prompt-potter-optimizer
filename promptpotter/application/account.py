@@ -52,6 +52,7 @@ from promptpotter.shared.identity import (
     default_identity,
     display_name,
 )
+from promptpotter.shared.worded import Worded
 
 
 def _consent(
@@ -102,28 +103,30 @@ class SignInRefusalInfo(NamedTuple):
     tone: Tone
 
 
-SIGN_IN_REFUSAL_INFO: dict[SignInRefusal, SignInRefusalInfo] = {
-    "state_invalid_or_expired": SignInRefusalInfo(
-        "That sign-in took too long and expired. Try Continue with Google again.", "warn"
-    ),
-    "code_exchange_failed": SignInRefusalInfo(
-        "We couldn't verify your sign-in with Google. Try again.", "warn"
-    ),
-    "provider_returned_error": SignInRefusalInfo(
-        "Google sign-in was cancelled. Try again when you're ready.", "attention"
-    ),
-    "callback_missing_params": SignInRefusalInfo(
-        "That sign-in link was incomplete. Try again.", "warn"
-    ),
-    "signin_unavailable": SignInRefusalInfo(
-        "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.", "danger"
-    ),
-    "accounts_full": SignInRefusalInfo(
-        "This server has reached its account limit, so it can't open a new account. "
-        "If you already have one, sign in with it.",
-        "warn",
-    ),
-}
+SIGN_IN_REFUSAL_INFO: Worded[SignInRefusal, SignInRefusalInfo] = Worded(
+    {
+        "state_invalid_or_expired": SignInRefusalInfo(
+            "That sign-in took too long and expired. Try Continue with Google again.", "warn"
+        ),
+        "code_exchange_failed": SignInRefusalInfo(
+            "We couldn't verify your sign-in with Google. Try again.", "warn"
+        ),
+        "provider_returned_error": SignInRefusalInfo(
+            "Google sign-in was cancelled. Try again when you're ready.", "attention"
+        ),
+        "callback_missing_params": SignInRefusalInfo(
+            "That sign-in link was incomplete. Try again.", "warn"
+        ),
+        "signin_unavailable": SignInRefusalInfo(
+            "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.", "danger"
+        ),
+        "accounts_full": SignInRefusalInfo(
+            "This server has reached its account limit, so it can't open a new account. "
+            "If you already have one, sign in with it.",
+            "warn",
+        ),
+    }
+)
 
 
 class AccountCeilingError(PotterError):

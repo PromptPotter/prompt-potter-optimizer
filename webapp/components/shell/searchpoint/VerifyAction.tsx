@@ -3,6 +3,7 @@ import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
 import { READING_STATE_INFO, VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import { wordKeys } from "@/lib/api/words";
 import { VERIFY_PASS_POLL_MS } from "@/lib/cadence";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui";
 import { VerifyReading } from "./VerifyReading";
 
-const STRATEGIES = (Object.keys(VERIFY_STRATEGY_LABELS) as VerifyStrategy[]).map((value) => ({
+const STRATEGIES = wordKeys(VERIFY_STRATEGY_LABELS).map((value) => ({
   value,
   label: VERIFY_STRATEGY_LABELS[value],
 }));

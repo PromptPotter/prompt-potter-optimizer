@@ -64,7 +64,6 @@ export interface ServedDashboard {
   total_backend_calls: number;
   current_query_payload: string | null;
   open_positions: number[];
-  waiting_on: WaitingOn | null;
   backpressure: ServedBackpressure | null;
   measured_unit: 'sample' | 'cell';
   at_time: string;
@@ -114,14 +113,15 @@ export interface ServedDashboard {
   spend_metered: MeteredSpend | null;
   /** `spend_metered` per round, in round order. */
   spend_metered_by_round: Record<string, MeteredSpend> | null;
-  /** What the campaign's ceiling has counted in its meter, every cycle of it once,
-   * deleted ones included — the figure `run_limits.budget.usd` binds, of
-   * which `spend_metered` is this cycle's own. Null on a replay and where the
+  /** This cycle's spend in the campaign's meter, capped or not, a replay included —
+   * `domain/spend.py::metered_line`, the CLI's stop line; null where the
    * manifest is gone. */
-  campaign_metered_usd: number | null;
-  /** The same count in billed tokens, the figure `run_limits.budget.tokens` binds;
-   * null with `campaign_metered_usd`. */
-  campaign_metered_tokens: number | null;
+  metered_line: string | null;
+  /** Beside `metered_line`: what the campaign's ceiling has counted in its meter,
+   * every cycle of it once and deleted ones included, against each cap it
+   * bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is
+   * capped, on a replay and where the manifest is gone. */
+  cap_lines: string[];
   /** This cycle's share of the campaign's ceiling — the most it may have metered in
    * all, and what its run's book binds; null where no run holds a share, and
    * on a replay. */
@@ -135,6 +135,9 @@ export interface ServedDashboard {
    * replay. */
   walk: SampleWalk | null;
   round_axis: RoundAxis;
+  /** The call holding the walk and for how long (`held_call`); null until a call
+   * has run past `CALL_HOLDS_AFTER_S`, and where its cell is unknown. */
+  held_call: Said | null;
   /** The run's pinned line (`run_said`), its producer among the rows; null where
    * nothing needs the operator. */
   said: Said | null;
@@ -313,7 +316,7 @@ export interface ArmAbility {
 
 /** One pair of addressed individuals read on one cell set. */
 export interface PairedReading {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
   a: PairMember | null;
   b: PairMember | null;
   cell_set: CellSet | null;
@@ -639,7 +642,7 @@ export interface VerificationMark {
    * `failed` pass, which reads nothing. */
   level: BandedValue | null;
   /** How a `failed` pass reads, so why it ended without a reading; null otherwise. */
-  failed_as: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
+  failed_as: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
 }
 
 /** A backend transport or 5xx retry; a 429 is ``backpressure``, never one of these. */
@@ -654,13 +657,6 @@ export interface BackendWarning {
   final: boolean;
   query: string | null;
   detail: string | null;
-}
-
-/** The cell the producer's open call holds — worded `WAITING_ON_WORDS` on every surface. */
-export interface WaitingOn {
-  /** The owning arm's label; null for a pass no arm owns. */
-  label: string | null;
-  position: number;
 }
 
 /** A provider hold as served: the banked reading with both clocks read at the response. */
@@ -933,11 +929,6 @@ export interface ProducerReading {
   /** Seconds since the last ledger record that was not a heartbeat; null unless
    * appending. */
   silent_for_s: number | null;
-  /** Seconds the cell the round waits on has been open; null where none is. */
-  open_for_s: number | null;
-  /** That cell has been open past `CALL_HOLDS_AFTER_S`: calls are taken in walk
-   * order, so it is what holds every call behind it. */
-  call_holds: boolean;
 }
 
 /** Which run verbs a cycle admits now: the one answer the run control and the dispatcher read. */
@@ -1417,17 +1408,10 @@ export interface ActivityDecision {
   /** The paragraph under the title. */
   lead: string;
   /** The evidence, in reading order. */
-  facts: DecisionFact[];
+  facts: Said[];
   /** Why the run is holding, one fragment each. */
   reasons: string[];
   actions: DecisionAction[];
-}
-
-/** One labelled line of the evidence behind a hold. */
-export interface DecisionFact {
-  label: string;
-  value: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
 }
 
 /** One button: a press sends `decision` as `kind` to the cycle whose activity carries it. */
@@ -1557,7 +1541,7 @@ export interface HeadToHead {
   guard: PairGuard;
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
-  verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
+  verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
   /** The arm-by-arm matrix: every two treatments whose selections the bench graded,
    * oldest arm as `a`. */
   contrasts: ArmContrast[];
@@ -1703,13 +1687,13 @@ export interface BenchScore {
 
 /** Where a campaign's bench stands, and whether asking for its pass would be admitted. */
 export interface BenchStatus {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
   trigger: 'manual' | 'at_end' | 'each_round';
   /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
    * one answer. */
   can_grade: boolean;
   /** Why not, exactly where `can_grade` is false. */
-  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'not_held' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
   /** Whether the grade control shows: admitted, or a pass still waited on. Never on
    * an inner run, whose line no command grades. */
   offered: boolean;
@@ -4712,6 +4696,63 @@ export interface CommandResponses {
   "verify-candidate": CommandAcceptedBody;
 }
 
+// promptpotter.domain.checkin_draft::SetupStep
+export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
+
+// promptpotter.application.evidence.head_to_head::GuardDifference
+export type GuardDifference = 'instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading';
+
+// promptpotter.application.evidence.head_to_head::GuardState
+export type GuardState = 'controlled' | 'uncontrolled' | 'differs';
+
+// promptpotter.domain.paired_reading::ReadingState
+export type ReadingState = 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+
+// promptpotter.application.jobs.capacity::SlotBound
+export type SlotBound = 'throttle' | 'machine';
+
+// promptpotter.shared.errors::LaunchRefusalReason
+export type LaunchRefusalReason = 'used_up' | 'held' | 'over_declared' | 'no_key';
+
+// promptpotter.shared.account_tabs::AccountTab
+export type AccountTab = 'profile' | 'usage' | 'keys' | 'activity' | 'preferences' | 'storage' | 'about';
+
+// promptpotter.domain.arm_reading::CandidateCount
+export type CandidateCount = 'replayed';
+
+// promptpotter.domain.arm_reading::DisplayMetric
+export type DisplayMetric = 'accuracy' | 'composite' | 'ability';
+
+// promptpotter.domain.paired_reading::MeasurandUnit
+export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
+
+// promptpotter.domain.bench::BenchRefusal
+export type BenchRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
+
+// promptpotter.domain.bench::CostAbsence
+export type CostAbsence = 'no_lift' | 'unpriced_tokens' | 'zero_spend';
+
+// promptpotter.domain.campaign::LifecycleStatus
+export type LifecycleStatus = 'active' | 'archived' | 'deleted';
+
+// promptpotter.domain.cells::HitSpread
+export type HitSpread = 'unmeasured' | 'never' | 'partly' | 'always';
+
+// promptpotter.domain.command_kinds::ArchiveMode
+export type ArchiveMode = 'compact' | 'restore' | 'purge-cold';
+
+// promptpotter.domain.cycle_index::StatusMark
+export type StatusMark = 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+
+// promptpotter.domain.dataset_start::StartBlock
+export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
+
+// promptpotter.domain.export::ExportTier
+export type ExportTier = 'chat' | 'report' | 'notebook' | 'deploy' | 'package';
+
+// promptpotter.domain.origin_panel::RoundAdvance
+export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
+
 // promptpotter.domain.phases::StopReason
 export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
@@ -4721,92 +4762,66 @@ export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
 // promptpotter.domain.phases::StopCategory
 export type StopCategory = 'search' | 'limit' | 'budget' | 'operator' | 'external' | 'failure';
 
-// promptpotter.domain.paired_reading::ReadingState
-export type ReadingState = 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+// promptpotter.domain.pipeline_schema::MovableAgent
+export type MovableAgent = 'proposer' | 'optimizer';
 
-// promptpotter.domain.paired_reading::ReadingStateKind
-export type ReadingStateKind = 'read' | 'waiting' | 'unpaired' | 'absent' | 'refused';
-
-// promptpotter.domain.bench::BenchRefusal
-export type BenchRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'not_held' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
-
-// promptpotter.domain.origin_panel::RoundAdvance
-export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
-
-// promptpotter.domain.origin_panel::StallEffect
-export type StallEffect = 'starts' | 'resets' | 'counts' | 'skips';
+// promptpotter.domain.pool::PoolSource
+export type PoolSource = 'library' | 'partition';
 
 // promptpotter.domain.ruler::ThetaCaveat
 export type ThetaCaveat = 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
 
-// promptpotter.domain.bench::CostAbsence
-export type CostAbsence = 'no_lift' | 'unpriced_tokens' | 'zero_spend';
+// promptpotter.domain.run_standing::LivesWord
+export type LivesWord = 'banked' | 'spent_pip' | 'empty' | 'empty_sentence' | 'life' | 'lives';
 
-// promptpotter.application.evidence.head_to_head::GuardState
-export type GuardState = 'controlled' | 'uncontrolled' | 'differs';
+// promptpotter.domain.spend::CapAxis
+export type CapAxis = 'usd' | 'tokens' | 'rounds' | 'wall_clock_s';
 
-// promptpotter.application.evidence.head_to_head::GuardDifference
-export type GuardDifference = 'instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading';
-
-// promptpotter.shared.errors::LaunchRefusalReason
-export type LaunchRefusalReason = 'used_up' | 'held' | 'over_declared' | 'no_key';
-
-// promptpotter.application.jobs.capacity::SlotBound
-export type SlotBound = 'throttle' | 'machine';
-
-// promptpotter.domain.dataset_start::StartBlock
-export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';
-
-// promptpotter.domain.checkin_draft::SetupStep
-export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
+// promptpotter.domain.spend::TokenUsageKind
+export type TokenUsageKind = 'optimizer' | 'backend' | 'judge' | 'diagnostic' | 'bench';
 
 // promptpotter.infrastructure.store.data_root::Leaf
 export type Leaf = 'dataset' | 'connector' | 'state' | 'trace' | 'history' | 'reports';
 
-export interface StopReasonInfo {
+export interface SignInRefusalInfo {
   label: string;
-  outcome: StopOutcome;
-  category: StopCategory;
-  halts_mid_round: boolean;
-  has_traceback: boolean;
-  next_step: string;
-  grades_selection: boolean;
-  cli_command: string;
+  tone: Tone;
 }
 
-export interface RunPhaseInfo {
+export interface ActivityWindowInfo {
   label: string;
-  walks: boolean;
-  settled: boolean;
-  awaits_operator: boolean;
-  dock_priority: number;
-  action: 'pause' | 'resume' | 'start' | null;
-  no_action: string;
-  parked: string;
+  seconds: number;
 }
 
-export interface ReadingStateInfo {
-  kind: ReadingStateKind;
-  label: string;
-  sentence: string;
+export interface CouplingSeverityInfo {
+  tone: Tone;
 }
 
-export interface BenchStateInfo {
-  label: string;
-  sentence: string;
-  fault: boolean;
-}
-
-export interface RoundAdvanceInfo {
-  label: string;
-  sentence: string;
-  stall: StallEffect;
-}
-
-export interface ThetaCaveatInfo {
-  label: string;
+export interface SteerOutsideInfo {
+  title: string;
   detail: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  tone: Tone;
+}
+
+export interface CellTermMeta {
+  name: string;
+  direction: 'high' | 'low';
+  description: string;
+  dial: 'anchored' | 'unit' | null;
+  primary: boolean;
+}
+
+export interface AccountTabInfo {
+  label: string;
+  group: string;
+  place: string;
+}
+
+export interface DisplayMetricInfo {
+  label: string;
+  glyph: string;
+  title: string;
+  unit: MeasurandUnit;
 }
 
 export interface UnitFormat {
@@ -4820,18 +4835,79 @@ export interface UnitFormat {
   compact: boolean;
 }
 
+export interface ArmEndInfo {
+  label: string;
+  tone: Tone;
+  sentence: string;
+}
+
+export interface ArchiveModeInfo {
+  label: string;
+  sentence: string;
+}
+
+export interface BackendReachabilityInfo {
+  label: string;
+  tone: Tone;
+}
+
+export interface StatusMarkInfo {
+  glyph: string;
+  tone: Tone;
+}
+
 export interface VerificationKindInfo {
   name: string;
   rows: string;
 }
 
-export interface StatusMarkInfo {
-  glyph: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+export interface ExportTierInfo {
+  label: string;
+  pasted: boolean;
 }
 
-export interface CouplingSeverityInfo {
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+export interface RoundAdvanceInfo {
+  label: string;
+  sentence: string;
+}
+
+export interface ReadingStateInfo {
+  label: string;
+  sentence: string;
+  fault: boolean;
+}
+
+export interface RunPhaseInfo {
+  label: string;
+  walks: boolean;
+  settled: boolean;
+  awaits_operator: boolean;
+  dock_priority: number;
+  action: 'pause' | 'resume' | 'start' | null;
+  no_action: string;
+  parked: string;
+}
+
+export interface StopReasonInfo {
+  label: string;
+  outcome: StopOutcome;
+  category: StopCategory;
+  halts_mid_round: boolean;
+  has_traceback: boolean;
+  next_step: string;
+  grades_selection: boolean;
+  cli_command: string;
+}
+
+export interface NodeKindInfo {
+  label: string;
+  role: string;
+}
+
+export interface PoolSourceInfo {
+  one: string;
+  many: string;
+  in_play: string;
 }
 
 export interface HealthCauseInfo {
@@ -4840,34 +4916,13 @@ export interface HealthCauseInfo {
 }
 
 export interface HealthGradeInfo {
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  tone: Tone;
 }
 
-export interface BackendReachabilityInfo {
+export interface ThetaCaveatInfo {
   label: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
-}
-
-export interface NodeKindInfo {
-  label: string;
-  role: string;
-}
-
-export interface LeafInfo {
-  label: string;
-  description: string;
-  loop: boolean;
-}
-
-export interface SignInRefusalInfo {
-  label: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
-}
-
-export interface SteerOutsideInfo {
-  title: string;
   detail: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  tone: Tone;
 }
 
 export interface CapAxisInfo {
@@ -4880,7 +4935,403 @@ export interface CapAxisInfo {
   exclusive_minimum: number | null;
 }
 
-// Mirror of domain/phases.py::STOP_REASON_INFO.
+export interface LeafInfo {
+  label: string;
+  description: string;
+  loop: boolean;
+}
+
+// Mirror of application/account.py::SIGN_IN_REFUSAL_INFO, in display order.
+export const SIGN_IN_REFUSAL_INFO: Record<'state_invalid_or_expired' | 'code_exchange_failed' | 'provider_returned_error' | 'callback_missing_params' | 'signin_unavailable' | 'accounts_full', SignInRefusalInfo> = {
+  "state_invalid_or_expired": { label: "That sign-in took too long and expired. Try Continue with Google again.", tone: "warn" },
+  "code_exchange_failed": { label: "We couldn't verify your sign-in with Google. Try again.", tone: "warn" },
+  "provider_returned_error": { label: "Google sign-in was cancelled. Try again when you're ready.", tone: "attention" },
+  "callback_missing_params": { label: "That sign-in link was incomplete. Try again.", tone: "warn" },
+  "signin_unavailable": { label: "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.", tone: "danger" },
+  "accounts_full": { label: "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.", tone: "warn" },
+};
+
+// Mirror of application/datasets/origin_readiness.py::SETUP_STEP_TITLES, in display order.
+export const SETUP_STEP_TITLES: Record<SetupStep, string> = {
+  "optimizer": "Optimizer",
+  "data": "Data",
+  "scoring": "Scoring",
+  "pipeline": "Pipeline",
+  "head_to_head": "Head-to-head",
+  "run": "Run bounds",
+};
+
+// Mirror of application/evidence/head_to_head.py::GUARD_DIFFERENCE_INFO, in display order.
+export const GUARD_DIFFERENCE_INFO: Record<GuardDifference, string> = {
+  "instrument_id": "Different instruments measured the cells: another dataset, or another inner origin under it.",
+  "dataset_hash": "The banks hold different rows.",
+  "split": "The banks were split differently.",
+  "bench_rows": "Different rows were held out, so the headlines are graded on different cells.",
+  "scorer_id": "Different scorers graded the headlines.",
+  "models": "The target pipelines ran different models.",
+  "origin": "The campaigns started from different origins.",
+  "budget": "The campaigns declared different budgets, stopping rules or determinism clamps.",
+  "defaults": "The campaigns were declared over different code defaults, so a key neither set ran at different values.",
+  "optimizer_models": "The optimizers called different models, so a gap between two headlines is the model's as much as the method's.",
+  "human_intervened": "An operator steered, skipped or model-overrode a cycle on a campaign's line.",
+  "origin_reading": "Campaigns on one bench set read the same origin apart beyond its own noise under one formula, so the backend or a judge moved between them — a change no stamp names.",
+};
+
+// Mirror of application/evidence/head_to_head.py::GUARD_STATE_INFO, in display order.
+export const GUARD_STATE_INFO: Record<GuardState, string> = {
+  "controlled": "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, split, held-out rows, scorer, target model, origin and budget, with one optimizer model set and no operator's steer.",
+  "uncontrolled": "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a head-to-head, or an arm a launch act ran off it, could read other campaigns' measurements, take an operator's steer or re-run its own rounds.",
+  "differs": "Not one quantity: what graded or bounded these headlines differs, so a gap between two is not the optimizer's alone.",
+};
+
+// Mirror of application/evidence/head_to_head.py::GUARD_STATE_LABELS, in display order.
+export const GUARD_STATE_LABELS: Record<GuardState, string> = {
+  "controlled": "controlled",
+  "uncontrolled": "not controlled",
+  "differs": "differs",
+};
+
+// Mirror of application/evidence/head_to_head.py::VERDICT_ABSENT_INFO, in display order.
+export const VERDICT_ABSENT_INFO: Partial<Record<ReadingState, string>> = {
+  "under_two_cells": "No verdict: a head-to-head needs two campaigns with a graded bench set.",
+  "pending": "No verdict yet: a declared arm of this head-to-head has no bench headline, so the graded rows are not the comparison that was declared.",
+};
+
+// Mirror of application/evidence/subjects.py::SUBJECT_KIND_LABELS, in display order.
+export const SUBJECT_KIND_LABELS: Record<'campaign' | 'course' | 'candidate', string> = {
+  "campaign": "origin",
+  "course": "branch head",
+  "candidate": "searchpoint",
+};
+
+// Mirror of application/jobs/account_activity.py::ACTIVITY_WINDOW_INFO, in display order.
+export const ACTIVITY_WINDOW_INFO: Record<'15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y', ActivityWindowInfo> = {
+  "15m": { label: "Past 15 min", seconds: 900 },
+  "30m": { label: "Past 30 min", seconds: 1800 },
+  "1h": { label: "Past hour", seconds: 3600 },
+  "3h": { label: "Past 3 hours", seconds: 10800 },
+  "1d": { label: "Past day", seconds: 86400 },
+  "2d": { label: "Past 2 days", seconds: 172800 },
+  "1w": { label: "Past week", seconds: 604800 },
+  "1mo": { label: "Past month", seconds: 2592000 },
+  "1y": { label: "Past year", seconds: 31536000 },
+};
+
+// Mirror of application/jobs/capacity.py::SLOT_BOUND_WORDS, in display order.
+export const SLOT_BOUND_WORDS: Record<SlotBound, string> = {
+  "throttle": "admitting {capacity} of {ceiling} while the provider throttle is saturated",
+  "machine": "This account's limit of {max_concurrent_cycles} is above the machine's {ceiling}, so the machine is what binds.",
+};
+
+// Mirror of application/jobs/quota.py::LAUNCH_REFUSAL_LABELS, in display order.
+export const LAUNCH_REFUSAL_LABELS: Record<LaunchRefusalReason, string> = {
+  "used_up": "Allowance used up",
+  "held": "Allowance held",
+  "over_declared": "Ceiling past the allowance",
+  "no_key": "No key for a provider",
+};
+
+// Mirror of application/knobs.py::COUPLING_SEVERITY_INFO, in display order.
+export const COUPLING_SEVERITY_INFO: Record<'collision' | 'inert' | 'info', CouplingSeverityInfo> = {
+  "collision": { tone: "danger" },
+  "inert": { tone: "attention" },
+  "info": { tone: "quiet" },
+};
+
+// Mirror of application/mask/record.py::SCORE_LENS_LABELS, in display order.
+export const SCORE_LENS_LABELS: Record<string, string> = {
+  "score:accuracy": "Accuracy",
+};
+
+// Mirror of application/optimizers/potter/pobb/checks.py::ABORT_LENS_LABELS, in display order.
+export const ABORT_LENS_LABELS: Record<string, string> = {
+  "abort:epsilon_off": "No ε-elimination",
+  "abort:lock_in_off": "No lock-in",
+  "abort:all_off": "No early abort",
+};
+
+// Mirror of application/pipeline_responses.py::STEER_OUTSIDE_INFO, in display order.
+export const STEER_OUTSIDE_INFO: Record<'babysat' | 'refused', SteerOutsideInfo> = {
+  "babysat": { title: "This steer leaves what the campaign permits, so the branch goes grade C.", detail: "Steering to it marks this branch — and every round after it — operator-babysat: excluded from clean comparison, origin reuse, and the L4 rollup. The measurement is still recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.", tone: "warn" },
+  "refused": { title: "This steer leaves what the campaign permits.", detail: "Steering outside it is a babysit act this account may not take. Pick a permitted model.", tone: "danger" },
+};
+
+// Mirror of application/scoring/evaluators.py::CELL_TERM_META, in display order.
+export const CELL_TERM_META: Record<string, CellTermMeta> = {
+  "fitness": { name: "fitness", direction: "high", description: "The cell's correctness under the per-sample formula.", dial: null, primary: true },
+  "ground_truth_rank": { name: "ground_truth_rank", direction: "low", description: "Where the truth landed in the ranking; 1 is the top.", dial: null, primary: false },
+  "latency": { name: "latency", direction: "low", description: "Seconds the cell took when measured; a replay keeps them.", dial: "anchored", primary: true },
+  "unworked": { name: "unworked", direction: "low", description: "Seconds the cell sat blocked (suspend, rate-limit queue).", dial: "anchored", primary: false },
+  "bench_lift": { name: "bench_lift", direction: "high", description: "L4: the inner campaign's mean lift over its origin on its held-out rows.", dial: null, primary: false },
+  "bench_origin": { name: "bench_origin", direction: "high", description: "L4: the inner origin's headline on the held-out rows.", dial: null, primary: false },
+  "bench_final_lift": { name: "bench_final_lift", direction: "high", description: "L4: the held-out lift the inner campaign ended on.", dial: null, primary: false },
+  "lift": { name: "lift", direction: "high", description: "L4: the inner campaign's mean θ lift over its own origin.", dial: null, primary: false },
+  "origin": { name: "origin", direction: "high", description: "L4: the inner campaign's origin level.", dial: null, primary: false },
+  "final_lift": { name: "final_lift", direction: "high", description: "L4: the lift the inner campaign ended on.", dial: null, primary: false },
+  "peak_lift": { name: "peak_lift", direction: "high", description: "L4: the best lift the inner campaign reached.", dial: null, primary: false },
+  "rounds": { name: "rounds", direction: "low", description: "L4: rounds the inner campaign ran.", dial: "anchored", primary: false },
+  "round_budget": { name: "round_budget", direction: "high", description: "L4: rounds the inner campaign was allowed.", dial: null, primary: false },
+  "cost": { name: "cost", direction: "low", description: "USD the cell cost.", dial: "anchored", primary: true },
+  "tokens": { name: "tokens", direction: "low", description: "Input plus output tokens the cell spent.", dial: "anchored", primary: true },
+  "target_prompt_chars": { name: "target_prompt_chars", direction: "low", description: "Characters of the candidate's prompt template.", dial: "anchored", primary: true },
+  "errored": { name: "errored", direction: "low", description: "1 where the cell errored, else 0.", dial: "unit", primary: false },
+  "degraded": { name: "degraded", direction: "low", description: "1 where a pipeline node did not finish cleanly, else 0.", dial: "unit", primary: false },
+  "cached": { name: "cached", direction: "high", description: "1 where the cell was replayed from the archive, else 0.", dial: "unit", primary: true },
+  "retrieval_shortfall": { name: "retrieval_shortfall", direction: "high", description: "Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.", dial: null, primary: false },
+};
+
+// Mirror of application/served_dashboard.py::LOOKAHEAD_WORDS, in display order.
+export const LOOKAHEAD_WORDS: Record<'one_at_a_time' | 'settled' | 'no_further_cell' | 'more_affordable' | 'holds_every_round' | 'holds_this_round' | 'discarded' | 'depth_one' | 'depth_many', string> = {
+  "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to overlap.",
+  "settled": "not available now",
+  "no_further_cell": "holds no further cell",
+  "more_affordable": "more affordable",
+  "holds_every_round": "Every round, scoring holds as many calls as the stop rules allow, up to {ceiling}. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
+  "holds_this_round": "Runs this round's scoring with this many calls in flight, up to {pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
+  "discarded": "{discards} discarded so far.",
+  "depth_one": "One at a time",
+  "depth_many": "Hold {cells} in flight",
+};
+
+// Mirror of domain/account_words.py::ACCOUNT_TAB_INFO, in display order.
+export const ACCOUNT_TAB_INFO: Record<AccountTab, AccountTabInfo> = {
+  "profile": { label: "Profile", group: "Account", place: "Account → Profile" },
+  "usage": { label: "Usage & limits", group: "Account", place: "Account → Usage & limits" },
+  "keys": { label: "API keys", group: "Account", place: "Account → API keys" },
+  "activity": { label: "Activity", group: "Account", place: "Account → Activity" },
+  "preferences": { label: "Preferences", group: "Account", place: "Account → Preferences" },
+  "storage": { label: "Storage", group: "Workspace", place: "Workspace → Storage" },
+  "about": { label: "About this unit", group: "This unit", place: "This unit → About this unit" },
+};
+
+// Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS, in display order.
+export const ARM_VERDICT_LABELS: Record<'retired' | 'invalid' | 'origin' | 'elected' | 'uncontested' | 'selected' | 'not_elected' | 'unmeasured' | 'awaiting', string> = {
+  "retired": "retired",
+  "invalid": "invalid — never measured",
+  "origin": "origin",
+  "elected": "won its round",
+  "uncontested": "advanced uncontested",
+  "selected": "selected",
+  "not_elected": "not elected",
+  "unmeasured": "no cell measured yet",
+  "awaiting": "awaiting election",
+};
+
+// Mirror of domain/arm_reading.py::CANDIDATE_COUNT_WORDS, in display order.
+export const CANDIDATE_COUNT_WORDS: Record<CandidateCount, string> = {
+  "replayed": "Counted per candidate: N of the M shown carry at least one replayed cell.",
+};
+
+// Mirror of domain/arm_reading.py::DISPLAY_METRIC_INFO, in display order.
+export const DISPLAY_METRIC_INFO: Record<DisplayMetric, DisplayMetricInfo> = {
+  "accuracy": { label: "accuracy", glyph: "%", title: "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).", unit: "rate" },
+  "ability": { label: "ability θ", glyph: "θ", title: "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.", unit: "theta" },
+  "composite": { label: "composite", glyph: "∑", title: "Composite fitness under the active scoring formula (equals accuracy when no formula is set).", unit: "score" },
+};
+
+// Mirror of domain/arm_reading.py::UNIT_FORMATS, in display order.
+export const UNIT_FORMATS: Record<MeasurandUnit, UnitFormat> = {
+  "rate": { scale: 100.0, digits: 0, prefix: "", suffix: "%", lift_digits: 1, lift_word: "pts", lift_name: "point", compact: false },
+  "score": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 3, lift_word: "score", lift_name: "unit of score", compact: false },
+  "theta": { scale: 1.0, digits: 2, prefix: "θ ", suffix: "", lift_digits: 3, lift_word: "logits", lift_name: "logit", compact: false },
+  "seconds": { scale: 1.0, digits: 2, prefix: "", suffix: "s", lift_digits: 2, lift_word: "s", lift_name: "second", compact: false },
+  "usd": { scale: 1.0, digits: 4, prefix: "$", suffix: "", lift_digits: 4, lift_word: "USD", lift_name: "dollar", compact: false },
+  "tokens": { scale: 1.0, digits: 0, prefix: "", suffix: " tok", lift_digits: 0, lift_word: "tok", lift_name: "token", compact: true },
+  "rank": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 2, lift_word: "ranks", lift_name: "rank", compact: false },
+  "rounds": { scale: 1.0, digits: 1, prefix: "", suffix: "", lift_digits: 1, lift_word: "rounds", lift_name: "round", compact: false },
+};
+
+// Mirror of domain/arms.py::ARM_END_INFO, in display order.
+export const ARM_END_INFO: Record<'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in', ArmEndInfo> = {
+  "invalid": { label: "invalid", tone: "danger", sentence: "Refused before its first cell: its own validation failed fatally, so nothing was measured." },
+  "skipped": { label: "skipped", tone: "quiet", sentence: "An operator cut it short." },
+  "broken": { label: "broken", tone: "danger", sentence: "Its measurements kept failing, so the bench stopped it. That is the candidate's own fault, and it is charged to it." },
+  "eliminated": { label: "eliminated", tone: "quiet", sentence: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea." },
+  "locked_in": { label: "locked in", tone: "quiet", sentence: "The optimizer's eliminator stopped it far enough ahead to call." },
+};
+
+// Mirror of domain/bench.py::BENCH_REFUSAL_INFO, in display order.
+export const BENCH_REFUSAL_INFO: Record<BenchRefusal, string> = {
+  "inner": "An inner run is one cell of its outer campaign; no command grades its line.",
+  "no_manifest": "This campaign has no manifest on disk.",
+  "held_elsewhere": "Another cycle (`held_by`) holds this campaign's line, and the bench grades the campaign's result. Ask for that cycle.",
+  "no_holdout": "The campaign's dataset_split holds no rows out, so the bench has none to grade.",
+  "in_flight": "A bench pass is grading now; its reading lands when it ends.",
+  "selecting": "The run is still selecting. Pause it or let it end first.",
+  "origin_unscored": "The origin has not been scored, so there is no reference to grade against.",
+  "graded": "The line's selection is already graded.",
+  "no_selection": "No round closed past the origin, so there is no selection to grade.",
+};
+
+// Mirror of domain/bench.py::COST_ABSENCE_WORDS, in display order.
+export const COST_ABSENCE_WORDS: Record<CostAbsence, string> = {
+  "no_lift": "no lift to price",
+  "unpriced_tokens": "search tokens unpriced",
+  "zero_spend": "no search spend",
+};
+
+// Mirror of domain/campaign.py::LIFECYCLE_STATUS_LABELS, in display order.
+export const LIFECYCLE_STATUS_LABELS: Record<LifecycleStatus, string> = {
+  "active": "Active",
+  "archived": "Archived",
+  "deleted": "Deleted",
+};
+
+// Mirror of domain/cells.py::HARD_SAMPLE_ORDER_LABELS, in display order.
+export const HARD_SAMPLE_ORDER_LABELS: Record<'info_gain' | 'difficulty', string> = {
+  "info_gain": "Info gain",
+  "difficulty": "Hardness",
+};
+
+// Mirror of domain/cells.py::HEATMAP_SCOPE_LABELS, in display order.
+export const HEATMAP_SCOPE_LABELS: Record<'cycle' | 'campaign' | 'dataset', string> = {
+  "cycle": "This cycle",
+  "campaign": "This campaign",
+  "dataset": "All campaigns",
+};
+
+// Mirror of domain/cells.py::HIT_SPREAD_LABELS, in display order.
+export const HIT_SPREAD_LABELS: Record<HitSpread, string> = {
+  "unmeasured": "not measured yet",
+  "never": "never hit",
+  "partly": "partly hit",
+  "always": "always hit",
+};
+
+// Mirror of domain/command_kinds.py::ARCHIVE_MODE_INFO, in display order.
+export const ARCHIVE_MODE_INFO: Record<ArchiveMode, ArchiveModeInfo> = {
+  "compact": { label: "Compact", sentence: "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay." },
+  "restore": { label: "Restore", sentence: "Puts every moved field back and drops the compressed copy." },
+  "purge-cold": { label: "Purge", sentence: "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back." },
+};
+
+// Mirror of domain/connector.py::BACKEND_REACHABILITY_INFO, in display order.
+export const BACKEND_REACHABILITY_INFO: Record<'live' | 'unreachable' | 'missing_extra', BackendReachabilityInfo> = {
+  "live": { label: "Backend reachable", tone: "success" },
+  "unreachable": { label: "Backend unreachable", tone: "warn" },
+  "missing_extra": { label: "Python extra not installed", tone: "warn" },
+};
+
+// Mirror of domain/cycle_index.py::STATUS_MARK_INFO, in display order.
+export const STATUS_MARK_INFO: Record<StatusMark, StatusMarkInfo> = {
+  "running": { glyph: "●", tone: "live" },
+  "scoring": { glyph: "◐", tone: "live" },
+  "starting": { glyph: "◌", tone: "live" },
+  "queued": { glyph: "…", tone: "quiet" },
+  "gate": { glyph: "◆", tone: "attention" },
+  "paused": { glyph: "‖", tone: "quiet" },
+  "detached": { glyph: "⊘", tone: "warn" },
+  "success": { glyph: "✓", tone: "success" },
+  "halted": { glyph: "■", tone: "warn" },
+  "failed": { glyph: "✕", tone: "danger" },
+  "archived": { glyph: "▫", tone: "quiet" },
+  "unknown": { glyph: "?", tone: "quiet" },
+};
+
+// Mirror of domain/dashboard_rows.py::PRECISION_VERDICT_ADVICE, in display order.
+export const PRECISION_VERDICT_ADVICE: Record<'noise' | 'spread', string> = {
+  "noise": "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
+  "spread": "The cells genuinely differ — that spread is signal about where this optimizer prompt works.",
+};
+
+// Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_LABELS, in display order.
+export const SAMPLE_MOVEMENT_LABELS: Record<'new' | 'readded' | 'gained' | 'lost' | 'kept', string> = {
+  "new": "new",
+  "readded": "re-added",
+  "gained": "gained position",
+  "lost": "lost position",
+  "kept": "kept position",
+};
+
+// Mirror of domain/dashboard_rows.py::VERIFICATION_KIND_INFO, in display order.
+export const VERIFICATION_KIND_INFO: Record<'verify' | 'bench', VerificationKindInfo> = {
+  "verify": { name: "verify", rows: " never seen" },
+  "bench": { name: "held-out bench", rows: "" },
+};
+
+// Mirror of domain/dataset_start.py::START_BLOCK_WORDS, in display order.
+export const START_BLOCK_WORDS: Record<StartBlock, string> = {
+  "verifier_graded": "Each sample is graded by running a verifier rather than by a labelled answer, so it is launched from the command line, not from here.",
+  "empty": "It holds no row with both a query and an answer.",
+  "missing_extra": "It runs through a Python extra this install lacks.",
+  "unreadable": "Its samples could not be read on this install.",
+  "backend_unreachable": "Its backend is not answering; it opens once the backend is up.",
+};
+
+// Mirror of domain/export.py::EXPORT_TIER_INFO, in display order.
+export const EXPORT_TIER_INFO: Record<ExportTier, ExportTierInfo> = {
+  "chat": { label: "Chat — the candidates as compact text", pasted: true },
+  "report": { label: "Report — that text under its provenance header", pasted: true },
+  "notebook": { label: "Notebook — candidates.jsonl and its dataset card", pasted: false },
+  "deploy": { label: "Deploy — export.json", pasted: false },
+  "package": { label: "Package — a skill folder for another agent", pasted: false },
+};
+
+// Mirror of domain/origin_panel.py::ROUND_ADVANCE_INFO, in display order.
+export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
+  "origin": { label: "origin", sentence: "Round 0 measured the origin every later pick is read against." },
+  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's." },
+  "advanced_unpaired": { label: "advanced, unpaired", sentence: "An arm was promoted, and the origin panel held nothing to pair it with the origin on." },
+  "not_separated": { label: "not separated", sentence: "An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick." },
+  "held": { label: "held", sentence: "No arm was promoted." },
+  "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall." },
+};
+
+// Mirror of domain/paired_reading.py::LIFT_SIDE_TONE, in display order.
+export const LIFT_SIDE_TONE: Record<'above' | 'below' | 'spans', Tone> = {
+  "above": "success",
+  "below": "danger",
+  "spans": "quiet",
+};
+
+// Mirror of domain/paired_reading.py::READING_STATE_INFO, in display order.
+export const READING_STATE_INFO: Record<ReadingState, ReadingStateInfo> = {
+  "read": { label: "read", sentence: "Read on the cells both members scored.", fault: false },
+  "not_asked": { label: "not asked", sentence: "Nobody has asked for the pass this reading is taken on yet.", fault: false },
+  "pending": { label: "pending", sentence: "The pass this reading waits on has not finished.", fault: false },
+  "not_held": { label: "no cells held", sentence: "The cell set this reading is taken on holds no cell.", fault: false },
+  "no_holdout": { label: "no rows held out", sentence: "The campaign's dataset_split holds no rows out, so the bench has none to grade.", fault: false },
+  "held_elsewhere": { label: "held elsewhere", sentence: "The cycle holding this line takes the reading, not this one.", fault: false },
+  "pass_stopped": { label: "pass stopped", sentence: "The pass that measures a member stopped before its last cell, so it reads nothing.", fault: true },
+  "past_tolerance": { label: "past tolerance", sentence: "A member's pass ended with more cells carrying no verdict than its tolerance allows.", fault: true },
+  "member_unscoreable": { label: "unscoreable", sentence: "A member holds no scoreable cell on this set.", fault: true },
+  "under_two_cells": { label: "under two cells", sentence: "Fewer than two cells were scored by both members, so nothing was tested.", fault: false },
+  "no_selection": { label: "no selection", sentence: "No round closed past the origin, so no individual is selected to pair.", fault: false },
+  "same_individual": { label: "same individual", sentence: "Both members are one individual on one pass, so there is no difference to read.", fault: false },
+  "run_failed": { label: "run failed", sentence: "The run failed before this reading was taken.", fault: true },
+  "scope_differs": { label: "scopes differ", sentence: "The members were read in different scopes.", fault: false },
+  "measurand_differs": { label: "scorers differ", sentence: "The members were graded by different scorers.", fault: false },
+  "dataset_differs": { label: "datasets differ", sentence: "The members were measured on different datasets.", fault: false },
+  "cell_set_differs": { label: "cell sets differ", sentence: "The members were sent on different declared cell sets.", fault: false },
+  "instrument_differs": { label: "instruments differ", sentence: "The members were measured by different instruments.", fault: false },
+};
+
+// Mirror of domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS, in display order.
+export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
+  "init": "starting up",
+  "origin": "scoring origin",
+  "proposing": "generating candidates",
+  "scoring": "scoring samples",
+  "between_samples": "scoring samples",
+  "between_candidates": "scoring samples",
+  "optimizer_step": "the optimizer's step",
+  "bench": "grading on the bench set",
+  "stopped": "the current round",
+};
+
+// Mirror of domain/phases.py::RUN_PHASE_INFO, in display order.
+export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
+  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "waiting for a machine slot" },
+  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "coming up" },
+  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
+  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
+  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "stopping at its next checkpoint" },
+  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "awaiting your decision" },
+  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone" },
+  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "writing its last files" },
+};
+
+// Mirror of domain/phases.py::STOP_REASON_INFO, in display order.
 export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "perfect_score": { label: "Perfect score", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "This is one round's panel, not the dataset: verify the winner on more cells.", grades_selection: true, cli_command: "`verify`" },
   "rounds_budget": { label: "Rounds budget reached", outcome: "success", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Every allowed round ran. If the curve was still moving, raise the rounds cap and resume; else read the review.", grades_selection: true, cli_command: "`set-limits --max-rounds <more>`, then `resume`; else read `review.md`" },
@@ -4914,282 +5365,31 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "optimizer_timeout": { label: "Optimizer timeout", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: true, cli_command: "" },
 };
 
-// Mirror of domain/phases.py::RUN_PHASE_INFO.
-export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "waiting for a machine slot" },
-  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "coming up" },
-  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
-  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
-  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "stopping at its next checkpoint" },
-  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "awaiting your decision" },
-  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone" },
-  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "writing its last files" },
-};
-
-// Mirror of domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS.
-export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
-  "init": "starting up",
-  "origin": "scoring origin",
-  "proposing": "generating candidates",
-  "scoring": "scoring samples",
-  "between_samples": "scoring samples",
-  "between_candidates": "scoring samples",
-  "optimizer_step": "",
-  "bench": "grading on the bench set",
-  "stopped": "",
-};
-
-// Mirror of domain/paired_reading.py::READING_STATE_INFO.
-export const READING_STATE_INFO: Record<ReadingState, ReadingStateInfo> = {
-  "read": { kind: "read", label: "read", sentence: "Read on the cells both members scored." },
-  "not_asked": { kind: "waiting", label: "not asked", sentence: "Nobody has asked for this reading yet." },
-  "pending": { kind: "waiting", label: "pending", sentence: "The pass this reading waits on has not finished." },
-  "not_held": { kind: "unpaired", label: "no cells held", sentence: "The cell set this reading is taken on holds no cell." },
-  "held_elsewhere": { kind: "unpaired", label: "held elsewhere", sentence: "The cycle holding this line takes the reading, not this one." },
-  "pass_stopped": { kind: "absent", label: "pass stopped", sentence: "The pass that measures a member stopped before it finished." },
-  "past_tolerance": { kind: "absent", label: "past tolerance", sentence: "A member's pass lost more cells than its tolerance allows." },
-  "member_unscoreable": { kind: "absent", label: "unscoreable", sentence: "A member holds no scoreable cell on this set." },
-  "under_two_cells": { kind: "absent", label: "under two cells", sentence: "Fewer than two cells were scored by both members, so nothing was tested." },
-  "no_selection": { kind: "unpaired", label: "no selection", sentence: "No individual was selected, so there is nothing to pair." },
-  "same_individual": { kind: "unpaired", label: "same individual", sentence: "Both members are one individual on one pass, so there is no difference to read." },
-  "run_failed": { kind: "absent", label: "run failed", sentence: "The run failed before this reading was taken." },
-  "scope_differs": { kind: "refused", label: "scopes differ", sentence: "The members were read in different scopes." },
-  "measurand_differs": { kind: "refused", label: "scorers differ", sentence: "The members were graded by different scorers." },
-  "dataset_differs": { kind: "refused", label: "datasets differ", sentence: "The members were measured on different datasets." },
-  "cell_set_differs": { kind: "refused", label: "cell sets differ", sentence: "The members were sent on different declared cell sets." },
-  "instrument_differs": { kind: "refused", label: "instruments differ", sentence: "The members were measured by different instruments." },
-};
-
-// Mirror of domain/bench.py::BENCH_STATE_INFO.
-export const BENCH_STATE_INFO: Partial<Record<ReadingState, BenchStateInfo>> = {
-  "read": { label: "graded", sentence: "The origin and the selection are graded on the held-out rows.", fault: false },
-  "not_asked": { label: "not asked", sentence: "Rows are held out, and nobody has asked for the selection's pass on them yet.", fault: false },
-  "pending": { label: "pending", sentence: "The line grades its selection when its run ends.", fault: false },
-  "not_held": { label: "nothing held out", sentence: "The campaign's dataset_split holds no bench rows out.", fault: false },
-  "held_elsewhere": { label: "held elsewhere", sentence: "This cycle runs beside the campaign's line, and the bench grades the line's result.", fault: false },
-  "pass_stopped": { label: "pass stopped", sentence: "A bench pass stopped before its last row, so it reads nothing.", fault: true },
-  "past_tolerance": { label: "past tolerance", sentence: "A bench pass ended with more rows carrying no verdict than the split's tolerance allows.", fault: true },
-  "no_selection": { label: "no selection", sentence: "No round closed past the origin, so there is no selection to grade.", fault: false },
-  "run_failed": { label: "run failed", sentence: "The run failed before the line graded its selection.", fault: true },
-};
-
-// Mirror of domain/bench.py::BENCH_REFUSAL_INFO.
-export const BENCH_REFUSAL_INFO: Record<BenchRefusal, string> = {
-  "inner": "An inner run is one cell of its outer campaign; no command grades its line.",
-  "no_manifest": "This campaign has no manifest on disk.",
-  "held_elsewhere": "Another cycle (`held_by`) holds this campaign's line, and the bench grades the campaign's result. Ask for that cycle.",
-  "not_held": "The campaign's dataset_split holds no bench rows out.",
-  "in_flight": "A bench pass is grading now; its reading lands when it ends.",
-  "selecting": "The run is still selecting. Pause it or let it end first.",
-  "origin_unscored": "The origin has not been scored, so there is no reference to grade against.",
-  "graded": "The line's selection is already graded.",
-  "no_selection": "No round closed past the origin, so there is no selection to grade.",
-};
-
-// Mirror of domain/phases.py::WAITING_ON_WORDS.
-export const WAITING_ON_WORDS: Record<"pass" | "sample", string> = {
-  "pass": "pass",
-  "sample": "sample",
-};
-
-// Mirror of application/served_dashboard.py::LOOKAHEAD_WORDS.
-export const LOOKAHEAD_WORDS: Record<"one_at_a_time" | "settled" | "no_further_cell" | "more_affordable" | "holds_every_round" | "holds_this_round" | "discarded" | "depth_one" | "depth_many", string> = {
-  "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to overlap.",
-  "settled": "not available now",
-  "no_further_cell": "holds no further cell",
-  "more_affordable": "more affordable",
-  "holds_every_round": "Every round, scoring holds as many calls as the stop rules allow, up to {ceiling}. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
-  "holds_this_round": "Runs this round's scoring with this many calls in flight, up to {pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
-  "discarded": "{discards} discarded so far.",
-  "depth_one": "One at a time",
-  "depth_many": "Hold {cells} in flight",
-};
-
-// Mirror of domain/run_standing.py::LIVES_WORDS.
-export const LIVES_WORDS: Record<"banked" | "spent_pip" | "empty" | "empty_sentence" | "life" | "lives", string> = {
-  "banked": "♥",
-  "spent_pip": "♡",
-  "empty": "💀",
-  "empty_sentence": "No lives left — the run stops after this round",
-  "life": "life",
-  "lives": "lives",
-};
-
-// Mirror of domain/origin_panel.py::ROUND_ADVANCE_INFO.
-export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
-  "origin": { label: "origin", sentence: "Round 0 measured the origin every later pick is read against.", stall: "starts" },
-  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's.", stall: "resets" },
-  "advanced_unpaired": { label: "advanced, unpaired", sentence: "An arm was promoted, and the origin panel held nothing to pair it with the origin on.", stall: "resets" },
-  "not_separated": { label: "not separated", sentence: "An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick.", stall: "resets" },
-  "held": { label: "held", sentence: "No arm was promoted.", stall: "counts" },
-  "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall.", stall: "skips" },
-};
-
-// Mirror of domain/ruler.py::THETA_CAVEAT_INFO.
-export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
-  "disjoint_scopes": { label: "θ mixes datasets", detail: "These samples come from more than one dataset, and difficulty is only rated within one, so this θ averages scales that don't compare. Read each dataset on its own; a lift against the parent still holds.", tone: "attention" },
-  "cold_ruler": { label: "θ is plain accuracy so far", detail: "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another scale. A lift against the parent holds; θ compared across rounds or candidates does not.", tone: "attention" },
-  "flat_ruler": { label: "θ is plain accuracy here", detail: "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as accuracy does. No round can change that.", tone: "attention" },
-  "collapsed_band": { label: "θ is plain accuracy this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as accuracy does. A round drawing harder and easier samples reads differently.", tone: "attention" },
-  "prior_pinned": { label: "θ shifts between rounds", detail: "Most samples this round got the default difficulty, because every candidate answered them alike. That default moves as rounds come in, so compare θ within a round, not across rounds.", tone: "attention" },
-  "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
-  "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
-};
-
-// Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS.
-export const ARM_VERDICT_LABELS: Record<"retired" | "invalid" | "origin" | "elected" | "uncontested" | "selected" | "not_elected" | "unmeasured" | "awaiting", string> = {
-  "retired": "retired",
-  "invalid": "invalid — never measured",
-  "origin": "origin",
-  "elected": "won its round",
-  "uncontested": "advanced uncontested",
-  "selected": "selected",
-  "not_elected": "not elected",
-  "unmeasured": "not measured yet",
-  "awaiting": "awaiting election",
-};
-
-// Mirror of domain/arm_reading.py::UNIT_FORMATS.
-export const UNIT_FORMATS: Record<"rate" | "score" | "theta" | "seconds" | "usd" | "tokens" | "rank" | "rounds", UnitFormat> = {
-  "rate": { scale: 100.0, digits: 0, prefix: "", suffix: "%", lift_digits: 1, lift_word: "pts", lift_name: "point", compact: false },
-  "score": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 3, lift_word: "score", lift_name: "unit of score", compact: false },
-  "theta": { scale: 1.0, digits: 2, prefix: "θ ", suffix: "", lift_digits: 3, lift_word: "logits", lift_name: "logit", compact: false },
-  "seconds": { scale: 1.0, digits: 2, prefix: "", suffix: "s", lift_digits: 2, lift_word: "s", lift_name: "second", compact: false },
-  "usd": { scale: 1.0, digits: 4, prefix: "$", suffix: "", lift_digits: 4, lift_word: "USD", lift_name: "dollar", compact: false },
-  "tokens": { scale: 1.0, digits: 0, prefix: "", suffix: " tok", lift_digits: 0, lift_word: "tok", lift_name: "token", compact: true },
-  "rank": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 2, lift_word: "ranks", lift_name: "rank", compact: false },
-  "rounds": { scale: 1.0, digits: 1, prefix: "", suffix: "", lift_digits: 1, lift_word: "rounds", lift_name: "round", compact: false },
-};
-
-// Mirror of domain/bench.py::COST_ABSENCE_WORDS.
-export const COST_ABSENCE_WORDS: Record<CostAbsence, string> = {
-  "no_lift": "no lift to price",
-  "unpriced_tokens": "search tokens unpriced",
-  "zero_spend": "no search spend",
-};
-
-// Mirror of domain/campaign.py::LIFECYCLE_STATUS_LABELS.
-export const LIFECYCLE_STATUS_LABELS: Record<"active" | "archived" | "deleted", string> = {
-  "active": "Active",
-  "archived": "Archived",
-  "deleted": "Deleted",
-};
-
-// Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_LABELS.
-export const SAMPLE_MOVEMENT_LABELS: Record<"new" | "readded" | "gained" | "lost" | "kept", string> = {
-  "new": "new",
-  "readded": "re-added",
-  "gained": "gained position",
-  "lost": "lost position",
-  "kept": "kept position",
-};
-
-// Mirror of domain/dashboard_rows.py::PRECISION_VERDICT_ADVICE.
-export const PRECISION_VERDICT_ADVICE: Record<"noise" | "spread", string> = {
-  "noise": "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
-  "spread": "The cells genuinely differ — that spread is signal about where this optimizer prompt works.",
-};
-
-// Mirror of domain/dashboard_rows.py::VERIFICATION_KIND_INFO.
-export const VERIFICATION_KIND_INFO: Record<"verify" | "bench", VerificationKindInfo> = {
-  "verify": { name: "verify", rows: " never seen" },
-  "bench": { name: "held-out bench", rows: "" },
-};
-
-// Mirror of domain/cycle_index.py::STATUS_MARK_INFO.
-export const STATUS_MARK_INFO: Record<"running" | "scoring" | "starting" | "queued" | "gate" | "paused" | "detached" | "success" | "halted" | "failed" | "archived" | "unknown", StatusMarkInfo> = {
-  "running": { glyph: "●", tone: "live" },
-  "scoring": { glyph: "◐", tone: "live" },
-  "starting": { glyph: "◌", tone: "live" },
-  "queued": { glyph: "…", tone: "quiet" },
-  "gate": { glyph: "◆", tone: "attention" },
-  "paused": { glyph: "‖", tone: "quiet" },
-  "detached": { glyph: "⊘", tone: "warn" },
-  "success": { glyph: "✓", tone: "success" },
-  "halted": { glyph: "■", tone: "warn" },
-  "failed": { glyph: "✕", tone: "danger" },
-  "archived": { glyph: "▫", tone: "quiet" },
-  "unknown": { glyph: "?", tone: "quiet" },
-};
-
-// Mirror of application/knobs.py::COUPLING_SEVERITY_INFO.
-export const COUPLING_SEVERITY_INFO: Record<"collision" | "inert" | "info", CouplingSeverityInfo> = {
-  "collision": { tone: "danger" },
-  "inert": { tone: "attention" },
-  "info": { tone: "quiet" },
-};
-
-// Mirror of domain/verify_pass.py::VERIFY_STRATEGY_LABELS.
-export const VERIFY_STRATEGY_LABELS: Record<"random" | "hard", string> = {
-  "random": "picked at random",
-  "hard": "hardest first",
-};
-
-// Mirror of domain/pipeline_schema.py::MOVABLE_AGENT_LABELS.
-export const MOVABLE_AGENT_LABELS: Record<"proposer" | "optimizer", string> = {
+// Mirror of domain/pipeline_schema.py::MOVABLE_AGENT_LABELS, in display order.
+export const MOVABLE_AGENT_LABELS: Record<MovableAgent, string> = {
   "proposer": "the optimizer's proposer, every round",
   "optimizer": "the optimizer itself, mid-run",
 };
 
-// Mirror of domain/spend.py::PREFIX_STATE_TITLES.
-export const PREFIX_STATE_TITLES: Record<"discounted" | "cold" | "unreported" | "replayed", string> = {
-  "discounted": "The provider served this share of the input off its own prompt-prefix cache, billed at a discount. Unrelated to 📖, which means no provider was reached at all.",
-  "cold": "The provider reported its cache accounting and served none of this input from it — the prefix was cold. A measurement, not a missing one.",
-  "unreported": "This provider reported no cache accounting, so whether it collected the prefix is unknown. Not the same as no hit.",
-  "replayed": "Replayed from our own archive — no provider was reached, so there is no discount to report.",
+// Mirror of domain/pipeline_schema.py::NODE_KIND_INFO, in display order.
+export const NODE_KIND_INFO: Record<'io' | 'llm' | 'tool' | 'retriever' | 'cache' | 'measurement' | 'member', NodeKindInfo> = {
+  "io": { label: "I/O", role: "Pipeline terminal." },
+  "llm": { label: "LLM", role: "LLM call — runs the prompt below." },
+  "tool": { label: "tool", role: "Tool — a step that runs code, not a prompt." },
+  "retriever": { label: "retriever", role: "Retriever — ranks candidates from the index by similarity. No prompt." },
+  "cache": { label: "cache", role: "Cache — short-circuits the pipeline on a known hit. No prompt." },
+  "measurement": { label: "system step", role: "System step — runs a whole pipeline rather than a prompt." },
+  "member": { label: "member", role: "Optimizer member — code that samples, cuts, elects or steers the round, set by its knobs. No prompt." },
 };
 
-// Mirror of domain/spend.py::CEILING_METER_LABELS.
-export const CEILING_METER_LABELS: Record<"bill" | "search_incurred", string> = {
-  "bill": "billed + priced at our rate",
-  "search_incurred": "search incurred",
+// Mirror of domain/pool.py::POOL_SOURCE_INFO, in display order.
+export const POOL_SOURCE_INFO: Record<PoolSource, PoolSourceInfo> = {
+  "library": { one: "snippet", many: "snippets", in_play: "Snippets in play" },
+  "partition": { one: "row", many: "rows", in_play: "Rows in play" },
 };
 
-// Mirror of application/evidence/subjects.py::SUBJECT_KIND_LABELS.
-export const SUBJECT_KIND_LABELS: Record<"campaign" | "course" | "candidate", string> = {
-  "campaign": "origin",
-  "course": "branch head",
-  "candidate": "searchpoint",
-};
-
-// Mirror of application/evidence/head_to_head.py::GUARD_STATE_INFO.
-export const GUARD_STATE_INFO: Record<GuardState, string> = {
-  "controlled": "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, split, held-out rows, scorer, target model, origin and budget, with one optimizer model set and no operator's steer.",
-  "uncontrolled": "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a head-to-head, or an arm a launch act ran off it, could read other campaigns' measurements, take an operator's steer or re-run its own rounds.",
-  "differs": "Not one quantity: what graded or bounded these headlines differs, so a gap between two is not the optimizer's alone.",
-};
-
-// Mirror of application/evidence/head_to_head.py::GUARD_STATE_LABELS.
-export const GUARD_STATE_LABELS: Record<GuardState, string> = {
-  "controlled": "controlled",
-  "uncontrolled": "not controlled",
-  "differs": "differs",
-};
-
-// Mirror of application/evidence/head_to_head.py::GUARD_DIFFERENCE_INFO.
-export const GUARD_DIFFERENCE_INFO: Record<GuardDifference, string> = {
-  "instrument_id": "Different instruments measured the cells: another dataset, or another inner origin under it.",
-  "dataset_hash": "The banks hold different rows.",
-  "split": "The banks were split differently.",
-  "bench_rows": "Different rows were held out, so the headlines are graded on different cells.",
-  "scorer_id": "Different scorers graded the headlines.",
-  "models": "The target pipelines ran different models.",
-  "origin": "The campaigns started from different origins.",
-  "budget": "The campaigns declared different budgets, stopping rules or determinism clamps.",
-  "defaults": "The campaigns were declared over different code defaults, so a key neither set ran at different values.",
-  "optimizer_models": "The optimizers called different models, so a gap between two headlines is the model's as much as the method's.",
-  "human_intervened": "An operator steered, skipped or model-overrode a cycle on a campaign's line.",
-  "origin_reading": "Campaigns on one bench set read the same origin apart beyond its own noise under one formula, so the backend or a judge moved between them — a change no stamp names.",
-};
-
-// Mirror of application/evidence/head_to_head.py::VERDICT_ABSENT_INFO.
-export const VERDICT_ABSENT_INFO: Partial<Record<ReadingState, string>> = {
-  "under_two_cells": "No verdict: a head-to-head needs two campaigns with a graded bench set.",
-  "pending": "No verdict yet: a declared arm of this head-to-head has no bench headline, so the graded rows are not the comparison that was declared.",
-};
-
-// Mirror of domain/round_health.py::HEALTH_CAUSE_INFO.
-export const HEALTH_CAUSE_INFO: Record<"origin_unmeasured" | "origin_incomplete" | "structural" | "unscoreable" | "holed" | "evidence_starved" | "structural_untested" | "persistent" | "degraded" | "transient", HealthCauseInfo> = {
+// Mirror of domain/round_health.py::HEALTH_CAUSE_INFO, in display order.
+export const HEALTH_CAUSE_INFO: Record<'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | 'transient', HealthCauseInfo> = {
   "origin_unmeasured": { title: "not measured", remedy: "Re-score the origin. If it stops in the same place, read the error on the last cell that was measured — the cause is upstream of the prompt. A cell measured but not graded is the formula's: fix the formula and re-read that cell, never re-buy it." },
   "origin_incomplete": { title: "cells missing", remedy: "Re-score the origin before spending a round on top of it — errored cells are never served from cache." },
   "structural": { title: "failing structurally", remedy: "Consider aborting and fixing the config before spending more rounds." },
@@ -5202,93 +5402,87 @@ export const HEALTH_CAUSE_INFO: Record<"origin_unmeasured" | "origin_incomplete"
   "transient": { title: "degraded by transient failures", remedy: "No action is needed; if the next round degrades too, read the node's error." },
 };
 
-// Mirror of domain/round_health.py::HEALTH_GRADE_INFO.
-export const HEALTH_GRADE_INFO: Record<"healthy" | "degraded" | "critical" | "unmeasured", HealthGradeInfo> = {
+// Mirror of domain/round_health.py::HEALTH_GRADE_INFO, in display order.
+export const HEALTH_GRADE_INFO: Record<'healthy' | 'degraded' | 'critical' | 'unmeasured', HealthGradeInfo> = {
   "healthy": { tone: "success" },
   "degraded": { tone: "warn" },
   "critical": { tone: "danger" },
   "unmeasured": { tone: "quiet" },
 };
 
-// Mirror of domain/connector.py::BACKEND_REACHABILITY_INFO.
-export const BACKEND_REACHABILITY_INFO: Record<"live" | "unreachable" | "missing_extra", BackendReachabilityInfo> = {
-  "live": { label: "Backend reachable", tone: "success" },
-  "unreachable": { label: "Backend unreachable", tone: "warn" },
-  "missing_extra": { label: "Python extra not installed", tone: "warn" },
+// Mirror of domain/ruler.py::THETA_CAVEAT_INFO, in display order.
+export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
+  "disjoint_scopes": { label: "θ mixes datasets", detail: "These samples come from more than one dataset, and difficulty is only rated within one, so this θ averages scales that don't compare. Read each dataset on its own; a lift against the parent still holds.", tone: "attention" },
+  "cold_ruler": { label: "θ is plain accuracy so far", detail: "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another scale. A lift against the parent holds; θ compared across rounds or candidates does not.", tone: "attention" },
+  "flat_ruler": { label: "θ is plain accuracy here", detail: "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as accuracy does. No round can change that.", tone: "attention" },
+  "collapsed_band": { label: "θ is plain accuracy this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as accuracy does. A round drawing harder and easier samples reads differently.", tone: "attention" },
+  "prior_pinned": { label: "θ shifts between rounds", detail: "Most samples this round got the default difficulty, because every candidate answered them alike. That default moves as rounds come in, so compare θ within a round, not across rounds.", tone: "attention" },
+  "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
+  "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
 };
 
-// Mirror of application/jobs/quota.py::LAUNCH_REFUSAL_LABELS.
-export const LAUNCH_REFUSAL_LABELS: Record<LaunchRefusalReason, string> = {
-  "used_up": "Allowance used up",
-  "held": "Allowance held",
-  "over_declared": "Ceiling past the allowance",
-  "no_key": "No key for a provider",
+// Mirror of domain/run_standing.py::LIVES_WORDS, in display order.
+export const LIVES_WORDS: Record<LivesWord, string> = {
+  "banked": "♥",
+  "spent_pip": "♡",
+  "empty": "💀",
+  "empty_sentence": "No lives left — the run stops after this round",
+  "life": "life",
+  "lives": "lives",
 };
 
-// Mirror of domain/spend.py::KEY_SOURCE_LABELS.
-export const KEY_SOURCE_LABELS: Record<"host" | "user", string> = {
-  "host": "host key",
-  "user": "own key",
-};
-
-// Mirror of application/jobs/capacity.py::SLOT_BOUND_WORDS.
-export const SLOT_BOUND_WORDS: Record<SlotBound, string> = {
-  "throttle": "admitting {capacity} of {ceiling} while the provider throttle is saturated",
-  "machine": "This account's limit of {max_concurrent_cycles} is above the machine's {ceiling}, so the machine is what binds.",
-};
-
-// Mirror of domain/dataset_start.py::START_BLOCK_WORDS.
-export const START_BLOCK_WORDS: Record<StartBlock, string> = {
-  "verifier_graded": "Each sample is graded by running a verifier rather than by a labelled answer, so it is launched from the command line, not from here.",
-  "empty": "It holds no row with both a query and an answer.",
-  "missing_extra": "It runs through a Python extra this install lacks.",
-  "unreadable": "Its samples could not be read on this install.",
-  "backend_unreachable": "Its backend is not answering; it opens once the backend is up.",
-};
-
-// Mirror of application/datasets/origin_readiness.py::SETUP_STEP_TITLES.
-export const SETUP_STEP_TITLES: Record<SetupStep, string> = {
-  "optimizer": "Optimizer",
-  "data": "Data",
-  "scoring": "Scoring",
-  "pipeline": "Pipeline",
-  "head_to_head": "Head-to-head",
-  "run": "Run bounds",
-};
-
-// Mirror of domain/pipeline_schema.py::NODE_KIND_INFO.
-export const NODE_KIND_INFO: Record<"io" | "llm" | "tool" | "retriever" | "cache" | "measurement" | "member", NodeKindInfo> = {
-  "io": { label: "I/O", role: "Pipeline terminal." },
-  "llm": { label: "LLM", role: "LLM call — runs the prompt below." },
-  "tool": { label: "tool", role: "Tool — a step that runs code, not a prompt." },
-  "retriever": { label: "retriever", role: "Retriever — ranks candidates from the index by similarity. No prompt." },
-  "cache": { label: "cache", role: "Cache — short-circuits the pipeline on a known hit. No prompt." },
-  "measurement": { label: "system step", role: "System step — runs a whole pipeline rather than a prompt." },
-  "member": { label: "member", role: "Optimizer member — code that samples, cuts, elects or steers the round, set by its knobs. No prompt." },
-};
-
-// Mirror of domain/scoring.py::SAMPLE_STATUS_LABELS.
-export const SAMPLE_STATUS_LABELS: Record<"HIT" | "MISS" | "ERR" | "UNSC", string> = {
+// Mirror of domain/scoring.py::SAMPLE_STATUS_LABELS, in display order.
+export const SAMPLE_STATUS_LABELS: Record<'HIT' | 'MISS' | 'ERR' | 'UNSC', string> = {
   "HIT": "Hit",
   "MISS": "Miss",
   "ERR": "Error",
   "UNSC": "Unscored",
 };
 
-// Mirror of domain/cells.py::HEATMAP_SCOPE_LABELS.
-export const HEATMAP_SCOPE_LABELS: Record<"cycle" | "campaign" | "dataset", string> = {
-  "cycle": "This cycle",
-  "campaign": "This campaign",
-  "dataset": "All campaigns",
+// Mirror of domain/spend.py::CAP_AXIS_INFO, in display order.
+export const CAP_AXIS_INFO: Record<CapAxis, CapAxisInfo> = {
+  "usd": { title: "Spend cap", unit: "USD", scale: 1, step: 0.01, integer: false, minimum: null, exclusive_minimum: null },
+  "tokens": { title: "Token cap", unit: "tokens", scale: 1, step: 1000, integer: true, minimum: 0.0, exclusive_minimum: null },
+  "rounds": { title: "Round cap", unit: "rounds", scale: 1, step: 1, integer: true, minimum: 0.0, exclusive_minimum: null },
+  "wall_clock_s": { title: "Wall-clock cap", unit: "minutes", scale: 60, step: 5, integer: false, minimum: null, exclusive_minimum: null },
 };
 
-// Mirror of domain/cells.py::HARD_SAMPLE_ORDER_LABELS.
-export const HARD_SAMPLE_ORDER_LABELS: Record<"info_gain" | "difficulty", string> = {
-  "info_gain": "Info gain",
-  "difficulty": "Hardness",
+// Mirror of domain/spend.py::CEILING_METER_LABELS, in display order.
+export const CEILING_METER_LABELS: Record<'bill' | 'search_incurred', string> = {
+  "bill": "billed + priced at our rate",
+  "search_incurred": "search incurred",
 };
 
-// Mirror of infrastructure/store/data_root.py::LEAF_INFO.
+// Mirror of domain/spend.py::KEY_SOURCE_LABELS, in display order.
+export const KEY_SOURCE_LABELS: Record<'host' | 'user', string> = {
+  "host": "host key",
+  "user": "own key",
+};
+
+// Mirror of domain/spend.py::PREFIX_STATE_TITLES, in display order.
+export const PREFIX_STATE_TITLES: Record<'discounted' | 'cold' | 'unreported' | 'replayed', string> = {
+  "discounted": "The provider served this share of the input off its own prompt-prefix cache, billed at a discount. Unrelated to 📖, which means no provider was reached at all.",
+  "cold": "The provider reported its cache accounting and served none of this input from it — the prefix was cold. A measurement, not a missing one.",
+  "unreported": "This provider reported no cache accounting, so whether it collected the prefix is unknown. Not the same as no hit.",
+  "replayed": "Replayed from our own archive — no provider was reached, so the cell cost nothing and there is no discount to report.",
+};
+
+// Mirror of domain/spend.py::SPEND_KIND_LABELS, in display order.
+export const SPEND_KIND_LABELS: Record<TokenUsageKind, string> = {
+  "backend": "Connector",
+  "optimizer": "Optimizer",
+  "judge": "Judge",
+  "diagnostic": "Diagnostic",
+  "bench": "Bench",
+};
+
+// Mirror of domain/verify_pass.py::VERIFY_STRATEGY_LABELS, in display order.
+export const VERIFY_STRATEGY_LABELS: Record<'random' | 'hard', string> = {
+  "random": "picked at random",
+  "hard": "hardest first",
+};
+
+// Mirror of infrastructure/store/data_root.py::LEAF_INFO, in display order.
 export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "dataset": { label: "Dataset", description: "The input data's mirror: langfuse ground truth.", loop: false },
   "connector": { label: "Connector", description: "What the backend produced: node-I/O cache and per-sample arrays.", loop: false },
@@ -5298,142 +5492,79 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
   "reports": { label: "Reports", description: "Readable output: manifest, reports, hard samples.", loop: true },
 };
 
-// Mirror of application/account.py::SIGN_IN_REFUSAL_INFO.
-export const SIGN_IN_REFUSAL_INFO: Record<"state_invalid_or_expired" | "code_exchange_failed" | "provider_returned_error" | "callback_missing_params" | "signin_unavailable" | "accounts_full", SignInRefusalInfo> = {
-  "state_invalid_or_expired": { label: "That sign-in took too long and expired. Try Continue with Google again.", tone: "warn" },
-  "code_exchange_failed": { label: "We couldn't verify your sign-in with Google. Try again.", tone: "warn" },
-  "provider_returned_error": { label: "Google sign-in was cancelled. Try again when you're ready.", tone: "attention" },
-  "callback_missing_params": { label: "That sign-in link was incomplete. Try again.", tone: "warn" },
-  "signin_unavailable": { label: "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.", tone: "danger" },
-  "accounts_full": { label: "This server has reached its account limit, so it can't open a new account. If you already have one, sign in with it.", tone: "warn" },
-};
-
-// Mirror of application/pipeline_responses.py::STEER_OUTSIDE_INFO.
-export const STEER_OUTSIDE_INFO: Record<"babysat" | "refused", SteerOutsideInfo> = {
-  "babysat": { title: "This steer leaves what the campaign permits, so the branch goes grade C.", detail: "Steering to it marks this branch — and every round after it — operator-babysat: excluded from clean comparison, origin reuse, and the L4 rollup. The measurement is still recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.", tone: "warn" },
-  "refused": { title: "This steer leaves what the campaign permits.", detail: "Steering outside it is a babysit act this account may not take. Pick a permitted model.", tone: "danger" },
-};
-
-// Mirror of domain/spend.py::CAP_AXIS_INFO.
-export const CAP_AXIS_INFO: Record<"usd" | "tokens" | "rounds" | "wall_clock_s", CapAxisInfo> = {
-  "usd": { title: "Spend cap", unit: "USD", scale: 1, step: 0.01, integer: false, minimum: null, exclusive_minimum: null },
-  "tokens": { title: "Token cap", unit: "tokens", scale: 1, step: 1000, integer: true, minimum: 0.0, exclusive_minimum: null },
-  "rounds": { title: "Round cap", unit: "rounds", scale: 1, step: 1, integer: true, minimum: 0.0, exclusive_minimum: null },
-  "wall_clock_s": { title: "Wall-clock cap", unit: "minutes", scale: 60, step: 5, integer: false, minimum: null, exclusive_minimum: null },
-};
-
-// Who spent it (domain/spend.py::TokenUsageKind).
-export type SpendKind = 'backend' | 'optimizer' | 'judge' | 'diagnostic' | 'bench';
-
-// Each kind's word, in display order. Mirror of domain/spend.py::SPEND_KIND_LABELS.
-export const SPEND_KINDS: readonly { key: SpendKind; label: string }[] = [
-  { key: 'backend', label: 'Connector' },
-  { key: 'optimizer', label: 'Optimizer' },
-  { key: 'judge', label: 'Judge' },
-  { key: 'diagnostic', label: 'Diagnostic' },
-  { key: 'bench', label: 'Bench' },
-];
-
-// A provider prefix-cache reading's state (domain/spend.py::PrefixState).
-export type PrefixState = 'discounted' | 'cold' | 'unreported' | 'replayed';
-
-// The word beside a figure our rate table priced, which is never spent. Mirror of domain/spend.py::RATE_PRICED_LABEL.
-export const RATE_PRICED_LABEL = 'priced at our rate';
+// Each table's keys in display order (lib/api/words.ts walks a table by it).
+export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, readonly string[]>([
+  [SIGN_IN_REFUSAL_INFO, ["state_invalid_or_expired", "code_exchange_failed", "provider_returned_error", "callback_missing_params", "signin_unavailable", "accounts_full"]],
+  [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
+  [GUARD_DIFFERENCE_INFO, ["instrument_id", "dataset_hash", "split", "bench_rows", "scorer_id", "models", "origin", "budget", "defaults", "optimizer_models", "human_intervened", "origin_reading"]],
+  [GUARD_STATE_INFO, ["controlled", "uncontrolled", "differs"]],
+  [GUARD_STATE_LABELS, ["controlled", "uncontrolled", "differs"]],
+  [VERDICT_ABSENT_INFO, ["under_two_cells", "pending"]],
+  [SUBJECT_KIND_LABELS, ["campaign", "course", "candidate"]],
+  [ACTIVITY_WINDOW_INFO, ["15m", "30m", "1h", "3h", "1d", "2d", "1w", "1mo", "1y"]],
+  [SLOT_BOUND_WORDS, ["throttle", "machine"]],
+  [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key"]],
+  [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
+  [SCORE_LENS_LABELS, ["score:accuracy"]],
+  [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:lock_in_off", "abort:all_off"]],
+  [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
+  [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "bench_lift", "bench_origin", "bench_final_lift", "lift", "origin", "final_lift", "peak_lift", "rounds", "round_budget", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
+  [LOOKAHEAD_WORDS, ["one_at_a_time", "settled", "no_further_cell", "more_affordable", "holds_every_round", "holds_this_round", "discarded", "depth_one", "depth_many"]],
+  [ACCOUNT_TAB_INFO, ["profile", "usage", "keys", "activity", "preferences", "storage", "about"]],
+  [ARM_VERDICT_LABELS, ["retired", "invalid", "origin", "elected", "uncontested", "selected", "not_elected", "unmeasured", "awaiting"]],
+  [CANDIDATE_COUNT_WORDS, ["replayed"]],
+  [DISPLAY_METRIC_INFO, ["accuracy", "ability", "composite"]],
+  [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
+  [ARM_END_INFO, ["invalid", "skipped", "broken", "eliminated", "locked_in"]],
+  [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
+  [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
+  [LIFECYCLE_STATUS_LABELS, ["active", "archived", "deleted"]],
+  [HARD_SAMPLE_ORDER_LABELS, ["info_gain", "difficulty"]],
+  [HEATMAP_SCOPE_LABELS, ["cycle", "campaign", "dataset"]],
+  [HIT_SPREAD_LABELS, ["unmeasured", "never", "partly", "always"]],
+  [ARCHIVE_MODE_INFO, ["compact", "restore", "purge-cold"]],
+  [BACKEND_REACHABILITY_INFO, ["live", "unreachable", "missing_extra"]],
+  [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
+  [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],
+  [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
+  [VERIFICATION_KIND_INFO, ["verify", "bench"]],
+  [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
+  [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
+  [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "held", "unread"]],
+  [LIFT_SIDE_TONE, ["above", "below", "spans"]],
+  [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],
+  [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],
+  [RUN_PHASE_INFO, ["queued", "starting", "running", "scoring", "paused", "gate", "detached", "terminal"]],
+  [STOP_REASON_INFO, ["perfect_score", "rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "diag_complete", "converged", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
+  [MOVABLE_AGENT_LABELS, ["proposer", "optimizer"]],
+  [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
+  [POOL_SOURCE_INFO, ["library", "partition"]],
+  [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
+  [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
+  [THETA_CAVEAT_INFO, ["disjoint_scopes", "cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],
+  [LIVES_WORDS, ["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]],
+  [SAMPLE_STATUS_LABELS, ["HIT", "MISS", "ERR", "UNSC"]],
+  [CAP_AXIS_INFO, ["usd", "tokens", "rounds", "wall_clock_s"]],
+  [CEILING_METER_LABELS, ["bill", "search_incurred"]],
+  [KEY_SOURCE_LABELS, ["host", "user"]],
+  [PREFIX_STATE_TITLES, ["discounted", "cold", "unreported", "replayed"]],
+  [SPEND_KIND_LABELS, ["backend", "optimizer", "judge", "diagnostic", "bench"]],
+  [VERIFY_STRATEGY_LABELS, ["random", "hard"]],
+  [LEAF_INFO, ["dataset", "connector", "state", "trace", "history", "reports"]],
+]);
 
 // domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.
 export const SCHEMA_DESCRIPTION_PREFIX = "output_schema_descriptions.";
+// The word beside a figure our rate table priced (domain/spend.py::RATE_PRICED_LABEL).
+export const RATE_PRICED_LABEL = "priced at our rate";
+// How wide a row's slot is printed (domain/sample.py::sample_tag).
+export const SAMPLE_TAG_DIGITS = 3;
 
-// A column every arm carries (domain/arm_reading.py::DisplayMetric).
-export type DisplayMetric = 'accuracy' | 'ability' | 'composite';
-
-// Each column's words, in pick order. Mirror of domain/arm_reading.py::DISPLAY_METRIC_INFO.
-export const DISPLAY_METRICS: readonly {
-  id: DisplayMetric;
-  label: string;
-  glyph: string;
-  title: string;
-}[] = [
-  { id: 'accuracy', label: 'accuracy', glyph: '%', title: "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative)." },
-  { id: 'ability', label: 'ability θ', glyph: 'θ', title: "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank." },
-  { id: 'composite', label: 'composite', glyph: '∑', title: 'Composite fitness under the active scoring formula (equals accuracy when no formula is set).' },
-];
-
-export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {
-  'accuracy': 'accuracy',
-  'ability': 'ability θ',
-  'composite': 'composite',
-};
-
-// Every unit a read number is in (domain/paired_reading.py::MeasurandUnit).
-export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
-
-export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, MeasurandUnit> = {
-  'accuracy': 'rate',
-  'ability': 'theta',
-  'composite': 'score',
-};
-
-// What `GET …/export?tier=` serves, in offer order. Mirror of
-// domain/export.py::EXPORT_TIER_INFO — `pasted` tiers are text to copy, the rest download.
-export type ExportTier = "chat" | "report" | "notebook" | "deploy" | "package";
-
-export const EXPORT_TIERS: readonly { id: ExportTier; label: string; pasted: boolean }[] = [
-  { id: "chat", label: "Chat — the candidates as compact text", pasted: true },
-  { id: "report", label: "Report — that text under its provenance header", pasted: true },
-  { id: "notebook", label: "Notebook — candidates.jsonl and its dataset card", pasted: false },
-  { id: "deploy", label: "Deploy — export.json", pasted: false },
-  { id: "package", label: "Package — a skill folder for another agent", pasted: false },
-];
-
-// Each lens a picklist offers by name -> its label, keyed as the `lens=` it sends, in
-// picklist order. Mirrors of application/mask/record.py::SCORE_LENS_LABELS and
-// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against
-// `ABORT_LENS_SUPPRESS` at import. Don't hand-list these.
-export const SCORE_LENS_LABELS: Record<string, string> = {
-  'score:accuracy': 'Accuracy',
-};
-
-export const ABORT_LENS_LABELS: Record<string, string> = {
-  'abort:epsilon_off': 'No ε-elimination',
-  'abort:lock_in_off': 'No lock-in',
-  'abort:all_off': 'No early abort',
-};
-
-export interface CellTermMeta {
-  name: string;
-  direction: "high" | "low";
-  description: string;
-  dial: "anchored" | "unit" | null;
-  primary: boolean;
-}
-
-// What a per_cell formula can name, mirrored from application/scoring/evaluators.py.
-export const CELL_TERM_META: CellTermMeta[] = [
-  { name: 'fitness', direction: 'high', description: "The cell's correctness under the per-sample formula.", dial: null, primary: true },
-  { name: 'ground_truth_rank', direction: 'low', description: 'Where the truth landed in the ranking; 1 is the top.', dial: null, primary: false },
-  { name: 'latency', direction: 'low', description: 'Seconds the cell took when measured; a replay keeps them.', dial: "anchored", primary: true },
-  { name: 'unworked', direction: 'low', description: 'Seconds the cell sat blocked (suspend, rate-limit queue).', dial: "anchored", primary: false },
-  { name: 'bench_lift', direction: 'high', description: "L4: the inner campaign's mean lift over its origin on its held-out rows.", dial: null, primary: false },
-  { name: 'bench_origin', direction: 'high', description: "L4: the inner origin's headline on the held-out rows.", dial: null, primary: false },
-  { name: 'bench_final_lift', direction: 'high', description: 'L4: the held-out lift the inner campaign ended on.', dial: null, primary: false },
-  { name: 'lift', direction: 'high', description: "L4: the inner campaign's mean θ lift over its own origin.", dial: null, primary: false },
-  { name: 'origin', direction: 'high', description: "L4: the inner campaign's origin level.", dial: null, primary: false },
-  { name: 'final_lift', direction: 'high', description: 'L4: the lift the inner campaign ended on.', dial: null, primary: false },
-  { name: 'peak_lift', direction: 'high', description: 'L4: the best lift the inner campaign reached.', dial: null, primary: false },
-  { name: 'rounds', direction: 'low', description: 'L4: rounds the inner campaign ran.', dial: "anchored", primary: false },
-  { name: 'round_budget', direction: 'high', description: 'L4: rounds the inner campaign was allowed.', dial: null, primary: false },
-  { name: 'cost', direction: 'low', description: 'USD the cell cost.', dial: "anchored", primary: true },
-  { name: 'tokens', direction: 'low', description: 'Input plus output tokens the cell spent.', dial: "anchored", primary: true },
-  { name: 'target_prompt_chars', direction: 'low', description: "Characters of the candidate's prompt template.", dial: "anchored", primary: true },
-  { name: 'errored', direction: 'low', description: '1 where the cell errored, else 0.', dial: "unit", primary: false },
-  { name: 'degraded', direction: 'low', description: '1 where a pipeline node did not finish cleanly, else 0.', dial: "unit", primary: false },
-  { name: 'cached', direction: 'high', description: '1 where the cell was replayed from the archive, else 0.', dial: "unit", primary: true },
-  { name: 'retrieval_shortfall', direction: 'high', description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.', dial: null, primary: false },
-];
-
+// How often an open call beats (infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S).
+export const HEARTBEAT_INTERVAL_S = 10;
 // The shortest silence between two ray steps worth marking. Mirror of
 // infrastructure/runtime_flags.py::RECENT_STEP_S, the window a producer reads `live` in.
-export const RECENT_STEP_S = 90.0;
+export const RECENT_STEP_S = 90;
 
 // The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and
 // asserts at import that no separator matches the id charset — the precondition that

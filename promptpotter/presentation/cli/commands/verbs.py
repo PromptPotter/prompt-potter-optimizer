@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, Literal, get_args, get_origin
+from typing import Any, Literal, TypeAliasType, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -647,7 +647,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             Arg(
                 "--tier",
                 required=True,
-                choices=get_args(ExportTier),
+                choices=get_args(ExportTier.__value__),
                 help="; ".join(f"{tier}: {info.label}" for tier, info in EXPORT_TIER_INFO.items()),
             ),
             Arg(
@@ -741,7 +741,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
 
 
 def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
-    annotation = field.annotation
+    annotation: Any = field.annotation
+    # A `type` alias is spelled by what it stands for.
+    while isinstance(annotation, TypeAliasType):
+        annotation = annotation.__value__
     if annotation is Budget:
         return BUDGET_AXES
     flag = f"--{name.replace('_', '-')}"

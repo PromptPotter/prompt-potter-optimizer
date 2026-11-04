@@ -14,6 +14,7 @@ import {
 import { pathOfAddress } from "@/lib/ids";
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { CellRow, HierarchyCourse } from "@/lib/api";
+import { ARM_END_INFO } from "@/lib/api/types.generated";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
@@ -30,7 +31,6 @@ import {
   Term,
   type Segment,
 } from "@/components/ui";
-import { TERMS } from "@/lib/terms";
 import { NodeSurface } from "./NodeSurface";
 import { PanelCellRow } from "./PanelCellRow";
 
@@ -224,8 +224,8 @@ export function MeasurementRun({
                     </span>
                   )}
                   {early && (
-                    <Badge tone={early === "broken" ? "danger" : "quiet"}>
-                      <Term content={TERMS[`arm_${early}`]}>{early.replace("_", " ")}</Term>
+                    <Badge tone={ARM_END_INFO[early].tone}>
+                      <Term content={ARM_END_INFO[early].sentence}>{ARM_END_INFO[early].label}</Term>
                     </Badge>
                   )}
                   {cached != null && cached > 0 && (

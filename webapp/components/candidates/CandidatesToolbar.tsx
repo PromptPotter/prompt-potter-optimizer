@@ -7,6 +7,7 @@ import {
   Chip,
   ChipGroup,
   CopyButton,
+  Term,
   HoverCard,
   IconDownload,
   IconMore,
@@ -22,15 +23,17 @@ import {
 import { exportText, exportUrl } from "@/lib/api/reads";
 import {
   ABORT_LENS_LABELS,
-  DISPLAY_METRICS,
-  EXPORT_TIERS,
+  CANDIDATE_COUNT_WORDS,
+  DISPLAY_METRIC_INFO,
+  EXPORT_TIER_INFO,
+  PREFIX_STATE_TITLES,
   SCORE_LENS_LABELS,
 } from "@/lib/api/types.generated";
+import { wordRows } from "@/lib/api/words";
 import { setScoringMask } from "@/lib/scoring-mask";
-import { TERMS } from "@/lib/terms";
 
 const lensOptions = (labels: Record<string, string>) =>
-  Object.entries(labels).map(([value, label]) => ({ value, label }));
+  wordRows(labels).map(([value, label]) => ({ value, label }));
 
 const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string }[] = [
   { value: "", label: "Realized" },
@@ -64,25 +67,22 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
       ) : (
         <span className="cand-title">Candidates</span>
       )}
-      {m.maskActive && (
-        <Badge
-          tone="danger"
-          title={`Showing the ${m.maskLabel} mask — divergence vs the realized record`}
-        >
-          {m.maskLabel}
-        </Badge>
+      {m.readUnder && (
+        <Term content={m.readUnder.detail ?? m.readUnder.label}>
+          <Badge tone={m.readUnder.tone}>{m.readUnder.label}</Badge>
+        </Term>
       )}
       <ToolbarSep />
       <ChipGroup label="Bars" joined>
-        {DISPLAY_METRICS.map((d) => (
+        {wordRows(DISPLAY_METRIC_INFO).map(([id, d]) => (
           <Chip
-            key={d.id}
+            key={id}
             icon
-            on={m.metrics.has(d.id)}
-            ink={`var(${metricInkToken(d.id, m.electedMetric)})`}
+            on={m.metrics.has(id)}
+            ink={`var(${metricInkToken(id, m.electedMetric)})`}
             ariaLabel={d.label}
             title={d.title}
-            onClick={() => toggleMetric(d.id)}
+            onClick={() => toggleMetric(id)}
           >
             {d.glyph}
           </Chip>
@@ -144,7 +144,13 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
                 Scoring mask
               </MenuCheck>
             </HoverCard>
-            <HoverCard content={TERMS.cache_replayed}>
+            <HoverCard
+              content={
+                m.cacheHitCount > 0
+                  ? `${PREFIX_STATE_TITLES.replayed} ${CANDIDATE_COUNT_WORDS.replayed}`
+                  : PREFIX_STATE_TITLES.replayed
+              }
+            >
               <MenuCheck
                 on={m.showCache}
                 onClick={() => setCandidatesState({ showCache: !m.showCache })}
@@ -195,10 +201,10 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
         <>
           <CopyButton
             title="Copy this run's candidates"
-            choices={EXPORT_TIERS.filter((t) => t.pasted).map((t) => ({
-              key: t.id,
+            choices={wordRows(EXPORT_TIER_INFO).filter(([, t]) => t.pasted).map(([id, t]) => ({
+              key: id,
               label: t.label,
-              data: () => exportText(viewedPath, t.id),
+              data: () => exportText(viewedPath, id),
             }))}
           />
           <Menu
@@ -217,12 +223,12 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
             )}
           >
             {({ close }) =>
-              EXPORT_TIERS.filter((t) => !t.pasted).map((t) => (
+              wordRows(EXPORT_TIER_INFO).filter(([, t]) => !t.pasted).map(([id, t]) => (
                 <MenuItem
-                  key={t.id}
+                  key={id}
                   onClick={() => {
                     close();
-                    window.location.assign(exportUrl(viewedPath, t.id));
+                    window.location.assign(exportUrl(viewedPath, id));
                   }}
                 >
                   {t.label}

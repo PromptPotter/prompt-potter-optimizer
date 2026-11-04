@@ -11,19 +11,10 @@ import {
   type ActivityResponse,
   type ActivityWindow,
 } from "@/lib/api";
+import { ACTIVITY_WINDOW_INFO } from "@/lib/api/types.generated";
+import { wordKeys } from "@/lib/api/words";
 
-const WINDOW_LABEL: Record<ActivityWindow, string> = {
-  "15m": "Past 15 min",
-  "30m": "Past 30 min",
-  "1h": "Past hour",
-  "3h": "Past 3 hours",
-  "1d": "Past day",
-  "2d": "Past 2 days",
-  "1w": "Past week",
-  "1mo": "Past month",
-  "1y": "Past year",
-};
-const WINDOW_ORDER = Object.keys(WINDOW_LABEL) as ActivityWindow[];
+const WINDOW_ORDER = wordKeys(ACTIVITY_WINDOW_INFO);
 
 export function AccountActivityTab() {
   const [window, setWindow] = useState<ActivityWindow>("1d");
@@ -41,7 +32,7 @@ export function AccountActivityTab() {
         >
           {WINDOW_ORDER.map((id) => (
             <option key={id} value={id}>
-              {WINDOW_LABEL[id]}
+              {ACTIVITY_WINDOW_INFO[id].label}
             </option>
           ))}
         </select>
@@ -60,7 +51,7 @@ export function AccountActivityTab() {
         subject="activity"
         empty={(data) =>
           data.total_requests === 0 ? (
-            <Empty title={`No model calls in the ${WINDOW_LABEL[window].toLowerCase()}`}>
+            <Empty title={`No model calls in the ${ACTIVITY_WINDOW_INFO[window].label.toLowerCase()}`}>
               Spend, requests and tokens appear here as soon as a campaign runs. Widen the window
               to look further back.
             </Empty>

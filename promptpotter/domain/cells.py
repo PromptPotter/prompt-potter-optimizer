@@ -8,13 +8,16 @@ from pydantic import Field, JsonValue
 from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
 from promptpotter.domain.scoring import SampleStatus, is_hit
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.shared.worded import Worded
 
 # Ranks what the operator READS only: the engine's scoring order is `build_round_order`.
 HardSampleOrder = Literal["info_gain", "difficulty"]
-HARD_SAMPLE_ORDER_LABELS: dict[HardSampleOrder, str] = {
-    "info_gain": "Info gain",
-    "difficulty": "Hardness",
-}
+HARD_SAMPLE_ORDER_LABELS: Worded[HardSampleOrder, str] = Worded(
+    {
+        "info_gain": "Info gain",
+        "difficulty": "Hardness",
+    }
+)
 assert HARD_SAMPLE_ORDER_LABELS.keys() == set(get_args(HardSampleOrder))
 
 # How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
@@ -69,11 +72,13 @@ class PinnedCell(FrozenModel):
 
 # The tier stops at dataset: samples differ per dataset, so a workspace scope would mean nothing.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
-HEATMAP_SCOPE_LABELS: dict[HeatmapScope, str] = {
-    "cycle": "This cycle",
-    "campaign": "This campaign",
-    "dataset": "All campaigns",
-}
+HEATMAP_SCOPE_LABELS: Worded[HeatmapScope, str] = Worded(
+    {
+        "cycle": "This cycle",
+        "campaign": "This campaign",
+        "dataset": "All campaigns",
+    }
+)
 assert HEATMAP_SCOPE_LABELS.keys() == set(get_args(HeatmapScope))
 
 
@@ -138,7 +143,16 @@ class HardSamples(StrictModel):
 
 
 #: `partly` is both a sample some candidates hit and others missed, and one a graded scorer part-credited.
-HitSpread = Literal["unmeasured", "never", "partly", "always"]
+type HitSpread = Literal["unmeasured", "never", "partly", "always"]
+
+HIT_SPREAD_LABELS: Worded[HitSpread, str] = Worded(
+    {
+        "unmeasured": "not measured yet",
+        "never": "never hit",
+        "partly": "partly hit",
+        "always": "always hit",
+    }
+)
 
 
 def hit_spread(graded: Sequence[float]) -> HitSpread:

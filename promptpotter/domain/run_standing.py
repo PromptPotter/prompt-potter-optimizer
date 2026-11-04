@@ -9,7 +9,7 @@ from promptpotter.domain.arm_reading import UNIT_FORMATS, lift_text
 from promptpotter.domain.arms import ArmSlot, Concluded, arm_name
 from promptpotter.domain.bench import COST_ABSENCE_WORDS, LiftCost
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_STALL, RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     ArmKey,
@@ -23,6 +23,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.worded import Worded
 
 
 def closed_after_origin(rounds: Sequence[int]) -> int:
@@ -33,7 +34,7 @@ def closed_after_origin(rounds: Sequence[int]) -> int:
 def rounds_without_advance(rounds: Sequence[RoundOutcome]) -> int:
     depth = 0
     for rr in reversed(rounds):
-        match ROUND_ADVANCE_INFO[rr.overlap.advance].stall:
+        match ROUND_ADVANCE_STALL[rr.overlap.advance]:
             case StallEffect.STARTS | StallEffect.RESETS:
                 break
             case StallEffect.COUNTS:
@@ -50,7 +51,7 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     for rr in rounds:
         if rr.round == 0 or rr.election is None or rr.election.electable == 0:
             continue
-        match ROUND_ADVANCE_INFO[rr.overlap.advance].stall:
+        match ROUND_ADVANCE_STALL[rr.overlap.advance]:
             case StallEffect.RESETS:
                 bank = min(cap, bank + 1)
             case StallEffect.COUNTS:
@@ -62,14 +63,16 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
 
 # A life bank's words: one pip per banked life, one per spent one, a skull on an empty bank.
 type LivesWord = Literal["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]
-LIVES_WORDS: dict[LivesWord, str] = {
-    "banked": "♥",
-    "spent_pip": "♡",
-    "empty": "💀",
-    "empty_sentence": "No lives left — the run stops after this round",
-    "life": "life",
-    "lives": "lives",
-}
+LIVES_WORDS: Worded[LivesWord, str] = Worded(
+    {
+        "banked": "♥",
+        "spent_pip": "♡",
+        "empty": "💀",
+        "empty_sentence": "No lives left — the run stops after this round",
+        "life": "life",
+        "lives": "lives",
+    }
+)
 
 
 class LivesReading(FrozenModel):

@@ -85,6 +85,7 @@ from promptpotter.domain.run_records import (
     SampleScoredRecord,
     SampleStartedRecord,
 )
+from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.spend import prefix_reading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
@@ -477,7 +478,7 @@ class ReadoutProjection(Projection):
             return
         self._order_shown = sample_order
         prior_s = "" if n_priors == 1 else "s"
-        head = ", ".join(f"#{sid:03d}" for sid in sample_order[:3])
+        head = ", ".join(sample_tag(sid) for sid in sample_order[:3])
         self._write(
             f"  {DIM}shared order:{RESET} {head}, …  "
             f"({len(sample_order)} samples, win-opportunities first; "

@@ -13,13 +13,12 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.bench import (
-    BENCH_STATE_INFO,
     BandedValue,
     BenchColumn,
     BenchReading,
     BenchScore,
 )
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import health_reading
@@ -196,7 +195,7 @@ def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[st
         return []
     graded = bench.graded
     if graded is None:
-        sentence = BENCH_STATE_INFO[bench.status.state].sentence
+        sentence = READING_STATE_INFO[bench.status.state].sentence
         return ["## Bench score — the headline", "", f"Not graded. {sentence}", ""]
 
     def lift(column: BenchColumn) -> str:

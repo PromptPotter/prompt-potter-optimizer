@@ -14,7 +14,7 @@ from promptpotter.application.optimizers.potter.escalation.rules import (
     decide_escalation,
 )
 from promptpotter.application.optimizers.potter.records import Ladder, LayerCounters
-from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_STALL, RoundAdvance, StallEffect
 from promptpotter.domain.phases import StopReason
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -93,7 +93,7 @@ class LadderAsk:
 
 
 def bank_round(ladder: Ladder, advance: RoundAdvance) -> Ladder:
-    match ROUND_ADVANCE_INFO[advance].stall:
+    match ROUND_ADVANCE_STALL[advance]:
         case StallEffect.RESETS:
             return ladder.model_copy(update={"l1_stall_count": 0})
         case StallEffect.COUNTS:

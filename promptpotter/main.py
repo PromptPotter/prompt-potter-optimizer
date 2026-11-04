@@ -33,6 +33,7 @@ from promptpotter.config.paths import (
     webapp_static_root,
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
@@ -217,7 +218,7 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
         request,
         status=exc.http_status,
         code=exc.code,
-        message=exc.message,
+        message=refusal_words(exc),
         details=exc.details,
         banked=not isinstance(exc, RateLimitedError),
     )

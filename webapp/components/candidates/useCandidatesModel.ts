@@ -9,10 +9,10 @@ import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import type { HierarchyCourse, ServedDashboard } from "@/lib/api";
+import type { DisplayMetric } from "@/lib/api/types.generated";
 import {
   candidatesAtPath,
   courseAt,
-  type DisplayMetric,
   type LineageIndex,
 } from "@/lib/derivations";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
@@ -57,7 +57,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const electedMetric = dash.display_metric;
   const overlay = useViewedLineage();
   const wonOnTheta = useViewedCourse()?.facts.elects_on === "ability";
-  const { lens, setLens, maskActive, maskLabel, scoringMaskActive } = overlay;
+  const { lens, setLens, maskActive, readUnder, scoringMaskActive } = overlay;
   const { history, overlap, sampleUniverse, viewedNode, areCourses, views, floorPinned } =
     useCandidateBars(overlay.index);
 
@@ -251,7 +251,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     lensCriterion,
     lensShift: viewedNode?.level === "course" ? (viewedNode.facts.lens_shift ?? null) : null,
     maskActive,
-    maskLabel,
+    readUnder,
     scoringMaskActive,
     divergentRound,
     divergenceBoundary,

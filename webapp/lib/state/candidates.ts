@@ -1,4 +1,4 @@
-import type { DisplayMetric } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/api/types.generated";
 import { createModuleStore } from "@/lib/state/module-store";
 
 interface CandidatesState {

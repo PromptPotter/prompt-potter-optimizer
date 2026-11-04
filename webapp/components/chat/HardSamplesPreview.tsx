@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import type { DatasetItem } from "@/lib/api";
+import { HIT_SPREAD_LABELS } from "@/lib/api/types.generated";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { RosterNote } from "@/components/measurements/RosterNote";
-import { fmtDuration, fmtUnit, PLACEHOLDER } from "@/lib/format";
+import { Said } from "@/components/ui";
+import { fmtSampleTag, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
 const ROWS = 3;
@@ -46,17 +48,14 @@ export function HardSamplesPreview() {
     const it = byId.get(id);
     if (it === undefined) return { text: PLACEHOLDER, bucket: null };
     const n = it.n_measured;
-    if (n === 0 || it.mean_fitness == null || it.hit_spread === "unmeasured") {
-      return { text: "not measured yet", bucket: null };
-    }
+    if (it.hit_spread === "unmeasured") return { text: HIT_SPREAD_LABELS.unmeasured, bucket: null };
     return {
       text: `${fmtUnit("rate", it.mean_fitness)} of ${n} ${n === 1 ? "try" : "tries"}`,
       bucket: it.hit_spread,
     };
   };
   const itemOf = (id: number): DatasetItem | undefined => byId.get(id);
-  const openS = dash?.producer.open_for_s;
-  const openFor = running && openS != null ? fmtDuration(openS) : null;
+  const held = running ? (dash?.held_call ?? null) : null;
 
   return (
     <div className="hsp">
@@ -94,14 +93,19 @@ export function HardSamplesPreview() {
                 <span className="hsp-mark" aria-hidden="true">
                   {MARKS[toneAt(at, cursor)]}
                 </span>
-                <span className="hsp-id">#{String(id).padStart(3, "0")}</span>
+                <span className="hsp-id">{fmtSampleTag(id)}</span>
                 <span className={cx("hsp-rate", rate.bucket && `is-${rate.bucket}`)}>
                   {rate.text}
                 </span>
-                <span className="hsp-tag" title={item?.query}>
-                  {labelAt(at, cursor, item?.hard_sample_rank)}
-                  {at === cursor && openFor ? ` · ${openFor}` : ""}
-                </span>
+                {at === cursor && held !== null ? (
+                  <span className="hsp-tag" title={item?.query}>
+                    <Said tone={held.tone} label={held.label} detail={held.detail} />
+                  </span>
+                ) : (
+                  <span className="hsp-tag" title={item?.query}>
+                    {labelAt(at, cursor, item)}
+                  </span>
+                )}
               </li>
             );
           })}
@@ -144,9 +148,9 @@ function toneAt(at: number, cursor: number): Tone {
   return at < cursor ? "done" : at === cursor ? "now" : "next";
 }
 
-// Position is only a fallback: a paged, filtered roster parts it from the served `hard_sample_rank`.
-function labelAt(at: number, cursor: number, servedRank?: number): string {
-  if (cursor < 0) return `rank ${servedRank ?? at + 1}`;
+// A paged, filtered roster parts position from rank, so a row the roster lacks has none to show.
+function labelAt(at: number, cursor: number, item: DatasetItem | undefined): string {
+  if (cursor < 0) return item === undefined ? PLACEHOLDER : `rank ${item.hard_sample_rank}`;
   if (at === cursor) return "scoring now";
   if (at === cursor - 1) return "just measured";
   if (at < cursor) return "measured";
@@ -190,7 +194,7 @@ function SpreadLine({ bucket, n }: { bucket: SampleBucket; n: number }) {
   return (
     <span className={cx("hsp-b", `is-${bucket}`)}>
       <span className="hsp-dot" aria-hidden="true" />
-      <strong>{n}</strong> {bucket}
+      <strong>{n}</strong> {HIT_SPREAD_LABELS[bucket]}
     </span>
   );
 }

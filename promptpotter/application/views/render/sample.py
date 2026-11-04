@@ -12,6 +12,7 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.results_health import is_deprecated, terminal_node
+from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import graded_answer
 
 if TYPE_CHECKING:
@@ -97,7 +98,7 @@ def fmt_query_result(
         indent = f"{indent}\U0001f504 "
 
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
-    sid_col = f"#{position:03d}"
+    sid_col = sample_tag(position)
     step_block = f" {step}" if step else ""
     if status == "ERR":
         err = facts.error or "pipeline error"

@@ -10,7 +10,7 @@ import type { HierarchyCampaign } from "@/lib/api";
 import type { Figure as FigureType } from "@/lib/api/types.generated";
 import { BRAND } from "@/lib/brand";
 import { cx } from "@/lib/cx";
-import { readSpend, tagValue, type FigureKey } from "@/lib/derivations";
+import { tagValue, type FigureKey } from "@/lib/derivations";
 import { fmtAgo } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
@@ -106,13 +106,13 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
   const course = useViewedCourse();
   const served = useServedCriterion();
   const innerLeaf = path.length > 1 ? pathLeaf(path) : null;
-  const spend = readSpend(dash);
+  const metered = dash?.spend_metered ?? null;
   const figures = course?.figures.map((row) => ({ row, opens: familyOfGlance(row.key) })) ?? [];
   const unnamed = useUnnamedViews(figures.map((f) => f.opens));
   // What the masthead adds to a served figure's Term, by its key.
   const details: Partial<Record<FigureKey, ReactNode>> = {
     lift: TERMS.masthead_best,
-    spend: spend.metered && <SpendBuckets view={spend} />,
+    spend: dash && metered && <SpendBuckets metered={metered} meterLines={dash} />,
   };
   // The masthead draws no sub line, so a figure's sub leads its Term.
   const hover = (row: FigureType) => {

@@ -1,5 +1,5 @@
 import type { ServedBackpressure } from "@/lib/api";
-import { SegmentedControl, Switch, Term } from "@/components/ui";
+import { Said, SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
 import { LOOKAHEAD_WORDS } from "@/lib/api/types.generated";
 import { affordableText, lookaheadDepthLabel, lookaheadExplained } from "@/lib/derivations";
@@ -43,10 +43,16 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
             : `${la.most} at most`}
         </span>
       </Term>
-      {m.waitNote ? (
+      {m.heldCall ? (
         <div className="row">
-          <span className="lbl">Held by</span>
-          <span className="val remote-spend-warn">{m.waitNote}</span>
+          <span className="lbl">Walk</span>
+          <Said
+            className="val"
+            tone={m.heldCall.tone}
+            label={m.heldCall.label}
+            sub={m.heldCall.sub}
+            detail={m.heldCall.detail}
+          />
         </div>
       ) : null}
       {la.affordable !== null ? (

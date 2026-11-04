@@ -9,12 +9,10 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import BadRequestError
+from promptpotter.shared.worded import Worded
 
 LensKind = Literal["score", "dials", "abort"]
 _LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
-
-#: The `score:` formulas a picklist offers by name; any other is the operator's own expression.
-SCORE_LENS_LABELS: dict[str, str] = {"accuracy": "Accuracy"}
 
 
 class Lens(NamedTuple):
@@ -24,6 +22,11 @@ class Lens(NamedTuple):
     @property
     def spelling(self) -> str:
         return f"{self.kind}:{self.body}"
+
+
+#: The `score:` formulas a picklist offers by name, keyed as the `lens=` it sends; any other is
+#: the operator's own expression.
+SCORE_LENS_LABELS: Worded[str, str] = Worded({Lens("score", "accuracy").spelling: "Accuracy"})
 
 
 def parse_lens(value: str, *, allow_abort: bool) -> Lens:

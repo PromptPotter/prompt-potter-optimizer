@@ -46,7 +46,7 @@
   .toggle-row .name{font-size:var(--text-base)}
 
   .account-frame{height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
-  .account-pane-body{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
+  .account-tab-body{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
   .login-button{padding:var(--space-14) var(--space-16);min-height:44px;font-size:var(--text-md)}
 }
 

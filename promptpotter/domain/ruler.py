@@ -11,6 +11,7 @@ from pydantic import Field
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -139,52 +140,56 @@ class ThetaCaveatInfo(NamedTuple):
 
 
 # A footnote to a θ, never an alarm: the reading stands, read with this in mind.
-THETA_CAVEAT_INFO: Annotated[dict[ThetaCaveat, ThetaCaveatInfo], shapes_optimizer_prompt] = {
-    ThetaCaveat.DISJOINT_SCOPES: ThetaCaveatInfo(
-        "θ mixes datasets",
-        "These samples come from more than one dataset, and difficulty is only rated within one, "
-        "so this θ averages scales that don't compare. Read each dataset on its own; a lift "
-        "against the parent still holds.",
-        "attention",
-    ),
-    ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
-        "θ is plain accuracy so far",
-        "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another "
-        "scale. A lift against the parent holds; θ compared across rounds or candidates does not.",
-        "attention",
-    ),
-    ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
-        "θ is plain accuracy here",
-        "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as "
-        "accuracy does. No round can change that.",
-        "attention",
-    ),
-    ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
-        "θ is plain accuracy this round",
-        "This round's samples were all about equally hard, so θ ranks candidates exactly as "
-        "accuracy does. A round drawing harder and easier samples reads differently.",
-        "attention",
-    ),
-    ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
-        "θ shifts between rounds",
-        "Most samples this round got the default difficulty, because every candidate answered "
-        "them alike. That default moves as rounds come in, so compare θ within a round, not "
-        "across rounds.",
-        "attention",
-    ),
-    ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
-        "θ leaves some samples out",
-        "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy "
-        "beside it, and two candidates may be read on different ones. A later round includes them.",
-        "attention",
-    ),
-    ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
-        "No θ for an all-wrong candidate",
-        "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift "
-        "taken from it, is a placeholder. Other candidates are unaffected.",
-        "attention",
-    ),
-}
+THETA_CAVEAT_INFO: Annotated[Worded[ThetaCaveat, ThetaCaveatInfo], shapes_optimizer_prompt] = (
+    Worded(
+        {
+            ThetaCaveat.DISJOINT_SCOPES: ThetaCaveatInfo(
+                "θ mixes datasets",
+                "These samples come from more than one dataset, and difficulty is only rated within one, "
+                "so this θ averages scales that don't compare. Read each dataset on its own; a lift "
+                "against the parent still holds.",
+                "attention",
+            ),
+            ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
+                "θ is plain accuracy so far",
+                "Too few earlier answers to rate how hard each sample is, so θ is accuracy on another "
+                "scale. A lift against the parent holds; θ compared across rounds or candidates does not.",
+                "attention",
+            ),
+            ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
+                "θ is plain accuracy here",
+                "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as "
+                "accuracy does. No round can change that.",
+                "attention",
+            ),
+            ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
+                "θ is plain accuracy this round",
+                "This round's samples were all about equally hard, so θ ranks candidates exactly as "
+                "accuracy does. A round drawing harder and easier samples reads differently.",
+                "attention",
+            ),
+            ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
+                "θ shifts between rounds",
+                "Most samples this round got the default difficulty, because every candidate answered "
+                "them alike. That default moves as rounds come in, so compare θ within a round, not "
+                "across rounds.",
+                "attention",
+            ),
+            ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
+                "θ leaves some samples out",
+                "Some samples have no difficulty rating yet, so θ reads fewer samples than the accuracy "
+                "beside it, and two candidates may be read on different ones. A later round includes them.",
+                "attention",
+            ),
+            ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
+                "No θ for an all-wrong candidate",
+                "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift "
+                "taken from it, is a placeholder. Other candidates are unaffected.",
+                "attention",
+            ),
+        }
+    )
+)
 
 _missing_caveat_info = set(ThetaCaveat) - set(THETA_CAVEAT_INFO)
 if _missing_caveat_info:

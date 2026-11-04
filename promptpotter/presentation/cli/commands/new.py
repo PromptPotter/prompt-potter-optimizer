@@ -27,6 +27,7 @@ from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS,
 from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     EditDraftCampaignPayload,
@@ -281,7 +282,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     try:
         held = await _hold_checkin(args, stores, draft_id, patch)
     except PotterError as exc:
-        raise SystemExit(f"ERROR: {exc}\n\n{_draft_kept(draft_id)}") from None
+        raise SystemExit(f"ERROR: {refusal_words(exc)}\n\n{_draft_kept(draft_id)}") from None
     return await _run_origin(held, diag=args.diag)
 
 

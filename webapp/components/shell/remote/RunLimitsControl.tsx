@@ -1,14 +1,20 @@
 import { useState } from "react";
 import { cycleAddress, postCommand, type Budget, type MeteredSpend } from "@/lib/api";
-import { CAP_AXIS_INFO, CEILING_METER_LABELS } from "@/lib/api/types.generated";
+import {
+  ACCOUNT_TAB_INFO,
+  CAP_AXIS_INFO,
+  CEILING_METER_LABELS,
+  type CapAxis,
+} from "@/lib/api/types.generated";
+import { wordKeys } from "@/lib/api/words";
 import { budgetAxis } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtUnit, fmtUsd } from "@/lib/format";
-import { capInput, capText, parseCapIn, type Cap, type CapAxis } from "@/lib/run-limits";
+import { capInput, capText, parseCapIn, type Cap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/workspace";
 import { Button, Dialog, FailureLine } from "@/components/ui";
 
-const AXES = Object.keys(CAP_AXIS_INFO) as CapAxis[];
+const AXES = wordKeys(CAP_AXIS_INFO);
 
 type Drafts = Record<CapAxis, string>;
 
@@ -166,7 +172,7 @@ export function RunLimitsControl({ budget, share, metered }: Props) {
       <small className="run-limits-control-hint">
         {isHalt
           ? "Halts the run after the current round."
-          : "Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins. Spend and token caps are the campaign's, one book its live cycles share; the round cap is this cycle's; the wall clock bounds one launch and restarts at the next, cutting a remote cell still open at its edge. A spend raise is also clamped by your account allowance (Account → Security)."}
+          : `Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins. Spend and token caps are the campaign's, one book its live cycles share; the round cap is this cycle's; the wall clock bounds one launch and restarts at the next, cutting a remote cell still open at its edge. A spend raise is also clamped by your account allowance (${ACCOUNT_TAB_INFO.usage.place}).`}
       </small>
       {note ? <small className="run-limits-control-note">{note}</small> : null}
       <FailureLine failure={cmd.failure} />

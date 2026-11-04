@@ -304,11 +304,8 @@
 .chat-msg.chat-decision{border:1px solid var(--color-accent);box-shadow:0 0 14px var(--color-accent-glow);display:flex;flex-direction:column;gap:var(--space-10);max-width:100%;width:100%;align-self:stretch}
 .chat-decision-title{font-weight:600;font-size:var(--text-md);color:var(--color-text-primary)}
 .chat-decision-lead{margin:0;font-size:var(--text-base);line-height:1.5;color:var(--color-text-secondary)}
-.chat-decision-verdict{display:grid;grid-template-columns:auto 1fr;gap:var(--space-6) var(--space-16);margin:0;font-size:var(--text-base)}
-.chat-decision-verdict>div{display:contents}
-.chat-decision-verdict dt{color:var(--color-text-secondary)}
-.chat-decision-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text-primary)}
-.chat-decision-error{overflow-wrap:anywhere;white-space:pre-wrap;max-height:9em;overflow-y:auto;font-size:var(--text-sm);color:var(--color-danger)}
+.chat-decision-verdict{display:grid;gap:var(--space-6);margin:0;padding:0;list-style:none;font-size:var(--text-base)}
+.chat-decision-verdict .said-value{display:inline-block;max-width:100%;max-height:9em;overflow-y:auto;vertical-align:top;font-family:var(--font-mono);overflow-wrap:anywhere;white-space:pre-wrap}
 .chat-decision-reasons{margin:0;padding-left:18px;font-size:var(--text-sm);color:var(--color-text-secondary);line-height:1.5}
 .chat-decision-actions{display:flex;flex-wrap:wrap;gap:var(--space-8)}
 .chat-decision-btn{padding:var(--space-6) var(--space-14);border-radius:6px;font-size:var(--text-base);font-weight:500;cursor:pointer;border:1px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-text-primary);transition:background .15s,border-color .15s}
@@ -345,8 +342,9 @@
 .hsp-rate.is-never{color:var(--color-danger)}
 .hsp-rate.is-partly{color:var(--color-warn)}
 .hsp-rate.is-always{color:var(--color-success)}
-.hsp-tag{margin-left:auto;font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary);flex:0 0 auto}
+.hsp-tag{margin-left:auto;font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .hsp-row.is-now .hsp-tag{color:var(--color-accent)}
+.hsp-tag .said{display:inline;margin:0;color:inherit}
 
 .hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px var(--space-8);border:0;border-left:1px solid var(--color-border);background:none;font:inherit;text-align:left;cursor:pointer}
 .hsp-spread:hover{background:var(--color-background-hover)}

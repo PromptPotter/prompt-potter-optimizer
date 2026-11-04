@@ -12,7 +12,7 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { allowanceCaveats, billText } from "@/lib/derivations";
-import { SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
+import { ACCOUNT_TAB_INFO, SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
 import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -76,7 +76,7 @@ function AllowanceSection({ coupon }: { coupon: CouponStatus }) {
     <AccountSection
       title="Host allowance"
       lede={said.detail}
-      aside={<Button onClick={() => open("account", "keys")}>API keys</Button>}
+      aside={<Button onClick={() => open("account", "keys")}>{ACCOUNT_TAB_INFO.keys.label}</Button>}
     >
       <div className="account-wallet">
         <div className="account-wallet-cell">

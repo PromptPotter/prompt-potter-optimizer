@@ -31,6 +31,7 @@ from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.shared.plugin_registry import BUILT_IN
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -235,20 +236,22 @@ class SteerOutsideInfo(NamedTuple):
     tone: Tone
 
 
-STEER_OUTSIDE_INFO: dict[SteerOutside, SteerOutsideInfo] = {
-    "babysat": SteerOutsideInfo(
-        "This steer leaves what the campaign permits, so the branch goes grade C.",
-        "Steering to it marks this branch — and every round after it — operator-babysat: excluded "
-        "from clean comparison, origin reuse, and the L4 rollup. The measurement is still "
-        "recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.",
-        "warn",
-    ),
-    "refused": SteerOutsideInfo(
-        "This steer leaves what the campaign permits.",
-        "Steering outside it is a babysit act this account may not take. Pick a permitted model.",
-        "danger",
-    ),
-}
+STEER_OUTSIDE_INFO: Worded[SteerOutside, SteerOutsideInfo] = Worded(
+    {
+        "babysat": SteerOutsideInfo(
+            "This steer leaves what the campaign permits, so the branch goes grade C.",
+            "Steering to it marks this branch — and every round after it — operator-babysat: excluded "
+            "from clean comparison, origin reuse, and the L4 rollup. The measurement is still "
+            "recorded; it just isn't a clean one. Pick a permitted model to keep a clean branch.",
+            "warn",
+        ),
+        "refused": SteerOutsideInfo(
+            "This steer leaves what the campaign permits.",
+            "Steering outside it is a babysit act this account may not take. Pick a permitted model.",
+            "danger",
+        ),
+    }
+)
 
 
 class ForkPreviewResponse(StrictModel):

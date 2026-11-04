@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, TypeIs, get_args
 
 from pydantic import Field
 
@@ -11,6 +11,7 @@ from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
     RunPhase,
+    StopOutcome,
     StopReason,
     run_phase_label,
 )
@@ -18,6 +19,7 @@ from promptpotter.domain.run_records import CycleFinal, ForkSpec, SpawnedBy, sib
 from promptpotter.domain.run_standing import RunStanding, closed_after_origin
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.worded import Worded
 
 
 class IndexRound(FrozenModel):
@@ -98,20 +100,34 @@ class StatusMarkInfo(NamedTuple):
     tone: Tone
 
 
-STATUS_MARK_INFO: dict[StatusMark, StatusMarkInfo] = {
-    "running": StatusMarkInfo("●", "live"),
-    "scoring": StatusMarkInfo("◐", "live"),
-    "starting": StatusMarkInfo("◌", "live"),
-    "queued": StatusMarkInfo("…", "quiet"),
-    "gate": StatusMarkInfo("◆", "attention"),
-    "paused": StatusMarkInfo("‖", "quiet"),
-    "detached": StatusMarkInfo("⊘", "warn"),
-    "success": StatusMarkInfo("✓", "success"),
-    "halted": StatusMarkInfo("■", "warn"),
-    "failed": StatusMarkInfo("✕", "danger"),
-    "archived": StatusMarkInfo("▫", "quiet"),
-    "unknown": StatusMarkInfo("?", "quiet"),
-}
+STATUS_MARK_INFO: Worded[StatusMark, StatusMarkInfo] = Worded(
+    {
+        "running": StatusMarkInfo("●", "live"),
+        "scoring": StatusMarkInfo("◐", "live"),
+        "starting": StatusMarkInfo("◌", "live"),
+        "queued": StatusMarkInfo("…", "quiet"),
+        "gate": StatusMarkInfo("◆", "attention"),
+        "paused": StatusMarkInfo("‖", "quiet"),
+        "detached": StatusMarkInfo("⊘", "warn"),
+        "success": StatusMarkInfo("✓", "success"),
+        "halted": StatusMarkInfo("■", "warn"),
+        "failed": StatusMarkInfo("✕", "danger"),
+        "archived": StatusMarkInfo("▫", "quiet"),
+        "unknown": StatusMarkInfo("?", "quiet"),
+    }
+)
+
+
+_STATUS_MARKS = frozenset(get_args(StatusMark.__value__))
+
+
+def _is_mark(value: str) -> TypeIs[StatusMark]:
+    return value in _STATUS_MARKS
+
+
+# A live phase and a stop outcome ARE their marks: one spelling, the enum's.
+assert all(_is_mark(p.value) for p in RunPhase if p is not RunPhase.TERMINAL)
+assert all(_is_mark(o.value) for o in StopOutcome)
 
 
 class RunStatus(FrozenModel):
@@ -136,9 +152,8 @@ class RunStatus(FrozenModel):
             mark = run_phase.value
         elif stop_reason is not None:
             mark = STOP_REASON_INFO[stop_reason].outcome.value
-        return cls.model_validate(
-            {"run_phase": run_phase, "stop_reason": stop_reason, "mark": mark}
-        )
+        assert _is_mark(mark)
+        return cls(run_phase=run_phase, stop_reason=stop_reason, mark=mark)
 
     @property
     def label(self) -> str:

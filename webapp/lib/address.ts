@@ -20,7 +20,7 @@ export const FAMILY_IDS = [
 ] as const;
 export type FamilyId = (typeof FAMILY_IDS)[number];
 
-// One open view family; `key` picks what it shows (a cell's archive answer, a node, an account section).
+// One open view family; `key` picks what it shows (a cell's archive answer, a node, an account tab).
 export interface View {
   family: FamilyId;
   key: string | null;

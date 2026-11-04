@@ -1,7 +1,4 @@
-import type { Budget } from "@/lib/api";
-import { CAP_AXIS_INFO, type CapAxisInfo } from "@/lib/api/types.generated";
-
-export type CapAxis = keyof Budget;
+import { CAP_AXIS_INFO, type CapAxis, type CapAxisInfo } from "@/lib/api/types.generated";
 
 export interface CapBounds {
   integer?: boolean | undefined;

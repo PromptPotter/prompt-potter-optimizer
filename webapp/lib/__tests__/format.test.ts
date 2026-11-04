@@ -13,10 +13,10 @@ const NBSP = String.fromCharCode(0xa0);
 
 describe("sideTone", () => {
   it("inks a served side, and an interval spanning 0 like one that was never tested", () => {
-    expect(sideTone("above")).toBe("l4-eff-pos");
-    expect(sideTone("below")).toBe("l4-eff-neg");
-    expect(sideTone("spans")).toBe("l4-eff-flat");
-    expect(sideTone(null)).toBe("l4-eff-flat");
+    expect(sideTone("above")).toBe("l4-eff tone-success");
+    expect(sideTone("below")).toBe("l4-eff tone-danger");
+    expect(sideTone("spans")).toBe("l4-eff tone-quiet");
+    expect(sideTone(null)).toBe("l4-eff tone-quiet");
   });
 });
 

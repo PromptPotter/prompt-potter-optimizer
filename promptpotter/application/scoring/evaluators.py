@@ -13,12 +13,14 @@ from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     ROW_GRADES,
+    DialKind,
     JudgeReading,
     all_verifier_graded,
     extract_item_label,
 )
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
@@ -275,29 +277,28 @@ def _validate_registry() -> None:
 _validate_registry()
 
 
-def cell_terms_meta() -> list[dict[str, Any]]:
-    terms: list[dict[str, Any]] = [
-        {
-            "name": name,
-            "direction": term.direction,
-            "description": term.description,
-            "dial": term.dial,
-            "primary": term.primary,
-        }
-        for name, term in CELL_TERMS.items()
-    ]
-    banked: list[dict[str, Any]] = [
-        {
-            "name": ev.name,
-            "direction": ev.direction,
-            "description": ev.description,
-            "dial": None,
-            "primary": False,
-        }
-        for ev in _REGISTRY
-        if ev.scope == "per_sample"
-    ]
-    return terms + banked
+class CellTermMeta(NamedTuple):
+    name: str
+    direction: Literal["high", "low"]
+    description: str
+    dial: DialKind | None
+    primary: bool
+
+
+# What a per_cell formula can name: the intrinsic terms, then each per_sample evaluator's.
+CELL_TERM_META: Worded[str, CellTermMeta] = Worded(
+    {
+        **{
+            name: CellTermMeta(name, term.direction, term.description, term.dial, term.primary)
+            for name, term in CELL_TERMS.items()
+        },
+        **{
+            ev.name: CellTermMeta(ev.name, ev.direction, ev.description, None, False)
+            for ev in _REGISTRY
+            if ev.scope == "per_sample"
+        },
+    }
+)
 
 
 def _round_value(ev: Evaluator, value: Computed | Awaitable[Computed]) -> float | None:

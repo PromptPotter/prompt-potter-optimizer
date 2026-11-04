@@ -10,6 +10,7 @@ import {
   type PoolOffer,
   type PoolRow,
 } from "@/lib/api";
+import { POOL_SOURCE_INFO } from "@/lib/api/types.generated";
 import { knobGroups, knobRange, knobText, parseKnob } from "@/lib/derivations";
 import { promptField, promptFieldLabel } from "@/lib/prompt-fields";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -243,12 +244,6 @@ export function KnobItem({
   );
 }
 
-// What a pool's entries are called, by where they come from.
-const POOL_NOUN: Record<PoolRow["source"], { one: string; many: string; inPlay: string }> = {
-  library: { one: "snippet", many: "snippets", inPlay: "Snippets in play" },
-  partition: { one: "row", many: "rows", inPlay: "Rows in play" },
-};
-
 function counted(n: number, noun: { one: string; many: string }): string {
   return `${n} ${n === 1 ? noun.one : noun.many}`;
 }
@@ -270,7 +265,7 @@ function CandidateBorrows({ pools, onChange }: { pools: PoolRow[]; onChange: OnC
 }
 
 function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) {
-  const noun = POOL_NOUN[pool.source];
+  const noun = POOL_SOURCE_INFO[pool.source];
   const named = pool.packs.filter((p) => p.on).map((p) => p.name);
   const setPacks = onChange
     ? (packs: string[]) => onChange({ [pool.initializer]: { config: { packs } } })
@@ -378,7 +373,7 @@ function PoolPicker({
   pool: PoolRow;
   onActive: ((active: string[]) => void) | undefined;
 }) {
-  const noun = POOL_NOUN[pool.source];
+  const noun = POOL_SOURCE_INFO[pool.source];
   const [all, setAll] = useState(false);
   const toggle = (path: string) =>
     onActive?.(
@@ -408,7 +403,7 @@ function PoolPicker({
   };
   const groups = pool.offered.filter((o) => o.kind !== "entry");
   const entries = pool.offered.filter((o) => o.kind === "entry");
-  const { inPlay } = noun;
+  const { in_play: inPlay } = noun;
   if (entries.length <= ENTRIES_INLINE) {
     return <ChipGroup label={inPlay}>{pool.offered.map(chip)}</ChipGroup>;
   }

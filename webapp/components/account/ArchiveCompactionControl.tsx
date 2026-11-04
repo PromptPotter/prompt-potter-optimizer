@@ -1,25 +1,16 @@
 import { useState } from "react";
 import { postCommand } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";
+import { ARCHIVE_MODE_INFO, type ArchiveMode as Mode } from "@/lib/api/types.generated";
+import { wordRows } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
 import { Button, FailureLine, Said, SegmentedControl, type Segment } from "@/components/ui";
 
-type Mode = "compact" | "restore" | "purge-cold";
-
-const MODES: readonly Segment<Mode>[] = [
-  { value: "compact", label: "Compact" },
-  { value: "restore", label: "Restore" },
-  { value: "purge-cold", label: "Purge" },
-];
-
-const BLURB: Record<Mode, string> = {
-  compact:
-    "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay.",
-  restore: "Puts every moved field back and drops the compressed copy.",
-  "purge-cold":
-    "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back.",
-};
+const MODES: readonly Segment<Mode>[] = wordRows(ARCHIVE_MODE_INFO).map(([value, info]) => ({
+  value,
+  label: info.label,
+}));
 
 export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
@@ -66,7 +57,7 @@ export function ArchiveCompactionControl() {
         onChange={pick}
         ariaLabel="Archive maintenance mode"
       />
-      <p className="account-muted wsmaint-blurb">{BLURB[mode]}</p>
+      <p className="account-muted wsmaint-blurb">{ARCHIVE_MODE_INFO[mode].sentence}</p>
 
       <div className="wsmaint-actions">
         <Button onClick={() => void run(false)} disabled={busy}>

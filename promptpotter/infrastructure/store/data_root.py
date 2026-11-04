@@ -119,6 +119,7 @@ from promptpotter.infrastructure.store.wallet_store import (
 )
 from promptpotter.shared.errors import validation_reason
 from promptpotter.shared.hashing import SourceFacts
+from promptpotter.shared.worded import Worded
 
 
 class Fate(Enum):
@@ -312,16 +313,20 @@ class LeafInfo(NamedTuple):
     loop: bool
 
 
-LEAF_INFO: dict[Leaf, LeafInfo] = {
-    Leaf.DATASET: LeafInfo("Dataset", "The input data's mirror: langfuse ground truth.", False),
-    Leaf.CONNECTOR: LeafInfo(
-        "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
-    ),
-    Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
-    Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: prompts, the langfuse trace.", True),
-    Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
-    Leaf.REPORTS: LeafInfo("Reports", "Readable output: manifest, reports, hard samples.", True),
-}
+LEAF_INFO: Worded[Leaf, LeafInfo] = Worded(
+    {
+        Leaf.DATASET: LeafInfo("Dataset", "The input data's mirror: langfuse ground truth.", False),
+        Leaf.CONNECTOR: LeafInfo(
+            "Connector", "What the backend produced: node-I/O cache and per-sample arrays.", False
+        ),
+        Leaf.STATE: LeafInfo("State", "Round checkouts, less their per-sample rows.", True),
+        Leaf.TRACE: LeafInfo("Trace", "Loop telemetry: prompts, the langfuse trace.", True),
+        Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
+        Leaf.REPORTS: LeafInfo(
+            "Reports", "Readable output: manifest, reports, hard samples.", True
+        ),
+    }
+)
 assert LEAF_INFO.keys() == set(Leaf)
 
 

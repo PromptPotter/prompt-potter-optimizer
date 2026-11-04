@@ -1,13 +1,12 @@
 import { memo, useCallback, useMemo, useRef } from "react";
 import { fmtUnit } from "@/lib/format";
 import { useWidth } from "@/lib/hooks/useWidth";
-import type { DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
 import { figureOf, tagValue } from "@/lib/derivations";
 import type { CourseKind, CourseSpawn, HierarchyCourse, SubtreeCampaign } from "@/lib/api";
-import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
+import { DISPLAY_METRIC_INFO, type DisplayMetric } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
   HEADER_H,
@@ -100,16 +99,16 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_LABELS[metric]} ${fmtUnit(DISPLAY_METRIC_UNITS[metric],level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_INFO[metric].label} ${fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
         {n.candidateLabel} ·{" "}
         {invalidated
           ? "unknown"
-          : fmtUnit(DISPLAY_METRIC_UNITS[metric],level)}
+          : fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}
         {!invalidated && metric !== "ability" && typeof theta === "number"
-          ? ` · ${fmtUnit(DISPLAY_METRIC_UNITS.ability, theta)}`
+          ? ` · ${fmtUnit(DISPLAY_METRIC_INFO.ability.unit, theta)}`
           : ""}
         {n.node.facts.variations
           .map((v) => `\n${v.node} (${v.mode}): ${v.loci.join(", ") || "nothing"}`)
@@ -157,7 +156,7 @@ const CandidateNode = memo(function CandidateNode({
           className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
           style={ink ? { fill: ink } : undefined}
         >
-          {n.candidateLabel} {invalidated ? "?" : fmtUnit(DISPLAY_METRIC_UNITS[metric],level)}
+          {n.candidateLabel} {invalidated ? "?" : fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}
         </text>
       )}
       <rect
@@ -387,7 +386,7 @@ export function Forest({
                       className="family-cladogram-roundlabel"
                       textAnchor="middle"
                     >
-                      R{n.round} {fmtUnit(DISPLAY_METRIC_UNITS[metric],valOf(n))}
+                      R{n.round} {fmtUnit(DISPLAY_METRIC_INFO[metric].unit,valOf(n))}
                     </text>
                   )}
                   {d.labels && rowLabelText && (
@@ -404,9 +403,9 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {nodeCycleId} · R{n.round} · {fmtUnit(DISPLAY_METRIC_UNITS[metric],valOf(n))}
+                    {nodeCycleId} · R{n.round} · {fmtUnit(DISPLAY_METRIC_INFO[metric].unit,valOf(n))}
                     {metric !== "ability" && typeof thetaOf(n) === "number"
-                      ? ` · ${fmtUnit(DISPLAY_METRIC_UNITS.ability, thetaOf(n))}`
+                      ? ` · ${fmtUnit(DISPLAY_METRIC_INFO.ability.unit, thetaOf(n))}`
                       : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}

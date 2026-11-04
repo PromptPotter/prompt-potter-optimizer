@@ -1,50 +1,49 @@
 // Update profile, remove account and connect account are INTENTIONAL placeholders: never hide them.
 
 import type { ComponentType } from "react";
-import { AboutUnit } from "./AboutUnit";
+import { AccountAboutTab } from "./AccountAboutTab";
 import { AccountProfileTab } from "./AccountProfileTab";
 import { AccountUsageTab } from "./AccountUsageTab";
 import { AccountKeysTab } from "./AccountKeysTab";
 import { AccountActivityTab } from "./AccountActivityTab";
 import { AccountPreferencesTab } from "./AccountPreferencesTab";
-import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
-import { ReadState } from "@/components/ui";
+import { AccountStorageTab } from "./AccountStorageTab";
 import { cx } from "@/lib/cx";
 import { meRead } from "@/lib/api";
+import { ACCOUNT_TAB_INFO, type AccountTab } from "@/lib/api/types.generated";
+import { wordRows } from "@/lib/api/words";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
 
-function ProfileSection() {
-  return (
-    <ReadState read={useRead(meRead())} subject="your profile">
-      {(data) => <AccountProfileTab me={data} />}
-    </ReadState>
-  );
-}
+// Each served tab's body; its label and group are `ACCOUNT_TAB_INFO`'s, which refusals name too.
+const BODIES: Record<AccountTab, ComponentType> = {
+  profile: AccountProfileTab,
+  usage: AccountUsageTab,
+  keys: AccountKeysTab,
+  activity: AccountActivityTab,
+  preferences: AccountPreferencesTab,
+  storage: AccountStorageTab,
+  about: AccountAboutTab,
+};
 
-// The Account view's key is a section's; the server's refusals name "Account → API keys": rename them together.
-const SECTIONS: readonly { key: string; label: string; group: string; Body: ComponentType }[] = [
-  { key: "profile", label: "Profile", group: "Account", Body: ProfileSection },
-  { key: "usage", label: "Usage & limits", group: "Account", Body: AccountUsageTab },
-  { key: "keys", label: "API keys", group: "Account", Body: AccountKeysTab },
-  { key: "activity", label: "Activity", group: "Account", Body: AccountActivityTab },
-  { key: "preferences", label: "Preferences", group: "Account", Body: AccountPreferencesTab },
-  { key: "storage", label: "Storage", group: "Workspace", Body: WorkspaceStoragePanel },
-  { key: "about", label: "About this unit", group: "This unit", Body: AboutUnit },
-];
+const TABS = wordRows(ACCOUNT_TAB_INFO).map(([key, info]) => ({
+  key,
+  ...info,
+  Body: BODIES[key],
+}));
 
-const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
+const GROUPS = [...new Set(TABS.map((t) => t.group))];
 
-// A null section is the first; a key naming none leaves the nav with nothing picked.
-export function AccountView({ section }: { section: string | null }) {
+// A null tab is the first; a key naming none leaves the nav with nothing picked.
+export function AccountView({ tab }: { tab: string | null }) {
   const { open } = useWorkspace();
   const me = readyData(useRead(meRead()));
-  const shown = SECTIONS.find((s) => s.key === (section ?? SECTIONS[0]!.key)) ?? null;
+  const shown = TABS.find((t) => t.key === (tab ?? TABS[0]!.key)) ?? null;
   const who = me ? (me.name ?? me.email ?? (me.provider ? me.user_id : "Local workspace")) : null;
 
   return (
     <section className="account-frame box-full" aria-label="Account">
-      <nav className="account-nav" aria-label="Account sections">
+      <nav className="account-nav" aria-label="Account tabs">
         <div className="account-nav-head">
           <h2>Account</h2>
           <p title={who ?? undefined}>{who ?? " "}</p>
@@ -53,15 +52,15 @@ export function AccountView({ section }: { section: string | null }) {
           <div key={group} className="account-nav-group">
             <span className="account-nav-group-label">{group}</span>
             <ul className="account-nav-list">
-              {SECTIONS.filter((s) => s.group === group).map((s) => (
-                <li key={s.key}>
+              {TABS.filter((t) => t.group === group).map((t) => (
+                <li key={t.key}>
                   <button
                     type="button"
-                    className={cx("account-nav-item", s === shown && "active")}
-                    aria-current={s === shown ? "page" : undefined}
-                    onClick={() => open("account", s.key)}
+                    className={cx("account-nav-item", t === shown && "active")}
+                    aria-current={t === shown ? "page" : undefined}
+                    onClick={() => open("account", t.key)}
                   >
-                    {s.label}
+                    {t.label}
                   </button>
                 </li>
               ))}
@@ -69,11 +68,11 @@ export function AccountView({ section }: { section: string | null }) {
           </div>
         ))}
       </nav>
-      <section className="account-pane">
-        <header className="account-pane-head">
+      <section className="account-tab">
+        <header className="account-tab-head">
           <h3>{shown?.label}</h3>
         </header>
-        <div className="account-pane-body">{shown && <shown.Body />}</div>
+        <div className="account-tab-body">{shown && <shown.Body />}</div>
       </section>
     </section>
   );

@@ -52,7 +52,7 @@ class BackendWarning(StrictModel):
 
 
 class WaitingOn(StrictModel):
-    """The cell the producer's open call holds — worded `WAITING_ON_WORDS` on every surface."""
+    """The cell the producer's open call holds, worded once by `served_dashboard.py::held_call`."""
 
     label: str | None = Field(description="The owning arm's label; null for a pass no arm owns.")
     position: int
@@ -130,7 +130,6 @@ class DashboardFacts(StrictModel):
     current_query_payload: str | None = None
     open_positions: list[int] = Field(default_factory=list)
 
-    waiting_on: WaitingOn | None = None
     backpressure: BackpressureReading | None = None
     measured_unit: MeasuredUnit
 
@@ -168,6 +167,8 @@ class LiveDashboardState(DashboardFacts):
     # The course entry serves both (`CourseFacts.standing` / `elects_on`); the file keeps them.
     run_standing: RunStanding | None = None
     elects_on: DisplayMetric
+    # The cell the open call holds; served only as `ServedDashboard.held_call`.
+    waiting_on: WaitingOn | None = None
 
     current_position: int | None = None
     # The last close's; served only as each `ServedRound`'s readings of it.

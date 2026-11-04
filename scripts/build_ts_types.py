@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-import importlib
 import json
 import sys
 import textwrap
 import types
 import typing
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from fastapi.routing import APIRoute
@@ -17,11 +16,13 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
 from promptpotter.domain.said import TONES
 from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.routers.commands import commands_router
+from promptpotter.shared.worded import Worded, registered
 
 
 def _served_roots() -> list[typing.Any]:
@@ -204,56 +205,47 @@ def _emit_command_contract() -> str:
     )
 
 
-# Every closed set's wording, whole and under its Python name: the browser reads a state's words
-# where the terminal does, so no surface holds a table of its own. A row's columns are its
-# NamedTuple's; an enum a table is keyed by, or a column holds, is exported as its union once.
-_WORD_TABLES: tuple[tuple[str, str], ...] = (
-    ("promptpotter.domain.phases", "STOP_REASON_INFO"),
-    ("promptpotter.domain.phases", "RUN_PHASE_INFO"),
-    ("promptpotter.domain.phases", "DASHBOARD_STATE_PAUSE_WORDS"),
-    ("promptpotter.domain.paired_reading", "READING_STATE_INFO"),
-    ("promptpotter.domain.bench", "BENCH_STATE_INFO"),
-    ("promptpotter.domain.bench", "BENCH_REFUSAL_INFO"),
-    ("promptpotter.domain.phases", "WAITING_ON_WORDS"),
-    ("promptpotter.application.served_dashboard", "LOOKAHEAD_WORDS"),
-    ("promptpotter.domain.run_standing", "LIVES_WORDS"),
-    ("promptpotter.domain.origin_panel", "ROUND_ADVANCE_INFO"),
-    ("promptpotter.domain.ruler", "THETA_CAVEAT_INFO"),
-    ("promptpotter.domain.arm_reading", "ARM_VERDICT_LABELS"),
-    ("promptpotter.domain.arm_reading", "UNIT_FORMATS"),
-    ("promptpotter.domain.bench", "COST_ABSENCE_WORDS"),
-    ("promptpotter.domain.campaign", "LIFECYCLE_STATUS_LABELS"),
-    ("promptpotter.domain.dashboard_rows", "SAMPLE_MOVEMENT_LABELS"),
-    ("promptpotter.domain.dashboard_rows", "PRECISION_VERDICT_ADVICE"),
-    ("promptpotter.domain.dashboard_rows", "VERIFICATION_KIND_INFO"),
-    ("promptpotter.domain.cycle_index", "STATUS_MARK_INFO"),
-    ("promptpotter.application.knobs", "COUPLING_SEVERITY_INFO"),
-    ("promptpotter.domain.verify_pass", "VERIFY_STRATEGY_LABELS"),
-    ("promptpotter.domain.pipeline_schema", "MOVABLE_AGENT_LABELS"),
-    ("promptpotter.domain.spend", "PREFIX_STATE_TITLES"),
-    ("promptpotter.domain.spend", "CEILING_METER_LABELS"),
-    ("promptpotter.application.evidence.subjects", "SUBJECT_KIND_LABELS"),
-    ("promptpotter.application.evidence.head_to_head", "GUARD_STATE_INFO"),
-    ("promptpotter.application.evidence.head_to_head", "GUARD_STATE_LABELS"),
-    ("promptpotter.application.evidence.head_to_head", "GUARD_DIFFERENCE_INFO"),
-    ("promptpotter.application.evidence.head_to_head", "VERDICT_ABSENT_INFO"),
-    ("promptpotter.domain.round_health", "HEALTH_CAUSE_INFO"),
-    ("promptpotter.domain.round_health", "HEALTH_GRADE_INFO"),
-    ("promptpotter.domain.connector", "BACKEND_REACHABILITY_INFO"),
-    ("promptpotter.application.jobs.quota", "LAUNCH_REFUSAL_LABELS"),
-    ("promptpotter.domain.spend", "KEY_SOURCE_LABELS"),
-    ("promptpotter.application.jobs.capacity", "SLOT_BOUND_WORDS"),
-    ("promptpotter.domain.dataset_start", "START_BLOCK_WORDS"),
-    ("promptpotter.application.datasets.origin_readiness", "SETUP_STEP_TITLES"),
-    ("promptpotter.domain.pipeline_schema", "NODE_KIND_INFO"),
-    ("promptpotter.domain.scoring", "SAMPLE_STATUS_LABELS"),
-    ("promptpotter.domain.cells", "HEATMAP_SCOPE_LABELS"),
-    ("promptpotter.domain.cells", "HARD_SAMPLE_ORDER_LABELS"),
-    ("promptpotter.infrastructure.store.data_root", "LEAF_INFO"),
-    ("promptpotter.application.account", "SIGN_IN_REFUSAL_INFO"),
-    ("promptpotter.application.pipeline_responses", "STEER_OUTSIDE_INFO"),
-    ("promptpotter.domain.spend", "CAP_AXIS_INFO"),
-)
+class _Declared(typing.NamedTuple):
+    module: str
+    name: str
+    table: Worded[typing.Any, typing.Any]
+    key_type: typing.Any
+    row_type: typing.Any
+
+
+def _declared_type(module: str, name: str, annotation: object) -> typing.Any:
+    """The one annotation, evaluated alone: a module's TYPE_CHECKING-only names stay unread."""
+    holder = type(name, (), {"__annotations__": {name: annotation}, "__module__": module})
+    return typing.get_type_hints(holder)[name]
+
+
+def _word_tables() -> list[_Declared]:
+    """Every registered `Worded`, under the annotated module binding that declares it.
+
+    The app is imported and its registries completed as its boot completes them, so the registry
+    holds what it serves; a re-export binds without an annotation and is no owner. A table no
+    declaration owns, or two own, is refused.
+    """
+    complete_registries()
+    owners: dict[int, list[tuple[str, str, object]]] = {}
+    for module, loaded in list(sys.modules.items()):
+        if not module.startswith("promptpotter."):
+            continue
+        for name, annotation in vars(loaded).get("__annotations__", {}).items():
+            if isinstance(value := vars(loaded).get(name), Worded):
+                owners.setdefault(id(value), []).append((module, name, annotation))
+    declared: list[_Declared] = []
+    for table in registered():
+        found = owners.get(id(table), [])
+        if len(found) != 1:
+            where = [f"{module}::{name}" for module, name, _ in found] or "no annotated binding"
+            raise SystemExit(f"word table keyed {list(table)[:3]} is declared by {where}")
+        ((module, name, annotation),) = found
+        key_type, row_type = typing.get_args(_declared_type(module, name, annotation))
+        declared.append(_Declared(module, name, table, key_type, row_type))
+    if len({d.name for d in declared}) != len(declared):
+        raise SystemExit("two word tables share an exported name")
+    return sorted(declared, key=lambda d: (d.module, d.name))
 
 
 def _wire(value: object) -> object:
@@ -261,46 +253,42 @@ def _wire(value: object) -> object:
 
 
 def _emit_word_tables(emitted: set[str]) -> str:
+    """Each closed set's words, whole and under its Python name, so no surface holds a table of its
+    own. A row's columns are its NamedTuple's; a named key or column type is exported once."""
     unions: dict[str, str] = {}
 
-    def named(cls: type[enum.Enum]) -> str:
-        if cls.__name__ not in emitted:
-            unions.setdefault(
-                cls.__name__, _emit_enum_union(cls, f"{cls.__module__}::{cls.__name__}")
-            )
-        return cls.__name__
+    def named(kind: typing.Any) -> str | None:
+        if isinstance(kind, type) and issubclass(kind, enum.Enum):
+            body = _emit_enum_union(kind, f"{kind.__module__}::{kind.__name__}")
+        elif isinstance(kind, typing.TypeAliasType):
+            body = f"// {kind.__module__}::{kind.__name__}\nexport type {kind.__name__} = {_emit_type(kind)};"
+        else:
+            return None
+        if kind.__name__ not in emitted:
+            unions.setdefault(kind.__name__, body)
+        return str(kind.__name__)
 
     def column(hint: typing.Any) -> str:
-        enums = [
-            a
-            for a in (hint, *typing.get_args(hint))
-            if isinstance(a, type) and issubclass(a, enum.Enum)
-        ]
-        return (
-            " | ".join(
-                [named(e) for e in enums]
-                + (["null"] if type(None) in typing.get_args(hint) else [])
-            )
-            if enums
-            else _emit_type(hint)
-        )
+        members = [hint] if named(hint) else [a for a in typing.get_args(hint) if named(a)]
+        if not members:
+            return _emit_type(hint)
+        nullable = ["null"] if type(None) in typing.get_args(hint) else []
+        return " | ".join([str(named(m)) for m in members] + nullable)
 
     tables: list[str] = []
+    orders: list[str] = []
     rows_seen: dict[str, str] = {}
-    for module, name in _WORD_TABLES:
-        table: Mapping[typing.Any, typing.Any] = vars(importlib.import_module(module))[name]
-        first_key, first = next(iter(table.items()))
-        keys = (
-            named(type(first_key))
-            if isinstance(first_key, enum.Enum)
-            else " | ".join(json.dumps(str(k)) for k in table)
-        )
-        if isinstance(first, tuple):
-            row = type(first).__name__
-            hints = typing.get_type_hints(type(first))
+    for module, name, table, key_type, row_type in _word_tables():
+        orders.append(f"  [{name}, {json.dumps([str(_wire(k)) for k in table])}],")
+        keys = named(key_type) or _emit_type(key_type)
+        if isinstance(row_type, type) and issubclass(row_type, tuple):
+            row = row_type.__name__
             rows_seen[row] = (
                 f"export interface {row} {{\n"
-                + "".join(f"  {col}: {column(hint)};\n" for col, hint in hints.items())
+                + "".join(
+                    f"  {col}: {column(hint)};\n"
+                    for col, hint in typing.get_type_hints(row_type).items()
+                )
                 + "}"
             )
 
@@ -314,155 +302,48 @@ def _emit_word_tables(emitted: set[str]) -> str:
                     + " }"
                 )
         else:
-            row = "string"
+            row = column(row_type)
 
             def render(info: typing.Any) -> str:
                 return json.dumps(info, ensure_ascii=False)
 
         body = "\n".join(f"  {json.dumps(str(_wire(k)))}: {render(v)}," for k, v in table.items())
         owner = module.removeprefix("promptpotter.").replace(".", "/")
-        # A table over a subset of its enum is partial: a reader handles the member it lacks.
-        whole = not isinstance(first_key, enum.Enum) or len(table) == len(type(first_key))
-        record = f"Record<{keys}, {row}>" if whole else f"Partial<Record<{keys}, {row}>>"
+        # A table over a subset of its key set is partial: a reader handles the member it lacks.
+        domain = (
+            len(key_type)
+            if isinstance(key_type, type) and issubclass(key_type, enum.Enum)
+            else len(typing.get_args(getattr(key_type, "__value__", key_type))) or len(table)
+        )
+        record = f"Record<{keys}, {row}>"
         tables.append(
-            f"// Mirror of {owner}.py::{name}.\nexport const {name}: {record} = {{\n{body}\n}};"
+            f"// Mirror of {owner}.py::{name}, in display order.\nexport const {name}: "
+            f"{record if len(table) == domain else f'Partial<{record}>'} = {{\n{body}\n}};"
         )
     # A row interface named like an exported model would MERGE with it, silently.
     if clash := emitted & set(rows_seen):
         raise SystemExit(f"word-table rows share a name with an exported type: {sorted(clash)}")
-    return "\n\n".join([*unions.values(), *rows_seen.values(), *tables])
-
-
-def _emit_spend_tables() -> str:
-    from promptpotter.domain.spend import PREFIX_STATE_TITLES, RATE_PRICED_LABEL, SPEND_KIND_LABELS
-
-    kinds = " | ".join(repr(k) for k in SPEND_KIND_LABELS)
-    rows = "\n".join(
-        f"  {{ key: {key!r}, label: {label!r} }}," for key, label in SPEND_KIND_LABELS.items()
+    # An object's own key order puts integer-like keys first, so the display order rides beside it.
+    order = (
+        "// Each table's keys in display order (lib/api/words.ts walks a table by it).\n"
+        "export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, "
+        "readonly string[]>([\n" + "\n".join(orders) + "\n]);"
     )
-    states = " | ".join(repr(s) for s in PREFIX_STATE_TITLES)
-    return (
-        "// Who spent it (domain/spend.py::TokenUsageKind).\n"
-        f"export type SpendKind = {kinds};\n\n"
-        "// Each kind's word, in display order. Mirror of domain/spend.py::SPEND_KIND_LABELS.\n"
-        "export const SPEND_KINDS: readonly { key: SpendKind; label: string }[] = [\n"
-        f"{rows}\n"
-        "];\n\n"
-        "// A provider prefix-cache reading's state (domain/spend.py::PrefixState).\n"
-        f"export type PrefixState = {states};\n\n"
-        "// The word beside a figure our rate table priced, which is never spent. Mirror of "
-        "domain/spend.py::RATE_PRICED_LABEL.\n"
-        f"export const RATE_PRICED_LABEL = {RATE_PRICED_LABEL!r};"
-    )
+    return "\n\n".join([*unions.values(), *rows_seen.values(), *tables, order])
 
 
-def _emit_display_metrics() -> str:
-    from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO
-    from promptpotter.domain.paired_reading import MeasurandUnit
-
-    members = " | ".join(repr(m) for m in DISPLAY_METRIC_INFO)
-    measurand_units = " | ".join(repr(u) for u in typing.get_args(MeasurandUnit))
-    rows = "\n".join(
-        f"  {{ id: {metric!r}, label: {info.label!r}, glyph: {info.glyph!r},"
-        f" title: {info.title!r} }},"
-        for metric, info in DISPLAY_METRIC_INFO.items()
-    )
-    labels = "\n".join(
-        f"  {metric!r}: {info.label!r}," for metric, info in DISPLAY_METRIC_INFO.items()
-    )
-    units = "\n".join(
-        f"  {metric!r}: {info.unit!r}," for metric, info in DISPLAY_METRIC_INFO.items()
-    )
-    return (
-        "// A column every arm carries (domain/arm_reading.py::DisplayMetric).\n"
-        f"export type DisplayMetric = {members};\n\n"
-        "// Each column's words, in pick order. Mirror of "
-        "domain/arm_reading.py::DISPLAY_METRIC_INFO.\n"
-        "export const DISPLAY_METRICS: readonly {\n"
-        "  id: DisplayMetric;\n  label: string;\n  glyph: string;\n  title: string;\n}[] = [\n"
-        f"{rows}\n"
-        "];\n\n"
-        "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
-        f"{labels}\n"
-        "};\n\n"
-        "// Every unit a read number is in (domain/paired_reading.py::MeasurandUnit).\n"
-        f"export type MeasurandUnit = {measurand_units};\n\n"
-        "export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, MeasurandUnit> = {\n"
-        f"{units}\n"
-        "};"
-    )
-
-
-def _emit_export_tiers() -> str:
-    from promptpotter.domain.export import EXPORT_TIER_INFO
-
-    members = " | ".join(json.dumps(tier) for tier in EXPORT_TIER_INFO)
-    rows = "\n".join(
-        f"  {{ id: {json.dumps(tier)}, label: {json.dumps(info.label, ensure_ascii=False)},"
-        f" pasted: {'true' if info.pasted else 'false'} }},"
-        for tier, info in EXPORT_TIER_INFO.items()
-    )
-    return (
-        "// What `GET …/export?tier=` serves, in offer order. Mirror of\n"
-        "// domain/export.py::EXPORT_TIER_INFO — `pasted` tiers are text to copy, the rest download.\n"
-        f"export type ExportTier = {members};\n\n"
-        "export const EXPORT_TIERS: readonly { id: ExportTier; label: string; pasted: boolean }[] = [\n"
-        f"{rows}\n"
-        "];"
-    )
-
-
-def _emit_lens_labels() -> str:
-    from promptpotter.application.mask.record import SCORE_LENS_LABELS, Lens
-    from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
-
-    def table(name: str, kind: typing.Literal["score", "abort"], labels: Mapping[str, str]) -> str:
-        rows = "\n".join(
-            f"  {Lens(kind, body).spelling!r}: {label!r}," for body, label in labels.items()
-        )
-        return f"export const {name}: Record<string, string> = {{\n{rows}\n}};"
-
-    return (
-        "// Each lens a picklist offers by name -> its label, keyed as the `lens=` it sends, in\n"
-        "// picklist order. Mirrors of application/mask/record.py::SCORE_LENS_LABELS and\n"
-        "// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against\n"
-        "// `ABORT_LENS_SUPPRESS` at import. Don't hand-list these.\n"
-        + table("SCORE_LENS_LABELS", "score", SCORE_LENS_LABELS)
-        + "\n\n"
-        + table("ABORT_LENS_LABELS", "abort", ABORT_LENS_LABELS)
-    )
-
-
-def _emit_cell_term_meta() -> str:
-    from promptpotter.application.scoring.evaluators import cell_terms_meta
-
-    rows = "\n".join(
-        f"  {{ name: {m['name']!r}, direction: {m['direction']!r},"
-        f" description: {m['description']!r}, dial: {json.dumps(m['dial'])},"
-        f" primary: {json.dumps(m['primary'])} }},"
-        for m in cell_terms_meta()
-    )
-    return (
-        "export interface CellTermMeta {\n"
-        "  name: string;\n"
-        '  direction: "high" | "low";\n'
-        "  description: string;\n"
-        '  dial: "anchored" | "unit" | null;\n'
-        "  primary: boolean;\n"
-        "}\n\n"
-        "// What a per_cell formula can name, mirrored from application/scoring/evaluators.py.\n"
-        "export const CELL_TERM_META: CellTermMeta[] = [\n"
-        f"{rows}\n"
-        "];"
-    )
-
-
-def _emit_pipeline_schema_words() -> str:
+def _emit_served_words() -> str:
     from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
+    from promptpotter.domain.sample import SAMPLE_TAG_DIGITS
+    from promptpotter.domain.spend import RATE_PRICED_LABEL
 
     return (
         "// domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.\n"
-        f"export const SCHEMA_DESCRIPTION_PREFIX = {json.dumps(SCHEMA_DESCRIPTION_PREFIX)};"
+        f"export const SCHEMA_DESCRIPTION_PREFIX = {json.dumps(SCHEMA_DESCRIPTION_PREFIX)};\n"
+        "// The word beside a figure our rate table priced (domain/spend.py::RATE_PRICED_LABEL).\n"
+        f"export const RATE_PRICED_LABEL = {json.dumps(RATE_PRICED_LABEL)};\n"
+        "// How wide a row's slot is printed (domain/sample.py::sample_tag).\n"
+        f"export const SAMPLE_TAG_DIGITS = {SAMPLE_TAG_DIGITS};"
     )
 
 
@@ -474,13 +355,16 @@ def _emit_tones() -> str:
     )
 
 
-def _emit_recent_step() -> str:
+def _emit_live_windows() -> str:
+    from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
     from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
 
     return (
+        "// How often an open call beats (infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S).\n"
+        f"export const HEARTBEAT_INTERVAL_S = {HEARTBEAT_INTERVAL_S:g};\n"
         "// The shortest silence between two ray steps worth marking. Mirror of\n"
         "// infrastructure/runtime_flags.py::RECENT_STEP_S, the window a producer reads `live` in.\n"
-        f"export const RECENT_STEP_S = {RECENT_STEP_S};"
+        f"export const RECENT_STEP_S = {RECENT_STEP_S:g};"
     )
 
 
@@ -610,15 +494,11 @@ def main() -> int:
         "RunPhase",
         "ProducerState",
         "DashboardState",
+        "Tone",
     }
     blocks.append(_emit_word_tables(emitted))
-    blocks.append(_emit_spend_tables())
-    blocks.append(_emit_pipeline_schema_words())
-    blocks.append(_emit_display_metrics())
-    blocks.append(_emit_export_tiers())
-    blocks.append(_emit_lens_labels())
-    blocks.append(_emit_cell_term_meta())
-    blocks.append(_emit_recent_step())
+    blocks.append(_emit_served_words())
+    blocks.append(_emit_live_windows())
     blocks.append(_emit_cycle_path_grammar())
     content = _HEADER + "\n\n".join(blocks) + "\n"
     _OUT_PATH.write_text(content, encoding="utf-8", newline="\n")

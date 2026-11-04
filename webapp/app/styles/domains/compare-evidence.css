@@ -37,17 +37,17 @@
   margin-left: 8px;
   font-size:var(--text-sm);
 }
-/* A side's ink (`format.ts::sideTone`) is the element's colour: text and `currentColor` marks take it. */
-.l4-eff-pos,
-.l4-eff-pos .l4-effect-mean {
+/* A side's served tone (`format.ts::sideTone`) is the element's colour: text and `currentColor` marks take it. */
+.l4-eff.tone-success,
+.l4-eff.tone-success .l4-effect-mean {
   color: var(--color-success);
 }
-.l4-eff-neg,
-.l4-eff-neg .l4-effect-mean {
+.l4-eff.tone-danger,
+.l4-eff.tone-danger .l4-effect-mean {
   color: var(--color-danger);
 }
-.l4-eff-flat,
-.l4-eff-flat .l4-effect-mean {
+.l4-eff.tone-quiet,
+.l4-eff.tone-quiet .l4-effect-mean {
   color: var(--color-text-secondary);
 }
 

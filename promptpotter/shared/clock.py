@@ -5,7 +5,8 @@ import time
 from datetime import UTC, datetime
 
 SUSPEND_GRACE_S = 60.0
-"""Above the 15 s heartbeat interval, so a tick that merely ran late never reads as a suspend."""
+"""Well above `infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S`, so a tick that merely ran
+late never reads as a suspend."""
 
 
 def duration_words(seconds: float) -> str:

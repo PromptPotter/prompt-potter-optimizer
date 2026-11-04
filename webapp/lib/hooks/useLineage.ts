@@ -6,8 +6,8 @@ import {
   courseAt,
   nodeOverlays,
   primaryMetric,
-  type DisplayMetric,
 } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/api/types.generated";
 import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";

@@ -3,7 +3,7 @@ import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { MeasuredLift } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
 import {
-  BENCH_STATE_INFO,
+  READING_STATE_INFO,
   CEILING_METER_LABELS,
   COST_ABSENCE_WORDS,
   STOP_REASON_INFO,
@@ -103,7 +103,7 @@ export function benchLead(row: HeadToHeadRow | null): {
       bench === null || s === null
         ? {
             value: PLACEHOLDER,
-            band: bench === null ? "" : (BENCH_STATE_INFO[bench.status.state]?.sentence ?? ""),
+            band: bench === null ? "" : READING_STATE_INFO[bench.status.state].sentence,
           }
         : {
             value: fmtUnit("score", level?.value),

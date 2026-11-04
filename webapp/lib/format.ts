@@ -1,6 +1,9 @@
 import type { LiftEstimate, MeasuredUnit, MetricSpec } from "@/lib/api/types";
+import { cx } from "@/lib/cx";
 import {
+  LIFT_SIDE_TONE,
   RECENT_STEP_S,
+  SAMPLE_TAG_DIGITS,
   UNIT_FORMATS,
   type MeasurandUnit,
   type UnitFormat,
@@ -9,6 +12,11 @@ import {
 type LiftSide = LiftEstimate["side"];
 
 export const PLACEHOLDER = "—";
+
+// A row's slot as every surface prints it (`domain/sample.py::sample_tag`): `#007`.
+export function fmtSampleTag(position: number): string {
+  return `#${String(position).padStart(SAMPLE_TAG_DIGITS, "0")}`;
+}
 
 // A `{name}` in served words stands for the served model's field of that name.
 export function filled(words: string, model: object): string {
@@ -180,15 +188,10 @@ export function fmtThetaSe(v: number | null | undefined, se: number | null | und
   return theta !== PLACEHOLDER && typeof se === "number" ? `${theta} ± ${se.toFixed(2)}` : theta;
 }
 
+// A side's served ink (`LIFT_SIDE_TONE`); no side reads as a band spanning zero.
 export function sideTone(side: LiftSide | null | undefined): string {
-  return side == null ? "l4-eff-flat" : SIDE_TONE[side];
+  return cx("l4-eff", `tone-${LIFT_SIDE_TONE[side ?? "spans"]}`);
 }
-
-const SIDE_TONE: Record<LiftSide, string> = {
-  above: "l4-eff-pos",
-  below: "l4-eff-neg",
-  spans: "l4-eff-flat",
-};
 
 export function fmtClock(s: unknown): string {
   if (!s) return PLACEHOLDER;

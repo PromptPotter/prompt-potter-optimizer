@@ -216,10 +216,13 @@ import-graph script before and after; close each wave with `gate.py --only layer
 
 ### The webapp's vanilla pass (audit 2026-10-29)
 
-- **Wording authored in the browser**: label tables still client-side (`lib/prompt-fields.ts::PROMPT_FIELD`, `lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`,
-  `WINDOW_LABEL`, `AccountView::SECTIONS`, …) and the tone vocabularies off `domain/said.py::Tone` (`l4-eff-*`,
-  `verdictTone`, PipelineFlow's). Canonical: served label constants, one tone. **Re-test:** each table
-  served or deleted.
+- **Wording authored in the browser**: `lib/prompt-fields.ts::PROMPT_FIELD` still labels a served
+  set client-side (arc U1b's file). `sample-trajectory.ts::MOVEMENT_CLASS` maps the served
+  `SampleMovement` to an ink class, and `PipelineFlow`'s `tone: "accent" | "neutral"` is chosen by each
+  host: both are ink with no words, so they wait until a served word row carries its `Tone`
+  (`domain/said.py`) and do not ride the Worded re-key. `shared/clock.py::duration_words` twins
+  `format.ts::fmtDuration` because the browser formats clocks that tick between polls; one served
+  formatter would need a served tick. **Re-test:** `git grep -n "PROMPT_FIELD\|MOVEMENT_CLASS" -- webapp/lib`.
 - **The seed-once latch** hand-built at each
   `git grep -n -i "seeded" -- webapp/components webapp/lib` site (one hook is the fix, and
   `lib/hooks/` is arc W1's); `STORAGE_KEYS` mixes hook and
@@ -310,30 +313,15 @@ fixtures.
   **Re-test:** `git grep -nE "liveCandidate(SearchPoint|Verdicts|ObserveConfig)|round_axis.completed.includes" -- webapp/lib webapp/components`.
 
 **B. Served words own every wording.**
-- **`lib/lineage.tsx::maskLabel` / `maskActive` word and decide the active re-read client-side**
-  (the badge reads "Showing the Sample set mask"), beside the served `hierarchy_subtree.py::_read_under`
-  line. Action: render `read_under`. **Re-test:** `git grep -n "maskLabel" -- webapp`.
-- **Intervals typed into UI text beside their owners**: `TimeRay.tsx::Gap` "beats every 15 s"
-  (`heartbeat.py::HEARTBEAT_INTERVAL_S` is the owner, and the gap comment disagrees with `RECENT_STEP_S`),
-  `TERMS.brand_live_preview` "every 2s". Action: interpolate the served or `cadence.ts` constant.
-  **Re-test:** `git grep -nE "every (15|2) ?s" -- webapp/components webapp/lib`.
-- **`MeasurementRun.tsx` words the served `ArmEnd`** through ``TERMS[`arm_${early}`]`` and
-  `early.replace("_", " ")`, its tone picked locally. Action: an `ArmEnd` row in `_WORD_TABLES`.
-  **Re-test:** `git grep -n 'arm_\${' -- webapp/components`.
-- **`run-phase.ts::phasePauseLabel` covers blank served words** (`DASHBOARD_STATE_PAUSE_WORDS` maps
-  `optimizer_step` and `stopped` to `""`) with a `||` and hand-typed "the current round". Action: the
-  served table words every state. **Re-test:** `git grep -n "the current round" -- webapp/lib`.
 - **Glyph tables over served enums**: `forest-layout.ts::KIND_GLYPH` / `TRIGGER_GLYPH` /
   `DIRECTION_GLYPH`, `Criterion.tsx::TERM_GLYPHS`, `FitnessRankSummary::MOVE_MARK`, a literal "⑂" in
-  `ForestRows`. Low weight. Action: the glyph rides the served word rows.
+  `ForestRows`. Low weight. Kept out of the Worded re-key because several of the keyed enums (the
+  forest's kinds and triggers) are not word tables yet. Action: the glyph rides the served word rows.
   **Re-test:** `git grep -nE "_GLYPHS?\b|MOVE_MARK" -- webapp/lib webapp/components`.
-- **`chat/HardSamplesPreview.tsx`**: `labelAt` invents `rank ${…at + 1}` on a lookup miss though
-  `hard_sample_rank` is required on the wire; `rateOf` tests "unmeasured" three ways; bucket keys render
-  raw. Action: handle the miss, one served unmeasured state, served bucket words.
-  **Re-test:** `git grep -nE "at \+ 1|hit_spread === \"unmeasured\"" -- webapp/components/chat`.
 - **"Measured in N/M rounds" is counted in the browser** (`sample-set.ts::roundsCoveringSample`, read by
-  `SampleSetControl`), and `fullyCovered` counts rounds with any selection. Action: served per-sample
-  coverage. **Re-test:** `git grep -n "roundsCoveringSample\|fullyCovered" -- webapp`.
+  `SampleSetControl`), and `fullyCovered` counts rounds with any selection. This is a count, not a
+  word, so a served coverage field is a dashboard reshape outside the wording arc. Action: served
+  per-sample coverage. **Re-test:** `git grep -n "roundsCoveringSample\|fullyCovered" -- webapp`.
 
 **C. Lineage reads the served tree.**
 - **A campaign's short label is parsed three ways**: `format.ts::shortId` (`{dataset}__{rand6}`),
@@ -503,25 +491,17 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
-- **`domain/bench.py::BENCH_STATE_INFO` is a second table over `ReadingState`** beside
-  `READING_STATE_INFO`. Action: one table with a `fault` column. Merging re-keys optimizer prompts
-  (a digest table), so it asks the operator first. **Re-test:** `git grep -c "BENCH_STATE_INFO" -- promptpotter`.
-- **`DISPLAY_METRIC_INFO` is hand-emitted three ways** (`DISPLAY_METRICS`, `_LABELS`, `_UNITS` in
-  `scripts/build_ts_types.py`). Action: one `_WORD_TABLES` row. **Re-test:** grep the three names in the script.
-- **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and passes it through `model_validate`**,
-  so the `StatusMark` literal is checked at runtime only. Action: map phase/outcome → `StatusMark` typed.
+- **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and asserts it a `StatusMark`**, so the
+  literal holds at runtime only. Action: `StatusMark` typed off `RunPhase` and `StopOutcome`, whose
+  values it repeats (a re-key of the exported union, so not one edit). **Re-test:** `git grep -n "mark: str" -- promptpotter/domain/cycle_index.py`.
 - **`application/config_map.py::ConfigKnob.source` is an untyped `str`**, and its only reader is
   `RowHoverCard`'s declared-knobs list. Action: a `KnobSource` literal. **Re-test:** `git grep -n "source: str" -- promptpotter/application/config_map.py`.
 - **The pipeline renderer's styles live in `app/styles/domains/chat.css`** (`.wf-hero-*`,
   `.connector*`, `.pipeline-zoom*`), restated by `dashboard-pipeline-nodes.css` to win on order. The
   renderer is `dashboard/pipeline/PipelineFlow`'s. Action: move the block to its own domain file in
   one commit once the run-card session's `chat.css` hunk lands. **Re-test:** `git grep -c "wf-hero" -- webapp/app/styles/domains/chat.css`.
-- **`NodeKnobsPanel::POOL_NOUN` words a served closed set (`PoolRow.source`) locally.** Action: an
-  exported word table. **Re-test:** `git grep -n "POOL_NOUN" -- webapp/components`.
 - **`search-point.ts::OBSERVE_LABELS` is a TS-only closed set** (`ObserveState`): a UI mode, not a
   served state — admitted until a surface beside the browser names it. **Re-test:** still TS-only.
-- **`lib/format.ts::SIDE_TONE` / `verdictTone`** stay local: the file belongs to the run-card
-  session. **Rides with:** that session landing.
 - **A landing waits on every live producer on another commit, whether or not the ledger shape
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
@@ -556,6 +536,15 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 - **An unparseable job file is logged and skipped** (`jobs/registry.py::JobRegistry.list_all`), so
   occupancy undercounts a live slot; a parseable one that fails validation raises
   `JobUnreadableError`. Action: one refusal for both. **Re-test:** `git grep -n "logger" -- promptpotter/application/jobs/registry.py`.
+- **Potter's and capo-pobb's digests hash the review.md and log.md writers' words**: their members
+  reach `generation_only.py::run_generation_only_round` → `round.py::close_round` →
+  `output.py::write_review_md` / `write_log_md`, so `READING_STATE_INFO`, `STOP_REASON_INFO`,
+  `HEALTH_CAUSE_INFO`, `DISPLAY_METRIC_INFO`, `UNIT_FORMATS` and the `NoApiKeyError` /
+  `HostAllowanceExhaustedError` sentences (`campaign_result.py::read_cycle_bench` → the judges →
+  `coupon.py::keyed_client`) key both treatments while no request byte moves. Action: the closure stops
+  at the round's close, a writer of files no prompt reads. **Rides with:** the next L4 digest pass.
+  **Re-test:** a reach trace over `source_scan.py::optimizer_prompt_shapers` for potter still ends a
+  `READING_STATE_INFO` chain at `generation_only.py::run_generation_only_round`.
 
 ### The member backbone
 
@@ -820,10 +809,8 @@ word's `git grep -c` for that sense is 0.
   halts an origin with no scored cell, but holds a degraded one, and its three answers repeat run verbs
   (`abort` ≈ leave it ended, `proceed` ≈ `resume`, `rescore` ≈ `resume --from 0` force-fresh).
   Open: halt it too, deleting the hold.
-- **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
-  **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
-- **Three seams owed a re-read:** `webapp/lib/hooks/useCompareWithOrigin.ts` picks the best pointer; `webapp/lib/derivations/spend.ts::readSpend`
-  sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
+- **Two seams owed a re-read:** `webapp/lib/hooks/useCompareWithOrigin.ts` picks the best pointer;
+  `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
 - **A declined pause refuses with "."**: `phases.py::RUN_PHASE_INFO` gives `RUNNING` and `SCORING` a
@@ -846,10 +833,10 @@ word's `git grep -c` for that sense is 0.
   - **One append rebuilds every campaign's entry**: `application/hierarchy.py::entries_version` and
     `hierarchy_subtree.py::subtree_version` are store-wide. The shape is a per-campaign version and an
     entry memo; what a shared input (the ruler, an account's spend) invalidates is the decision.
-  - **Activity rows are `Said` rows under other names**: `domain/activity.py::ActivityItem` and
-    `DecisionFact` carry label, tone and detail, with kind glyphs (★ ◆ ↻) beside the CSS tone glyphs,
-    and `chat/LiveSegment`'s `<dl>` honours only `danger`. One `Said` row reaches every constructor,
-    `LiveSegment`, `TimeRay` and the event contract.
+  - **An activity row is a `Said` row under other names**: `domain/activity.py::ActivityItem` carries
+    label, tone and detail, with kind glyphs (★ ◆ ↻) beside the CSS tone glyphs. One `Said` row
+    reaches every constructor, `chat/LiveSegment`, `TimeRay` and the event contract. That reshapes
+    the event contract (AsyncAPI) and its chat readers, so it is its own arc, not a word table.
   - **Off-screen view columns stay mounted and poll**: `shell/Views.tsx` mounts every open column, so a
     phone on the Dashboard preset runs every pane's reads at once. React's `<Activity mode="hidden">`
     per column, on one IntersectionObserver, stops them and keeps their state. The fork: a column
@@ -954,8 +941,6 @@ word's `git grep -c` for that sense is 0.
     **Re-test:** time one send on an account with 100 cycles.
   - Restamp drops `User.spend_budget_usd_total` / `token_budget_total`: a hand-raised account must be
     re-granted as `grant.json`. **Re-test:** `ls .promptpotter/projects/*/grant.json` after a restamp.
-  - The refusals in `coupon.py` / `errors.py` name a webapp pane ("Account → API keys"): renaming the
-    pane means editing Python strings. **Re-test:** `git grep -n "API keys" -- promptpotter`.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
     **Re-test:** the Host allowance section with a token-bound grant.
   - `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.

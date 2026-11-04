@@ -19,7 +19,7 @@ test.describe("dashboard", () => {
   });
 
   test("the chronology is its own region and is readable", async ({ page }) => {
-    // `TimeRay` waits on three reads, which lag well past 15s after the account-pane spec.
+    // `TimeRay` waits on three reads, which lag well past 15s after the account spec.
     await expect(page.getByRole("region", { name: /Time-ray/ })).toBeVisible({ timeout: 60_000 });
   });
 

@@ -9,7 +9,7 @@ import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
 import { cx } from "@/lib/cx";
 import { PLACEHOLDER } from "@/lib/format";
 
-export function AboutUnit() {
+export function AccountAboutTab() {
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 

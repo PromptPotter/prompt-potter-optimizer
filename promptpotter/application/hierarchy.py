@@ -16,7 +16,7 @@ from promptpotter.domain.arm_reading import (
     level_text,
     lift_band_text,
 )
-from promptpotter.domain.bench import BENCH_STATE_INFO, BenchScore
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
     Campaign,
@@ -164,7 +164,7 @@ def _course_climb(facts: CourseFacts) -> CourseClimb | None:
 
 def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
     level = None if bench is None or bench.selected is None else bench.selected.level
-    notes = [BENCH_STATE_INFO[state].sentence]
+    notes = [READING_STATE_INFO[state].sentence]
     # How far a pass got rides the sentence, where it stopped short of its rows.
     if (
         bench is not None

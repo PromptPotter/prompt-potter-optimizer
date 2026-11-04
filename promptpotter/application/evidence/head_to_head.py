@@ -55,6 +55,7 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.statistics import bh_adjusted
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import CampaignConfig
@@ -70,29 +71,33 @@ class GuardState(StrEnum):
     DIFFERS = "differs"
 
 
-GUARD_STATE_INFO: dict[GuardState, str] = {
-    GuardState.CONTROLLED: (
-        "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, "
-        "split, held-out rows, scorer, target model, origin and budget, with one optimizer model "
-        "set and no operator's steer."
-    ),
-    GuardState.UNCONTROLLED: (
-        "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a "
-        "head-to-head, or an arm a launch act ran off it, could read other campaigns' "
-        "measurements, take an operator's steer or re-run its own rounds."
-    ),
-    GuardState.DIFFERS: (
-        "Not one quantity: what graded or bounded these headlines differs, so a gap between two "
-        "is not the optimizer's alone."
-    ),
-}
+GUARD_STATE_INFO: Worded[GuardState, str] = Worded(
+    {
+        GuardState.CONTROLLED: (
+            "One quantity, as declared: every campaign is an arm of one head-to-head, on its bank, "
+            "split, held-out rows, scorer, target model, origin and budget, with one optimizer model "
+            "set and no operator's steer."
+        ),
+        GuardState.UNCONTROLLED: (
+            "One quantity, undeclared: nothing read here differs, and a campaign that is no arm of a "
+            "head-to-head, or an arm a launch act ran off it, could read other campaigns' "
+            "measurements, take an operator's steer or re-run its own rounds."
+        ),
+        GuardState.DIFFERS: (
+            "Not one quantity: what graded or bounded these headlines differs, so a gap between two "
+            "is not the optimizer's alone."
+        ),
+    }
+)
 assert GUARD_STATE_INFO.keys() == set(GuardState)
 
-GUARD_STATE_LABELS: dict[GuardState, str] = {
-    GuardState.CONTROLLED: "controlled",
-    GuardState.UNCONTROLLED: "not controlled",
-    GuardState.DIFFERS: "differs",
-}
+GUARD_STATE_LABELS: Worded[GuardState, str] = Worded(
+    {
+        GuardState.CONTROLLED: "controlled",
+        GuardState.UNCONTROLLED: "not controlled",
+        GuardState.DIFFERS: "differs",
+    }
+)
 assert GUARD_STATE_LABELS.keys() == set(GuardState)
 
 
@@ -113,37 +118,39 @@ class GuardDifference(StrEnum):
     ORIGIN_READING = "origin_reading"
 
 
-GUARD_DIFFERENCE_INFO: dict[GuardDifference, str] = {
-    GuardDifference.INSTRUMENT_ID: (
-        "Different instruments measured the cells: another dataset, or another inner origin under it."
-    ),
-    GuardDifference.DATASET_HASH: "The banks hold different rows.",
-    GuardDifference.SPLIT: "The banks were split differently.",
-    GuardDifference.BENCH_ROWS: (
-        "Different rows were held out, so the headlines are graded on different cells."
-    ),
-    GuardDifference.SCORER_ID: "Different scorers graded the headlines.",
-    GuardDifference.MODELS: "The target pipelines ran different models.",
-    GuardDifference.ORIGIN: "The campaigns started from different origins.",
-    GuardDifference.BUDGET: (
-        "The campaigns declared different budgets, stopping rules or determinism clamps."
-    ),
-    GuardDifference.DEFAULTS: (
-        "The campaigns were declared over different code defaults, so a key neither set ran "
-        "at different values."
-    ),
-    GuardDifference.OPTIMIZER_MODELS: (
-        "The optimizers called different models, so a gap between two headlines is the model's "
-        "as much as the method's."
-    ),
-    GuardDifference.HUMAN_INTERVENED: (
-        "An operator steered, skipped or model-overrode a cycle on a campaign's line."
-    ),
-    GuardDifference.ORIGIN_READING: (
-        "Campaigns on one bench set read the same origin apart beyond its own noise under one "
-        "formula, so the backend or a judge moved between them — a change no stamp names."
-    ),
-}
+GUARD_DIFFERENCE_INFO: Worded[GuardDifference, str] = Worded(
+    {
+        GuardDifference.INSTRUMENT_ID: (
+            "Different instruments measured the cells: another dataset, or another inner origin under it."
+        ),
+        GuardDifference.DATASET_HASH: "The banks hold different rows.",
+        GuardDifference.SPLIT: "The banks were split differently.",
+        GuardDifference.BENCH_ROWS: (
+            "Different rows were held out, so the headlines are graded on different cells."
+        ),
+        GuardDifference.SCORER_ID: "Different scorers graded the headlines.",
+        GuardDifference.MODELS: "The target pipelines ran different models.",
+        GuardDifference.ORIGIN: "The campaigns started from different origins.",
+        GuardDifference.BUDGET: (
+            "The campaigns declared different budgets, stopping rules or determinism clamps."
+        ),
+        GuardDifference.DEFAULTS: (
+            "The campaigns were declared over different code defaults, so a key neither set ran "
+            "at different values."
+        ),
+        GuardDifference.OPTIMIZER_MODELS: (
+            "The optimizers called different models, so a gap between two headlines is the model's "
+            "as much as the method's."
+        ),
+        GuardDifference.HUMAN_INTERVENED: (
+            "An operator steered, skipped or model-overrode a cycle on a campaign's line."
+        ),
+        GuardDifference.ORIGIN_READING: (
+            "Campaigns on one bench set read the same origin apart beyond its own noise under one "
+            "formula, so the backend or a judge moved between them — a change no stamp names."
+        ),
+    }
+)
 assert GUARD_DIFFERENCE_INFO.keys() == set(GuardDifference)
 assert set(BenchSet.model_fields) <= {d.value for d in GuardDifference}
 
@@ -257,15 +264,17 @@ def pair_guard(
     )
 
 
-VERDICT_ABSENT_INFO: dict[ReadingState, str] = {
-    ReadingState.UNDER_TWO_CELLS: (
-        "No verdict: a head-to-head needs two campaigns with a graded bench set."
-    ),
-    ReadingState.PENDING: (
-        "No verdict yet: a declared arm of this head-to-head has no bench headline, so the "
-        "graded rows are not the comparison that was declared."
-    ),
-}
+VERDICT_ABSENT_INFO: Worded[ReadingState, str] = Worded(
+    {
+        ReadingState.UNDER_TWO_CELLS: (
+            "No verdict: a head-to-head needs two campaigns with a graded bench set."
+        ),
+        ReadingState.PENDING: (
+            "No verdict yet: a declared arm of this head-to-head has no bench headline, so the "
+            "graded rows are not the comparison that was declared."
+        ),
+    }
+)
 assert VERDICT_ABSENT_INFO.keys() <= set(ReadingState)
 
 

@@ -13,7 +13,7 @@ import httpx
 from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
-from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
+from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
@@ -147,7 +147,7 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
             node=label,
             round_num=current_round(),
             start_monotonic=started,
-            detail_fn=lambda: waiting_on(client, stage.model, role="grader"),
+            detail_fn=lambda: silence_detail(client, stage.model, role="grader"),
         )
     )
     try:

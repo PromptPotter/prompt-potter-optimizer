@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { READING_STATE_INFO, type ReadingState } from "@/lib/api/types.generated";
+import { READING_STATE_INFO } from "@/lib/api/types.generated";
+import { wordKeys } from "@/lib/api/words";
 import { pairedReading, unreadOverlap } from "@/lib/test-fixtures";
 import { liftOf, readPaired } from "../paired-reading";
 
@@ -9,12 +10,12 @@ describe("readPaired", () => {
     expect(pair).toMatchObject({ read: true, cells: 10 });
   });
 
-  const UNREAD = (Object.keys(READING_STATE_INFO) as ReadingState[]).filter((s) => s !== "read");
+  const UNREAD = wordKeys(READING_STATE_INFO).filter((s) => s !== "read");
 
   it.each(UNREAD)("says why a %s pair was not read, in the served words", (state) => {
     const reading = { ...unreadOverlap().lead, state };
-    const { kind, label, sentence } = READING_STATE_INFO[state];
-    expect(readPaired(reading)).toEqual({ read: false, kind, label, sentence });
+    const { label, sentence } = READING_STATE_INFO[state];
+    expect(readPaired(reading)).toEqual({ read: false, label, sentence });
     expect(liftOf(reading)).toBeNull();
   });
 });

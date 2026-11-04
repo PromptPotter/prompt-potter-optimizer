@@ -26,7 +26,7 @@
 
 ## A wire shape is GENERATED — never hand-declared
 
-**Every response type comes from `lib/api/types.generated.ts`** (gate `ts-types`); re-export from `lib/api/types.ts`; a narrow alias is derived (`ResponseType["field"]`). **A closed set belongs on the server**, and so do its words: a served enum is worded by its exported table (`scripts/build_ts_types.py::_WORD_TABLES`, e.g. `STATUS_MARK_INFO`, `STOP_REASON_INFO`), never a local `Record<…, string>`; a composed line is a served `Said` row.
+**Every response type comes from `lib/api/types.generated.ts`** (gate `ts-types`); re-export from `lib/api/types.ts`; a narrow alias is derived (`ResponseType["field"]`). **A closed set belongs on the server**, and so do its words: a served enum is worded by its `promptpotter/shared/worded.py::Worded` table, which registers itself when built and is exported under the binding that declares it (e.g. `STATUS_MARK_INFO`, `STOP_REASON_INFO`), never a local `Record<…, string>`; iterate one through `lib/api/words.ts`; a composed line is a served `Said` row.
 <!-- probe: git grep -cE "^const [A-Z_]+_(LABELS|TONE|ADVICE|NAME): Record" -- webapp/*.ts <= 2 -->
 
 ## Viewed identity — one address (CyclePath)

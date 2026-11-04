@@ -237,8 +237,6 @@ export function producerReading(over: Partial<ProducerReading> = {}): ProducerRe
     attached: false,
     appending: false,
     silent_for_s: null,
-    open_for_s: null,
-    call_holds: false,
     ...over,
   };
 }
@@ -555,7 +553,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       auto_refusal: "one_at_a_time",
       depths: [{ cells: 1, fill: null, pickable: true }],
     },
-    waiting_on: null,
+    held_call: null,
     producer: producerReading(),
     admission: {
       offers: "pause",
@@ -573,8 +571,8 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     spend_metered: null,
     fork_remainder: null,
     spend_metered_by_round: null,
-    campaign_metered_usd: null,
-    campaign_metered_tokens: null,
+    metered_line: null,
+    cap_lines: [],
     allotment: null,
     catch_up_log: [],
     current_round: currentRound(),

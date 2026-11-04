@@ -10,7 +10,8 @@ import type {
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { tagValue } from "./hierarchy";
 import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
-import { metricLevel, type DisplayMetric } from "./headline-stats";
+import { metricLevel } from "./headline-stats";
+import type { DisplayMetric } from "@/lib/api/types.generated";
 
 export interface RetiredGroup {
   // The address of the course that took the tail's place.

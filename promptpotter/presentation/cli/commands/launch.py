@@ -18,6 +18,7 @@ from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import default_projects_root
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
     CyclePayload,
     OriginGateDecisionPayload,
@@ -105,7 +106,7 @@ def ctrl_c_pauses(
                     await CommandDispatcher(stores).dispatch(CommandCall(payload))
                 except PotterError as exc:
                     if not then_cancel:
-                        print(f"  {exc}", flush=True)
+                        print(f"  {refusal_words(exc)}", flush=True)
         finally:
             if then_cancel:
                 run.cancel()

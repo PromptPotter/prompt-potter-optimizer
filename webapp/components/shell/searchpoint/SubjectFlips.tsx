@@ -3,6 +3,7 @@ import type { CellRow } from "@/lib/api";
 import { usePresetCells } from "@/lib/hard-samples";
 import { cx } from "@/lib/cx";
 import { HoverCard } from "@/components/ui";
+import { fmtSampleTag } from "@/lib/format";
 
 export function SubjectFlips({
   vsOrigin,
@@ -95,7 +96,7 @@ function FlipList({ keys, arms }: { keys: string[]; arms: FlipArms }) {
         return (
           <li key={key}>
             <span className="subject-flip-id">
-              {it === undefined ? "#—" : `#${String(it.position).padStart(3, "0")}`}
+              {it === undefined ? "#—" : fmtSampleTag(it.position)}
             </span>
             <span className="subject-flip-was">{(it && wasAt.get(it.position)?.predicted) || "∅"}</span>
             <span aria-hidden="true">→</span>

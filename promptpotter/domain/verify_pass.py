@@ -9,13 +9,16 @@ from promptpotter.domain.paired_reading import ArmName, PairedReading
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
+from promptpotter.shared.worded import Worded
 
 VerifyStrategy = Literal["random", "hard"]
 
-VERIFY_STRATEGY_LABELS: dict[VerifyStrategy, str] = {
-    "random": "picked at random",
-    "hard": "hardest first",
-}
+VERIFY_STRATEGY_LABELS: Worded[VerifyStrategy, str] = Worded(
+    {
+        "random": "picked at random",
+        "hard": "hardest first",
+    }
+)
 if set(VERIFY_STRATEGY_LABELS) != set(get_args(VerifyStrategy)):
     raise RuntimeError("VERIFY_STRATEGY_LABELS is out of step with VerifyStrategy")
 

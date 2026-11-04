@@ -43,6 +43,7 @@ from promptpotter.shared.errors import (
     is_error_result,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.worded import Worded
 
 # What a cell's `predicted` reads when its pipeline ran and emitted nothing parseable.
 NO_RESULT: Annotated[str, shapes_optimizer_prompt] = "NO_RESULT"
@@ -469,12 +470,14 @@ assert not (GRADE_KEYS & _CELL.keys), "a grade is a formula's reading, never a f
 
 #: ERR and UNSC are states of their own, not a bad MISS; a re-grade recovers UNSC.
 SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
-SAMPLE_STATUS_LABELS: dict[SampleStatus, str] = {
-    "HIT": "Hit",
-    "MISS": "Miss",
-    "ERR": "Error",
-    "UNSC": "Unscored",
-}
+SAMPLE_STATUS_LABELS: Worded[SampleStatus, str] = Worded(
+    {
+        "HIT": "Hit",
+        "MISS": "Miss",
+        "ERR": "Error",
+        "UNSC": "Unscored",
+    }
+)
 assert SAMPLE_STATUS_LABELS.keys() == set(get_args(SampleStatus))
 
 

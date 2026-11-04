@@ -10,6 +10,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.shared.account_tabs import AccountTab
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,12 @@ def is_provider_credit_refusal(detail: str) -> bool:
 
 
 class SendRefusedError(RuntimeError):
-    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::REFUSAL_STOPS``)."""
+    """The run ENDS on the stop ``category`` maps to (``domain/phases.py::REFUSAL_STOPS``).
+
+    ``tab`` is the Account tab its remedy lives in, as a KEY: each surface words it
+    (`domain/account_words.py::refusal_words`), so no navigation wording rides the sentence."""
+
+    tab: AccountTab | None = None
 
     def __init__(self, message: str, *, category: ErrorCategory) -> None:
         super().__init__(message)
@@ -212,11 +218,12 @@ class NoApiKeyError(SendRefusedError, PotterError):
     def __init__(self, *, provider: str, key: str) -> None:
         message = (
             f"No {provider} key is held by this account or this box, so nothing was sent. Add "
-            f"your own {provider} key under Account → API keys, or the box's operator sets {key} "
-            "and restarts the app."
+            f"your own {provider} key to this account, or the box's operator sets {key} and "
+            "restarts the app."
         )
         SendRefusedError.__init__(self, message, category=ErrorCategory.CLIENT)
         self.provider = provider
+        self.tab = "keys"
         self.details = {"provider": provider, "key": key}
 
 
@@ -243,7 +250,7 @@ class HostAllowanceExhaustedError(SendRefusedError, PotterError):
         remedy = (
             "ask the host to raise this account's allowance."
             if provider is None
-            else f"add your own {provider} key under Account → API keys to send on your own money."
+            else f"add your own {provider} key to this account to send on your own money."
         )
         said = (
             f"Lower the run's ceiling, or {remedy}"
@@ -253,6 +260,7 @@ class HostAllowanceExhaustedError(SendRefusedError, PotterError):
         SendRefusedError.__init__(self, f"{facts} {said}", category=ErrorCategory.HOST_ALLOWANCE)
         self.reason = reason
         self.provider = provider
+        self.tab = None if provider is None else "keys"
         self.details = {"reason": reason, "provider": provider}
 
 

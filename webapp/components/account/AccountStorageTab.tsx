@@ -8,7 +8,7 @@ import { AccountSection } from "./AccountSection";
 import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 import { LeafSplit } from "./LeafSplit";
 
-export function WorkspaceStoragePanel() {
+export function AccountStorageTab() {
   const read = useRead(workspaceStorageRead());
   return (
     <ReadState read={read} subject="workspace storage">

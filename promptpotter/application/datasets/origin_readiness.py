@@ -15,6 +15,7 @@ from promptpotter.domain.checkin_draft import (
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.task_context import OriginQuestion
@@ -22,14 +23,16 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 
-SETUP_STEP_TITLES: dict[SetupStep, str] = {
-    SetupStep.OPTIMIZER: "Optimizer",
-    SetupStep.DATA: "Data",
-    SetupStep.SCORING: "Scoring",
-    SetupStep.PIPELINE: "Pipeline",
-    SetupStep.HEAD_TO_HEAD: "Head-to-head",
-    SetupStep.RUN: "Run bounds",
-}
+SETUP_STEP_TITLES: Worded[SetupStep, str] = Worded(
+    {
+        SetupStep.OPTIMIZER: "Optimizer",
+        SetupStep.DATA: "Data",
+        SetupStep.SCORING: "Scoring",
+        SetupStep.PIPELINE: "Pipeline",
+        SetupStep.HEAD_TO_HEAD: "Head-to-head",
+        SetupStep.RUN: "Run bounds",
+    }
+)
 assert SETUP_STEP_TITLES.keys() == set(SetupStep)
 
 

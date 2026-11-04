@@ -1,7 +1,5 @@
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { waitingText } from "@/lib/derivations";
-import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
 import { encodeCyclePath } from "@/lib/ids";
 import { useEntry } from "@/lib/state/registry";
@@ -20,12 +18,8 @@ export function useRemoteModel() {
 
   // No `settled` gate: a verb is still offered there, and this gates `RunControlButton`'s only mount.
   if (!dash) return null;
-  const { lookahead, producer } = dash;
+  const { lookahead } = dash;
   const innerHop = isLive ? dash.current_round.inner : null;
-  const waitNote =
-    producer.call_holds && producer.open_for_s !== null && dash.waiting_on
-      ? `waiting on ${waitingText(dash.waiting_on)} · ${fmtDuration(producer.open_for_s)}`
-      : null;
   const arm = (cells: number, auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
       // `cells: 1` disarms; sent unclamped, the walk clamps it to `lookahead.ceiling`.
@@ -50,7 +44,7 @@ export function useRemoteModel() {
     budget: dash.run_limits.budget,
     share: dash.allotment,
     lookahead,
-    waitNote,
+    heldCall: dash.held_call,
     providerHeld: dash.backpressure,
     arm,
     armCells,

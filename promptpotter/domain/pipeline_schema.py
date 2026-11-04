@@ -9,17 +9,21 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.worded import Worded
 
 # A locus's kind, decided by the roster: a prompt field, a prompt node's shots, or a config param.
 type LocusKind = Literal["prompt", "shots", "config"]
 
 type MovableAgent = Literal["proposer", "optimizer"]
-MOVABLE_AGENT_LABELS: dict[MovableAgent, str] = {
-    "proposer": "the optimizer's proposer, every round",
-    "optimizer": "the optimizer itself, mid-run",
-}
 # No OPERATOR and no L4 member: a fork moves anything, and an outer loop's axes are the proposer's one level up.
-MOVABLE_AGENTS: tuple[MovableAgent, ...] = tuple(MOVABLE_AGENT_LABELS)
+MOVABLE_AGENTS: tuple[MovableAgent, ...] = get_args(MovableAgent.__value__)
+MOVABLE_AGENT_LABELS: Worded[MovableAgent, str] = Worded(
+    {
+        "proposer": "the optimizer's proposer, every round",
+        "optimizer": "the optimizer itself, mid-run",
+    }
+)
+assert tuple(MOVABLE_AGENT_LABELS) == MOVABLE_AGENTS
 
 # The parser types `output_schema` as `object`, so a fork's overlay merges one level.
 OUTPUT_SCHEMA_KEY: Annotated[str, shapes_optimizer_prompt] = "output_schema"
@@ -243,25 +247,27 @@ class NodeKindInfo(NamedTuple):
     role: str
 
 
-NODE_KIND_INFO: dict[ViewKind, NodeKindInfo] = {
-    "io": NodeKindInfo("I/O", "Pipeline terminal."),
-    "llm": NodeKindInfo("LLM", "LLM call — runs the prompt below."),
-    "tool": NodeKindInfo("tool", "Tool — a step that runs code, not a prompt."),
-    "retriever": NodeKindInfo(
-        "retriever", "Retriever — ranks candidates from the index by similarity. No prompt."
-    ),
-    "cache": NodeKindInfo(
-        "cache", "Cache — short-circuits the pipeline on a known hit. No prompt."
-    ),
-    "measurement": NodeKindInfo(
-        "system step", "System step — runs a whole pipeline rather than a prompt."
-    ),
-    "member": NodeKindInfo(
-        "member",
-        "Optimizer member — code that samples, cuts, elects or steers the round, set by its "
-        "knobs. No prompt.",
-    ),
-}
+NODE_KIND_INFO: Worded[ViewKind, NodeKindInfo] = Worded(
+    {
+        "io": NodeKindInfo("I/O", "Pipeline terminal."),
+        "llm": NodeKindInfo("LLM", "LLM call — runs the prompt below."),
+        "tool": NodeKindInfo("tool", "Tool — a step that runs code, not a prompt."),
+        "retriever": NodeKindInfo(
+            "retriever", "Retriever — ranks candidates from the index by similarity. No prompt."
+        ),
+        "cache": NodeKindInfo(
+            "cache", "Cache — short-circuits the pipeline on a known hit. No prompt."
+        ),
+        "measurement": NodeKindInfo(
+            "system step", "System step — runs a whole pipeline rather than a prompt."
+        ),
+        "member": NodeKindInfo(
+            "member",
+            "Optimizer member — code that samples, cuts, elects or steers the round, set by its "
+            "knobs. No prompt.",
+        ),
+    }
+)
 assert set(NODE_KIND_INFO) == set(get_args(ViewKind))
 
 ParamKind = Literal["model", "enum", "number", "bool", "string", "prompt", "description", "nested"]

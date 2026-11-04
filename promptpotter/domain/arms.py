@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypedDict, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple, Self, TypedDict, get_args
 
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, ArmName
+from promptpotter.domain.said import Tone
 from promptpotter.domain.scoring import GradedCell, is_answer_collapsed
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
@@ -19,6 +20,7 @@ from promptpotter.domain.wounds import (
 from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -37,6 +39,40 @@ def candidate_label(round_num: int, idx: int) -> str:
 CutKind = Literal["invalid", "skipped", "broken", "eliminated"]
 #: How an arm's walk ended short of its panel: cut against it, or locked in for it.
 ArmEnd = Literal[CutKind, "locked_in"]
+
+
+class ArmEndInfo(NamedTuple):
+    label: str
+    tone: Tone
+    sentence: str
+
+
+ARM_END_INFO: Worded[ArmEnd, ArmEndInfo] = Worded(
+    {
+        "invalid": ArmEndInfo(
+            "invalid",
+            "danger",
+            "Refused before its first cell: its own validation failed fatally, so nothing was"
+            " measured.",
+        ),
+        "skipped": ArmEndInfo("skipped", "quiet", "An operator cut it short."),
+        "broken": ArmEndInfo(
+            "broken",
+            "danger",
+            "Its measurements kept failing, so the bench stopped it. That is the candidate's own"
+            " fault, and it is charged to it.",
+        ),
+        "eliminated": ArmEndInfo(
+            "eliminated",
+            "quiet",
+            "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the"
+            " idea.",
+        ),
+        "locked_in": ArmEndInfo(
+            "locked in", "quiet", "The optimizer's eliminator stopped it far enough ahead to call."
+        ),
+    }
+)
 #: Where an arm's walk stands: each ``ArmState`` member's discriminator.
 ArmStateKind = Literal["proposed", "measuring", "cut", "measured"]
 #: What an arm IS in its round: the origin, a proposal, or a reference re-read on the round's cells.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Any, ClassVar, Literal, Self
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
 from pydantic import (
     Field,
@@ -43,6 +43,7 @@ from promptpotter.shared.identity import (
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
 )
+from promptpotter.shared.worded import Worded
 
 
 class CommandKind(StrEnum):
@@ -590,11 +591,40 @@ class BankSnippetPayload(CommandPayload, kind=CommandKind.BANK_SNIPPET):
     )
 
 
+type ArchiveMode = Literal["compact", "restore", "purge-cold"]
+
+
+class ArchiveModeInfo(NamedTuple):
+    label: str
+    sentence: str
+
+
+#: What each archive verb does, as the operator picks one.
+ARCHIVE_MODE_INFO: Worded[ArchiveMode, ArchiveModeInfo] = Worded(
+    {
+        "compact": ArchiveModeInfo(
+            "Compact",
+            "Moves the fields nothing reads out of candidate runs into a compressed store beside "
+            "them. Origin and round-parent runs are never touched — they serve almost every cache "
+            "replay.",
+        ),
+        "restore": ArchiveModeInfo(
+            "Restore", "Puts every moved field back and drops the compressed copy."
+        ),
+        "purge-cold": ArchiveModeInfo(
+            "Purge",
+            "Deletes the compressed copy for good. The rows cost real money and hours to measure "
+            "again, and nothing puts them back.",
+        ),
+    }
+)
+
+
 class CompactArchivePayload(CommandPayload, kind=CommandKind.COMPACT_ARCHIVE):
     """``apply`` defaults to False on every mode, including the destructive one: a preview is what
     the operator consents on, so the write has to be asked for rather than defaulted into."""
 
-    mode: Literal["compact", "restore", "purge-cold"]
+    mode: ArchiveMode
     dataset: str | None = Field(default=None, min_length=1, max_length=64)
     apply: bool = False
 

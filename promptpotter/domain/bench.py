@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
+    READING_STATE_KIND,
     ArmName,
     CellSet,
     CellSetBasis,
@@ -25,6 +26,7 @@ from promptpotter.domain.scoring import CellGrade, WalkedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.worded import Worded
 
 
 class DatasetSplit(StrictModel):
@@ -318,55 +320,6 @@ class BenchReading(OwnLevel):
         return self
 
 
-class BenchStateInfo(NamedTuple):
-    """``sentence`` is SERVED on every status: no surface words a bench state of its own."""
-
-    label: str
-    sentence: str
-    fault: bool
-
-
-#: A subset of `ReadingState`: a refusal is a pair's, and one pass over one cell set refuses nothing.
-BENCH_STATE_INFO: dict[ReadingState, BenchStateInfo] = {
-    ReadingState.READ: BenchStateInfo(
-        "graded", "The origin and the selection are graded on the held-out rows.", False
-    ),
-    ReadingState.NOT_ASKED: BenchStateInfo(
-        "not asked",
-        "Rows are held out, and nobody has asked for the selection's pass on them yet.",
-        False,
-    ),
-    ReadingState.PENDING: BenchStateInfo(
-        "pending", "The line grades its selection when its run ends.", False
-    ),
-    ReadingState.NOT_HELD: BenchStateInfo(
-        "nothing held out", "The campaign's dataset_split holds no bench rows out.", False
-    ),
-    ReadingState.HELD_ELSEWHERE: BenchStateInfo(
-        "held elsewhere",
-        "This cycle runs beside the campaign's line, and the bench grades the line's result.",
-        False,
-    ),
-    ReadingState.PASS_STOPPED: BenchStateInfo(
-        "pass stopped", "A bench pass stopped before its last row, so it reads nothing.", True
-    ),
-    ReadingState.PAST_TOLERANCE: BenchStateInfo(
-        "past tolerance",
-        "A bench pass ended with more rows carrying no verdict than the split's tolerance allows.",
-        True,
-    ),
-    ReadingState.NO_SELECTION: BenchStateInfo(
-        "no selection",
-        "No round closed past the origin, so there is no selection to grade.",
-        False,
-    ),
-    ReadingState.RUN_FAILED: BenchStateInfo(
-        "run failed", "The run failed before the line graded its selection.", True
-    ),
-}
-assert BENCH_STATE_INFO.keys() <= set(ReadingState)
-
-
 class PassOutcome(NamedTuple):
     state: ReadingState
     stop: PassStop | None
@@ -391,7 +344,7 @@ class BenchRefusal(StrEnum):
     INNER = "inner"
     NO_MANIFEST = "no_manifest"
     HELD_ELSEWHERE = "held_elsewhere"
-    NOT_HELD = "not_held"
+    NO_HOLDOUT = "no_holdout"
     IN_FLIGHT = "in_flight"
     SELECTING = "selecting"
     ORIGIN_UNSCORED = "origin_unscored"
@@ -399,22 +352,24 @@ class BenchRefusal(StrEnum):
     NO_SELECTION = "no_selection"
 
 
-BENCH_REFUSAL_INFO: dict[BenchRefusal, str] = {
-    BenchRefusal.INNER: "An inner run is one cell of its outer campaign; no command grades its line.",
-    BenchRefusal.NO_MANIFEST: "This campaign has no manifest on disk.",
-    BenchRefusal.HELD_ELSEWHERE: (
-        "Another cycle (`held_by`) holds this campaign's line, and the bench grades the "
-        "campaign's result. Ask for that cycle."
-    ),
-    BenchRefusal.NOT_HELD: "The campaign's dataset_split holds no bench rows out.",
-    BenchRefusal.IN_FLIGHT: "A bench pass is grading now; its reading lands when it ends.",
-    BenchRefusal.SELECTING: "The run is still selecting. Pause it or let it end first.",
-    BenchRefusal.ORIGIN_UNSCORED: (
-        "The origin has not been scored, so there is no reference to grade against."
-    ),
-    BenchRefusal.GRADED: "The line's selection is already graded.",
-    BenchRefusal.NO_SELECTION: "No round closed past the origin, so there is no selection to grade.",
-}
+BENCH_REFUSAL_INFO: Worded[BenchRefusal, str] = Worded(
+    {
+        BenchRefusal.INNER: "An inner run is one cell of its outer campaign; no command grades its line.",
+        BenchRefusal.NO_MANIFEST: "This campaign has no manifest on disk.",
+        BenchRefusal.HELD_ELSEWHERE: (
+            "Another cycle (`held_by`) holds this campaign's line, and the bench grades the "
+            "campaign's result. Ask for that cycle."
+        ),
+        BenchRefusal.NO_HOLDOUT: READING_STATE_INFO[ReadingState.NO_HOLDOUT].sentence,
+        BenchRefusal.IN_FLIGHT: "A bench pass is grading now; its reading lands when it ends.",
+        BenchRefusal.SELECTING: "The run is still selecting. Pause it or let it end first.",
+        BenchRefusal.ORIGIN_UNSCORED: (
+            "The origin has not been scored, so there is no reference to grade against."
+        ),
+        BenchRefusal.GRADED: "The line's selection is already graded.",
+        BenchRefusal.NO_SELECTION: "No round closed past the origin, so there is no selection to grade.",
+    }
+)
 assert BENCH_REFUSAL_INFO.keys() == set(BenchRefusal)
 
 
@@ -480,7 +435,7 @@ def bench_status(
     if not on_line:
         state = ReadingState.HELD_ELSEWHERE
     elif not bench_size:
-        state = ReadingState.NOT_HELD
+        state = ReadingState.NO_HOLDOUT
     elif origin is None:
         state = unsent
     elif origin.state is not ReadingState.READ:
@@ -499,7 +454,7 @@ def bench_status(
     elif not on_line:
         refusal = BenchRefusal.NO_MANIFEST if held_by is None else BenchRefusal.HELD_ELSEWHERE
     elif not bench_size:
-        refusal = BenchRefusal.NOT_HELD
+        refusal = BenchRefusal.NO_HOLDOUT
     elif run.pass_open:
         refusal = BenchRefusal.IN_FLIGHT
     elif run.selecting:
@@ -516,7 +471,7 @@ def bench_status(
         can_grade=refusal is None,
         refusal=refusal,
         offered=refusal is None
-        or (not inner and READING_STATE_INFO[state].kind is ReadingStateKind.WAITING),
+        or (not inner and READING_STATE_KIND[state] is ReadingStateKind.WAITING),
         subject=subject,
         held_by=held_by,
         stop=None if decided is None else decided.stop,
@@ -534,11 +489,13 @@ class CostAbsence(StrEnum):
     ZERO_SPEND = "zero_spend"
 
 
-COST_ABSENCE_WORDS: dict[CostAbsence, str] = {
-    CostAbsence.NO_LIFT: "no lift to price",
-    CostAbsence.UNPRICED_TOKENS: "search tokens unpriced",
-    CostAbsence.ZERO_SPEND: "no search spend",
-}
+COST_ABSENCE_WORDS: Worded[CostAbsence, str] = Worded(
+    {
+        CostAbsence.NO_LIFT: "no lift to price",
+        CostAbsence.UNPRICED_TOKENS: "search tokens unpriced",
+        CostAbsence.ZERO_SPEND: "no search spend",
+    }
+)
 
 
 class LiftCost(FrozenModel):

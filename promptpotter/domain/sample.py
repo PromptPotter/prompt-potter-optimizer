@@ -75,6 +75,15 @@ class Bank:
         return [row.banked() for row in self.samples]
 
 
+#: How wide a row's slot is printed; served, so the browser's `lib/format.ts::fmtSampleTag` pads alike.
+SAMPLE_TAG_DIGITS = 3
+
+
+def sample_tag(position: int) -> str:
+    """A row's slot as every surface prints it: ``#007``."""
+    return f"#{position:0{SAMPLE_TAG_DIGITS}d}"
+
+
 def sample_key(
     *,
     query: str,

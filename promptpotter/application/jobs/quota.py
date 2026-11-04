@@ -28,6 +28,7 @@ from promptpotter.application.jobs.coupon import (
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
@@ -82,6 +83,7 @@ from promptpotter.shared.identity import (
     acting_principal,
     has_capability,
 )
+from promptpotter.shared.worded import Worded
 
 logger = logging.getLogger(__name__)
 
@@ -338,12 +340,14 @@ def launch_bound(wallet: AccountWallet, sends: tuple[Send, ...]) -> Budget:
     return wallet.headroom
 
 
-LAUNCH_REFUSAL_LABELS: dict[LaunchRefusalReason, str] = {
-    LaunchRefusalReason.USED_UP: "Allowance used up",
-    LaunchRefusalReason.HELD: "Allowance held",
-    LaunchRefusalReason.OVER_DECLARED: "Ceiling past the allowance",
-    LaunchRefusalReason.NO_KEY: "No key for a provider",
-}
+LAUNCH_REFUSAL_LABELS: Worded[LaunchRefusalReason, str] = Worded(
+    {
+        LaunchRefusalReason.USED_UP: "Allowance used up",
+        LaunchRefusalReason.HELD: "Allowance held",
+        LaunchRefusalReason.OVER_DECLARED: "Ceiling past the allowance",
+        LaunchRefusalReason.NO_KEY: "No key for a provider",
+    }
+)
 assert LAUNCH_REFUSAL_LABELS.keys() == set(LaunchRefusalReason)
 
 
@@ -364,7 +368,7 @@ class LaunchRefusal(StrictModel):
             if isinstance(refused, HostAllowanceExhaustedError)
             else LaunchRefusalReason.NO_KEY
         )
-        return cls(reason=reason, provider=refused.provider, sentence=refused.message)
+        return cls(reason=reason, provider=refused.provider, sentence=refusal_words(refused))
 
 
 class ProviderRoute(StrictModel):

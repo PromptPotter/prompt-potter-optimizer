@@ -7,6 +7,7 @@ from typing import Literal, NamedTuple, get_args
 from pydantic import Field
 
 from promptpotter.domain.arms import (
+    ARM_END_INFO,
     ArmEnd,
     ArmRole,
     ArmState,
@@ -34,6 +35,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.worded import Worded
 
 
 @shapes_optimizer_prompt
@@ -70,7 +72,7 @@ class ScoreboardRow(FrozenModel):
     reading: ArmReading
 
 
-DisplayMetric = Literal["accuracy", "composite", "ability"]
+type DisplayMetric = Literal["accuracy", "composite", "ability"]
 
 
 class UnitFormat(NamedTuple):
@@ -90,16 +92,18 @@ class UnitFormat(NamedTuple):
 
 
 # A rate's lift reads in percentage points, never in percent.
-UNIT_FORMATS: dict[MeasurandUnit, UnitFormat] = {
-    "rate": UnitFormat(100.0, 0, "", "%", 1, "pts", "point", False),
-    "score": UnitFormat(1.0, 2, "", "", 3, "score", "unit of score", False),
-    "theta": UnitFormat(1.0, 2, "θ ", "", 3, "logits", "logit", False),
-    "seconds": UnitFormat(1.0, 2, "", "s", 2, "s", "second", False),
-    "usd": UnitFormat(1.0, 4, "$", "", 4, "USD", "dollar", False),
-    "tokens": UnitFormat(1.0, 0, "", " tok", 0, "tok", "token", True),
-    "rank": UnitFormat(1.0, 2, "", "", 2, "ranks", "rank", False),
-    "rounds": UnitFormat(1.0, 1, "", "", 1, "rounds", "round", False),
-}
+UNIT_FORMATS: Worded[MeasurandUnit, UnitFormat] = Worded(
+    {
+        "rate": UnitFormat(100.0, 0, "", "%", 1, "pts", "point", False),
+        "score": UnitFormat(1.0, 2, "", "", 3, "score", "unit of score", False),
+        "theta": UnitFormat(1.0, 2, "θ ", "", 3, "logits", "logit", False),
+        "seconds": UnitFormat(1.0, 2, "", "s", 2, "s", "second", False),
+        "usd": UnitFormat(1.0, 4, "$", "", 4, "USD", "dollar", False),
+        "tokens": UnitFormat(1.0, 0, "", " tok", 0, "tok", "token", True),
+        "rank": UnitFormat(1.0, 2, "", "", 2, "ranks", "rank", False),
+        "rounds": UnitFormat(1.0, 1, "", "", 1, "rounds", "round", False),
+    }
+)
 
 _COMPACT_STEPS = ((1_000_000.0, "M"), (1_000.0, "k"))
 
@@ -159,33 +163,43 @@ class DisplayMetricInfo(NamedTuple):
 
 
 #: IN PICK ORDER — the tiebreak where the elected column is not among those shown.
-DISPLAY_METRIC_INFO: dict[DisplayMetric, DisplayMetricInfo] = {
-    "accuracy": DisplayMetricInfo(
-        "accuracy",
-        "%",
-        "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
-        "rate",
-    ),
-    "ability": DisplayMetricInfo(
-        "ability θ",
-        "θ",
-        "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. "
-        "A logit (not a %): comparable within a round; cross-round comparison waits on the stable "
-        "δ bank.",
-        "theta",
-    ),
-    "composite": DisplayMetricInfo(
-        "composite",
-        "∑",
-        "Composite fitness under the active scoring formula (equals accuracy when no formula is "
-        "set).",
-        "score",
-    ),
-}
-if set(DISPLAY_METRIC_INFO) != set(get_args(DisplayMetric)):
+DISPLAY_METRIC_INFO: Worded[DisplayMetric, DisplayMetricInfo] = Worded(
+    {
+        "accuracy": DisplayMetricInfo(
+            "accuracy",
+            "%",
+            "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
+            "rate",
+        ),
+        "ability": DisplayMetricInfo(
+            "ability θ",
+            "θ",
+            "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. "
+            "A logit (not a %): comparable within a round; cross-round comparison waits on the stable "
+            "δ bank.",
+            "theta",
+        ),
+        "composite": DisplayMetricInfo(
+            "composite",
+            "∑",
+            "Composite fitness under the active scoring formula (equals accuracy when no formula is "
+            "set).",
+            "score",
+        ),
+    }
+)
+if set(DISPLAY_METRIC_INFO) != set(get_args(DisplayMetric.__value__)):
     raise RuntimeError(
         "DISPLAY_METRIC_INFO is out of step with DisplayMetric (domain/arm_reading.py)"
     )
+
+# A count a surface takes over the candidates it shows, read as "N of M".
+type CandidateCount = Literal["replayed"]
+CANDIDATE_COUNT_WORDS: Worded[CandidateCount, str] = Worded(
+    {
+        "replayed": "Counted per candidate: N of the M shown carry at least one replayed cell.",
+    }
+)
 
 
 class ArmFit(FrozenModel):
@@ -336,17 +350,19 @@ ArmVerdict = Literal[
     "awaiting",
 ]
 
-ARM_VERDICT_LABELS: dict[ArmVerdict, str] = {
-    "retired": "retired",
-    "invalid": "invalid — never measured",
-    "origin": "origin",
-    "elected": "won its round",
-    "uncontested": "advanced uncontested",
-    "selected": "selected",
-    "not_elected": "not elected",
-    "unmeasured": "not measured yet",
-    "awaiting": "awaiting election",
-}
+ARM_VERDICT_LABELS: Worded[ArmVerdict, str] = Worded(
+    {
+        "retired": "retired",
+        "invalid": f"{ARM_END_INFO['invalid'].label} — never measured",
+        "origin": "origin",
+        "elected": "won its round",
+        "uncontested": "advanced uncontested",
+        "selected": "selected",
+        "not_elected": "not elected",
+        "unmeasured": "no cell measured yet",
+        "awaiting": "awaiting election",
+    }
+)
 assert ARM_VERDICT_LABELS.keys() == set(get_args(ArmVerdict))
 
 

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
-import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
+import type { Said } from "@/lib/api/types.generated";
 import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
 import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
 import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
@@ -14,8 +14,6 @@ import { useRegistry } from "@/lib/state/registry";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
 
-const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
-
 export type CampaignTree = ReadResult<SubtreeCampaign>;
 
 interface ViewedLineage {
@@ -26,7 +24,8 @@ interface ViewedLineage {
   lens: string;
   setLens: (lens: string) => void;
   maskActive: boolean;
-  maskLabel: string;
+  // The served line naming what re-read this tree's stats; null on the realized record.
+  readUnder: Said | null;
   scoringMaskActive: boolean;
 }
 
@@ -86,7 +85,6 @@ export function LineageProvider({
   const liveMaskLens = useMemo(() => (maskOpen ? lensOf(mask) : null), [maskOpen, mask]);
   const maskLens = useDebounced(liveMaskLens, MASK_LENS_DEBOUNCE_MS);
   const lensParam = maskOpen ? maskLens : lens || null;
-  const maskLabel = maskOpen ? "Scoring mask" : samples ? "Sample set" : (LENS_LABELS[lens] ?? "");
 
   // Keyed on the campaign, not `cycleId`: a same-campaign cycle switch keeps one read.
   const viewedAddress = campaignId && cycleId ? campaignId : null;
@@ -126,6 +124,11 @@ export function LineageProvider({
     [index],
   );
 
+  const readUnder = useMemo(
+    () => courseAt(index, leafPath)?.lines.find((l) => l.key === "read_under") ?? null,
+    [index, leafPath],
+  );
+
   const viewed = useMemo<ViewedLineage>(
     () => ({
       tree: viewedTree,
@@ -134,10 +137,10 @@ export function LineageProvider({
       lens,
       setLens,
       maskActive,
-      maskLabel,
+      readUnder,
       scoringMaskActive: maskOpen,
     }),
-    [viewedTree, treeRead, index, lens, maskActive, maskLabel, maskOpen],
+    [viewedTree, treeRead, index, lens, maskActive, readUnder, maskOpen],
   );
 
   const addressing = useMemo<TreeAddressing>(

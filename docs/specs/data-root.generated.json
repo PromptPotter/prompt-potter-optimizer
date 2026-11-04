@@ -619,15 +619,7 @@
                 "type": "string"
               },
               "kind": {
-                "enum": [
-                  "optimizer",
-                  "backend",
-                  "judge",
-                  "diagnostic",
-                  "bench"
-                ],
-                "title": "Kind",
-                "type": "string"
+                "$ref": "#/$defs/TokenUsageKind"
               },
               "model": {
                 "anyOf": [
@@ -757,6 +749,16 @@
             ],
             "title": "HeldCharge",
             "type": "object"
+          },
+          "TokenUsageKind": {
+            "enum": [
+              "optimizer",
+              "backend",
+              "judge",
+              "diagnostic",
+              "bench"
+            ],
+            "type": "string"
           }
         },
         "anyOf": [
@@ -3070,7 +3072,7 @@
           },
           "demo_mode_enabled": {
             "default": true,
-            "description": "Surface the built-in try-and-learn demo dataset in the collection. On by default for new users; toggled in Account → Preferences.",
+            "description": "Surface the built-in try-and-learn demo dataset in the collection. On by default for new users; the account toggles it in its preferences.",
             "title": "Demo Mode Enabled",
             "type": "boolean"
           },

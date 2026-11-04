@@ -36,7 +36,7 @@ from promptpotter.domain.run_records import (
     RunPhaseRecord,
     SampleScoredRecord,
 )
-from promptpotter.domain.said import Tone
+from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.spend import prefix_reading
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import duration_words
@@ -116,14 +116,6 @@ class ActivityState(FrozenModel):
     )
 
 
-class DecisionFact(FrozenModel):
-    """One labelled line of the evidence behind a hold."""
-
-    label: str
-    value: str
-    tone: Tone = "quiet"
-
-
 class DecisionAction(FrozenModel):
     """One button: a press sends `decision` as `kind` to the cycle whose activity carries it."""
 
@@ -138,7 +130,7 @@ class ActivityDecision(FrozenModel):
 
     title: str
     lead: str = Field(description="The paragraph under the title.")
-    facts: list[DecisionFact] = Field(description="The evidence, in reading order.")
+    facts: list[Said] = Field(description="The evidence, in reading order.")
     reasons: list[str] = Field(description="Why the run is holding, one fragment each.")
     actions: list[DecisionAction]
 
@@ -152,19 +144,28 @@ if set(_GATE_ACTIONS) != set(get_args(GateDecision)):
     raise RuntimeError("the origin gate's buttons are out of step with their type")
 
 
-def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
+def _gate_facts(health: DegradationHealth) -> list[Said]:
     """COVERAGE LEADS: the degraded rate and the reading are computed over disjoint rows."""
     panel = health.samples + health.not_attempted
     measured = f"{health.samples} of {panel}"
     if health.not_attempted > 0:
         measured += f" · {health.not_attempted} never sent"
-    facts = [DecisionFact(label="Cells measured", value=measured)]
+    facts = [Said(key="cells_measured", tone="quiet", label="Cells measured", value=measured)]
     if health.hole_count > 0:
-        facts.append(DecisionFact(label="Returned nothing", value=str(health.hole_count)))
+        facts.append(
+            Said(
+                key="returned_nothing",
+                tone="quiet",
+                label="Returned nothing",
+                value=str(health.hole_count),
+            )
+        )
     # Holes never reach the degraded numerator, so the rate shows only where something came back.
     if health.samples - health.hole_count > 0:
         facts.append(
-            DecisionFact(
+            Said(
+                key="degraded_rate",
+                tone="quiet",
                 label="Degraded rate",
                 value=f"{health.degraded_rate:.0%} · {health.structural_count} structural / "
                 f"{health.transient_count} transient",
@@ -172,16 +173,23 @@ def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
         )
     if health.output_ceiling_count > 0:
         facts.append(
-            DecisionFact(label="Ran to the output ceiling", value=str(health.output_ceiling_count))
+            Said(
+                key="output_ceiling",
+                tone="quiet",
+                label="Ran to the output ceiling",
+                value=str(health.output_ceiling_count),
+            )
         )
     if health.last_error:
-        facts.append(DecisionFact(label="Last error", value=health.last_error, tone="danger"))
+        facts.append(
+            Said(key="last_error", tone="danger", label="Last error", value=health.last_error)
+        )
     return facts
 
 
 def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
     held = "The run holds before round 1: the origin is not healthy enough to optimize against."
-    title, lead, reasons, facts = "Origin gate", held, list[str](), list[DecisionFact]()
+    title, lead, reasons, facts = "Origin gate", held, list[str](), list[Said]()
     # The cause's row words the hold; with no graded close read yet, the hold alone is said.
     if health is not None and (reading := health_reading(0, health)) is not None:
         title = reading.title
@@ -205,7 +213,7 @@ def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
     )
 
 
-def _arms_gate(round_num: int | None, drafts: list[DecisionFact]) -> ActivityDecision:
+def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
     """No button: an arm is written text, so the answer is the verb the lead names."""
     held = "The round" if round_num is None else f"Round {round_num}"
     drafted = (
@@ -255,7 +263,7 @@ class ActivityFeed:
         self._round: int | None = None
         self._bench: _BenchPass | None = None
         self._gate: GateKind | None = None
-        self._offered: list[DecisionFact] = []
+        self._offered: list[Said] = []
         self._origin_health: DegradationHealth | None = None
         # Each held sender's notice id.
         self._held: dict[str, str] = {}
@@ -297,7 +305,9 @@ class ActivityFeed:
                 # The hold lasts to the next declaration, so a re-score under way is still at the gate.
                 self._gate = record.gate
                 self._offered = [
-                    DecisionFact(
+                    Said(
+                        key=f"draft_{idx}",
+                        tone="quiet",
                         label=f"draft {idx} · {candidate_label(self._round or 0, idx)}",
                         value=draft.individual.lineage.changes_description or "—",
                     )

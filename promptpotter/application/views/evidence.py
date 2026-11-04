@@ -29,7 +29,6 @@ from promptpotter.domain.arm_reading import (
     lift_text,
 )
 from promptpotter.domain.bench import (
-    BENCH_STATE_INFO,
     BandedValue,
     BenchColumn,
     BenchScore,
@@ -440,7 +439,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         *_table(_h2h_columns(beside), (_h2h_row(r, h2h, beside) for r in h2h.rows), indent="  "),
     ]
     lines += [
-        f"  {r.campaign_id}: {BENCH_STATE_INFO[r.bench.status.state].sentence}"
+        f"  {r.campaign_id}: {READING_STATE_INFO[r.bench.status.state].sentence}"
         for r in h2h.rows
         if r.bench.graded is None
     ]

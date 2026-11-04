@@ -6,6 +6,7 @@ from pydantic import Field
 
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.worded import Worded
 
 HealthGrade = Literal["healthy", "degraded", "critical", "unmeasured"]
 
@@ -14,12 +15,14 @@ class HealthGradeInfo(NamedTuple):
     tone: Tone
 
 
-HEALTH_GRADE_INFO: dict[HealthGrade, HealthGradeInfo] = {
-    "healthy": HealthGradeInfo("success"),
-    "degraded": HealthGradeInfo("warn"),
-    "critical": HealthGradeInfo("danger"),
-    "unmeasured": HealthGradeInfo("quiet"),
-}
+HEALTH_GRADE_INFO: Worded[HealthGrade, HealthGradeInfo] = Worded(
+    {
+        "healthy": HealthGradeInfo("success"),
+        "degraded": HealthGradeInfo("warn"),
+        "critical": HealthGradeInfo("danger"),
+        "unmeasured": HealthGradeInfo("quiet"),
+    }
+)
 
 HealthCause = Literal[
     "origin_unmeasured",
@@ -44,54 +47,56 @@ class HealthCauseInfo(NamedTuple):
     remedy: str
 
 
-HEALTH_CAUSE_INFO: dict[HealthCause, HealthCauseInfo] = {
-    "origin_unmeasured": HealthCauseInfo(
-        "not measured",
-        "Re-score the origin. If it stops in the same place, read the error on the last cell that "
-        "was measured — the cause is upstream of the prompt. A cell measured but not graded is "
-        "the formula's: fix the formula and re-read that cell, never re-buy it.",
-    ),
-    "origin_incomplete": HealthCauseInfo(
-        "cells missing",
-        "Re-score the origin before spending a round on top of it — errored cells are never "
-        "served from cache.",
-    ),
-    "structural": HealthCauseInfo(
-        "failing structurally",
-        "Consider aborting and fixing the config before spending more rounds.",
-    ),
-    "unscoreable": HealthCauseInfo(
-        "no extractable answer",
-        "Fix the prompt's answer_format so the model commits one parseable label (or the "
-        "extraction contract), then re-score — don't optimize against it.",
-    ),
-    "holed": HealthCauseInfo(
-        "cells returned nothing",
-        "Re-measure: errored cells are never served from cache. If they keep failing, the cause "
-        "is upstream of the prompt — read the row's error before changing anything.",
-    ),
-    "evidence_starved": HealthCauseInfo(
-        "an enricher is starved",
-        "Restore the backend (its quota) and re-measure — don't burn rounds chasing it.",
-    ),
-    "structural_untested": HealthCauseInfo(
-        "failing structurally, never clean",
-        "Consider aborting and fixing the config before spending more rounds.",
-    ),
-    "persistent": HealthCauseInfo(
-        "degraded round after round",
-        "Consider aborting and fixing the config.",
-    ),
-    "degraded": HealthCauseInfo(
-        "degraded",
-        "Read the node's error before trusting this round's numbers; no action is needed if the "
-        "next round comes back clean.",
-    ),
-    "transient": HealthCauseInfo(
-        "degraded by transient failures",
-        "No action is needed; if the next round degrades too, read the node's error.",
-    ),
-}
+HEALTH_CAUSE_INFO: Worded[HealthCause, HealthCauseInfo] = Worded(
+    {
+        "origin_unmeasured": HealthCauseInfo(
+            "not measured",
+            "Re-score the origin. If it stops in the same place, read the error on the last cell that "
+            "was measured — the cause is upstream of the prompt. A cell measured but not graded is "
+            "the formula's: fix the formula and re-read that cell, never re-buy it.",
+        ),
+        "origin_incomplete": HealthCauseInfo(
+            "cells missing",
+            "Re-score the origin before spending a round on top of it — errored cells are never "
+            "served from cache.",
+        ),
+        "structural": HealthCauseInfo(
+            "failing structurally",
+            "Consider aborting and fixing the config before spending more rounds.",
+        ),
+        "unscoreable": HealthCauseInfo(
+            "no extractable answer",
+            "Fix the prompt's answer_format so the model commits one parseable label (or the "
+            "extraction contract), then re-score — don't optimize against it.",
+        ),
+        "holed": HealthCauseInfo(
+            "cells returned nothing",
+            "Re-measure: errored cells are never served from cache. If they keep failing, the cause "
+            "is upstream of the prompt — read the row's error before changing anything.",
+        ),
+        "evidence_starved": HealthCauseInfo(
+            "an enricher is starved",
+            "Restore the backend (its quota) and re-measure — don't burn rounds chasing it.",
+        ),
+        "structural_untested": HealthCauseInfo(
+            "failing structurally, never clean",
+            "Consider aborting and fixing the config before spending more rounds.",
+        ),
+        "persistent": HealthCauseInfo(
+            "degraded round after round",
+            "Consider aborting and fixing the config.",
+        ),
+        "degraded": HealthCauseInfo(
+            "degraded",
+            "Read the node's error before trusting this round's numbers; no action is needed if the "
+            "next round comes back clean.",
+        ),
+        "transient": HealthCauseInfo(
+            "degraded by transient failures",
+            "No action is needed; if the next round degrades too, read the node's error.",
+        ),
+    }
+)
 assert HEALTH_CAUSE_INFO.keys() == set(get_args(HealthCause))
 
 

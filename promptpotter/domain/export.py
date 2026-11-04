@@ -18,11 +18,12 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.treatment import Treatment
+from promptpotter.shared.worded import Worded
 
 EXPORT_ARTIFACT_VERSION = 8
 """Bumped only when a reader of the old shape would MISREAD the new one, never for an added field."""
 
-ExportTier = Literal["chat", "report", "notebook", "deploy", "package"]
+type ExportTier = Literal["chat", "report", "notebook", "deploy", "package"]
 
 
 class ExportTierInfo(NamedTuple):
@@ -32,14 +33,18 @@ class ExportTierInfo(NamedTuple):
 
 
 # One reading of a cycle per reader's next move, the same names on every surface.
-EXPORT_TIER_INFO: dict[ExportTier, ExportTierInfo] = {
-    "chat": ExportTierInfo("Chat — the candidates as compact text", pasted=True),
-    "report": ExportTierInfo("Report — that text under its provenance header", pasted=True),
-    "notebook": ExportTierInfo("Notebook — candidates.jsonl and its dataset card", pasted=False),
-    "deploy": ExportTierInfo("Deploy — export.json", pasted=False),
-    "package": ExportTierInfo("Package — a skill folder for another agent", pasted=False),
-}
-assert tuple(EXPORT_TIER_INFO) == get_args(ExportTier)
+EXPORT_TIER_INFO: Worded[ExportTier, ExportTierInfo] = Worded(
+    {
+        "chat": ExportTierInfo("Chat — the candidates as compact text", pasted=True),
+        "report": ExportTierInfo("Report — that text under its provenance header", pasted=True),
+        "notebook": ExportTierInfo(
+            "Notebook — candidates.jsonl and its dataset card", pasted=False
+        ),
+        "deploy": ExportTierInfo("Deploy — export.json", pasted=False),
+        "package": ExportTierInfo("Package — a skill folder for another agent", pasted=False),
+    }
+)
+assert tuple(EXPORT_TIER_INFO) == get_args(ExportTier.__value__)
 
 # JSON-LD to a reader that cares, a dict to one that does not: PROV-O names the lineage edges.
 PROV_CONTEXT: dict[str, Any] = {

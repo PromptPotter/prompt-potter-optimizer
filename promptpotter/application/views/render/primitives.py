@@ -5,8 +5,9 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.domain.arm_reading import lift_shown, lift_text
-from promptpotter.domain.bench import BENCH_STATE_INFO, BenchColumn
+from promptpotter.domain.bench import BenchColumn
 from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
+from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -27,7 +28,7 @@ def bench_readout(bench: BenchScore) -> str:
     """The bench headline on one terminal line: both levels, each column's lift, the rows."""
     graded = bench.graded
     if graded is None:
-        return BENCH_STATE_INFO[bench.status.state].sentence
+        return READING_STATE_INFO[bench.status.state].sentence
 
     def level(reading: BenchReading) -> str:
         return "—" if reading.level is None else f"{reading.level.value:.3f}"

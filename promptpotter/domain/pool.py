@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import enum
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -16,6 +16,7 @@ from promptpotter.domain.prompt_block import AUTHORED_SOURCE, snippet_id
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -36,6 +37,22 @@ class PoolSource(enum.StrEnum):
     LIBRARY = "library"
     # The cycle's demo split, pinned by its bank's hash: the pool banks sample keys.
     PARTITION = "partition"
+
+
+class PoolSourceInfo(NamedTuple):
+    """What a pool's entries are called, by where they come from."""
+
+    one: str
+    many: str
+    in_play: str
+
+
+POOL_SOURCE_INFO: Worded[PoolSource, PoolSourceInfo] = Worded(
+    {
+        PoolSource.LIBRARY: PoolSourceInfo("snippet", "snippets", "Snippets in play"),
+        PoolSource.PARTITION: PoolSourceInfo("row", "rows", "Rows in play"),
+    }
+)
 
 
 @shapes_optimizer_prompt

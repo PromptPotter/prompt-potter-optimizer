@@ -1,20 +1,25 @@
 import { AccountSection } from "./AccountSection";
 import { PROVIDER_LABEL, ProviderIcon } from "./providers";
-import { Badge, Button, CopyButton, Empty, FailureLine } from "@/components/ui";
+import { Badge, Button, CopyButton, Empty, FailureLine, ReadState } from "@/components/ui";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { postLogout, type MeResponse } from "@/lib/api";
+import { useRead } from "@/lib/hooks/useRead";
+import { meRead, postLogout, type MeResponse } from "@/lib/api";
 
 const CAP_PREFIX = "campaign.";
 
-export function AccountProfileTab({ me }: { me: MeResponse }) {
+export function AccountProfileTab() {
   return (
-    <>
-      <IdentityCard me={me} />
-      <EmailSection me={me} />
-      <SignInSection me={me} />
-      <PermissionsSection capabilities={me.capabilities} />
-      <SessionSection me={me} />
-    </>
+    <ReadState read={useRead(meRead())} subject="your profile">
+      {(me) => (
+        <>
+          <IdentityCard me={me} />
+          <EmailSection me={me} />
+          <SignInSection me={me} />
+          <PermissionsSection capabilities={me.capabilities} />
+          <SessionSection me={me} />
+        </>
+      )}
+    </ReadState>
   );
 }
 

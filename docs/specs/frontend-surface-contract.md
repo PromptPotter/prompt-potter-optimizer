@@ -40,7 +40,7 @@ invariants:
                       on the dashboard, `state.attached` on a /hierarchy course entry). A paused
                       cycle whose worker exited is NOT attached; detached never renders as running.
                       The browser holds no set of "live" phases and subtracts no clock from a stamp:
-                      every duration arrives served (`silent_for_s`, `open_for_s`). Connection loss
+                      every duration arrives served (`silent_for_s`; an open call's, worded, in `held_call`). Connection loss
                       renders as connection state, never a run phase, and never unmounts run
                       controls. Every "running" surface reads this one set and one ordering; a
                       surface rendering the phase reads `RUN_PHASE_INFO` and offers the served

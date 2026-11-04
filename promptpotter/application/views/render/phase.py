@@ -22,7 +22,12 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
+from promptpotter.domain.origin_panel import (
+    ROUND_ADVANCE_INFO,
+    ROUND_ADVANCE_STALL,
+    RoundAdvance,
+    StallEffect,
+)
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
@@ -187,7 +192,7 @@ def render_round_stats(
 
 def render_patience_status(advance: RoundAdvance, stall: int, patience: int | None) -> str:
     info = ROUND_ADVANCE_INFO[advance]
-    if info.stall is StallEffect.RESETS:
+    if ROUND_ADVANCE_STALL[advance] is StallEffect.RESETS:
         return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
     bound = "" if patience is None else f" (converges at {patience})"

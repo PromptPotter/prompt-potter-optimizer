@@ -11,9 +11,11 @@ from pydantic import Field, model_validator
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
+from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
+from promptpotter.shared.worded import Worded
 
 
 class ReadingStateKind(StrEnum):
@@ -35,6 +37,8 @@ class ReadingState(StrEnum):
     NOT_ASKED = "not_asked"
     PENDING = "pending"
     NOT_HELD = "not_held"
+    # The bench's own: the campaign's split holds no rows out to grade on.
+    NO_HOLDOUT = "no_holdout"
     HELD_ELSEWHERE = "held_elsewhere"
     PASS_STOPPED = "pass_stopped"
     PAST_TOLERANCE = "past_tolerance"
@@ -52,93 +56,143 @@ class ReadingState(StrEnum):
 
 
 class ReadingStateInfo(NamedTuple):
-    """``label`` and ``sentence`` are SERVED: no surface words a state of its own."""
+    """``label`` and ``sentence`` are SERVED on every scope a pair is read in, the bench's
+    included: no surface words a state of its own. ``fault``: something owed the reading broke,
+    so a surface sounds it rather than waiting on it."""
 
-    kind: ReadingStateKind
     label: str
     sentence: str
+    fault: bool
 
 
-# Marked: a state's ``kind`` decides the round's advance, and so the stall a prompt reports.
-READING_STATE_INFO: Annotated[dict[ReadingState, ReadingStateInfo], shapes_optimizer_prompt] = {
-    ReadingState.READ: ReadingStateInfo(
-        ReadingStateKind.READ, "read", "Read on the cells both members scored."
-    ),
-    ReadingState.NOT_ASKED: ReadingStateInfo(
-        ReadingStateKind.WAITING, "not asked", "Nobody has asked for this reading yet."
-    ),
-    ReadingState.PENDING: ReadingStateInfo(
-        ReadingStateKind.WAITING, "pending", "The pass this reading waits on has not finished."
-    ),
-    ReadingState.NOT_HELD: ReadingStateInfo(
-        ReadingStateKind.UNPAIRED,
-        "no cells held",
-        "The cell set this reading is taken on holds no cell.",
-    ),
-    ReadingState.HELD_ELSEWHERE: ReadingStateInfo(
-        ReadingStateKind.UNPAIRED,
-        "held elsewhere",
-        "The cycle holding this line takes the reading, not this one.",
-    ),
-    ReadingState.PASS_STOPPED: ReadingStateInfo(
-        ReadingStateKind.ABSENT,
-        "pass stopped",
-        "The pass that measures a member stopped before it finished.",
-    ),
-    ReadingState.PAST_TOLERANCE: ReadingStateInfo(
-        ReadingStateKind.ABSENT,
-        "past tolerance",
-        "A member's pass lost more cells than its tolerance allows.",
-    ),
-    ReadingState.MEMBER_UNSCOREABLE: ReadingStateInfo(
-        ReadingStateKind.ABSENT, "unscoreable", "A member holds no scoreable cell on this set."
-    ),
-    ReadingState.UNDER_TWO_CELLS: ReadingStateInfo(
-        ReadingStateKind.ABSENT,
-        "under two cells",
-        "Fewer than two cells were scored by both members, so nothing was tested.",
-    ),
-    ReadingState.NO_SELECTION: ReadingStateInfo(
-        ReadingStateKind.UNPAIRED,
-        "no selection",
-        "No individual was selected, so there is nothing to pair.",
-    ),
-    ReadingState.SAME_INDIVIDUAL: ReadingStateInfo(
-        ReadingStateKind.UNPAIRED,
-        "same individual",
-        "Both members are one individual on one pass, so there is no difference to read.",
-    ),
-    ReadingState.RUN_FAILED: ReadingStateInfo(
-        ReadingStateKind.ABSENT, "run failed", "The run failed before this reading was taken."
-    ),
-    ReadingState.SCOPE_DIFFERS: ReadingStateInfo(
-        ReadingStateKind.REFUSED, "scopes differ", "The members were read in different scopes."
-    ),
-    ReadingState.MEASURAND_DIFFERS: ReadingStateInfo(
-        ReadingStateKind.REFUSED,
-        "scorers differ",
-        "The members were graded by different scorers.",
-    ),
-    ReadingState.DATASET_DIFFERS: ReadingStateInfo(
-        ReadingStateKind.REFUSED,
-        "datasets differ",
-        "The members were measured on different datasets.",
-    ),
-    ReadingState.CELL_SET_DIFFERS: ReadingStateInfo(
-        ReadingStateKind.REFUSED,
-        "cell sets differ",
-        "The members were sent on different declared cell sets.",
-    ),
-    ReadingState.INSTRUMENT_DIFFERS: ReadingStateInfo(
-        ReadingStateKind.REFUSED,
-        "instruments differ",
-        "The members were measured by different instruments.",
-    ),
+# Marked: a state's kind decides the round's advance, and so the stall a prompt reports. The words
+# below are unmarked, so no prompt's closure reaches them through this table; potter's and
+# capo-pobb's still do through review.md (code-debt-cleanup.md, the review.md and log.md row).
+READING_STATE_KIND: Annotated[dict[ReadingState, ReadingStateKind], shapes_optimizer_prompt] = {
+    ReadingState.READ: ReadingStateKind.READ,
+    ReadingState.NOT_ASKED: ReadingStateKind.WAITING,
+    ReadingState.PENDING: ReadingStateKind.WAITING,
+    ReadingState.NOT_HELD: ReadingStateKind.UNPAIRED,
+    ReadingState.NO_HOLDOUT: ReadingStateKind.UNPAIRED,
+    ReadingState.HELD_ELSEWHERE: ReadingStateKind.UNPAIRED,
+    ReadingState.PASS_STOPPED: ReadingStateKind.ABSENT,
+    ReadingState.PAST_TOLERANCE: ReadingStateKind.ABSENT,
+    ReadingState.MEMBER_UNSCOREABLE: ReadingStateKind.ABSENT,
+    ReadingState.UNDER_TWO_CELLS: ReadingStateKind.ABSENT,
+    ReadingState.NO_SELECTION: ReadingStateKind.UNPAIRED,
+    ReadingState.SAME_INDIVIDUAL: ReadingStateKind.UNPAIRED,
+    ReadingState.RUN_FAILED: ReadingStateKind.ABSENT,
+    ReadingState.SCOPE_DIFFERS: ReadingStateKind.REFUSED,
+    ReadingState.MEASURAND_DIFFERS: ReadingStateKind.REFUSED,
+    ReadingState.DATASET_DIFFERS: ReadingStateKind.REFUSED,
+    ReadingState.CELL_SET_DIFFERS: ReadingStateKind.REFUSED,
+    ReadingState.INSTRUMENT_DIFFERS: ReadingStateKind.REFUSED,
 }
+assert READING_STATE_KIND.keys() == set(ReadingState)
+
+READING_STATE_INFO: Worded[ReadingState, ReadingStateInfo] = Worded(
+    {
+        ReadingState.READ: ReadingStateInfo(
+            "read",
+            "Read on the cells both members scored.",
+            False,
+        ),
+        ReadingState.NOT_ASKED: ReadingStateInfo(
+            "not asked",
+            "Nobody has asked for the pass this reading is taken on yet.",
+            False,
+        ),
+        ReadingState.PENDING: ReadingStateInfo(
+            "pending",
+            "The pass this reading waits on has not finished.",
+            False,
+        ),
+        ReadingState.NOT_HELD: ReadingStateInfo(
+            "no cells held",
+            "The cell set this reading is taken on holds no cell.",
+            False,
+        ),
+        ReadingState.NO_HOLDOUT: ReadingStateInfo(
+            "no rows held out",
+            "The campaign's dataset_split holds no rows out, so the bench has none to grade.",
+            False,
+        ),
+        ReadingState.HELD_ELSEWHERE: ReadingStateInfo(
+            "held elsewhere",
+            "The cycle holding this line takes the reading, not this one.",
+            False,
+        ),
+        ReadingState.PASS_STOPPED: ReadingStateInfo(
+            "pass stopped",
+            "The pass that measures a member stopped before its last cell, so it reads nothing.",
+            True,
+        ),
+        ReadingState.PAST_TOLERANCE: ReadingStateInfo(
+            "past tolerance",
+            "A member's pass ended with more cells carrying no verdict than its tolerance allows.",
+            True,
+        ),
+        ReadingState.MEMBER_UNSCOREABLE: ReadingStateInfo(
+            "unscoreable",
+            "A member holds no scoreable cell on this set.",
+            True,
+        ),
+        ReadingState.UNDER_TWO_CELLS: ReadingStateInfo(
+            "under two cells",
+            "Fewer than two cells were scored by both members, so nothing was tested.",
+            False,
+        ),
+        ReadingState.NO_SELECTION: ReadingStateInfo(
+            "no selection",
+            "No round closed past the origin, so no individual is selected to pair.",
+            False,
+        ),
+        ReadingState.SAME_INDIVIDUAL: ReadingStateInfo(
+            "same individual",
+            "Both members are one individual on one pass, so there is no difference to read.",
+            False,
+        ),
+        ReadingState.RUN_FAILED: ReadingStateInfo(
+            "run failed",
+            "The run failed before this reading was taken.",
+            True,
+        ),
+        ReadingState.SCOPE_DIFFERS: ReadingStateInfo(
+            "scopes differ",
+            "The members were read in different scopes.",
+            False,
+        ),
+        ReadingState.MEASURAND_DIFFERS: ReadingStateInfo(
+            "scorers differ",
+            "The members were graded by different scorers.",
+            False,
+        ),
+        ReadingState.DATASET_DIFFERS: ReadingStateInfo(
+            "datasets differ",
+            "The members were measured on different datasets.",
+            False,
+        ),
+        ReadingState.CELL_SET_DIFFERS: ReadingStateInfo(
+            "cell sets differ",
+            "The members were sent on different declared cell sets.",
+            False,
+        ),
+        ReadingState.INSTRUMENT_DIFFERS: ReadingStateInfo(
+            "instruments differ",
+            "The members were measured by different instruments.",
+            False,
+        ),
+    }
+)
 assert READING_STATE_INFO.keys() == set(ReadingState)
 
 
 LiftSide = Literal["above", "below", "spans"]
+
+#: A side's ink on every surface drawing a lift: a band clear of zero is loud, one spanning it quiet.
+LIFT_SIDE_TONE: Worded[LiftSide, Tone] = Worded(
+    {"above": "success", "below": "danger", "spans": "quiet"}
+)
 
 
 #: `best_so_far`: the standing best re-scored on the round's panel; `parents`: the better parent on the arm's cells.
@@ -272,7 +326,7 @@ class MeasurandKind(StrEnum):
 
 
 # Every unit a read number is in: θ is a fit's logit, which a seed cell carries off its inner run.
-MeasurandUnit = Literal["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]
+type MeasurandUnit = Literal["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]
 
 
 class Measurand(FrozenModel):

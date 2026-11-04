@@ -4,7 +4,6 @@ import type {
   CellRow,
   CellStatus,
   DatasetItem,
-  HardSampleOrder,
   HardSamplesScope,
 } from "@/lib/api";
 import {
@@ -12,6 +11,7 @@ import {
   HEATMAP_SCOPE_LABELS,
   SAMPLE_STATUS_LABELS,
 } from "@/lib/api/types.generated";
+import { wordKeys } from "@/lib/api/words";
 import { fmtLogits, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useHardSamples, usePresetCells, type CellsPreset } from "@/lib/hard-samples";
@@ -48,7 +48,7 @@ const GROUPS = [
 type StatusPick = CellStatus | "all";
 const STATUSES: { value: StatusPick; label: string }[] = [
   { value: "all", label: "All" },
-  ...(Object.keys(SAMPLE_STATUS_LABELS) as CellStatus[]).map((value) => ({
+  ...wordKeys(SAMPLE_STATUS_LABELS).map((value) => ({
     value,
     label: SAMPLE_STATUS_LABELS[value],
   })),
@@ -60,7 +60,7 @@ const SCOPES = (["campaign", "dataset"] as const).map((value) => ({
   label: HEATMAP_SCOPE_LABELS[value],
 }));
 
-const ORDERS = (Object.keys(HARD_SAMPLE_ORDER_LABELS) as HardSampleOrder[]).map((value) => ({
+const ORDERS = wordKeys(HARD_SAMPLE_ORDER_LABELS).map((value) => ({
   value,
   label: HARD_SAMPLE_ORDER_LABELS[value],
 }));

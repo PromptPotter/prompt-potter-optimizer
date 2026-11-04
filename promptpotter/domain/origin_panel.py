@@ -7,7 +7,7 @@ from typing import Annotated, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.paired_reading import (
-    READING_STATE_INFO,
+    READING_STATE_KIND,
     ArmName,
     PairedReading,
     ReadingState,
@@ -16,6 +16,7 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.worded import Worded
 
 
 class StallEffect(StrEnum):
@@ -39,41 +40,47 @@ class RoundAdvance(StrEnum):
 class RoundAdvanceInfo(NamedTuple):
     label: str
     sentence: str
-    stall: StallEffect
 
 
-# `stall` is the ONE pacing column: L1 patience, `rounds_without_advance` and the life bank read it.
-ROUND_ADVANCE_INFO: Annotated[dict[RoundAdvance, RoundAdvanceInfo], shapes_optimizer_prompt] = {
-    RoundAdvance.ORIGIN: RoundAdvanceInfo(
-        "origin",
-        "Round 0 measured the origin every later pick is read against.",
-        StallEffect.STARTS,
-    ),
-    RoundAdvance.ADVANCED: RoundAdvanceInfo(
-        "advanced",
-        "The pick's lift over the origin clears zero on the origin panel, and its rate there "
-        "tops every earlier pick's.",
-        StallEffect.RESETS,
-    ),
-    RoundAdvance.ADVANCED_UNPAIRED: RoundAdvanceInfo(
-        "advanced, unpaired",
-        "An arm was promoted, and the origin panel held nothing to pair it with the origin on.",
-        StallEffect.RESETS,
-    ),
-    RoundAdvance.NOT_SEPARATED: RoundAdvanceInfo(
-        "not separated",
-        "An arm was promoted, and on the origin panel it has not separated from the origin and "
-        "every earlier pick.",
-        StallEffect.RESETS,
-    ),
-    RoundAdvance.HELD: RoundAdvanceInfo("held", "No arm was promoted.", StallEffect.COUNTS),
-    RoundAdvance.UNREAD: RoundAdvanceInfo(
-        "unread",
-        "An arm was promoted, and the origin-panel reading owed on it was not taken: the round "
-        "neither advances the line nor counts as a stall.",
-        StallEffect.SKIPS,
-    ),
+# The ONE pacing table: L1 patience, `rounds_without_advance` and the life bank read it. Marked; the
+# words beside it are not, and reach a closure only where a prompt prints one.
+ROUND_ADVANCE_STALL: Annotated[dict[RoundAdvance, StallEffect], shapes_optimizer_prompt] = {
+    RoundAdvance.ORIGIN: StallEffect.STARTS,
+    RoundAdvance.ADVANCED: StallEffect.RESETS,
+    RoundAdvance.ADVANCED_UNPAIRED: StallEffect.RESETS,
+    RoundAdvance.NOT_SEPARATED: StallEffect.RESETS,
+    RoundAdvance.HELD: StallEffect.COUNTS,
+    RoundAdvance.UNREAD: StallEffect.SKIPS,
 }
+assert ROUND_ADVANCE_STALL.keys() == set(RoundAdvance)
+
+ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
+    {
+        RoundAdvance.ORIGIN: RoundAdvanceInfo(
+            "origin", "Round 0 measured the origin every later pick is read against."
+        ),
+        RoundAdvance.ADVANCED: RoundAdvanceInfo(
+            "advanced",
+            "The pick's lift over the origin clears zero on the origin panel, and its rate there "
+            "tops every earlier pick's.",
+        ),
+        RoundAdvance.ADVANCED_UNPAIRED: RoundAdvanceInfo(
+            "advanced, unpaired",
+            "An arm was promoted, and the origin panel held nothing to pair it with the origin on.",
+        ),
+        RoundAdvance.NOT_SEPARATED: RoundAdvanceInfo(
+            "not separated",
+            "An arm was promoted, and on the origin panel it has not separated from the origin and "
+            "every earlier pick.",
+        ),
+        RoundAdvance.HELD: RoundAdvanceInfo("held", "No arm was promoted."),
+        RoundAdvance.UNREAD: RoundAdvanceInfo(
+            "unread",
+            "An arm was promoted, and the origin-panel reading owed on it was not taken: the round "
+            "neither advances the line nor counts as a stall.",
+        ),
+    }
+)
 assert ROUND_ADVANCE_INFO.keys() == set(RoundAdvance)
 
 
@@ -86,7 +93,7 @@ def round_advance(
         return RoundAdvance.ORIGIN
     if not improved:
         return RoundAdvance.HELD
-    match READING_STATE_INFO[lead.state].kind:
+    match READING_STATE_KIND[lead.state]:
         case ReadingStateKind.UNPAIRED:
             return RoundAdvance.ADVANCED_UNPAIRED
         case ReadingStateKind.WAITING | ReadingStateKind.ABSENT | ReadingStateKind.REFUSED:

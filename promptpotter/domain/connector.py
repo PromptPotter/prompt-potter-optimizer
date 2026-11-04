@@ -7,6 +7,7 @@ from promptpotter.domain.said import Tone
 from promptpotter.shared.errors import PotterError
 from promptpotter.shared.extras import MissingExtraError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     import httpx
@@ -57,11 +58,13 @@ class BackendReachabilityInfo(NamedTuple):
     tone: Tone
 
 
-BACKEND_REACHABILITY_INFO: dict[BackendReachability, BackendReachabilityInfo] = {
-    "live": BackendReachabilityInfo("Backend reachable", "success"),
-    "unreachable": BackendReachabilityInfo("Backend unreachable", "warn"),
-    "missing_extra": BackendReachabilityInfo("Python extra not installed", "warn"),
-}
+BACKEND_REACHABILITY_INFO: Worded[BackendReachability, BackendReachabilityInfo] = Worded(
+    {
+        "live": BackendReachabilityInfo("Backend reachable", "success"),
+        "unreachable": BackendReachabilityInfo("Backend unreachable", "warn"),
+        "missing_extra": BackendReachabilityInfo("Python extra not installed", "warn"),
+    }
+)
 assert BACKEND_REACHABILITY_INFO.keys() == set(get_args(BackendReachability))
 
 

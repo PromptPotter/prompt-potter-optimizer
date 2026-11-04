@@ -1,6 +1,6 @@
 import { test, expect, open, ready } from "../harness";
 
-const SECTIONS = [
+const TABS = [
   ["profile", "Profile"],
   ["usage", "Usage & limits"],
   ["keys", "API keys"],
@@ -13,9 +13,9 @@ const SECTIONS = [
 const account = (page: import("@playwright/test").Page) =>
   page.getByRole("region", { name: "Account" });
 
-// The nav's own: a section body may link another section by its label.
+// The nav's own: a tab body may link another tab by its label.
 const navButton = (page: import("@playwright/test").Page, label: string) =>
-  account(page).getByRole("navigation", { name: "Account sections" }).getByRole("button", { name: label, exact: true });
+  account(page).getByRole("navigation", { name: "Account tabs" }).getByRole("button", { name: label, exact: true });
 
 test.describe("account", () => {
   test("opens from the sidebar", async ({ page }) => {
@@ -24,18 +24,18 @@ test.describe("account", () => {
     await expect(account(page)).toBeVisible();
   });
 
-  for (const [section, label] of SECTIONS) {
-    test(`deep-links to the ${section} section`, async ({ page }) => {
-      await open(page, `#/account=${section}`);
+  for (const [tab, label] of TABS) {
+    test(`deep-links to the ${tab} tab`, async ({ page }) => {
+      await open(page, `#/account=${tab}`);
       await expect(navButton(page, label)).toBeVisible();
     });
   }
 
-  test("walks every section in one session", async ({ page }) => {
+  test("walks every tab in one session", async ({ page }) => {
     await open(page, "#/account=profile");
-    for (const [section, label] of SECTIONS) {
+    for (const [tab, label] of TABS) {
       await navButton(page, label).click();
-      await expect.poll(() => new URL(page.url()).hash).toContain(`/account=${section}`);
+      await expect.poll(() => new URL(page.url()).hash).toContain(`/account=${tab}`);
     }
   });
 
@@ -48,7 +48,7 @@ test.describe("account", () => {
 
   test("never claims a verification the brand does not declare", async ({ page, request }) => {
     await open(page, "#/account=about");
-    // The PILL is the claim (`AboutUnit::ProvenancePill`); the section's prose says "verified" too.
+    // The PILL is the claim (`AccountAboutTab::ProvenancePill`); the tab's prose says "verified" too.
     await expect(account(page).getByText("Self-declared").first()).toBeVisible();
     await expect(account(page).getByText("✓ Verified")).toHaveCount(0);
 

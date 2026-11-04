@@ -1,4 +1,5 @@
-"""No verb's module is imported here: ``main()`` imports the one it dispatches, so ``--help`` loads no verb."""
+"""No verb's module is imported here: ``main()`` imports the one it dispatches, so ``--help`` loads no
+verb and no use case."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.config.settings import settings
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.parsers import build_parser
@@ -83,9 +85,10 @@ def main() -> None:
         result = runner.run(run)
     except (UngeneratedRequestError, SendRefusedError, PotterError) as exc:
         runner.close()
+        said = refusal_words(exc)
         if args.json_output and isinstance(exc, PotterError):
-            print(json.dumps({"error": exc.code, "message": str(exc), **exc.details}, default=str))
-        print(f"Error: {exc}", file=sys.stderr)
+            print(json.dumps({"error": exc.code, "message": said, **exc.details}, default=str))
+        print(f"Error: {said}", file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.

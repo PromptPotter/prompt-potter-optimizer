@@ -22,6 +22,7 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import RoundStatement
@@ -30,11 +31,13 @@ if TYPE_CHECKING:
 #: `noise`: the cells were measured no more sharply than they landed apart; `spread`: they differ.
 PrecisionVerdict = Literal["noise", "spread"]
 
-PRECISION_VERDICT_ADVICE: dict[PrecisionVerdict, str] = {
-    "noise": "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
-    "spread": "The cells genuinely differ — that spread is signal about where this optimizer "
-    "prompt works.",
-}
+PRECISION_VERDICT_ADVICE: Worded[PrecisionVerdict, str] = Worded(
+    {
+        "noise": "The panel is re-reading its own noise — sharpen the cells before buying more of them.",
+        "spread": "The cells genuinely differ — that spread is signal about where this optimizer "
+        "prompt works.",
+    }
+)
 
 
 def precision_verdict(precision: PanelPrecision) -> PrecisionVerdict:
@@ -44,13 +47,15 @@ def precision_verdict(precision: PanelPrecision) -> PrecisionVerdict:
 #: Against the last earlier round that measured any; `readded` was measured before, but not in it.
 SampleMovement = Literal["new", "readded", "gained", "lost", "kept"]
 
-SAMPLE_MOVEMENT_LABELS: dict[SampleMovement, str] = {
-    "new": "new",
-    "readded": "re-added",
-    "gained": "gained position",
-    "lost": "lost position",
-    "kept": "kept position",
-}
+SAMPLE_MOVEMENT_LABELS: Worded[SampleMovement, str] = Worded(
+    {
+        "new": "new",
+        "readded": "re-added",
+        "gained": "gained position",
+        "lost": "lost position",
+        "kept": "kept position",
+    }
+)
 assert SAMPLE_MOVEMENT_LABELS.keys() == set(get_args(SampleMovement))
 
 
@@ -173,10 +178,12 @@ class VerificationKindInfo(NamedTuple):
     rows: str
 
 
-VERIFICATION_KIND_INFO: dict[VerificationKind, VerificationKindInfo] = {
-    "verify": VerificationKindInfo("verify", " never seen"),
-    "bench": VerificationKindInfo("held-out bench", ""),
-}
+VERIFICATION_KIND_INFO: Worded[VerificationKind, VerificationKindInfo] = Worded(
+    {
+        "verify": VerificationKindInfo("verify", " never seen"),
+        "bench": VerificationKindInfo("held-out bench", ""),
+    }
+)
 VerificationState = Literal["running", "done", "failed"]
 
 

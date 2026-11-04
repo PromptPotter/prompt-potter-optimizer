@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
 from promptpotter.application.intelligence.rasch import theta_cells
+from promptpotter.application.mask.record import Lens
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
     PairedGrade,
@@ -17,6 +18,7 @@ from promptpotter.application.scoring.selection import (
     paired_p_best,
 )
 from promptpotter.domain.validators import StopSignal
+from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
@@ -33,22 +35,21 @@ class EliminationGate(StrEnum):
     LOCK_IN = "lock_in"
 
 
-ABORT_LENS_LABELS: dict[str, str] = {
-    f"{EliminationGate.EPSILON.value}_off": "No ε-elimination",
-    f"{EliminationGate.LOCK_IN.value}_off": "No lock-in",
-    "all_off": "No early abort",
-}
-
 ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {
     **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
     "all_off": frozenset(g.value for g in EliminationGate),
 }
 
-# The browser's picklist is emitted from the labels and must be exactly what `mask/tree_lens.py` accepts.
-assert set(ABORT_LENS_LABELS) == set(ABORT_LENS_SUPPRESS), (
-    "abort-lens vocabulary drift: "
-    f"unlabelled {sorted(set(ABORT_LENS_SUPPRESS) - set(ABORT_LENS_LABELS))}, "
-    f"unserved {sorted(set(ABORT_LENS_LABELS) - set(ABORT_LENS_SUPPRESS))}"
+# The browser's picklist, keyed as the `lens=` it sends; exactly what `mask/tree_lens.py` accepts.
+ABORT_LENS_LABELS: Worded[str, str] = Worded(
+    {
+        Lens("abort", f"{EliminationGate.EPSILON.value}_off").spelling: "No ε-elimination",
+        Lens("abort", f"{EliminationGate.LOCK_IN.value}_off").spelling: "No lock-in",
+        Lens("abort", "all_off").spelling: "No early abort",
+    }
+)
+assert set(ABORT_LENS_LABELS) == {Lens("abort", body).spelling for body in ABORT_LENS_SUPPRESS}, (
+    "abort-lens vocabulary drift between ABORT_LENS_LABELS and ABORT_LENS_SUPPRESS"
 )
 
 

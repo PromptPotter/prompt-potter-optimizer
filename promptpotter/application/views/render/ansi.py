@@ -19,8 +19,8 @@ from promptpotter.application.views.render.primitives import (
     fmt_pct,
 )
 from promptpotter.domain.arm_reading import lift_band_text
-from promptpotter.domain.bench import BENCH_STATE_INFO
 from promptpotter.domain.candidate_diff import group_diff_keys
+from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phase_views import (
     BenchEnterView,
     BenchGradedView,
@@ -40,7 +40,7 @@ from promptpotter.domain.phase_views import (
     VerifyGradedView,
 )
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
-from promptpotter.domain.spend import CEILING_METER_LABELS, RATE_PRICED_LABEL, usd_text
+from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
 
@@ -254,19 +254,7 @@ def render_run_spend(v: RunSpendView) -> str:
         f"{RATE_PRICED_LABEL} {usd_text(v.rate_priced_usd)} (calls no provider reported a charge for)",
         f"incurred {usd_text(v.incurred_usd)} (every cell priced, replays included)",
     ]
-    counted = CEILING_METER_LABELS[v.meter]
-    if v.usd_cap is not None:
-        share = "" if v.usd_share is None else f" of its {usd_text(v.usd_share)} share"
-        bits.append(
-            f"campaign cap {usd_text(v.campaign_metered_usd)} of {usd_text(v.usd_cap)} "
-            f"{counted}, this cycle {usd_text(v.metered_usd)}{share}"
-        )
-    if v.token_cap is not None:
-        share = "" if v.token_share is None else f" of its {v.token_share:,} share"
-        bits.append(
-            f"campaign cap {v.campaign_metered_tokens:,} of {v.token_cap:,} tokens {counted}, "
-            f"this cycle {v.metered_tokens:,}{share}"
-        )
+    bits.extend(v.meter_lines())
     return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
 
 
@@ -280,7 +268,7 @@ def _render_bench_graded(v: BenchGradedView) -> str:
     if reading is None:
         cut = v.bench_pass.stop
         stop = "" if cut is None else f": {cut.cause.value}"
-        return f"  {YELLOW}bench: no reading — {BENCH_STATE_INFO[v.state].label}{stop}{RESET}"
+        return f"  {YELLOW}bench: no reading — {READING_STATE_INFO[v.state].label}{stop}{RESET}"
     level = reading.level
     value = "—" if level is None else f"{level.value:.3f}"
     return (
@@ -315,7 +303,7 @@ def _render_bench_scored(v: BenchScoredView) -> str:
     graded = bench.graded
     if graded is None:
         # Loud only where a pass or the run broke; a bench still waiting is no fault.
-        info = BENCH_STATE_INFO[bench.status.state]
+        info = READING_STATE_INFO[bench.status.state]
         return f"  {YELLOW if info.fault else DIM}bench: no headline — {info.sentence}{RESET}"
     selected = graded.selected
     levels = " → ".join(

@@ -25,7 +25,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.base import LLMClientBase
-from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
+from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
@@ -248,7 +248,7 @@ async def _provider_reply(call: _Call) -> LLMResponse:
             node=label,
             round_num=context.round_num,
             start_monotonic=call.started,
-            detail_fn=lambda: waiting_on(call.client, merged.model, role="provider"),
+            detail_fn=lambda: silence_detail(call.client, merged.model, role="provider"),
         )
     )
     try:

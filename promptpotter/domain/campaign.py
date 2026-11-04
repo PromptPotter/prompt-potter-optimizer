@@ -18,6 +18,7 @@ from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.worded import Worded
 
 
 class BenchSet(FrozenModel):
@@ -286,11 +287,13 @@ def worked_seconds(launches: Sequence[LaunchClockRecord]) -> float | None:
 # What a minted campaign's manifest stores: a manifest is written at Start, so an open check-in
 # has none (the listing serves it as `domain/hierarchy.py::UnstartedCampaign`).
 type LifecycleStatus = Literal["active", "archived", "deleted"]
-LIFECYCLE_STATUS_LABELS: dict[LifecycleStatus, str] = {
-    "active": "Active",
-    "archived": "Archived",
-    "deleted": "Deleted",
-}
+LIFECYCLE_STATUS_LABELS: Worded[LifecycleStatus, str] = Worded(
+    {
+        "active": "Active",
+        "archived": "Archived",
+        "deleted": "Deleted",
+    }
+)
 type LifecycleFilter = Literal["active", "archived", "deleted", "all"]
 
 

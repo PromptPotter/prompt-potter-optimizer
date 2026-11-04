@@ -1,13 +1,12 @@
 import { DataTable, Term, type Column } from "@/components/ui";
-import type { MeteredSpend } from "@/lib/api";
+import type { MeteredSpend, ServedDashboard } from "@/lib/api";
 import {
-  CEILING_METER_LABELS,
   PREFIX_STATE_TITLES,
   RATE_PRICED_LABEL,
   type PrefixReading,
 } from "@/lib/api/types.generated";
-import { replayShareLine, type SpendView } from "@/lib/derivations";
-import { fmtUnit, fmtUsd } from "@/lib/format";
+import { replayShareLine, spendLines } from "@/lib/derivations";
+import { fmtUsd } from "@/lib/format";
 
 interface BucketRow {
   key: string;
@@ -54,11 +53,6 @@ const COLUMNS: readonly Column<BucketRow>[] = [
   },
 ];
 
-// " of <cap>" where the axis is capped; nothing where it is not.
-const against = (cap: number | null, fmt: (n: number) => string, share = false) =>
-  cap === null ? "" : share ? ` of its ${fmt(cap)} share` : ` of ${fmt(cap)}`;
-const tokenText = (n: number) => fmtUnit("tokens", n);
-
 function Fact({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
     <div className={className}>
@@ -68,14 +62,17 @@ function Fact({ label, value, className }: { label: string; value: string; class
   );
 }
 
-const TOTAL = "spend-buckets-total";
-
-// The one breakdown of a cycle's spend: by bucket, then the campaign's and this cycle's against the caps.
-export function SpendBuckets({ view }: { view: SpendView }) {
-  const { metered, lines } = view;
-  if (metered === null) return null;
-  const meter = CEILING_METER_LABELS[metered.meter];
-  const tokens = view.budgetTokens !== null;
+// The one breakdown of a cycle's spend: by bucket, then the served metered line with any cap line
+// beside it (`ServedDashboard.metered_line` / `cap_lines`, the CLI's stop line), then each kind
+// inside the cap or beside it.
+export function SpendBuckets({
+  metered,
+  meterLines,
+}: {
+  metered: MeteredSpend;
+  meterLines: Pick<ServedDashboard, "metered_line" | "cap_lines">;
+}) {
+  const lines = spendLines(metered);
   return (
     <div className="spend-buckets">
       <DataTable
@@ -94,32 +91,15 @@ export function SpendBuckets({ view }: { view: SpendView }) {
         getRowId={(r) => r.key}
       />
       <p className="spend-buckets-replay">{replayShareLine(metered)}</p>
+      {[
+        ...(meterLines.metered_line === null ? [] : [meterLines.metered_line]),
+        ...meterLines.cap_lines,
+      ].map((line) => (
+        <p key={line} className="spend-buckets-total">
+          {line}
+        </p>
+      ))}
       <dl>
-        {view.campaignUsd !== null && (
-          <Fact
-            className={TOTAL}
-            label={`Campaign spend against the campaign cap, every cycle, ${meter}`}
-            value={fmtUsd(view.campaignUsd) + against(view.budgetUsd, fmtUsd)}
-          />
-        )}
-        <Fact
-          className={TOTAL}
-          label={`This cycle’s spend against the campaign cap, ${meter}`}
-          value={fmtUsd(metered.metered_usd) + against(view.shareUsd, fmtUsd, true)}
-        />
-        {tokens && view.campaignTokens !== null && (
-          <Fact
-            className={TOTAL}
-            label="Campaign tokens against the campaign cap, every cycle"
-            value={tokenText(view.campaignTokens) + against(view.budgetTokens, tokenText)}
-          />
-        )}
-        {tokens && (
-          <Fact
-            label="This cycle’s tokens"
-            value={tokenText(metered.metered_tokens) + against(view.shareTokens, tokenText, true)}
-          />
-        )}
         {lines
           .filter((l) => l.kind.counted)
           .map((l) => (

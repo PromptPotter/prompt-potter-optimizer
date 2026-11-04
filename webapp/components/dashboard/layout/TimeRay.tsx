@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { FailureLine } from "@/components/ui";
 import { cx } from "@/lib/cx";
+import { HEARTBEAT_INTERVAL_S } from "@/lib/api/types.generated";
 import { fmtGap } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
@@ -94,14 +95,14 @@ export const TimeRay = memo(function TimeRay() {
   );
 });
 
-// `fmtGap` renders "" below 90 s, so a heartbeated backend query shows no marker.
+// `fmtGap` renders "" inside `RECENT_STEP_S`, so a heartbeated backend query shows no marker.
 function Gap({ seconds }: { seconds: number }) {
   const label = fmtGap(seconds);
   if (!label) return null;
   return (
     <span
       className="dash-time-ray-gap"
-      title={`No step and no heartbeat anywhere in this family for ${label}. An open call beats every 15 s, so this is real silence, not a long call.`}
+      title={`No step and no heartbeat anywhere in this family for ${label}. An open call beats every ${HEARTBEAT_INTERVAL_S} s, so this is real silence, not a long call.`}
     >
       ── {label} ──
     </span>

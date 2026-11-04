@@ -171,7 +171,7 @@
           "facts": {
             "description": "The evidence, in reading order.",
             "items": {
-              "$ref": "#/components/schemas/DecisionFact"
+              "$ref": "#/components/schemas/Said"
             },
             "title": "Facts",
             "type": "array"
@@ -1455,7 +1455,7 @@
           "inner",
           "no_manifest",
           "held_elsewhere",
-          "not_held",
+          "no_holdout",
           "in_flight",
           "selecting",
           "origin_unscored",
@@ -2912,30 +2912,6 @@
         "title": "DecisionAction",
         "type": "object"
       },
-      "DecisionFact": {
-        "additionalProperties": false,
-        "description": "One labelled line of the evidence behind a hold.",
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "tone": {
-            "$ref": "#/components/schemas/Tone",
-            "default": "quiet"
-          },
-          "value": {
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "value"
-        ],
-        "title": "DecisionFact",
-        "type": "object"
-      },
       "DefaultsDrift": {
         "additionalProperties": false,
         "description": "Something the run's declaration is a delta over moved since it was declared, so the launch\nruns today's value under the same declaration.",
@@ -3166,6 +3142,14 @@
         "title": "DegradationHealth",
         "type": "object"
       },
+      "DisplayMetric": {
+        "enum": [
+          "accuracy",
+          "composite",
+          "ability"
+        ],
+        "type": "string"
+      },
       "DraftOpenedEffect": {
         "additionalProperties": false,
         "description": "A check-in draft opened by upload, dataset or origin: the draft a retry under its key answers.",
@@ -3196,13 +3180,7 @@
             "type": "integer"
           },
           "elects_on": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Elects On",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           },
           "ended_on": {
             "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
@@ -3286,13 +3264,7 @@
             "type": "integer"
           },
           "elects_on": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Elects On",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           },
           "ended_on": {
             "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
@@ -4597,18 +4569,7 @@
             "type": "string"
           },
           "unit": {
-            "enum": [
-              "rate",
-              "score",
-              "theta",
-              "seconds",
-              "usd",
-              "tokens",
-              "rank",
-              "rounds"
-            ],
-            "title": "Unit",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasurandUnit"
           }
         },
         "required": [
@@ -4628,6 +4589,19 @@
           "expr"
         ],
         "title": "MeasurandKind",
+        "type": "string"
+      },
+      "MeasurandUnit": {
+        "enum": [
+          "rate",
+          "score",
+          "theta",
+          "seconds",
+          "usd",
+          "tokens",
+          "rank",
+          "rounds"
+        ],
         "type": "string"
       },
       "MeasureEnterView": {
@@ -6451,6 +6425,7 @@
           "not_asked",
           "pending",
           "not_held",
+          "no_holdout",
           "held_elsewhere",
           "pass_stopped",
           "past_tolerance",
@@ -6878,14 +6853,8 @@
             "title": "Composite Fitness Formula Short"
           },
           "display_metric": {
-            "default": "accuracy",
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Display Metric",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric",
+            "default": "accuracy"
           },
           "ended_on": {
             "title": "Ended On",
@@ -7828,22 +7797,10 @@
             ]
           },
           "display_metric": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Display Metric",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           },
           "elects_on": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Elects On",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric"
           },
           "langfuse_trace_url": {
             "anyOf": [
@@ -7980,6 +7937,68 @@
           "observed_config"
         ],
         "title": "RuntimeFailure",
+        "type": "object"
+      },
+      "Said": {
+        "additionalProperties": false,
+        "description": "One line composed once for a person: every medium renders it as served, none rewords it.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The longer reading, a tap away.",
+            "title": "Detail"
+          },
+          "key": {
+            "description": "What the line is about, for code to branch on; never shown.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sub"
+          },
+          "tone": {
+            "$ref": "#/components/schemas/Tone"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "tone",
+          "label"
+        ],
+        "title": "Said",
         "type": "object"
       },
       "SampleDiag": {
@@ -8567,15 +8586,7 @@
             "type": "string"
           },
           "kind": {
-            "enum": [
-              "optimizer",
-              "backend",
-              "judge",
-              "diagnostic",
-              "bench"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/TokenUsageKind"
           },
           "model": {
             "anyOf": [
@@ -8871,6 +8882,16 @@
         "title": "TokenAccount",
         "type": "object"
       },
+      "TokenUsageKind": {
+        "enum": [
+          "optimizer",
+          "backend",
+          "judge",
+          "diagnostic",
+          "bench"
+        ],
+        "type": "string"
+      },
       "TokenUsageRecord": {
         "additionalProperties": false,
         "description": "ONE answered send, or a replay (``cached``); a send that reported no usage writes none.",
@@ -8939,15 +8960,7 @@
             "title": "Key Source"
           },
           "kind": {
-            "enum": [
-              "optimizer",
-              "backend",
-              "judge",
-              "diagnostic",
-              "bench"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/TokenUsageKind"
           },
           "mirrored": {
             "default": false,
@@ -9510,14 +9523,8 @@
             "title": "Composite Fitness Formula Short"
           },
           "display_metric": {
-            "default": "accuracy",
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Display Metric",
-            "type": "string"
+            "$ref": "#/components/schemas/DisplayMetric",
+            "default": "accuracy"
           }
         },
         "title": "ViewAnchors",
