@@ -19,7 +19,6 @@ from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.pool import Pool
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.plugin_registry import Registry
 
 if typing.TYPE_CHECKING:
@@ -27,8 +26,6 @@ if typing.TYPE_CHECKING:
 
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.pipeline_schema import PipelineSchema
-
-shapes_optimizer_prompt(__name__)
 
 
 ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"

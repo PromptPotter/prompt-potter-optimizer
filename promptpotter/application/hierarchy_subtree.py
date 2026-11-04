@@ -207,8 +207,8 @@ def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]
 
 def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
     """The candidate *c* descends from — its main, the first parent, as last measured before it —
-    its donor, the second, likewise, with each locus moved off the main to the donor's value
-    verbatim, and per other moved locus the earlier candidates its value there is closer to."""
+    its donor, the second, likewise, with the loci its lineage records the donor gave, and per
+    other moved locus the earlier candidates its value there is closer to."""
     parent_ids = c.individual.lineage.parent_ids
     earlier = _earlier(c, everyone)
     parent = earlier.get(parent_ids[0]) if parent_ids else None
@@ -220,11 +220,13 @@ def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
     moved = c.individual.loci_moved_from(parent.individual)
     c.donor = earlier.get(parent_ids[1]) if len(parent_ids) > 1 else None
     if c.donor is not None:
-        given = c.donor.loci
+        # What a variation donated and no later one rewrote: the act's record, never a value match.
+        steps = c.individual.lineage.variations
         c.donated_loci = [
             name
-            for name, locus in ((name, by_name[name]) for name in moved)
-            if (locus in mine, mine.get(locus)) == (locus in given, given.get(locus))
+            for i, step in enumerate(steps)
+            for name in step.donated
+            if name in moved and not any(name in later.loci for later in steps[i + 1 :])
         ]
     for name in moved:
         locus = by_name[name]

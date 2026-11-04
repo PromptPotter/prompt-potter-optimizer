@@ -390,6 +390,22 @@ class SelectedOptimizer:
     def reached_knobs[T: StrictModel](self, member: NodeMember, kind: type[T]) -> T:
         return self.knobs_of(self.knob_owner(member, kind), kind)
 
+    def draw_owner(self, member: NodeMember, pool: type[Pool]) -> NodeMember:
+        """It where it draws *pool*, else the ONE consulted member that does: a reader of that
+        member's view never declares the draw beside it."""
+        if pool in member.draws:
+            return member
+        held = [
+            m
+            for m in (optimizers.NODE_MEMBERS.get(self.roster_one(c)) for c in member.consults)
+            if pool in m.draws
+        ]
+        if len(held) != 1:
+            raise KeyError(
+                f"{member.name!r} reads the {pool.kind!r} pool through {len(held)} drawers, not one"
+            )
+        return held[0]
+
     def access(self, member: NodeMember, pool: type[Pool]) -> Access:
         if (draw := member.draws.get(pool)) is None:
             raise KeyError(

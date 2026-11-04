@@ -8,7 +8,7 @@ from pydantic import Field
 
 from promptpotter.application.bench.node_context import Target
 from promptpotter.application.optimizers import nodes
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import (
     EARNED_SOURCE,
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 class PoolKnobs(StrictModel):
-    active: Annotated[list[str], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    active: Annotated[list[str], Knob(Estimand.SEARCH)] = Field(
         min_length=1,
         description="The entries in play, as paths: `*` for all, an entry's content id, or a "
         "leading run of its group — a block's `field` or `field/source`, a cited block's source "
@@ -46,7 +46,7 @@ class PoolKnobs(StrictModel):
 
 
 class BlockPoolKnobs(PoolKnobs):
-    packs: Annotated[list[PackName], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    packs: Annotated[list[PackName], Knob(Estimand.SEARCH)] = Field(
         description="The block packs the pool draws from, in draw order: each a directory the "
         "operator installs under the user-data root's `block_packs/`, none shipped, or one of the "
         f"run's account, whose edits bank into `{ACCOUNT_PACK}`. Of their "
@@ -93,10 +93,7 @@ class BlockPoolInitializer(_PoolInitializer):
         if mint is None:
             return []
         packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
-        # A pack named but refused or gone holds nothing; `refusal` names it.
-        serving = set(mint.shelf.names())
-        served = [name for name in packs if name in serving]
-        return list(mint.shelf.entries(served, admits=mint.admits).values())
+        return list(mint.shelf.entries(packs, admits=mint.admits).values())
 
     def refusal(
         self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None

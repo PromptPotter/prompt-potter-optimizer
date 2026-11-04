@@ -338,11 +338,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
     potter = resolve_optimizer("potter", {}, gate="off")
-    every, shelf = frozenset(Presumption), built_stores.block_packs
+    every = frozenset(Presumption)
     sent, capo_hashes, treated = (
         calls.fill(**values),
         capo.prompt_hashes(),
-        capo.treatment(every, shelf).digest,
+        capo.treatment(every, built_stores.block_packs).digest,
     )
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
@@ -350,7 +350,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         assert calls.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
             "the mutated CAPO prompt never reached the request it sends"
         )
-        assert capo.treatment(every, shelf).digest != treated, (
+        assert capo.treatment(every, built_stores.block_packs).digest != treated, (
             "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
         )
     # A valid layout edit on one node: `diagnostics` stays placed.
@@ -406,7 +406,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ), "two seeds share one inner campaign"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
-        resolve_optimizer("potter", n, gate="off").treatment(every, shelf).digest for n in ({}, cut)
+        resolve_optimizer("potter", n, gate="off").treatment(every, built_stores.block_packs).digest
+        for n in ({}, cut)
     )
     assert inner_campaign_id(
         _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
@@ -414,8 +415,8 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "a moved optimizer knob ran under the inner campaign of the unmoved one"
     )
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
-    assert replace(capo, manifest=rewalked).treatment(every, shelf).digest != (
-        capo.treatment(every, shelf).digest
+    assert replace(capo, manifest=rewalked).treatment(every, built_stores.block_packs).digest != (
+        capo.treatment(every, built_stores.block_packs).digest
     ), "a manifest walking its initial population apart ran under the treatment of one racing it"
     # A prompt-shaping class's method re-keys the run though it is only ever read through an instance.
     manifest_file, read_text = Path(optimizer_manifest.__file__), Path.read_text
@@ -424,7 +425,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         'self.access(member, pool) != "off"', 'self.access(member, pool) == "on"'
     )
     assert drawing_on != as_shipped, "the probe's edit no longer lands in `SelectedOptimizer.draws`"
-    as_run_source = potter.treatment(every, shelf).source
+    as_run_source = potter.treatment(every, built_stores.block_packs).source
     with monkeypatch.context() as patch:
         patch.setattr(
             Path,
@@ -432,7 +433,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             lambda p, *a, **k: drawing_on if p == manifest_file else read_text(p, *a, **k),
         )
         nodes._source_digest.cache_clear()
-        assert potter.treatment(every, shelf).source != as_run_source, (
+        assert potter.treatment(every, built_stores.block_packs).source != as_run_source, (
             "an edit to which pools a member draws ran under the unedited treatment"
         )
     nodes._source_digest.cache_clear()
@@ -452,7 +453,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         ]
     )
     assert named.pool_refusals(
-        mint=MintFacts([Sample(id=1, query="q", ground_truth="a")], admits(unranked, None), shelf)
+        mint=MintFacts(
+            [Sample(id=1, query="q", ground_truth="a")],
+            admits(unranked, None),
+            built_stores.block_packs,
+        )
     ), "a demo pool naming a key its partition lacks reached a mint"
     # A pack's drawable snippets are starting content: two packs merging under one treatment is silent.
     made = Authored(
@@ -493,19 +498,23 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
             return resolve_optimizer("potter", {"block_pool": overlay}, gate="off")
 
-        assert drawing(["one"], ["*"]).treatment(every, shelf).source != (
-            drawing(["two"], ["*"]).treatment(every, shelf).source
+        assert drawing(["one"], ["*"]).treatment(every, built_stores.block_packs).source != (
+            drawing(["two"], ["*"]).treatment(every, built_stores.block_packs).source
         ), "campaigns seeded from two different block packs share one treatment"
         # Only what `active` keeps reaches a prompt, so only its edit re-keys the run.
-        intent_only = drawing(["two"], ["task_intent"]).treatment(every, shelf).digest
+        intent_only = (
+            drawing(["two"], ["task_intent"]).treatment(every, built_stores.block_packs).digest
+        )
         install("two", ranked[0], snippet("answer_format", "Close on the answer."))
-        assert drawing(["two"], ["task_intent"]).treatment(every, shelf).digest == intent_only, (
-            "an edit to a snippet `active` excludes split one treatment in two"
-        )
+        assert (
+            drawing(["two"], ["task_intent"]).treatment(every, built_stores.block_packs).digest
+            == intent_only
+        ), "an edit to a snippet `active` excludes split one treatment in two"
         install("two", snippet("task_intent", "Pick the best match."), ranked[1])
-        assert drawing(["two"], ["task_intent"]).treatment(every, shelf).digest != intent_only, (
-            "an edit to a drawable snippet ran under the treatment of the unedited one"
-        )
+        assert (
+            drawing(["two"], ["task_intent"]).treatment(every, built_stores.block_packs).digest
+            != intent_only
+        ), "an edit to a drawable snippet ran under the treatment of the unedited one"
         # Only what the campaign's chain admits is drawn, so only its edit re-keys that campaign.
         ranker = PipelineNode(
             name="rank",
@@ -521,13 +530,15 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         }
         install("two", *ranked)
         unedited = {
-            k: drawing(["two"], ["*"]).treatment(a, shelf).digest for k, a in admitted_by.items()
+            k: drawing(["two"], ["*"]).treatment(a, built_stores.block_packs).digest
+            for k, a in admitted_by.items()
         }
         install(
             "two", snippet("task_intent", "Pick the best match.", Presumption.RANKING), ranked[1]
         )
         edited = {
-            k: drawing(["two"], ["*"]).treatment(a, shelf).digest for k, a in admitted_by.items()
+            k: drawing(["two"], ["*"]).treatment(a, built_stores.block_packs).digest
+            for k, a in admitted_by.items()
         }
         assert edited["unranked"] == unedited["unranked"], (
             "an edit to a ranking snippet a non-ranking campaign can never draw re-keyed its treatment"
@@ -545,7 +556,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             (last_line, "label_match", True),
         ):
             refused = drawing(["two"], [path]).pool_refusals(
-                mint=MintFacts((), admits(unranked, matcher), shelf)
+                mint=MintFacts((), admits(unranked, matcher), built_stores.block_packs)
             )
             assert (not refused) == admitted, (
                 f"{path} under {matcher}: admission missed a presumption"

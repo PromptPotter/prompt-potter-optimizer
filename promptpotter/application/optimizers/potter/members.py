@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
@@ -26,7 +27,6 @@ from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
 from promptpotter.application.optimizers.potter.dispatch.facade import (
-    BUNDLE_DRAWS,
     BUNDLE_READS,
     BUNDLE_SEES,
     build_bundle,
@@ -111,6 +111,7 @@ from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
+from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.strict_model import StrictModel
@@ -226,7 +227,14 @@ class L1Generate(LayoutNode, nodes.Proposer):
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout})
     sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Children, Replay}
-    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
+    # Every bundle member reads the pools through this draw (`NodeContext.drawn`), so L2 lays out
+    # what L1 is shown.
+    draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType(
+        {
+            BlockPool: nodes.AccessKnob(L1GenerateKnobs, "block_access"),
+            DemoPool: nodes.CountKnob(L1GenerateKnobs, "k_max"),
+        }
+    )
     response_model: ClassVar[type[BaseModel] | None] = L1GenerateOutput
     # L2 moves this node's panels, so the outer's only lever here is its output schema's names.
     outer_levers: ClassVar[Mapping[str, str]] = {SCHEMA_RENAME_PARAM: "object"}
@@ -345,7 +353,6 @@ class L1Critique(LayoutNode, nodes.Adapter):
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
     sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls}
-    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1CritiqueOutput
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
 
@@ -377,7 +384,6 @@ class L2Context(LayoutNode):
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L2Memory})
     sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Progress}
-    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L2ContextOutput
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -515,7 +521,6 @@ class L3Plan(LayoutNode):
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L3Memory})
     sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Progress}
-    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L3PlanOutput
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(

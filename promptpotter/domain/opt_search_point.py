@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
@@ -138,6 +138,19 @@ class Variation(FrozenModel):
         description="The loci it left different from what it was handed, as `node.key`: the "
         "first one's against the first parent, a later one's against the variation before it.",
     )
+    donated: list[str] = Field(
+        default_factory=list,
+        description="Of `loci`, those it wrote with the donor's value by its recombination "
+        "`take`, as `node.key`: what the donor gave, recorded as the act, never read off a value "
+        "that happens to equal the donor's.",
+    )
+
+    def stepped(self, loci: list[str], donated: Iterable[Locus]) -> Variation:
+        """This act as it landed: the loci it moved, and of those the ones its donor gave."""
+        given = {locus.name for locus in donated}
+        return self.model_copy(
+            update={"loci": loci, "donated": [name for name in loci if name in given]}
+        )
 
 
 class IndividualLineage(StrictModel):
@@ -387,14 +400,17 @@ class OptSearchPoint(FrozenModel):
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
     ) -> OptSearchPoint:
-        """*take* maps a locus to its donor's position in *parents* (`taken`)."""
+        """*take* maps a locus to its donor's position in *parents* (`taken`); a locus *changes*
+        also writes is the change's, never donated."""
         base = parents[0]
-        writes = {**taken(parents, take or {}, schema), **(changes or {})}
+        changes = changes or {}
+        writes = {**taken(parents, take or {}, schema), **changes}
         child = base._written(writes, schema)
+        donated = [locus for locus in take or {} if locus not in changes]
         lineage = IndividualLineage(
             parent_ids=[p.id for p in parents],
             changes_description=changes_description,
-            variations=[variation.model_copy(update={"loci": child.loci_moved_from(base)})],
+            variations=[variation.stepped(child.loci_moved_from(base), donated)],
             evidence_grounding=evidence_grounding,
         )
         return child.model_copy(update={"lineage": lineage})
@@ -405,14 +421,15 @@ class OptSearchPoint(FrozenModel):
         *,
         schema: PipelineSchema,
         changes: Mapping[Locus, Any],
+        donated: Iterable[Locus] = (),
         changes_description: str | None = None,
     ) -> OptSearchPoint:
+        """*donated* names the loci of *changes* that are a donor's values, by a `take`."""
         after = self._written(changes, schema)
         written = after.loci_moved_from(self)
         update: dict[str, Any] = {}
         if written:
-            step = variation.model_copy(update={"loci": written})
-            update["variations"] = [*self.lineage.variations, step]
+            update["variations"] = [*self.lineage.variations, variation.stepped(written, donated)]
         if changes_description is not None:
             update["changes_description"] = changes_description
         return after.model_copy(update={"lineage": self.lineage.model_copy(update=update)})

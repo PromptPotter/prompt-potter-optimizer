@@ -7,15 +7,11 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.statistics import sign_posterior
-
-shapes_optimizer_prompt(__name__)
-
 
 CellStrata = Literal["none", "dataset"]
 
@@ -37,7 +33,7 @@ class EscalationLadder(StrEnum):
 
 
 class AdaptiveQueueKnobs(StrictModel):
-    sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    sp_budget_round: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         ge=1,
         le=MAX_PASS_ROWS,
         description="Per-round eval budget — how many cells each candidate is scored on per "
@@ -45,25 +41,23 @@ class AdaptiveQueueKnobs(StrictModel):
         "random. Not the pool's size.",
     )
 
-    per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
-        Field(
-            description=(
-                "Draw a fresh seeded scoring subset every round from the search split, "
-                "blind to every outcome and ability, so the election reads cells the held-out "
-                "bench would. On — safe because "
-                "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
-                "measures on one fixed θ ruler, so a shifting per-round subset stays "
-                "comparable — but it is warm-gated: while the δ ruler is still cold (a "
-                "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
-                "selection, so those rounds are comparable AND concentrate measurements to "
-                "warm the ruler fastest; it thaws once the ruler locks. Off → "
-                "the campaign-start selection (deterministic bank prefix) for every round, "
-                "the whole campaign."
-            ),
-        )
+    per_round_resubset: Annotated[bool, Knob(Estimand.SELECTION, Estimand.GATE)] = Field(
+        description=(
+            "Draw a fresh seeded scoring subset every round from the search split, "
+            "blind to every outcome and ability, so the election reads cells the held-out "
+            "bench would. On — safe because "
+            "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
+            "measures on one fixed θ ruler, so a shifting per-round subset stays "
+            "comparable — but it is warm-gated: while the δ ruler is still cold (a "
+            "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
+            "selection, so those rounds are comparable AND concentrate measurements to "
+            "warm the ruler fastest; it thaws once the ruler locks. Off → "
+            "the campaign-start selection (deterministic bank prefix) for every round, "
+            "the whole campaign."
+        ),
     )
 
-    strata: Annotated[CellStrata, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    strata: Annotated[CellStrata, Knob(Estimand.SELECTION)] = Field(
         description="What a round's draw is spread over. `none` draws the budget off the whole "
         "pool; `dataset` gives each dataset its cells measure an equal share — so a mixed pool "
         "never fills a round from one stratum. A stratum short of its share hands the rest to the "
@@ -72,10 +66,10 @@ class AdaptiveQueueKnobs(StrictModel):
 
 
 class L1GenerateKnobs(StrictModel):
-    n_variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    n_variants: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1, description="Candidates per round"
     )
-    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    k_max: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,
         description=(
             "The most shots a variant may carry per prompt node in ``shots``, drawn by id from the "
@@ -83,7 +77,7 @@ class L1GenerateKnobs(StrictModel):
             "the shot slot and its panel, as does a campaign declaring no demo pool."
         ),
     )
-    pool_window: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    pool_window: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description=(
             "The most entries one call shows of each pool it reads — per field for the block pool, "
@@ -91,7 +85,7 @@ class L1GenerateKnobs(StrictModel):
             "no context. A ``closed`` block pool shows its subset whole, its wire's enum."
         ),
     )
-    recombine: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    recombine: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,
         description=(
             "The children a host call may name per call by recombination, ``l1_generate`` adding "
@@ -102,16 +96,16 @@ class L1GenerateKnobs(StrictModel):
             "no-recombination run."
         ),
     )
-    recombination_host: Annotated[
-        Literal["l1_generate", "l2_context"], Knob(Scope.POLICY, Estimand.SEARCH)
-    ] = Field(
-        description=(
-            "Which call writes those children, the pool panel and the reply slot moving with it. "
-            "``l1_generate``: the call that writes this round's variants. ``l2_context``: a fire, "
-            "its children joining the next round's arms."
-        ),
+    recombination_host: Annotated[Literal["l1_generate", "l2_context"], Knob(Estimand.SEARCH)] = (
+        Field(
+            description=(
+                "Which call writes those children, the pool panel and the reply slot moving with it. "
+                "``l1_generate``: the call that writes this round's variants. ``l2_context``: a fire, "
+                "its children joining the next round's arms."
+            ),
+        )
     )
-    block_access: Annotated[Access, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    block_access: Annotated[Access, Knob(Estimand.SEARCH)] = Field(
         description=(
             "How ``l1_generate`` takes the ``block_pool`` node's pool — the entries of the block "
             "packs that node names which its ``active`` paths keep, led by the blocks earlier "
@@ -123,7 +117,7 @@ class L1GenerateKnobs(StrictModel):
             "nothing, so the prompt is bit-for-bit a no-pool ablation run."
         ),
     )
-    schema_field_rename: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    schema_field_rename: Annotated[bool, Knob(Estimand.SEARCH)] = Field(
         description=(
             "Whether THIS campaign's L1 may PROPOSE renaming a field on the inner "
             "``l1_generate``'s output schema (``L1Variant``). Off: "
@@ -147,14 +141,14 @@ class PoBBKnobs(StrictModel):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
     # Under 0.5, so it never reaches a selector's admission bar and the two stops never cross.
-    epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    epsilon: Annotated[float, Knob(Estimand.STOPPING)] = Field(
         gt=0.0,
         lt=0.5,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Smaller → fewer stops. A stop ends "
         "measurement only; what is promoted is ``theta_election.admission``'s.",
     )
-    epsilon_floor: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    epsilon_floor: Annotated[float, Knob(Estimand.STOPPING)] = Field(
         gt=0.0,
         lt=1.0,
         description=(
@@ -167,7 +161,7 @@ class PoBBKnobs(StrictModel):
             "``epsilon`` instead — the ``epsilon_floor_inverted`` coupling reports it."
         ),
     )
-    early_stop: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    early_stop: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
         description=(
             "PoBB's two stops: a candidate stops measuring once its posterior probability of "
             "being the round's best falls below ε(n) — eliminated — or reaches the selector's "
@@ -179,7 +173,7 @@ class PoBBKnobs(StrictModel):
 
 
 class ElectionKnobs(StrictModel):
-    admission: Annotated[float, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+    admission: Annotated[float, Knob(Estimand.GATE)] = Field(
         ge=sign_posterior(1, 0),
         lt=1.0,
         description=(
@@ -192,17 +186,17 @@ class ElectionKnobs(StrictModel):
 
 
 class EscalationKnobs(StrictModel):
-    l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
+    l1_patience: Annotated[int, Knob(Estimand.CONTROLLER)] = Field(
         ge=0, description="Consecutive non-improving L1 rounds before L2 fires."
     )
-    l2_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
+    l2_patience: Annotated[int, Knob(Estimand.CONTROLLER)] = Field(
         ge=0,
         description=(
             "Consecutive non-improving L2 fires before the cycle escalates to L3. "
             "How DEEP the ladder runs is ``escalation_ladder``, never a patience."
         ),
     )
-    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
+    l3_patience: Annotated[int | None, Knob(Estimand.CONTROLLER)] = Field(
         ge=0,
         description=(
             "Consecutive non-improving L3 fires before the cycle stops on "
@@ -210,7 +204,7 @@ class EscalationKnobs(StrictModel):
             "spend ceilings as the only stops."
         ),
     )
-    escalation_ladder: Annotated[EscalationLadder, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
+    escalation_ladder: Annotated[EscalationLadder, Knob(Estimand.CONTROLLER)] = Field(
         description=(
             "How far up the L1 → L2 → L3 ladder this campaign may climb — the ablation "
             "switch. ``full`` is the whole ladder. ``l1_l2`` lets L2 re-frame "
@@ -226,7 +220,7 @@ class EscalationKnobs(StrictModel):
             "simply continues until ``budget.rounds`` / ``lives`` / spend binds."
         ),
     )
-    rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
+    rebase_capability: Annotated[bool, Knob(Estimand.CONTROLLER)] = Field(
         description=(
             "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
             "injection renders the rare-escape-hatch instruction into L2 + L3 "
@@ -240,7 +234,7 @@ class EscalationKnobs(StrictModel):
             "(default None) so on-disk audit shape doesn't drift between modes."
         ),
     )
-    terminate_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
+    terminate_capability: Annotated[bool, Knob(Estimand.CONTROLLER)] = Field(
         description=(
             "L2/L3 terminate_proposal emission. When True, the "
             "``terminate_capability`` injection renders the stop-the-cycle "

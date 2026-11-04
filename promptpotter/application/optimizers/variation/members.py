@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
 from promptpotter.application.bench.node_context import Children, Lineage, Replay, Target
 from promptpotter.application.optimizers import nodes
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.strict_model import StrictModel
@@ -37,20 +37,31 @@ logger = logging.getLogger(__name__)
 MatingPool = Literal["population", "measured"]
 
 
+class Cross(NamedTuple):
+    """A recombination's parents, in `parent_ids` order: the MAIN, the line the child continues and
+    its major contributor, then the DONOR, giving a minority of loci. A cross has these two alone."""
+
+    main: OptSearchPoint
+    donor: OptSearchPoint
+
+
+CROSS_ARITY = len(Cross._fields)
+
+
 class MatingKnobs(StrictModel):
-    offspring: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    offspring: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,
         description="The offspring one round adds to the arms it is handed, each a main parent "
         "and a donor; 0 is crossover off. A child with no main, or no donor apart from its main, "
         "is dropped.",
     )
-    donor_from: Annotated[MatingPool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    donor_from: Annotated[MatingPool, Knob(Estimand.SEARCH)] = Field(
         description="What the DONOR, the parent giving a minority of loci, is drawn from, any "
         "individual but the main; the main, the line the child continues, is always drawn from the "
         "population. `population`: the individuals the selector carried. `measured`: every "
         "individual a closed round of the campaign measured, its losers included."
     )
-    tournament: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    tournament: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description="Entries drawn per parent, the one with the highest θ taken: every θ is read "
         "on the round's one scale over all the cells it was measured on, and an entry with no "
@@ -94,12 +105,12 @@ class Mating(nodes.Proposer):
 
         by = rank if knobs.tournament > 1 else None
         rng = ctx.read(Replay).rng()
-        pairs: list[tuple[OptSearchPoint, OptSearchPoint]] = []
+        pairs: list[Cross] = []
         for _ in range(knobs.offspring if mains else 0):
             main = _fittest(rng.sample(mains, min(knobs.tournament, len(mains))), by)
             if rivals := [donor for donor in donors if donor.id != main.id]:
                 drawn = rng.sample(rivals, min(knobs.tournament, len(rivals)))
-                pairs.append((main, _fittest(drawn, by)))
+                pairs.append(Cross(main, _fittest(drawn, by)))
         if dropped := knobs.offspring - len(pairs):
             logger.info(
                 "%d offspring dropped: %d main(s), a child needing a %s donor apart from it",
@@ -113,19 +124,21 @@ class Mating(nodes.Proposer):
                 *proposals.proposals,
                 *(
                     children.child(
-                        [main, donor],
-                        changes_description=f"crossover of {main.id[:6]}, donor {donor.id[:6]}",
+                        cross,
+                        changes_description=(
+                            f"crossover of {cross.main.id[:6]}, donor {cross.donor.id[:6]}"
+                        ),
                     )
-                    for main, donor in pairs
+                    for cross in pairs
                 ),
             ]
         )
 
 
-def crossable(parents: Sequence[OptSearchPoint], schema: PipelineSchema) -> list[Locus]:
-    """The loci the donor, the second parent, can give the main: each the two differ on, shots left
-    to `shot_crossover`, a config locus the donor does not set having no value to give."""
-    first, second = (parent.loci() for parent in parents)
+def crossable(cross: Cross, schema: PipelineSchema) -> list[Locus]:
+    """The loci the donor can give the main: each the two differ on, shots left to
+    `shot_crossover`, a config locus the donor does not set having no value to give."""
+    first, second = cross.main.loci(), cross.donor.loci()
     return [
         locus
         for locus in dict.fromkeys((*first, *second))
@@ -141,12 +154,10 @@ def most_donated(crossable: int) -> int:
     return 0 if crossable < 2 else max(1, (crossable - 1) // 2)
 
 
-def donor_take(
-    parents: Sequence[OptSearchPoint], schema: PipelineSchema, rng: random.Random
-) -> dict[Locus, int] | None:
+def donor_take(cross: Cross, schema: PipelineSchema, rng: random.Random) -> dict[Locus, int] | None:
     """The take the donor gives: k crossable loci drawn at random, k uniform over 1 to
-    `most_donated`. None where under two are crossable."""
-    loci = crossable(parents, schema)
+    `most_donated`, by the donor's position in the cross. None where under two are crossable."""
+    loci = crossable(cross, schema)
     if not (most := most_donated(len(loci))):
         return None
     return dict.fromkeys(rng.sample(loci, rng.randint(1, most)), 1)
@@ -169,10 +180,11 @@ class LocusCrossover(nodes.Proposer):
         schema = ctx.read(Target).schema
         out, clones = [], []
         for proposal in proposals.proposals:
-            if len(proposal.individual.lineage.parent_ids) != 2:
+            if len(proposal.individual.lineage.parent_ids) != CROSS_ARITY:
                 out.append(proposal)
                 continue
-            if (take := donor_take(lineage.parents(proposal.individual), schema, rng)) is None:
+            cross = Cross(*lineage.parents(proposal.individual))
+            if (take := donor_take(cross, schema, rng)) is None:
                 clones.append(proposal.individual.lineage.changes_description)
                 continue
             out.append(children.edit(proposal, take=take))
@@ -184,7 +196,7 @@ class LocusCrossover(nodes.Proposer):
 
 
 class SurvivalKnobs(StrictModel):
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = Field(
+    size: Annotated[int, Knob(Estimand.SELECTION, Estimand.STOPPING)] = Field(
         ge=1,
         description="μ, the individuals carried into the next round: the selector's ranking, "
         "best first, cut to this many. A race reading μ cuts an arm once μ others are "

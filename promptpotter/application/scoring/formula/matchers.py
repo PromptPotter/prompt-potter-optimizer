@@ -21,10 +21,6 @@ from promptpotter.shared.answer_text import (
     text_list_items,
     text_list_rank,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-# Whole: a matcher's answer span and note reach the prompt, and both sit in its one entry.
-shapes_optimizer_prompt(__name__)
 
 
 def _gsm8k_match(predicted: str, ground_truth: str) -> float:

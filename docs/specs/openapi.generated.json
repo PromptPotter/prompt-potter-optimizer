@@ -2307,7 +2307,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/JudgeSpec"
             },
-            "description": "LLM-as-judge graders for datasets whose answer is free text, where no deterministic matcher can grade a cell. Each value names a registered judge (`promptpotter.judges`) and the models to run it on; its verdict is banked as a per-sample observation the `scoring` formula reads. **The KEY is the term that formula reads, not the judge's name** — so one cell can carry several graded terms, which is what a multi-step schema (retrieve -> ground -> answer) is, and two terms may run the same rubric on different models without one verdict landing on top of the other. Declaration order is the step order. `Scope.DATA` because swapping a judge invalidates every verdict taken under the old one, so a resume must run divergence detection rather than carry them forward. **Their models are declared here and inherited from nowhere** — not from the permitted model set, not from the pipeline's node config, not from the optimizer's own LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last steered to would not be one.",
+            "description": "LLM-as-judge graders for datasets whose answer is free text, where no deterministic matcher can grade a cell. Each value names a registered judge (`promptpotter.judges`) and the models to run it on; its verdict is banked as a per-sample observation the `scoring` formula reads. **The KEY is the term that formula reads, not the judge's name** — so one cell can carry several graded terms, which is what a multi-step schema (retrieve -> ground -> answer) is, and two terms may run the same rubric on different models without one verdict landing on top of the other. Declaration order is the step order. Swapping a judge invalidates every verdict taken under the old one, so a resume must run divergence detection rather than carry them forward. **Their models are declared here and inherited from nowhere** — not from the permitted model set, not from the pipeline's node config, not from the optimizer's own LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last steered to would not be one.",
             "title": "Judges",
             "type": "object"
           },
@@ -2702,7 +2702,7 @@
             "type": "boolean"
           },
           "donated_loci": {
-            "description": "The loci, as `node.key`, it moved off its main to the donor's value verbatim: what the donor gave. Empty without a donor.",
+            "description": "The loci, as `node.key`, its lineage records the donor gave and no later variation rewrote. Empty without a donor.",
             "items": {
               "type": "string"
             },
@@ -8807,7 +8807,7 @@
             "type": "array"
           },
           "refused": {
-            "description": "Each pack held but served none of, by name, and why: the rest serve on",
+            "description": "Each pack held but served none of, then each snippet of the account's skipped as an install pack's, and why: the rest serve on",
             "items": {
               "$ref": "#/components/schemas/PackRefusal"
             },
@@ -8815,7 +8815,7 @@
             "type": "array"
           },
           "snippets": {
-            "description": "By pack name, then each pack's own order",
+            "description": "The install's packs by name, then the account's, each in its own order",
             "items": {
               "$ref": "#/components/schemas/LibrarySnippet"
             },
@@ -8823,7 +8823,7 @@
             "type": "array"
           },
           "sources": {
-            "description": "Every source a snippet names, once, in first-named order",
+            "description": "Every work a cited snippet names, once, in first-named order",
             "items": {
               "$ref": "#/components/schemas/LibrarySource"
             },
@@ -8857,7 +8857,7 @@
             "title": "Author"
           },
           "id": {
-            "description": "Its content id, the suffix of each pool entry `{part}.{id}` it expands into; one text in two packs is two rows under one id",
+            "description": "Its content id, the suffix of each pool entry `{part}.{id}` it expands into; one on the shelf, since a pack repeating another's text is refused",
             "title": "Id",
             "type": "string"
           },
@@ -8878,8 +8878,16 @@
             "title": "Pack",
             "type": "string"
           },
+          "presumes": {
+            "description": "What it takes for granted of the run it lands in: a run whose chain or matcher lacks one never draws it into a pool",
+            "items": {
+              "$ref": "#/components/schemas/Presumption"
+            },
+            "title": "Presumes",
+            "type": "array"
+          },
           "source": {
-            "description": "A `sources` id: its cited work's arXiv id, or `authored`",
+            "description": "A `sources` id for a cited snippet; `authored` for one an account wrote, which no work names",
             "title": "Source",
             "type": "string"
           },
@@ -8925,6 +8933,7 @@
           "id",
           "text",
           "suits",
+          "presumes",
           "tags",
           "source",
           "method",
@@ -8938,22 +8947,14 @@
       },
       "LibrarySource": {
         "additionalProperties": false,
-        "description": "One source a snippet names: a cited work as its pack declares it, or the authored one.",
+        "description": "One cited work a snippet names, as its pack declares it; an authored snippet names none.",
         "properties": {
           "first_author": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Absent for `authored`",
-            "title": "First Author"
+            "title": "First Author",
+            "type": "string"
           },
           "id": {
-            "description": "A snippet's `source`: the work's arXiv id, or `authored`",
+            "description": "The work's arXiv id, a cited snippet's `source`",
             "title": "Id",
             "type": "string"
           },
@@ -8963,21 +8964,12 @@
             "type": "string"
           },
           "title": {
-            "description": "The work's title; for `authored`, the word itself",
             "title": "Title",
             "type": "string"
           },
           "year": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Absent for `authored`",
-            "title": "Year"
+            "title": "Year",
+            "type": "integer"
           }
         },
         "required": [
@@ -12275,13 +12267,15 @@
       },
       "PackRefusal": {
         "additionalProperties": false,
-        "description": "A pack the shelf holds but serves none of: the rest of the library serves on without it.",
+        "description": "What the shelf holds but does not serve, a whole pack or one snippet of the account's: the\nrest of the library serves on without it.",
         "properties": {
           "code": {
-            "description": "`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and this account both hold the name",
+            "description": "`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and this account both hold the name; `block_pack_repeats`: an install pack holding a text an install pack before it in name order holds; `block_snippet_held`: one snippet of the account's pack whose text an install pack holds, which serves as that snippet while the rest of the account's pack serves on. One text is one snippet",
             "enum": [
               "block_pack_invalid",
-              "block_pack_collision"
+              "block_pack_collision",
+              "block_pack_repeats",
+              "block_snippet_held"
             ],
             "title": "Code",
             "type": "string"
@@ -13056,6 +13050,15 @@
         ],
         "title": "PrefixReading",
         "type": "object"
+      },
+      "Presumption": {
+        "description": "What a block's text takes for granted of the run it lands in; a run lacking one makes it noise.",
+        "enum": [
+          "ranking",
+          "last_line_answer"
+        ],
+        "title": "Presumption",
+        "type": "string"
       },
       "ProducerReading": {
         "additionalProperties": false,
@@ -17423,6 +17426,14 @@
         "additionalProperties": false,
         "description": "One variation node's act: which node ran, whether it asked a model, and the loci it wrote.",
         "properties": {
+          "donated": {
+            "description": "Of `loci`, those it wrote with the donor's value by its recombination `take`, as `node.key`: what the donor gave, recorded as the act, never read off a value that happens to equal the donor's.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Donated",
+            "type": "array"
+          },
           "loci": {
             "description": "The loci it left different from what it was handed, as `node.key`: the first one's against the first parent, a later one's against the variation before it.",
             "items": {

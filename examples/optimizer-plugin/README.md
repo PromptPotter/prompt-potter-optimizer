@@ -38,7 +38,7 @@ Everything `members.py` and `prompts.py` use, and nothing else:
 
 | You write | Against |
 |---|---|
-| A knobs model per member | `StrictModel`, each field `Annotated[T, Knob(Scope, Estimand)]`. The manifest's `nodes.{name}.config` is validated as it. |
+| A knobs model per member | `StrictModel`, each field `Annotated[T, Knob(Estimand, …)]`. The manifest's `nodes.{name}.config` is validated as it. |
 | A member per manifest node | The Protocol of its node type in `promptpotter/application/optimizers/nodes.py` — here `Sampler`, `Proposer`, `Selector`. Each subclasses that Protocol, states `name` and `kind`, and overrides only the declarations it uses (`knobs`, `sees`, `reads` …) and its type's own members. |
 | The round, inside a member | `ctx: NodeContext` (`promptpotter/application/bench/node_context.py`): `ctx.knobs(YourKnobs)`, typed; `ctx.round_num`; `ctx.read(Kind)` for each read the member names under `sees`, refused at load where the member cannot hold it — `Lineage` holds the parent and `population`, the individuals the run carries, which a selector replaces through `Selection.ranked`, best first, a `survival` node after it keeping the top μ; `Replay` its `rng()` for a draw a resume repeats and `decide(kind, inputs, outcome)` to put a decision on the record; `Calls` its `fill(**values)` for the node's template and `ask_each({idx: prompt})` for its llm calls. |
 | What a member returns | `nodes.Panel`, `nodes.Proposals`, `nodes.Selection`; a selector reads `nodes.MeasuredRound`. |

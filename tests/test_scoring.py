@@ -117,7 +117,11 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     LayerCounters,
 )
-from promptpotter.application.optimizers.variation.members import donor_take, most_donated
+from promptpotter.application.optimizers.variation.members import (
+    Cross,
+    donor_take,
+    most_donated,
+)
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import declare_gate
 from promptpotter.application.run_phase_control import RunControl
@@ -1500,7 +1504,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     # A crossover child continues its main: its donor gives a minority of the loci the two differ on.
     solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
     for differing in range(1, len(PROMPT_FIELDS) + 1):
-        pair = [prompted(**dict.fromkeys(PROMPT_FIELDS[:differing], side)) for side in "md"]
+        pair = Cross(*(prompted(**dict.fromkeys(PROMPT_FIELDS[:differing], side)) for side in "md"))
         sizes = Counter(
             None if (take := donor_take(pair, solve, random.Random(seed))) is None else len(take)
             for seed in range(40)

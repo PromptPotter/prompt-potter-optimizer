@@ -120,12 +120,18 @@ class Snippet(FrozenModel):
 
 
 class PackRefusal(FrozenModel):
-    """A pack the shelf holds but serves none of: the rest of the library serves on without it."""
+    """What the shelf holds but does not serve, a whole pack or one snippet of the account's: the
+    rest of the library serves on without it."""
 
     name: str = Field(description="Its directory name, as a `packs` knob names it")
-    code: Literal["block_pack_invalid", "block_pack_collision"] = Field(
+    code: Literal[
+        "block_pack_invalid", "block_pack_collision", "block_pack_repeats", "block_snippet_held"
+    ] = Field(
         description="`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: "
-        "the install and this account both hold the name"
+        "the install and this account both hold the name; `block_pack_repeats`: an install pack "
+        "holding a text an install pack before it in name order holds; `block_snippet_held`: one "
+        "snippet of the account's pack whose text an install pack holds, which serves as that "
+        "snippet while the rest of the account's pack serves on. One text is one snippet"
     )
     reason: str = Field(description="What to fix, in a sentence")
 

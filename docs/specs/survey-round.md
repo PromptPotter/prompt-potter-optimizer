@@ -88,7 +88,7 @@ it. An LLM proposal, not a rule in `escalation/rules.py`.
 
 **The setting.** `at_init`, `candidates` (K), `races_offspring`, `share` and the thresholds sit on the
 `survey` node's `config`; the escalation half is `escalation.config.survey_capability`; each is
-`Knob(Scope.POLICY, Estimand.SELECTION)`, so each ablation is one knob, read `controlled` by `evidence`.
+`Knob(Estimand.SELECTION)`, so each ablation is one knob, read `controlled` by `evidence`.
 
 ## Replay and budget
 

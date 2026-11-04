@@ -512,6 +512,7 @@ class Children(CycleRead):
             self._variation,
             schema=schema,
             changes={**loci_of(config), **prompts},
+            donated=take or {},
             changes_description=changes_description,
         )
         failures = [
@@ -646,18 +647,18 @@ class NodeContext:
         self._bank(closed.model_copy(update={"optimizer_state": state}))
 
     def access(self, kind: type[Pool]) -> Access:
-        return self._round.cycle.optimizer.access(self._member, kind)
+        """Its own draw's, else the ONE consulted drawer's (`SelectedOptimizer.draw_owner`)."""
+        selected = self._round.cycle.optimizer
+        return selected.access(selected.draw_owner(self._member, kind), kind)
 
     @overload
     def drawn(self, kind: type[DemoPool]) -> tuple[Sample, ...]: ...
     @overload
     def drawn(self, kind: type[BlockPool]) -> tuple[PoolEntry, ...]: ...
     def drawn(self, kind: type[Pool]) -> tuple[Any, ...]:
-        if kind not in self._member.draws:
-            raise KeyError(
-                f"{self.node!r} draws from the {kind.kind!r} pool and does not declare it"
-            )
-        return _drawn(self._round, self._member, kind)
+        """Its own draw, else the ONE consulted drawer's view of *kind*."""
+        owner = self._round.cycle.optimizer.draw_owner(self._member, kind)
+        return _drawn(self._round, owner, kind)
 
     def _bank(self, restated: RoundResult) -> None:
         """On the run's live ledger before the cycle seats it: a restatement that failed to land is held nowhere."""

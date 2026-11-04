@@ -27,7 +27,7 @@ from promptpotter.application.optimizers.levi.state import (
 )
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
@@ -69,27 +69,27 @@ _LLOYD_ITERATIONS = 100
 
 
 class ProxyCssKnobs(StrictModel):
-    discovery: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    discovery: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         ge=1,
         description="The discovery set: the search-split cells, first in bank order, the "
         "calibration round scores every calibration prompt on and the proxy is chosen among.",
     )
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    size: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         ge=1,
         description="K_proxy: the discovery-set cells every round after calibration scores its "
         "arms on, chosen once from the calibration prompts' rows.",
     )
-    rank_weight: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    rank_weight: Annotated[float, Knob(Estimand.SELECTION)] = Field(
         ge=0.0,
         description="r: the weight on rank faithfulness — the share of calibration-prompt pairs "
         "the proxy orders as the discovery set does.",
     )
-    separation_weight: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    separation_weight: Annotated[float, Knob(Estimand.SELECTION)] = Field(
         ge=0.0,
         description="s: the weight on separation — how widely the calibration prompts' scores "
         "spread on the chosen cells.",
     )
-    redundancy_weight: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    redundancy_weight: Annotated[float, Knob(Estimand.SELECTION)] = Field(
         ge=0.0,
         description="c: the penalty on redundancy — a cell's mean |Pearson r| with the cells "
         "already chosen.",
@@ -197,17 +197,17 @@ def _nearest(centroids: Sequence[Sequence[float]], x: Sequence[float]) -> int:
 
 
 class MapElitesKnobs(StrictModel):
-    centroids: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    centroids: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description="The Voronoi cells the archive partitions descriptor space into; each keeps "
         "only the best individual mapped to it.",
     )
-    cvt_samples: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    cvt_samples: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description="The uniform draws inside the calibration prompts' descriptor bounds that "
         "k-means places the centroids among; at least `centroids`.",
     )
-    descriptors: Annotated[list[DescriptorFeature], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    descriptors: Annotated[list[DescriptorFeature], Knob(Estimand.SEARCH)] = Field(
         min_length=1,
         description="What places an arm in the archive: its scored prompt's length "
         "(`target_prompt_chars`) and its objective on each proxy cell (`cell_objectives`).",
@@ -378,12 +378,12 @@ class MapElites(nodes.Selector):
 
 
 class LeviParadigmShiftKnobs(RewriteKnobs):
-    interval: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    interval: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description="One paradigm shift every this many evaluations: each round after calibration "
         "is one paradigm shift and `interval - 1` refinements.",
     )
-    n_clusters: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    n_clusters: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description="k: the clusters k-means cuts the occupied cells into; each hands its best "
         "elite to the paradigm shift as a representative.",
@@ -391,7 +391,7 @@ class LeviParadigmShiftKnobs(RewriteKnobs):
 
 
 class LeviSeedKnobs(RewriteKnobs):
-    n_diverse_seeds: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    n_diverse_seeds: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1,
         description="The seeds the calibration round asks for, each shown every prompt before it.",
     )
@@ -505,18 +505,18 @@ class LeviParadigmShift(nodes.Proposer):
 
 
 class LeviRefineKnobs(RewriteKnobs):
-    sampler_temperatures: Annotated[list[float], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    sampler_temperatures: Annotated[list[float], Knob(Estimand.SEARCH)] = Field(
         min_length=1,
         description="T: the softmax temperatures a refinement's parent is drawn from the elites "
         "under, exp(score / T), one picked uniformly per call — lower favours the best.",
     )
-    n_inspirations: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    n_inspirations: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0, description="Other elites a refinement is shown beside its parent."
     )
-    inspiration_drop: Annotated[float, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    inspiration_drop: Annotated[float, Knob(Estimand.SEARCH)] = Field(
         ge=0.0, le=1.0, description="How often a refinement is shown no inspiration at all."
     )
-    feedback_failures: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    feedback_failures: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,
         description="The parent's failed proxy cells a refinement is shown, drawn at random.",
     )

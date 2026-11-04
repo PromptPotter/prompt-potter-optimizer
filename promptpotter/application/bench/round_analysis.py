@@ -15,12 +15,12 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
 
-shapes_optimizer_prompt(__name__)
-
 _RANK_BUCKET_KEYS: tuple[str, ...] = ("1", "2-5", "6-10", "11-20", "not_found")
 _TOP_K_LEVELS: tuple[int, ...] = (1, 3, 5, 10)
 
 
+# The bench calls it, outside any hashed module, and an optimizer prompt renders what it returns.
+@shapes_optimizer_prompt
 def compute_round_diagnostics(
     round_result: RoundResult, pipeline_schema: PipelineSchema | None
 ) -> RoundDiagnostics:

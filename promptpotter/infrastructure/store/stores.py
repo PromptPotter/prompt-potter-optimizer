@@ -43,7 +43,6 @@ class Stores:
     identity: IdentityContext
     archive_home: ArchiveHome
     tenant_datasets: TenantDatasetStore
-    block_packs: PackShelf
     ruler: RulerStore
     campaigns: CampaignStore
     drafts: DraftStore
@@ -59,6 +58,15 @@ class Stores:
     @property
     def tenant_id(self) -> TenantId:
         return self.identity.tenant_id
+
+    @property
+    def block_packs(self) -> PackShelf:
+        """A shelf per read, parsed once: a write landing after it never meets a stale parse.
+        Rooted at the account beside the caches: a sandbox isolates campaign STATE, and a block
+        pack an L4 cell reads is not state."""
+        return PackShelf(
+            account=tenant_workspace(self.shared_root, self.tenant_id) / paths.BLOCK_PACKS_DIR
+        )
 
     @property
     def jobs_dir(self) -> Path:
@@ -116,9 +124,8 @@ def build_stores(
         identity=identity,
         archive_home=home,
         # Rooted at the account beside the caches: a sandbox isolates campaign STATE, and a
-        # dataset, a block pack or the ruler an L4 cell reads is not state.
+        # dataset or the ruler an L4 cell reads is not state.
         tenant_datasets=TenantDatasetStore(account),
-        block_packs=PackShelf(account=account / paths.BLOCK_PACKS_DIR),
         ruler=RulerStore(account),
         campaigns=CampaignStore(tenant_dir),
         drafts=DraftStore(tenant_dir),

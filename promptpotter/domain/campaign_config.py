@@ -33,12 +33,6 @@ PanelGateMode = Literal["strict", "off"]
 ArmGateMode = Literal["off", "review", "author"]
 
 
-class Scope(StrEnum):
-    POLICY = "policy"
-    DATA = "data"
-    IDENTITY = "identity"
-
-
 class Estimand(StrEnum):
     """The statistical quantity a knob moves. **Declaration order IS presentation order** — the
     CLI config map and the webapp panel iterate this enum; never copy members into an ordering tuple."""
@@ -85,11 +79,9 @@ def knob_label(path: str) -> str:
 class Knob:
     """``Annotated`` metadata declaring a knob; a field carrying one is a LEAF whatever its shape."""
 
-    scope: Scope
     estimands: tuple[Estimand, ...]
 
-    def __init__(self, scope: Scope, *estimands: Estimand) -> None:
-        object.__setattr__(self, "scope", scope)
+    def __init__(self, *estimands: Estimand) -> None:
         object.__setattr__(self, "estimands", estimands)
 
 
@@ -97,12 +89,12 @@ class LivesConfig(StrictModel):
     """Improvement-banked round budget: banks a life each round that promotes an arm, loses one
     each round that does not. ``budget.rounds`` and spend stay the ceilings."""
 
-    start: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.SPEND)] = Field(
+    start: Annotated[int, Knob(Estimand.STOPPING, Estimand.SPEND)] = Field(
         2,
         ge=1,
         description="Lives a run starts with (a fully-stalling run does exactly this many rounds).",
     )
-    cap: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.SPEND)] = Field(
+    cap: Annotated[int, Knob(Estimand.STOPPING, Estimand.SPEND)] = Field(
         4,
         ge=1,
         description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
@@ -141,7 +133,7 @@ class OptimizationConfig(StrictModel):
     def _over_the_default(cls, given: object) -> Budget:
         return over_the_default(Budget.model_validate(given))
 
-    optimizer: Annotated[str, Knob(Scope.IDENTITY, Estimand.SEARCH)] = Field(
+    optimizer: Annotated[str, Knob(Estimand.SEARCH)] = Field(
         "potter",
         min_length=1,
         description=(
@@ -150,7 +142,7 @@ class OptimizationConfig(StrictModel):
             "selects it install-wide."
         ),
     )
-    nodes: Annotated[dict[str, ManifestNodeOverlay], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    nodes: Annotated[dict[str, ManifestNodeOverlay], Knob(Estimand.SEARCH)] = Field(
         default_factory=dict,
         description=(
             "This campaign's overlay on the selected manifest, keyed by node name — "
@@ -159,7 +151,7 @@ class OptimizationConfig(StrictModel):
             "all ride here; each node validates its own knobs when the optimizer is selected."
         ),
     )
-    budget: Annotated[Budget, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
+    budget: Annotated[Budget, Knob(Estimand.SPEND)] = Field(
         _DEFAULT_BUDGET,
         description=(
             "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the "
@@ -184,7 +176,7 @@ class OptimizationConfig(StrictModel):
             "lives run wanting the full bank sets ``budget: {rounds: null}``."
         ),
     )
-    halt_at_accuracy: Annotated[float | None, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    halt_at_accuracy: Annotated[float | None, Knob(Estimand.STOPPING)] = Field(
         None,
         ge=0.0,
         le=1.0,
@@ -194,9 +186,7 @@ class OptimizationConfig(StrictModel):
             "record's rule."
         ),
     )
-    convergence_patience: Annotated[
-        int | None, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.SPEND)
-    ] = Field(
+    convergence_patience: Annotated[int | None, Knob(Estimand.STOPPING, Estimand.SPEND)] = Field(
         None,
         ge=1,
         description=(
@@ -207,8 +197,8 @@ class OptimizationConfig(StrictModel):
             "way. ``None`` → no such stop."
         ),
     )
-    degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
-    degradation_fatal_fastpath: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    degradation_threshold: Annotated[float, Knob(Estimand.STOPPING)] = Field(...)
+    degradation_fatal_fastpath: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
         True,
         description=(
             "End a candidate at the first FATAL sample (empty response, "
@@ -219,7 +209,7 @@ class OptimizationConfig(StrictModel):
         ),
     )
     elimination_n_min: Annotated[
-        int, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.ABILITY, Estimand.DIFFICULTY)
+        int, Knob(Estimand.STOPPING, Estimand.ABILITY, Estimand.DIFFICULTY)
     ] = Field(
         6,
         description="Minimum distinct samples before θ is read as ability: the δ ruler stays "
@@ -227,7 +217,7 @@ class OptimizationConfig(StrictModel):
         "the floor on n for a posterior to be meaningful.",
     )
 
-    panel_gate: Annotated[PanelGateMode, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+    panel_gate: Annotated[PanelGateMode, Knob(Estimand.GATE)] = Field(
         "strict",
         description=(
             "Halt at the end of a round whose electable candidates carry HOLES — cells "
@@ -244,7 +234,7 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
-    lift_reference: Annotated[LiftReference, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+    lift_reference: Annotated[LiftReference, Knob(Estimand.GATE)] = Field(
         "best_so_far",
         description=(
             "What each arm's lift is read against — member `a` of its `vs_reference` reading. "
@@ -257,7 +247,7 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
-    origin_gate: Annotated[OriginGateMode, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+    origin_gate: Annotated[OriginGateMode, Knob(Estimand.GATE)] = Field(
         "strict",
         description=(
             "Halt after round 0 when the origin's degradation verdict is "
@@ -271,7 +261,7 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
-    arm_gate: Annotated[ArmGateMode, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+    arm_gate: Annotated[ArmGateMode, Knob(Estimand.GATE)] = Field(
         "off",
         description=(
             "Hold every round, before any arm is measured, until the operator answers with "
@@ -287,7 +277,7 @@ class OptimizationConfig(StrictModel):
 
     enable_2pl_graduation: Annotated[
         bool,
-        Knob(Scope.POLICY, Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY),
+        Knob(Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY),
     ] = Field(
         True,
         description=(
@@ -299,7 +289,7 @@ class OptimizationConfig(StrictModel):
             "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
         ),
     )
-    determinism: Annotated[DeterminismClamp | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    determinism: Annotated[DeterminismClamp | None, Knob(Estimand.SEARCH)] = Field(
         None,
         description=(
             "Pin the optimizer's decoding and its route so a re-run reproduces this "
@@ -319,7 +309,7 @@ class OptimizationConfig(StrictModel):
 
 
 class CampaignConfig(StrictModel):
-    sp_budget_origin: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    sp_budget_origin: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         DEFAULT_ORIGIN_BUDGET,
         ge=1,
         le=MAX_PASS_ROWS,
@@ -333,10 +323,8 @@ class CampaignConfig(StrictModel):
         "scored on a superset stays like-for-like. A bank smaller than this scores on "
         "the whole bank (`sample_dataset` is a prefix slice) — not an error.",
     )
-    exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
-        default_factory=list
-    )
-    task_framing: Annotated[Literal["committed", "off"], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
+    exclude_nodes: Annotated[list[str], Knob(Estimand.SEARCH)] = Field(default_factory=list)
+    task_framing: Annotated[Literal["committed", "off"], Knob(Estimand.SEARCH)] = Field(
         "committed",
         description="Which task framing every target render splices in. `committed` "
         "(default) runs under the front matter of the dataset's `task.md`, which the first mint "
@@ -344,12 +332,8 @@ class CampaignConfig(StrictModel):
         "UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign "
         "manifest keeps the delta, so the result never reads as a framed one.",
     )
-    pipeline_overlay: Annotated[dict[str, Any], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
-        default_factory=dict
-    )
-    optimizer_narrowing: Annotated[
-        dict[str, NodeSearchNarrowing], Knob(Scope.DATA, Estimand.SEARCH)
-    ] = Field(
+    pipeline_overlay: Annotated[dict[str, Any], Knob(Estimand.SEARCH)] = Field(default_factory=dict)
+    optimizer_narrowing: Annotated[dict[str, NodeSearchNarrowing], Knob(Estimand.SEARCH)] = Field(
         default_factory=dict,
         description="Per-node declaration over the dataset's optimizer search space — the "
         "per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). "
@@ -364,8 +348,8 @@ class CampaignConfig(StrictModel):
         "+ graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for "
         "a node = nothing sanctioned there, the restrictive default.",
     )
-    scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
-    judges: Annotated[dict[str, JudgeSpec], Knob(Scope.DATA, Estimand.GATE)] = Field(
+    scoring: Annotated[str | dict[str, str] | None, Knob(Estimand.GATE)] = Field(None)
+    judges: Annotated[dict[str, JudgeSpec], Knob(Estimand.GATE)] = Field(
         default_factory=dict,
         description="LLM-as-judge graders for datasets whose answer is free text, where no "
         "deterministic matcher can grade a cell. Each value names a registered judge "
@@ -375,14 +359,14 @@ class CampaignConfig(StrictModel):
         "carry several graded terms, which is what a multi-step schema (retrieve -> ground -> "
         "answer) is, and two terms may run the same rubric on different models without one "
         "verdict landing on top of the other. Declaration order is the step order. "
-        "`Scope.DATA` because swapping a judge invalidates every verdict taken under the "
-        "old one, so a resume must run divergence detection rather than carry them forward. "
+        "Swapping a judge invalidates every verdict taken under the old one, so a resume "
+        "must run divergence detection rather than carry them forward. "
         "**Their models are declared here and inherited from nowhere** — not from "
         "the permitted model set, not from the pipeline's node config, not from the optimizer's own "
         "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
         "steered to would not be one.",
     )
-    display_metric: Annotated[DisplayMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    display_metric: Annotated[DisplayMetric, Knob(Estimand.DISPLAY)] = Field(
         "accuracy",
         description="Which fitness number the operator's round and candidate views display "
         "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
@@ -393,7 +377,7 @@ class CampaignConfig(StrictModel):
         "Rides the `composite_fitness_formula` serve path to "
         "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
-    hard_sample_order: Annotated[HardSampleOrder, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    hard_sample_order: Annotated[HardSampleOrder, Knob(Estimand.DISPLAY)] = Field(
         "info_gain",
         description="Which key ranks the hard-sample leaderboard — the heatmap, the table "
         "and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the "
@@ -405,7 +389,7 @@ class CampaignConfig(StrictModel):
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
         "knob. Client-overridable per session, like `display_metric`.",
     )
-    accuracy_ceiling: Annotated[float | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    accuracy_ceiling: Annotated[float | None, Knob(Estimand.DISPLAY)] = Field(
         None,
         gt=0.0,
         le=1.0,
@@ -418,20 +402,20 @@ class CampaignConfig(StrictModel):
         "guessed value makes every campaign on it publish a round count nobody can defend. "
         "DISPLAY config — it moves no gate, no selection and no stop.",
     )
-    dataset_split: Annotated[DatasetSplit | None, Knob(Scope.DATA, Estimand.SELECTION)] = Field(
+    dataset_split: Annotated[DatasetSplit | None, Knob(Estimand.SELECTION)] = Field(
         None,
         description="How run init partitions the bank into the search split every optimizer draw "
         "reads, the held-out bench set the headline is scored on, and a demo pool. `None` "
         "holds nothing out: the whole bank is the search split and there is no bench score.",
     )
-    run_seed: Annotated[int, Knob(Scope.DATA, Estimand.SELECTION)] = Field(
+    run_seed: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         0,
         description="The run's one seed. It seeds which rows fall where and the order the search "
         "pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, "
         "so a reordered bank holds out the same rows and reads them in the same order. An L4 "
         "seat seeds its determinism clamp and its solver node from it too.",
     )
-    bench_trigger: Annotated[BenchTrigger, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
+    bench_trigger: Annotated[BenchTrigger, Knob(Estimand.SPEND)] = Field(
         "manual",
         description="When the line's bench passes are sent — each a cell per bench row, the "
         "ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` "

@@ -29,7 +29,7 @@ from promptpotter.application.optimizers.gepa.state import (
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.arms import Cut, Elimination, Measured
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
@@ -71,12 +71,12 @@ class GepaCheckpointKind(CheckpointKind):
 
 
 class MinibatchKnobs(StrictModel):
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH, Estimand.STOPPING)] = Field(
+    size: Annotated[int, Knob(Estimand.SEARCH, Estimand.STOPPING)] = Field(
         ge=1,
         description="b: the feedback-set cells a round runs its parent on for the reflection to "
         "read, and tests the child on before the Pareto set scores it.",
     )
-    pareto_size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    pareto_size: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         ge=1,
         description="The Pareto set: the search-split cells, first in bank order, every accepted "
         "child is scored on and the candidates are ranked by; minibatches are drawn from the "

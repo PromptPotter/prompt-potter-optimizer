@@ -226,7 +226,7 @@ export function SnippetLibrary({
               </div>
               {library.snippets.length === 0 ? (
                 <Empty className="mech-empty">
-                  No block pack installed here holds a snippet yet.
+                  No block pack you read holds a snippet yet.
                 </Empty>
               ) : matching.length === 0 ? (
                 <Empty className="mech-empty">
@@ -311,7 +311,8 @@ function SourceLabel({
   id: string;
 }) {
   const src = library.sources.find((x) => x.id === id);
-  if (!src || src.first_author === null) return <>{src?.title ?? id}</>;
+  // An authored snippet's source names no work, so it reads as its id.
+  if (!src) return <>{id}</>;
   return (
     <span className="snippet-source-option">
       {src.short_title}
@@ -394,6 +395,14 @@ function SnippetRow({
           {source}
           {s.method ? ` · ${s.method}` : ""} · {s.pack}
         </span>
+        {s.presumes.length === 0 ? null : (
+          <Term
+            className="snippet-source"
+            content="A run whose chain or answer matcher lacks this never draws the snippet into its pool."
+          >
+            presumes {s.presumes.join(", ")}
+          </Term>
+        )}
         {s.supersedes === null ? null : (
           <span className="snippet-source">{lineage(s, parent)}</span>
         )}

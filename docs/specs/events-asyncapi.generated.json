@@ -9363,6 +9363,14 @@
         "additionalProperties": false,
         "description": "One variation node's act: which node ran, whether it asked a model, and the loci it wrote.",
         "properties": {
+          "donated": {
+            "description": "Of `loci`, those it wrote with the donor's value by its recombination `take`, as `node.key`: what the donor gave, recorded as the act, never read off a value that happens to equal the donor's.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Donated",
+            "type": "array"
+          },
           "loci": {
             "description": "The loci it left different from what it was handed, as `node.key`: the first one's against the first parent, a later one's against the variation before it.",
             "items": {

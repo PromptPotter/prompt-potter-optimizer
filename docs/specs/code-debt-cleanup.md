@@ -569,11 +569,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 
 ## Open — multi-arc
 
-- **One text in two packs is two library rows under one id** (`application/library.py`): the id is
-  content-addressed, the row is per pack, so a drop keyed by id cannot say which pack's provenance it
-  carries. Action: a snippet's identity is (pack, id), or packs dedupe on install. **Re-test:** two
-  packs sharing a text serve distinct row keys.
-
 - **The crowning bar tests nothing a result can quote.** `application/scoring/selection.py::elect_round_winner`
   admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
   past round 0 as a promotion; at panel width `exact_p_floor(6) = 0.031`, Holm across three arms 0.094, so
@@ -820,21 +815,8 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 - **`round_cells` has two meanings for one draw:** potter's unclamped value, read by L4, verify and the
   overlap, and the backbone's ceiling panel, clamped to the search split. Also, `RoundPlan.walk` and
   `round_walks` each decide which walk counts as a round of its own.
-- **The library's duplicate-text check is written twice**: `application/library.py::bank_snippet` (a
-  no-op) and `infrastructure/store/account_packs.py::bank_into_account_pack` (under the lock).
-  `SnippetLibrary`'s empty copy still says "installed".
-- **A cross's arity is declared nowhere**: `crossable` unpacks exactly two parents. `donated_loci` is
-  derived by verbatim equality with the donor, not recorded on the lineage, so an LLM edit that lands on
-  the donor's value reads as donated. The capo offline bench turns on one seed: lift +0.700 or none
-  after a draw-order change, so the fixture cannot tell a mating-law change from a reshuffle.
-- **`config/prompt_blocks.py` is hashed whole into every optimizer's `treatment.source`**
-  (`shapes_optimizer_prompt(__name__)`): the per-pack refusal, a shelf read with no prompt text,
-  re-keyed every treatment. Action: mark only the units a prompt reads, as `optimizer_manifest.py`
-  does. **Re-test:** edit `PackShelf.refusals`; potter's treatment key stays.
-- **Two packs holding one snippet text raise a bare `ValueError`** (`config/prompt_blocks.py::PackShelf._held`)
-  where every other shelf failure is a `PackRefusal` or a typed refusal of the knob: a `packs` knob
-  naming both reaches the operator as an error, not a sentence. Action: `BlockPoolInitializer.refusal`
-  names the repeated entry. **Re-test:** two account packs with one text, both named; the draft serves.
+- **The capo offline bench turns on one seed**: lift +0.700 or none after a draw-order change, so the
+  fixture cannot tell a mating-law change from a reshuffle.
 - **A detached arm's job is the spawner's until its process adopts it**
   (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_orphaned`): a `head-to-head`
   terminal killed between the spawn and the adoption leaves jobs the sweep releases, so the
@@ -971,10 +953,6 @@ word's `git grep -c` for that sense is 0.
   but the run continues. The notice must name only the jobs this process owns. Seen 2026-10-30 against
   `promptpotter-self.panel__606cc9`; the same stop logged `ASGI callable returned without completing
   response` for its open `events:subscribe` stream.
-- **One node's knob gates four nodes' pool access**: `potter/dispatch/facade.py` declares `BlockPool` and
-  `DemoPool` draws on `L1GenerateKnobs` for every hub member, so the check-in shows `l1_critique`,
-  `l2_context` and `l3_plan` "open · l1_generate.block_access". Either each reader owns its access or
-  the pool is read once by the hub; the served row must say which.
 - **The check-in's optimizer graph ignores the draft's overlay**: `resolve_pipeline_for_optimizer`
   resolves the manifest with `{}`.
 - **Rename candidates, not yet picked** (one word, two senses each):
@@ -982,15 +960,13 @@ word's `git grep -c` for that sense is 0.
   `application/library.py::library` beside `candidate_library` (rides the `candidate_library` →
   `answer_terms` rename); `domain/pool.py::PoolOffer` / `offered` beside
   `promptpotter/application/datasets/startability.py::offered`.
-- **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and a knob's `NodeConfigParam` serves neither
-  scope nor estimand.
+- **A member knob's `NodeConfigParam` serves no estimand**, which the config map shows for every campaign
+  knob (`application/knobs.py`), so the setup screen cannot say what moving one moves.
 - **Seen building the setup screen**:
   - `OptimizerSetupInner` reads the optimizer from the draft and from `useConnector().optimizer`, which
     are one value through two doors.
   - An edited optimizer-prompt field cannot be reset: `OptimizerNodePrompt` serves no template text and
     `campaign_config._merge_dicts` keeps a null as a value.
-  - `LibrarySnippet` serves no `presumes`, so the library cannot show that a snippet the chain refuses
-    never enters a pool.
   - Smaller: `title=` used as teaching prose in `NodeDetail` and `OptimizerCard`;
     `CheckinLoadingWindow` keeps its own `setInterval` outside `lib/cadence`; `.setup-step` is styled in
     `chat.css`.
@@ -1002,14 +978,9 @@ word's `git grep -c` for that sense is 0.
   - The "adds no arms ⇒ off" rule sits in `pipeline_resolve.py`, not on `SelectedOptimizer`.
   - The check-in picklist button's accessible name runs slug and meta together; two open check-ins
     share one slug.
-- **Seen drawing the pools in place**:
-  - A named pack that leaves the shelf makes `BlockPoolInitializer.held` raise `block_pack_not_found`,
-    so the draft read itself fails instead of offering the pack to unname.
-- **Seen splitting the manifest hash**: the scan now hashes every top-level definition the marked units
-  reach (`source_scan.py::optimizer_prompt_shapers`), so most marks are redundant roots kept from when
-  each reached name had to be marked by hand; only a unit read through an instance or a registry (as
-  `SelectedOptimizer`) needs one. The `application/` modules that still carry
-  `shapes_optimizer_prompt(__name__)` hash whole where the reached units would do. **Re-test:**
+- **Potter's `dispatch/` modules still hash whole** (`shapes_optimizer_prompt(__name__)`): a member
+  module's reads are walked (`nodes.py::_source_digest`), so only a unit read through an instance or a
+  registry needs a mark. **Re-test:**
   `git grep -n "shapes_optimizer_prompt(__name__)" -- promptpotter/application`.
 - **Seen building the prompt workspace**:
   - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
@@ -1017,11 +988,9 @@ word's `git grep -c` for that sense is 0.
   - `PipelineSetupSection` picks a default node in a `useEffect` with a ref latch: a second door into the
     shared node selection.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
-  - `LibrarySource` fakes "authored" as a cited work with no author or year.
   - `ui/MenuCheck` takes a `title=` prop, which `CandidatesToolbar` fills with teaching prose.
 - **Seen framing snippets in a prompt**:
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
-  - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).
 - **A side worktree cannot pass the full gate**: pytest's `compileall` breaks on long Temp paths,
   so a rebuilt commit series is gated without it. **Re-test:** the full gate green in a worktree.
 - **Seen building the read catalogue** (2026-11-04):

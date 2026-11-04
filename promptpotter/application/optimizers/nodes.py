@@ -28,7 +28,7 @@ from pydantic import Field
 
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.arms import ArmSlot, Proposed
-from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -98,14 +98,14 @@ Rewrites = Literal["prompt", "field"]
 
 
 class RewriteKnobs(StrictModel):
-    rewrites: Annotated[Rewrites, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    rewrites: Annotated[Rewrites, Knob(Estimand.SEARCH)] = Field(
         description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
         "as one text — the model is shown every field rendered together, its reply rides `field` "
         "and the node's other fields empty, as the papers' one-text prompts do. `field`: that "
         "field alone — the model is shown it alone, and the child inherits every other locus "
         "from its first parent."
     )
-    field: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    field: Annotated[str, Knob(Estimand.SEARCH)] = Field(
         min_length=1,
         description="The prompt field the reply is written into; every prompt node the member "
         "rewrites declares it, or the campaign is refused before it mints.",
@@ -113,7 +113,7 @@ class RewriteKnobs(StrictModel):
 
 
 class ShotKnobs(StrictModel):
-    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    k_max: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,
         description="The most shots an individual this node writes may carry; 0 withdraws the "
         "demo pool from it.",
@@ -409,9 +409,10 @@ def _source_digest(
     covered: tuple[ModuleType, ...],
     roster: frozenset[str],
 ) -> str:
-    # The members' own modules are hashed whole; only `spoken` is scanned for the shapers it reads.
+    # Both are hashed whole and scanned for the shapers they read: a member module names its wire
+    # schemas and helpers by name, so a reached unit needs no mark.
     foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - roster)
-    shapers = optimizer_prompt_shapers(spoken, covered=(*own, *covered), foreign=foreign)
+    shapers = optimizer_prompt_shapers((*spoken, *own), covered=covered, foreign=foreign)
     return module_source_digest(*spoken, *own, *shapers)
 
 

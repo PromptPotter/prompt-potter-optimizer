@@ -1163,6 +1163,10 @@ export interface Variation {
    * one's against the first parent, a later one's against the variation
    * before it. */
   loci: string[];
+  /** Of `loci`, those it wrote with the donor's value by its recombination `take`,
+   * as `node.key`: what the donor gave, recorded as the act, never read off a
+   * value that happens to equal the donor's. */
+  donated: string[];
 }
 
 /** The panel field and citation L1 declares to justify a mutation. */
@@ -2422,13 +2426,17 @@ export interface PackOffer {
   on: boolean;
 }
 
-/** A pack the shelf holds but serves none of: the rest of the library serves on without it. */
+/** What the shelf holds but does not serve, a whole pack or one snippet of the account's: the */
 export interface PackRefusal {
   /** Its directory name, as a `packs` knob names it */
   name: string;
   /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
-   * install and this account both hold the name */
-  code: 'block_pack_invalid' | 'block_pack_collision';
+   * install and this account both hold the name; `block_pack_repeats`: an
+   * install pack holding a text an install pack before it in name order
+   * holds; `block_snippet_held`: one snippet of the account's pack whose text
+   * an install pack holds, which serves as that snippet while the rest of the
+   * account's pack serves on. One text is one snippet */
+  code: 'block_pack_invalid' | 'block_pack_collision' | 'block_pack_repeats' | 'block_snippet_held';
   /** What to fix, in a sentence */
   reason: string;
 }
@@ -2934,40 +2942,42 @@ export interface OptimizerEntry {
 export interface LibraryResponse {
   /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
   parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
-  /** Every source a snippet names, once, in first-named order */
+  /** Every work a cited snippet names, once, in first-named order */
   sources: LibrarySource[];
-  /** By pack name, then each pack's own order */
+  /** The install's packs by name, then the account's, each in its own order */
   snippets: LibrarySnippet[];
-  /** Each pack held but served none of, by name, and why: the rest serve on */
+  /** Each pack held but served none of, then each snippet of the account's skipped
+   * as an install pack's, and why: the rest serve on */
   refused: PackRefusal[];
 }
 
-/** One source a snippet names: a cited work as its pack declares it, or the authored one. */
+/** One cited work a snippet names, as its pack declares it; an authored snippet names none. */
 export interface LibrarySource {
-  /** A snippet's `source`: the work's arXiv id, or `authored` */
+  /** The work's arXiv id, a cited snippet's `source` */
   id: string;
-  /** The work's title; for `authored`, the word itself */
   title: string;
   /** The title up to its first colon, for a chip */
   short_title: string;
-  /** Absent for `authored` */
-  first_author: string | null;
-  /** Absent for `authored` */
-  year: number | null;
+  first_author: string;
+  year: number;
 }
 
 /** One snippet of one pack the account reads, as a library surface lists it. */
 export interface LibrarySnippet {
   /** Its content id, the suffix of each pool entry `{part}.{id}` it expands into;
-   * one text in two packs is two rows under one id */
+   * one on the shelf, since a pack repeating another's text is refused */
   id: string;
   text: string;
   /** The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part
    * is allowed and shown as such */
   suits: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** What it takes for granted of the run it lands in: a run whose chain or matcher
+   * lacks one never draws it into a pool */
+  presumes: ('ranking' | 'last_line_answer')[];
   /** Free labels for search alone; nothing else reads them */
   tags: string[];
-  /** A `sources` id: its cited work's arXiv id, or `authored` */
+  /** A `sources` id for a cited snippet; `authored` for one an account wrote, which
+   * no work names */
   source: string;
   /** The cited technique's family as its pack records it; absent for an authored
    * snippet */
@@ -3532,8 +3542,8 @@ export interface CandidateFacts {
    * last measured as before it, of any round. Null without a second parent or
    * a main, and where no candidate of its campaign measured it. */
   donor: string | null;
-  /** The loci, as `node.key`, it moved off its main to the donor's value verbatim:
-   * what the donor gave. Empty without a donor. */
+  /** The loci, as `node.key`, its lineage records the donor gave and no later
+   * variation rewrote. Empty without a donor. */
   donated_loci: string[];
   /** Per other locus it moved off its main, the earlier candidates whose value
    * there is closer to its own than the main's: most similar first, then most
@@ -4243,13 +4253,13 @@ export interface CampaignConfig {
    * carry several graded terms, which is what a multi-step schema (retrieve
    * -> ground -> answer) is, and two terms may run the same rubric on
    * different models without one verdict landing on top of the other.
-   * Declaration order is the step order. `Scope.DATA` because swapping a
-   * judge invalidates every verdict taken under the old one, so a resume must
-   * run divergence detection rather than carry them forward. **Their models
-   * are declared here and inherited from nowhere** — not from the permitted
-   * model set, not from the pipeline's node config, not from the optimizer's
-   * own LLMs. A judge is a ruler, and a ruler that moved with whatever the
-   * search was last steered to would not be one. */
+   * Declaration order is the step order. Swapping a judge invalidates every
+   * verdict taken under the old one, so a resume must run divergence
+   * detection rather than carry them forward. **Their models are declared
+   * here and inherited from nowhere** — not from the permitted model set, not
+   * from the pipeline's node config, not from the optimizer's own LLMs. A
+   * judge is a ruler, and a ruler that moved with whatever the search was
+   * last steered to would not be one. */
   judges: Record<string, JudgeSpec>;
   /** Which fitness number the operator's round and candidate views display first
    * (lineage node value, Best tile, sidebar). DISPLAY config, not search

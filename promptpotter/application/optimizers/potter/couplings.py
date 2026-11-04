@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from promptpotter.application.optimizers.nodes import MemberCoupling
 from promptpotter.domain.campaign_config import Estimand
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-# Their prose reaches the optimizer prompt's `confounds` panel.
-shapes_optimizer_prompt(__name__)
-
 
 ADAPTIVE_QUEUE = (
     MemberCoupling(

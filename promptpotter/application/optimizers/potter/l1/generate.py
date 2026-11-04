@@ -31,7 +31,11 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_citation_in_panel,
     l1_shots_in_demo_pool,
 )
-from promptpotter.application.optimizers.variation.members import crossable, most_donated
+from promptpotter.application.optimizers.variation.members import (
+    Cross,
+    crossable,
+    most_donated,
+)
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, loci_of
 from promptpotter.domain.optimizer_state import (
@@ -230,15 +234,18 @@ def _recombined(
     dropped: list[str] = []
     for spec in specs:
         main, donor = by_id.get(spec.main), by_id.get(spec.donor)
-        parents = [] if main is None or donor is None or main.id not in mains else [main, donor]
-        loci = crossable(parents, schema) if parents else []
+        if main is None or donor is None or main.id not in mains:
+            dropped.append(spec.changes_description)
+            continue
+        cross = Cross(main, donor)
+        loci = crossable(cross, schema)
         take = {locus: 1 for locus in loci if locus.name in spec.from_donor}
         if not 0 < len(take) <= most_donated(len(loci)):
             dropped.append(spec.changes_description)
             continue
         out.append(
             children.child(
-                parents, take=take, changes_description=spec.changes_description, hosted_by=host
+                cross, take=take, changes_description=spec.changes_description, hosted_by=host
             )
         )
     if dropped:

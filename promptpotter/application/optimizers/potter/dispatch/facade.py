@@ -5,12 +5,10 @@ import logging
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
 from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
-from promptpotter.application.optimizers.nodes import AccessKnob, CountKnob
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
@@ -48,7 +46,7 @@ from promptpotter.application.optimizers.potter.records import (
     L3Memory,
     Ladder,
 )
-from promptpotter.application.optimizers.variation.members import crossable
+from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import Critique
@@ -63,14 +61,13 @@ from promptpotter.shared.errors import PromptCompositionError
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from types import ModuleType
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.nodes import CycleRead, Draw
+    from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Pool, PoolEntry
+    from promptpotter.domain.pool import PoolEntry
     from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
@@ -254,13 +251,6 @@ def _sample_keys(round_result: RoundResult) -> frozenset[str]:
 BUNDLE_READS: frozenset[type[StatePart]] = frozenset(
     {L2Memory, L3Memory, Ladder, L1Readout, Critique}
 )
-# Every bundle shows the pools as `l1_generate` takes them, so L2 lays out what L1 is shown.
-BUNDLE_DRAWS: Mapping[type[Pool], Draw] = MappingProxyType(
-    {
-        BlockPool: AccessKnob(L1GenerateKnobs, "block_access"),
-        DemoPool: CountKnob(L1GenerateKnobs, "k_max"),
-    }
-)
 BUNDLE_SEES: frozenset[type[CycleRead]] = frozenset({Lineage, Frontier, Ruler, Bounds, Target})
 
 
@@ -295,7 +285,7 @@ def _recombination(
         if main.main
         for donor in pool
         if donor is not main
-        for locus in crossable([main.individual, donor.individual], schema)
+        for locus in crossable(Cross(main.individual, donor.individual), schema)
     )
     if not loci:
         return {}

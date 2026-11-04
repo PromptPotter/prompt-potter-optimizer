@@ -23,7 +23,7 @@ from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import rewrite, rewritten
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
 from promptpotter.domain.arms import Cut, Elimination, Proposal
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -145,12 +145,12 @@ class FewShot(nodes.Proposer):
 
 
 class BlocksKnobs(StrictModel):
-    block_size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = Field(
+    block_size: Annotated[int, Knob(Estimand.SELECTION, Estimand.STOPPING)] = Field(
         ge=1,
         description="Cells per block. An eliminator decides only once a block is complete, and a "
         "paired t-test read on one block wants 30 or more.",
     )
-    max_blocks: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    max_blocks: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         ge=1,
         description="The most blocks a round's panel holds — fewer where the search split cannot "
         "fill them.",
@@ -198,7 +198,7 @@ class Blocks(nodes.Sampler):
 
 
 class PairedTKnobs(StrictModel):
-    alpha: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    alpha: Annotated[float, Knob(Estimand.STOPPING)] = Field(
         gt=0.0,
         lt=1.0,
         description="Significance level of the one-sided paired t-test asking whether another arm "
@@ -459,19 +459,17 @@ class PairedT(nodes.Eliminator):
 
 
 class CapoInitKnobs(RewriteKnobs):
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    size: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=2, description="The individuals the initial population holds — the paper's μ."
     )
-    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    k_max: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0, description="The most demo-pool shots an initial individual is given."
     )
-    length_penalty: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = (
-        Field(
-            ge=0.0,
-            description="The paper's gamma: what CAPO's objective charges per cell for the "
-            "prompt's length over the longest initial prompt's. The race and the population both "
-            "rank on that objective; the campaign's formula still scores every arm.",
-        )
+    length_penalty: Annotated[float, Knob(Estimand.SELECTION, Estimand.STOPPING)] = Field(
+        ge=0.0,
+        description="The paper's gamma: what CAPO's objective charges per cell for the "
+        "prompt's length over the longest initial prompt's. The race and the population both "
+        "rank on that objective; the campaign's formula still scores every arm.",
     )
 
 

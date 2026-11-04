@@ -14,7 +14,7 @@ from promptpotter.application.bench.node_context import Calls, Children, Lineage
 from promptpotter.application.optimizers import ManifestDir, nodes, paper_templates
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
-from promptpotter.domain.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.strict_model import StrictModel
 
@@ -40,9 +40,7 @@ MANIFEST = ManifestDir("example", Path(__file__).parent)
 
 
 class DrawKnobs(StrictModel):
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
-        ge=1, description="Cells a round draws."
-    )
+    size: Annotated[int, Knob(Estimand.SELECTION)] = Field(ge=1, description="Cells a round draws.")
 
 
 class RandomDraw(nodes.Sampler):
@@ -62,7 +60,7 @@ class RandomDraw(nodes.Sampler):
 
 
 class ProposeKnobs(RewriteKnobs):
-    variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    variants: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1, description="Arms a round proposes."
     )
 

@@ -4,10 +4,6 @@ from collections.abc import Iterable, Sequence
 from typing import Literal, assert_never
 
 from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-shapes_optimizer_prompt(__name__)
-
 
 DescriptorFeature = Literal["target_prompt_chars", "cell_objectives"]
 

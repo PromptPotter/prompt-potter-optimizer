@@ -7,9 +7,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.scoring import PipelineData, find_rank, is_verifier_graded
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-shapes_optimizer_prompt(__name__)
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema

@@ -303,8 +303,8 @@ class CandidateFacts(FrozenModel):
         "where no candidate of its campaign measured it."
     )
     donated_loci: list[str] = Field(
-        description="The loci, as `node.key`, it moved off its main to the donor's value verbatim: "
-        "what the donor gave. Empty without a donor."
+        description="The loci, as `node.key`, its lineage records the donor gave and no later "
+        "variation rewrote. Empty without a donor."
     )
     gene_sources: list[GeneSource] = Field(
         description="Per other locus it moved off its main, the earlier candidates whose value there "
