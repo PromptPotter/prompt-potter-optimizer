@@ -238,6 +238,9 @@ pythonpath = ["tests", "scripts"]
 # under the standard `test_` prefix, so default discovery picks them up;
 # `conftest.py` (fixtures, not test fns) is excluded by the underscore prefix.
 addopts = "-q --tb=short --no-header"
+# A passing test's tree is deleted at its teardown, as a finished run's is: its ledgers' read models
+# then leave the process (`read_model.py::_registered`) instead of riding the rest of the suite.
+tmp_path_retention_policy = "failed"
 filterwarnings = ["ignore::RuntimeWarning"]
 
 [tool.mypy]
