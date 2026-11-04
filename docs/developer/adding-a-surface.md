@@ -82,21 +82,24 @@ A kind is ONE row of `domain/command_kinds.py::CommandKind`, and every table a r
 | the kind | the wire name; its payload model declares it (`class …(CyclePayload, kind=CommandKind.…)`), filing the model in `PAYLOAD_MODEL_FOR_KIND` | `command_kinds.py` fails at import on a kind with no model, or the declaration on a second one |
 | `handler` | `module:handler` in the `application/commands/` module named for what the kind does; imported when dispatched, never at import | `gate.py --only handler-tables` |
 | `capability` | the rung the dispatcher's `require_capability` asks | the row cannot be written without one |
-| `cli_verb` | the terminal verb that reaches it, derived from the payload model unless `verbs.py` writes it | the row cannot be written without one |
+| `press` | who may press it (`command_kinds.py::Press`): `anyone(verb)` at every door, `person(verb)` at the browser and a terminal but never a host, `BROWSER` alone; the verb is derived from the payload model unless `verbs.py` writes it | the row cannot be written without one |
+| `destructive` | optional, MCP's `destructiveHint`: `True` where the apply overwrites or removes what is there, `False` where it only adds | — |
+| `answering` | optional, `"task"` where its doors track the act as a task (a launch, a paid pass, a resolver turn) | `commands/dispatcher.py::command_answer`, on an inline kind applying what no wire model carries |
 
-The payload's address base is its target ledger (`CyclePayload`, `CampaignPayload`, a check-in's, or a bare `CommandPayload`), and `routers/commands.py` routes on it. `cli_verb` is the `<entry-point-parity>` guard: `None` is a declaration, not an escape hatch — exactly one exists (`set-sample-lookahead`, [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead). Nothing else is written: `scripts/build_specs.py` and `scripts/build_ts_types.py` generate the spec entry and the `CommandPayloads` entry `postCommand` types its body on.
+The payload's address base is its target ledger (`CyclePayload`, `CampaignPayload`, a check-in's, or a bare `CommandPayload`), and `routers/commands.py` routes on it. `press` is the `<entry-point-parity>` guard: `BROWSER` is a declaration, not an escape hatch, each with its reason beside the row — `set-sample-lookahead` ([`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead), `set-api-key` and `remove-api-key`. `accept-terms` is a `person` row: a person's consent, never a host's. Nothing else is written: `scripts/build_specs.py` and `scripts/build_ts_types.py` generate the spec entry and the `CommandPayloads` entry `postCommand` types its body on.
 
 ---
 
 ## 9. A served read
 
-A new `GET` — not a Control-remote command and not a sixth I/O kind, since that kind is defined by MUTATION (`architecture.md` § Control-remote). **Nothing here is caught by an import-time assert**:
+A new `GET` — not a Control-remote command and not a sixth I/O kind, since that kind is defined by MUTATION (`architecture.md` § Control-remote). Its row and model are held at import: a `ReadKind` with no `ReadParams` model, a model with no docstring of its own (`read_params.py::ReadParams`), a route named by none, or one binding another row's model, raises (`api/catalogue.py::bind_surface`). A read whose `answer` streams (an `AsyncIterator`) raises nowhere: no host tool offers it (`application/host_surface.py::_answers_once`), its route is its only door, and `bind_surface` matches no `response_model` to a non-JSON `response_class`. The rest is not:
 
 | Step | Do | Why it is not optional |
 |---|---|---|
 | 1 | Name the scope the read is a fact ABOUT, and address it by that entity's id | a read keyed on the wrong entity answers *plausibly and wrongly* |
 | 2 | Declare the response model before the handler | the spec and TS types are built from it (`--only specs`, `--only ts-types`); a route without one is undeclared with every gate green |
 | 3 | Resolve in `application/`, never in the router | [`decisions.md`](../decisions.md) § 0006; [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Out-of-bounds |
+| 3a | Add the `ReadKind` row and its `application/read_params.py::ReadParams` model (fields, bounds, descriptions, docstring); the route binds it as its one input, `read: Annotated[XParams, read_input(XParams)]` (`api/deps.py::read_input`), beside `CallerDep`, and has no docstring | the model is every door's input: a host reads its fields as the tool's schema and its docstring as the tool's description, which `bind_surface` also sets as the route's OpenAPI description, so a param or a sentence on the route alone reaches no host |
 | 4 | Serve provenance for anything the client could otherwise infer | a value the browser has to *diff* to explain becomes a client twin that drifts |
 | 5 | Add the row to [`webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § Display-data sources | a data class with no row has no owner |
 | 6 | Run it and look at the panel | §3's rule |

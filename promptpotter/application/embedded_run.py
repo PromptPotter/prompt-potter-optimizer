@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
+from promptpotter.application.commands import archive_compaction, measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
@@ -42,6 +43,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.results import CycleResult
 from promptpotter.domain.sample import Bank
+from promptpotter.domain.spend import HeldBudget
 from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
@@ -136,11 +138,10 @@ async def submit_arms(
 
 async def grade_bench(stores: Stores, campaign_id: str) -> BenchScore:
     """Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands."""
-    sent = await CommandDispatcher(stores).dispatch(
-        CommandCall(GradeBenchPayload(campaign_id=campaign_id))
+    sent = await CommandDispatcher(stores).answer(
+        measuring.grade_bench, CommandCall(GradeBenchPayload(campaign_id=campaign_id))
     )
-    score: BenchScore = sent.result
-    return score
+    return sent.result
 
 
 async def compact_archive(
@@ -150,9 +151,10 @@ async def compact_archive(
     payload = PayloadInvalidError.validating(
         CompactArchivePayload, {"mode": mode, "dataset": dataset, "apply": apply}
     )
-    sent = await CommandDispatcher(stores).dispatch(CommandCall(payload))
-    report: ArchiveReport = sent.result
-    return report
+    sent = await CommandDispatcher(stores).answer(
+        archive_compaction.compact_archive, CommandCall(payload)
+    )
+    return sent.result
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,41 +208,34 @@ async def run_campaign(
         start = _Mint(declaration)
         campaign_config = effective_config(declaration)
         connector = declaration.environment.connector
-    # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
-    async with embedded_share(
-        campaign_config,
-        stores=session.store,
-        dataset_name=session.measured_dataset,
-        hop=session.hop if session.cycle_id else None,
-        requested=budget,
-        step_rounds=step_rounds,
-        sends=sends_on(session.store, campaign_config, connector),
-    ) as (job_id, held):
+
+    async def _run(held: HeldBudget) -> tuple[Session, CycleResult]:
+        running = session
         match start:
             case _Resume(cycle=cycle, optimizer=optimizer):
                 pass
             case _Mint(declaration=declaration):
                 minted = await mint_framed_cycle(
-                    session,
+                    running,
                     declaration,
-                    session.bank.samples,
-                    campaign_id=fresh_campaign_id(session),
+                    running.bank.samples,
+                    campaign_id=fresh_campaign_id(running),
                     task_text=None,
                 )
-                session, optimizer, cycle = minted.session, minted.optimizer, minted.cycle
+                running, optimizer, cycle = minted.session, minted.optimizer, minted.cycle
                 land_job(
-                    session.store,
-                    JobRegistry.attach(session.store.jobs_dir),
-                    job_id,
-                    session.hop,
+                    running.store,
+                    JobRegistry.attach(running.store.jobs_dir),
+                    held.job_id,
+                    running.hop,
                     held.share,
                 )
         return await run_optimization(
-            list(session.bank.samples),
+            list(running.bank.samples),
             cycle,
-            session=session,
+            session=running,
             observers=build_run_observers(
-                session=session,
+                session=running,
                 campaign_config=cycle.config,
                 readout_sink=readout_sink,
             ),
@@ -249,6 +244,18 @@ async def run_campaign(
             mode=mode,
             optimizer=optimizer,
         )
+
+    # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
+    return await embedded_share(
+        campaign_config,
+        stores=session.store,
+        dataset_name=session.measured_dataset,
+        hop=session.hop if session.cycle_id else None,
+        requested=budget,
+        step_rounds=step_rounds,
+        sends=sends_on(session.store, campaign_config, connector),
+        run=_run,
+    )
 
 
 async def run_head_to_head(

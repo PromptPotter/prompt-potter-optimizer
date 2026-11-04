@@ -6,7 +6,11 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any, assert_never
 
-from promptpotter.application.jobs.launcher.admission import refuse_as_busy, request_jobs
+from promptpotter.application.jobs.launcher.admission import (
+    refuse_as_busy,
+    release_slot,
+    request_jobs,
+)
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, hold_checkin_start
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
@@ -19,6 +23,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, Job
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -37,11 +42,11 @@ class Inline:
 
 @dataclass(frozen=True, slots=True)
 class Launched:
-    """``held`` is ``None`` where the run goes to its own process; ``hop`` is ``None`` while queued."""
+    """What the launch answers, as its ack records it; ``held`` is ``None`` where the run goes to
+    its own process."""
 
-    job: Job
+    launch: LaunchedJob
     held: HeldRun | None
-    hop: CycleHop | None
 
 
 async def _hold(
@@ -73,11 +78,16 @@ class Admitted:
     job_registry: JobRegistry
     inline: Inline | None
 
+    def withdraw(self, exc: BaseException) -> None:
+        """Its slot given back, where the act that admitted it raised before any run held it."""
+        logger.warning("admitted launch %s withdrawn unrun: %s", self.job.job_id, exc)
+        release_slot(self.job_registry, self.job.job_id, exc, stores=self.stores, hop=None)
+
     async def launched(self) -> Launched:
         request, job, stores, job_registry = self.request, self.job, self.stores, self.job_registry
         if self.inline is not None:
             held = await _hold(request, stores=stores, job_registry=job_registry, job=job)
-            return Launched(job=job, held=held, hop=held.session.hop)
+            return Launched(LaunchedJob.of(job, held.session.hop), held)
 
         async def hold_and_detach() -> CycleHop:
             held = await _hold(request, stores=stores, job_registry=job_registry, job=job)
@@ -87,8 +97,8 @@ class Admitted:
 
         if job.queued:
             _detach(hold_and_detach(), what=f"queued launch {job.job_id} ({request.dataset_name})")
-            return Launched(job=job, held=None, hop=None)
-        return Launched(job=job, held=None, hop=await hold_and_detach())
+            return Launched(LaunchedJob.of(job), None)
+        return Launched(LaunchedJob.of(job, await hold_and_detach()), None)
 
 
 def admit(

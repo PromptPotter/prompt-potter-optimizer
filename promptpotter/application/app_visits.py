@@ -88,7 +88,7 @@ def _agent_name(ua: str) -> str:
 
 
 @dataclass
-class _Caller:
+class _Address:
     ip: str
     first: float
     last: float
@@ -107,24 +107,24 @@ class _Caller:
         return "crawler" if self.agents else "visitor"
 
 
-def _callers(records: Iterable[SiteRecord]) -> list[_Caller]:
-    by_ip: dict[str, _Caller] = {}
+def _addresses(records: Iterable[SiteRecord]) -> list[_Address]:
+    by_ip: dict[str, _Address] = {}
     for record in records:
         at, row = epoch_seconds(record.at) or 0.0, record.row
         ip = str(row.get("ip", ""))
-        caller = by_ip.setdefault(ip, _Caller(ip=ip, first=at, last=at))
-        caller.first, caller.last = min(caller.first, at), max(caller.last, at)
-        caller.requests += 1
-        caller.countries[str(row.get("country") or "?")] += 1
-        caller.paths.add(str(row.get("path", "")))
+        address = by_ip.setdefault(ip, _Address(ip=ip, first=at, last=at))
+        address.first, address.last = min(address.first, at), max(address.last, at)
+        address.requests += 1
+        address.countries[str(row.get("country") or "?")] += 1
+        address.paths.add(str(row.get("path", "")))
         ua = str(row.get("ua", ""))
         if not ua or _AGENT.search(ua):
-            caller.agents[_agent_name(ua)] += 1
+            address.agents[_agent_name(ua)] += 1
         hunted = _hunted(row)
-        caller.hunts.update(hunted)
+        address.hunts.update(hunted)
         status = int(row.get("status", 0))
         if hunted and 200 <= status < 300:
-            caller.answered.append(f"{row.get('path')} ({status})")
+            address.answered.append(f"{row.get('path')} ({status})")
     return list(by_ip.values())
 
 
@@ -150,14 +150,14 @@ class VisitsDigest(NamedTuple):
 
 
 def visits_digest(records: Iterable[SiteRecord], *, key: str, hours: int) -> VisitsDigest:
-    callers = _callers(records)
+    seen = _addresses(records)
     kinds = {
-        kind: [c for c in callers if c.kind == kind] for kind in ("scanner", "crawler", "visitor")
+        kind: [c for c in seen if c.kind == kind] for kind in ("scanner", "crawler", "visitor")
     }
-    total = sum(c.requests for c in callers)
+    total = sum(c.requests for c in seen)
     lines = [
         f"🕷 Outside traffic to the app, last {hours} h: {total} requests from "
-        f"{len(callers)} addresses without a sign-in."
+        f"{len(seen)} addresses without a sign-in."
     ]
     scanners = sorted(kinds["scanner"], key=lambda c: -c.requests)
     answered = [path for c in scanners for path in c.answered]
@@ -197,7 +197,7 @@ def visits_digest(records: Iterable[SiteRecord], *, key: str, hours: int) -> Vis
             f"Visitors {len(visitors)} from {_top(countries, 4)}: {login} opened the sign-in "
             f"page, {signin} started a sign-in."
         )
-    if not callers:
+    if not seen:
         lines.append("Nobody.")
     return VisitsDigest(key=key, text="\n".join(lines), ring=bool(answered))
 

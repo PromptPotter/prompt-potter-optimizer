@@ -11,7 +11,7 @@ from typing import NamedTuple, assert_never, get_args
 from pydantic import Field
 
 from promptpotter import connectors
-from promptpotter.application.account import account_of
+from promptpotter.application.account import account_of, account_or_opening
 from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.coupon import (
     ALLOWANCE_STATE_INFO,
@@ -313,7 +313,7 @@ def account_wallet(stores: Stores) -> AccountWallet:
     """The wallet a fresh launch on this account is admitted against: what a check-in offers and
     ``/auth/coupon`` serves, so neither can say other than ``admit_launch``."""
     return read_account_wallet(
-        user=account_of(stores),
+        user=account_or_opening(stores),
         stores=stores,
         job_registry=JobRegistry.attach(stores.jobs_dir),
     )
@@ -479,7 +479,7 @@ class QuotaStatus(StrictModel):
 
 
 def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
-    user = account_of(stores)
+    user = account_or_opening(stores)
     # The launches `max_concurrent_cycles` binds: a scoring pass is not among them.
     launches = job_registry.list_launches(user_id=user.user_id)
     ceiling = settings.MACHINE_RUN_CAPACITY

@@ -4,6 +4,7 @@ import enum
 import os
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 
@@ -17,6 +18,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import OptimizerState
@@ -57,6 +59,7 @@ from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import ARM_ROLES, MeasurementRole
+from promptpotter.shared.worded import Worded
 
 
 class CheckpointKind(enum.StrEnum):
@@ -695,6 +698,8 @@ class CommandRecord(FrozenModel):
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str
+    # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
+    act_digest: str
     issued_by: Principal
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -712,7 +717,55 @@ class DraftOpenedEffect(FrozenModel):
     draft_id: str
 
 
-CommandEffect = Annotated[NoEffect | DraftOpenedEffect, Field(discriminator="kind")]
+class LaunchedJob(FrozenModel):
+    """What a launch answers of one job it launched: the job, the cycle it holds or will (``None``
+    where a queued mint names none yet) and the words every surface names it by."""
+
+    job_id: str
+    hop: CycleHop | None
+    what: str
+
+    @classmethod
+    def of(cls, job: Job, hop: CycleHop | None = None) -> LaunchedJob:
+        """*hop* the cycle its hold took; unsaid, the one the job already knows."""
+        if hop is None and job.hop != UNRESOLVED_HOP:
+            hop = job.hop
+        named = (
+            job if hop is None else replace(job, campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
+        )
+        return cls(job_id=job.job_id, hop=hop, what=named.what)
+
+
+class LaunchedEffect(FrozenModel):
+    """A launch, of any kind: each job it launched, in launch order, which a retry under its key
+    answers — after a job's record is reaped too."""
+
+    kind: Literal["launched"] = "launched"
+    launches: list[LaunchedJob]
+
+
+class VerifySaturated(FrozenModel):
+    """A verify that bought nothing: every sample of the candidate's search split was already
+    measured for its config. Its answer, and the effect a retry under its key answers."""
+
+    kind: Literal["verify_saturated"] = "verify_saturated"
+    dataset_name: str
+    already_measured: int
+
+
+VerifyWord = Literal["saturated"]
+# What a `VerifySaturated` says, filled from its own fields: every surface reads it here.
+VERIFY_WORDS: Worded[VerifyWord, str] = Worded(
+    {
+        "saturated": "Every sample in the {dataset_name} search split is already measured for "
+        "this config ({already_measured} total). Nothing to add.",
+    }
+)
+
+
+CommandEffect = Annotated[
+    NoEffect | DraftOpenedEffect | LaunchedEffect | VerifySaturated, Field(discriminator="kind")
+]
 
 
 class CommandAckRecord(FrozenModel):

@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import TYPE_CHECKING
 
+from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
 from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.domain.command_kinds import GradeBenchPayload, PauseCyclePayload
-from promptpotter.presentation.cli.commands.launch import ctrl_c_pauses
+from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import NotFoundError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.bench import BenchScore
 
 logger = logging.getLogger("promptpotter.presentation.cli.bench")
 
@@ -36,11 +33,11 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     pause = PauseCyclePayload(
         campaign_id=holder.campaign_id, cycle_id=holder.cycle_id, reason="Ctrl+C"
     )
-    with ctrl_c_pauses(store, [pause]):
-        sent = await CommandDispatcher(store).dispatch(
-            CommandCall(GradeBenchPayload(campaign_id=campaign_id))
+    with ctrl_c_stops_pass(store, pause):
+        sent = await CommandDispatcher(store).answer(
+            measuring.grade_bench, CommandCall(GradeBenchPayload(campaign_id=campaign_id))
         )
-    score: BenchScore = sent.result
+    score = sent.result
     logger.info("bench: %s -> graded", campaign_id)
     return CommandResult(
         data=score.model_dump(mode="json"), human=f"{campaign_id} -> bench: {bench_readout(score)}"

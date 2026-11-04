@@ -76,6 +76,8 @@ LANDING_FILE = ".landing"
 PRODUCERS_DIR = "producers"
 MACHINE_DIR = "machine"
 JOB_LOGS_DIR = "logs"
+# A reaped job's record as its release stamped it, read by job id alone (`JobRegistry.launched_by`).
+ENDED_JOBS_DIR = "ended"
 
 
 def default_projects_root() -> Path:

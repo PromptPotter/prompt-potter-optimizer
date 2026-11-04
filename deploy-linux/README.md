@@ -205,7 +205,8 @@ knowing:
   survivor — a file that outlives a release, pinned in `docs/specs/data-root.generated.json` — and
   loads every file under the data root as it would then stand, writing nothing. On an `unloadable
   SURVIVOR` line, the script checks the previous commit back out, reopens admission to it, starts it
-  again and exits 1: that reshape ships no migration yet. Run data or a file no row names that will
+  again and exits 1: no migration maps that file yet, and only a release that ships one lands (a
+  migration maps every shape its record can take, so none waits on a sweep). Run data or a file no row names that will
   not load refuses the same way unless you pass `--reset` (`./update.sh v0.8.19 --reset`): every
   account's run data goes, refused while a run is live. A cache that will not load is dropped
   unasked. Last, with the API and the admin bot stopped, `land-data` plans again and writes; from

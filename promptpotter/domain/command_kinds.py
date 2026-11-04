@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
 from pydantic import (
+    ConfigDict,
     Field,
     JsonValue,
     SecretStr,
@@ -13,7 +16,6 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
-from pydantic.json_schema import SkipJsonSchema
 
 from promptpotter.domain.campaign import Arm, ArmName, Compare
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -43,174 +45,329 @@ from promptpotter.shared.identity import (
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
 )
+from promptpotter.shared.named_rows import require_own_docstring
 from promptpotter.shared.worded import Worded
 
 
+class Press(NamedTuple):
+    """Who may press a kind beyond the browser: the terminal verb a person presses it by, and
+    whether a host assistant may press it for them. A row pressed at the browser alone has none
+    (`BROWSER`)."""
+
+    cli_verb: str
+    host: bool
+
+
+def anyone(verb: str) -> Press:
+    """Every door: the browser, a terminal by *verb*, and a host's tool call."""
+    return Press(verb, host=True)
+
+
+def person(verb: str) -> Press:
+    """A person's own act at the browser or a terminal by *verb*; a host never presses it for them."""
+    return Press(verb, host=False)
+
+
+# The browser alone: no terminal verb and no host tool.
+BROWSER = None
+
+# How a door answers a kind: inline with its applied answer, or as a task its door tracks while
+# the act runs on (a launch, a paid pass, a resolver turn).
+type Answering = Literal["inline", "task"]
+
+
 class CommandKind(StrEnum):
-    """A row is `kind, handler, capability, cli_verb`: the handler is `application/commands/{module}:{attr}`, imported by the dispatch that needs it (the API imports every one at app import); a `None` capability is the account's own act, open to its session; a `None` verb DECLARES the kind browser-only."""
+    """A row is `kind, handler, capability, press[, destructive[, answering]]`: the handler is
+    `application/commands/{module}:{attr}`, imported by the dispatch that needs it (the API imports
+    every one at app import); a `None` capability is the account's own act, open to its session;
+    `press` is who may press it beyond the browser (`Press`, or `BROWSER`); `destructive` is MCP's `destructiveHint`, true for an
+    apply that overwrites or removes what is there and false for one that only adds; `answering`
+    is how its doors answer (`Answering`)."""
 
     handler: str
     capability: str | None
-    cli_verb: str | None
+    press: Press | None
+    destructive: bool
+    answering: Answering
 
-    def __new__(cls, kind: str, handler: str, capability: str | None, cli_verb: str | None) -> Self:
+    def __new__(
+        cls,
+        kind: str,
+        handler: str,
+        capability: str | None,
+        press: Press | None,
+        destructive: bool = False,
+        answering: Answering = "inline",
+    ) -> Self:
         member = str.__new__(cls, kind)
         member._value_ = kind
         member.handler = handler
         member.capability = capability
-        member.cli_verb = cli_verb
+        member.press = press
+        member.destructive = destructive
+        member.answering = answering
         return member
 
-    PAUSE_CYCLE = "pause-cycle", "loop_commands:pause_cycle", CAMPAIGN_STEP_CAP, "pause"
+    @property
+    def cli_verb(self) -> str | None:
+        return None if self.press is None else self.press.cli_verb
+
+    @property
+    def host(self) -> bool:
+        """A host assistant may press it for its person."""
+        return self.press is not None and self.press.host
+
+    @property
+    def browser_only(self) -> bool:
+        """Reached through the webapp alone: no terminal verb and no host tool."""
+        return self.press is None
+
+    PAUSE_CYCLE = (
+        "pause-cycle",
+        "loop_commands:pause_cycle",
+        CAMPAIGN_STEP_CAP,
+        anyone("pause"),
+        True,
+    )
     ORIGIN_GATE_DECISION = (
         "origin-gate-decision",
         "loop_commands:origin_gate_decision",
         CAMPAIGN_STEP_CAP,
-        "origin-gate",
+        anyone("origin-gate"),
+        True,
     )
-    SUBMIT_ARMS = "submit-arms", "loop_commands:submit_arms", CAMPAIGN_STEP_CAP, "submit-arms"
+    SUBMIT_ARMS = (
+        "submit-arms",
+        "loop_commands:submit_arms",
+        CAMPAIGN_STEP_CAP,
+        anyone("submit-arms"),
+    )
     SKIP_SEARCHPOINT = (
         "skip-searchpoint",
         "loop_commands:skip_searchpoint",
         CAMPAIGN_STEP_CAP,
-        "skip-searchpoint",
+        anyone("skip-searchpoint"),
+        True,
     )
     # Browser-only ON PURPOSE: `presentation/CLAUDE.md` § Sample look-ahead.
     SET_SAMPLE_LOOKAHEAD = (
         "set-sample-lookahead",
         "loop_commands:set_sample_lookahead",
         CAMPAIGN_LOOKAHEAD_CAP,
-        None,
+        BROWSER,
+        True,
     )
-    START_RUN = "start-run", "launching:start_run", CAMPAIGN_RUN_CAP, "resume"
-    STEP_CYCLE = "step-cycle", "launching:step_cycle", CAMPAIGN_STEP_CAP, "step-cycle"
-    FORK_CYCLE = "fork-cycle", "launching:fork_cycle", CAMPAIGN_RUN_CAP, "resume"
-    MINT_CAMPAIGN = "mint-campaign", "launching:mint_campaign", CAMPAIGN_CREATE_CAP, "new"
+    START_RUN = (
+        "start-run",
+        "launching:start_run",
+        CAMPAIGN_RUN_CAP,
+        anyone("resume"),
+        False,
+        "task",
+    )
+    STEP_CYCLE = (
+        "step-cycle",
+        "launching:step_cycle",
+        CAMPAIGN_STEP_CAP,
+        anyone("step-cycle"),
+        False,
+        "task",
+    )
+    # Its fork supersedes the line's head, which it pauses.
+    FORK_CYCLE = (
+        "fork-cycle",
+        "launching:fork_cycle",
+        CAMPAIGN_RUN_CAP,
+        anyone("resume"),
+        True,
+        "task",
+    )
+    MINT_CAMPAIGN = (
+        "mint-campaign",
+        "launching:mint_campaign",
+        CAMPAIGN_CREATE_CAP,
+        anyone("new"),
+        False,
+        "task",
+    )
     MINT_HEAD_TO_HEAD = (
         "mint-head-to-head",
         "launching:mint_head_to_head",
         CAMPAIGN_CREATE_CAP,
-        "head-to-head",
+        anyone("head-to-head"),
+        False,
+        "task",
     )
-    START_CHECKIN = "start-checkin", "launching:start_checkin", CAMPAIGN_CREATE_CAP, "new"
+    # It closes the draft it mints from.
+    START_CHECKIN = (
+        "start-checkin",
+        "launching:start_checkin",
+        CAMPAIGN_CREATE_CAP,
+        anyone("new"),
+        True,
+        "task",
+    )
     # A verify SPENDS on real cells, so it sits with the verbs that buy measurement, not the step verbs.
     VERIFY_CANDIDATE = (
         "verify-candidate",
         "measuring:verify_candidate",
         CAMPAIGN_RUN_CAP,
-        "verify",
+        anyone("verify"),
+        False,
+        "task",
     )
-    GRADE_BENCH = "grade-bench", "measuring:grade_bench", CAMPAIGN_RUN_CAP, "bench"
+    # It restates the line's headline in place.
+    GRADE_BENCH = (
+        "grade-bench",
+        "measuring:grade_bench",
+        CAMPAIGN_RUN_CAP,
+        anyone("bench"),
+        True,
+        "task",
+    )
     CHANGE_RUN_LIMITS = (
         "change-run-limits",
         "limits_and_queue:change_run_limits",
         CAMPAIGN_BUDGET_CAP,
-        "set-limits",
+        anyone("set-limits"),
+        True,
     )
     # Account-scoped, and holding the rung is not enough on the host's key: `quota.py::set_concurrent_cycles`.
     SET_CONCURRENT_CYCLES = (
         "set-concurrent-cycles",
         "limits_and_queue:set_concurrent_cycles",
         CAMPAIGN_BUDGET_CAP,
-        "set-concurrent-cycles",
+        anyone("set-concurrent-cycles"),
+        True,
     )
     # A queued MINT has no cycle to address yet, and WHOSE launch it is `JobRegistry.cancel_queued` checks.
     CANCEL_QUEUED_RUN = (
         "cancel-queued-run",
         "limits_and_queue:cancel_queued_run",
         CAMPAIGN_RUN_CAP,
-        "cancel-queued",
+        anyone("cancel-queued"),
+        True,
     )
     DELETE_CYCLE = (
         "delete-cycle",
         "cycle_cleanup:delete_cycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        "delete-cycle",
+        anyone("delete-cycle"),
+        True,
     )
     CLEANUP_EMPTY_CYCLES = (
         "cleanup-empty-cycles",
         "cycle_cleanup:cleanup_empty_cycles",
         CAMPAIGN_LIFECYCLE_CAP,
-        "cleanup-empty-cycles",
+        anyone("cleanup-empty-cycles"),
+        True,
     )
     ARCHIVE_CAMPAIGN = (
         "archive-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        "archive",
+        anyone("archive"),
+        True,
     )
     UNARCHIVE_CAMPAIGN = (
         "unarchive-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        "unarchive",
+        anyone("unarchive"),
+        True,
     )
     DELETE_CAMPAIGN = (
         "delete-campaign",
         "workspace_edits:campaign_lifecycle",
         CAMPAIGN_LIFECYCLE_CAP,
-        "delete",
+        anyone("delete"),
+        True,
     )
     # The label is how every other surface addresses the campaign to a human.
     SET_CAMPAIGN_LABEL = (
         "set-campaign-label",
         "workspace_edits:set_campaign_label",
         CAMPAIGN_LIFECYCLE_CAP,
-        "rename",
+        anyone("rename"),
+        True,
     )
     # Its purge step destroys paid spend.
     COMPACT_ARCHIVE = (
         "compact-archive",
         "archive_compaction:compact_archive",
         CAMPAIGN_LIFECYCLE_CAP,
-        "compact-archive",
+        anyone("compact-archive"),
+        True,
     )
     EDIT_DRAFT_CAMPAIGN = (
         "edit-draft-campaign",
         "draft_editing:edit_draft_campaign",
         CAMPAIGN_CREATE_CAP,
-        "new",
+        anyone("new"),
+        True,
     )
-    RESOLVE_ORIGIN = "resolve-origin", "origin_resolving:resolve_origin", CAMPAIGN_CREATE_CAP, "new"
+    # Its turn writes the draft's fields.
+    RESOLVE_ORIGIN = (
+        "resolve-origin",
+        "origin_resolving:resolve_origin",
+        CAMPAIGN_CREATE_CAP,
+        anyone("new"),
+        True,
+        "task",
+    )
     # It writes what a later campaign's `packs` may draw, so it sits with the verbs that make one.
     BANK_SNIPPET = (
         "bank-snippet",
         "workspace_edits:bank_snippet",
         CAMPAIGN_CREATE_CAP,
-        "bank-snippet",
+        anyone("bank-snippet"),
     )
     # Its apply removes the draft's ledger, so it is recorded on the workspace's.
     DISCARD_DRAFT = (
         "discard-draft",
         "draft_editing:discard_draft",
         CAMPAIGN_CREATE_CAP,
-        "discard-draft",
+        anyone("discard-draft"),
+        True,
     )
     # The three doors a check-in draft opens by; each records on the workspace's ledger, as no draft has one yet.
-    INGEST_UPLOAD = "ingest-upload", "workspace_edits:ingest_upload", CAMPAIGN_CREATE_CAP, "new"
+    INGEST_UPLOAD = (
+        "ingest-upload",
+        "workspace_edits:ingest_upload",
+        CAMPAIGN_CREATE_CAP,
+        anyone("new"),
+    )
     OPEN_DATASET_DRAFT = (
         "open-dataset-draft",
         "workspace_edits:open_dataset_draft",
         CAMPAIGN_CREATE_CAP,
-        "open-dataset-draft",
+        anyone("open-dataset-draft"),
     )
     OPEN_ORIGIN_DRAFT = (
         "open-origin-draft",
         "workspace_edits:open_origin_draft",
         CAMPAIGN_CREATE_CAP,
-        "open-origin-draft",
+        anyone("open-origin-draft"),
     )
     SET_USER_SETTINGS = (
         "set-user-settings",
         "workspace_edits:set_user_settings",
         None,
-        "set-user-settings",
+        anyone("set-user-settings"),
+        True,
     )
-    ACCEPT_TERMS = "accept-terms", "workspace_edits:accept_terms", None, "accept-terms"
+    # A person's consent: their own act, never a host's.
+    ACCEPT_TERMS = "accept-terms", "workspace_edits:accept_terms", None, person("accept-terms")
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
-    SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", CAMPAIGN_BUDGET_CAP, None
-    REMOVE_API_KEY = "remove-api-key", "workspace_edits:remove_api_key", CAMPAIGN_BUDGET_CAP, None
+    SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", CAMPAIGN_BUDGET_CAP, BROWSER, True
+    REMOVE_API_KEY = (
+        "remove-api-key",
+        "workspace_edits:remove_api_key",
+        CAMPAIGN_BUDGET_CAP,
+        BROWSER,
+        True,
+    )
 
 
 # Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
@@ -233,12 +390,32 @@ class CommandPayload(RequestBody):
         super().__init_subclass__(**kwargs)
         if kind is None:
             return
+        require_own_docstring(cls, kind)
         if kind in PAYLOAD_MODEL_FOR_KIND:
             raise TypeError(f"{kind} already carries {PAYLOAD_MODEL_FOR_KIND[kind].__name__}")
         if issubclass(cls, CyclePayload) and not hasattr(cls, "inner_refusal"):
             raise TypeError(f"{cls.__name__} is cycle-scoped and declares no `inner_refusal`")
         cls.kind = kind
         PAYLOAD_MODEL_FOR_KIND[kind] = cls
+
+    def recorded(self) -> tuple[dict[str, JsonValue], str]:
+        """The act as its `CommandRecord` keeps it, and what an idempotency key names, so one key
+        never answers two acts: that one dump and the raw value of each excluded field, each hashed
+        as its bytes. A secret's text enters no stored digest: the kind carrying one replays
+        nothing (`set-api-key`), so no retry is matched on it."""
+        dump = self.model_dump(mode="json")
+        digest = hashlib.sha256(f"{self.kind}\0".encode())
+        digest.update(json.dumps(dump, ensure_ascii=False, separators=(",", ":")).encode())
+        for name, info in type(self).model_fields.items():
+            value = getattr(self, name)
+            if not info.exclude or value is None:
+                continue
+            raw = value.encode() if isinstance(value, str) else value
+            if not isinstance(raw, bytes):
+                raise TypeError(f"{type(self).__name__}.{name} drops a {type(value).__name__}")
+            digest.update(f"\0{name}\0{len(raw)}\0".encode())
+            digest.update(raw)
+        return dump, digest.hexdigest()
 
 
 class ReasonedPayload(CommandPayload):
@@ -295,6 +472,8 @@ class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE_CYC
 
 
 class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHEAD):
+    """Arm how many cells ahead the walk sends."""
+
     # Throughput is what an inner run answers for itself: the outer's depth is never inherited.
     inner_refusal: ClassVar[str | None] = None
 
@@ -636,6 +815,8 @@ class CompactArchivePayload(CommandPayload, kind=CommandKind.COMPACT_ARCHIVE):
 
 
 class EditDraftCampaignPayload(DraftPayload, kind=CommandKind.EDIT_DRAFT_CAMPAIGN):
+    """Sparse-patch a check-in draft; answers the draft as the patch left it."""
+
     # Typed: a dict defers validation past the capability gate. Required: no patch records a no-op.
     patch: EditDraftPatch
 
@@ -746,6 +927,8 @@ class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.MINT_HEAD_TO_HEAD):
 
 
 class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
+    """Mint a campaign on an authored dataset and launch its root cycle."""
+
     dataset_name: str = Field(min_length=1, max_length=64)
     budget: Budget = Budget()
     optimization: OptimizationOverrides | None = Field(
@@ -792,13 +975,27 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         return self
 
 
+# One file's bound at every door: each transport reads one byte past it, and the bytes' own
+# validation refuses that byte (`IngestUploadPayload.blob`, the candidate-library upload).
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+UploadBytes = Annotated[bytes, Field(max_length=MAX_UPLOAD_BYTES)]
+
+
 class IngestUploadPayload(CommandPayload, kind=CommandKind.INGEST_UPLOAD):
     """Parse an uploaded tabular file into a durable check-in draft; ``start-checkin`` mints its campaign."""
+
+    # A JSON door (a host's tool call) sends the bytes base64; a form or a terminal hands them raw.
+    model_config = ConfigDict(val_json_bytes="base64", ser_json_bytes="base64")
 
     filename: str = Field(default="", max_length=256)
     slug: str | None = Field(default=None, max_length=64, description="Optional slug override.")
     # The bytes ride the act, never its record: the upload store keeps them (`record_upload`).
-    blob: SkipJsonSchema[bytes] = Field(exclude=True, repr=False)
+    blob: UploadBytes = Field(
+        exclude=True,
+        repr=False,
+        description="The file's bytes, base64: any tabular file (delimited text in any encoding, "
+        "JSON, JSONL, XLSX, XLS, ODS); any columns.",
+    )
 
 
 _DRAFT_OPENED = (
@@ -865,53 +1062,45 @@ class CommandAcceptedBody(StrictModel):
 
 
 class ReadKind(StrEnum):
-    """The read catalogue beside `CommandKind`: a row is `kind, answer`. The answer is
-    `application/{module}:{attr}`, the function whose return is the served model. The route serving
-    a row is NAMED by its kind, and `presentation/api/catalogue.py::bind_surface` refuses at import a
-    session route no row names, a row no route serves, and an answer whose return is not its route's
-    model."""
+    """The read catalogue beside `CommandKind`. A row's wire inputs and its answer are the
+    `application/read_params.py::ReadParams` model that declares it, as a payload declares its kind.
+    The route serving a row is NAMED by its kind, and `presentation/api/catalogue.py::bind_surface`
+    refuses at import a session route no row names, a row no route serves, and an answer whose
+    return is not its route's model."""
 
-    answer: str
-
-    def __new__(cls, kind: str, answer: str) -> Self:
-        member = str.__new__(cls, kind)
-        member._value_ = kind
-        member.answer = answer
-        return member
-
-    ME = "me", "account:me"
-    USER_SETTINGS = "user-settings", "account:user_settings"
-    QUOTA_STATUS = "quota-status", "jobs.quota:quota_status"
-    COUPON = "coupon", "jobs.quota:coupon_status"
-    ACTIVITY = "activity", "jobs.account_activity:account_activity"
-    ACTIVE_SESSION = "active-session", "cycle_addressing:active_session"
-    MACHINE_STATUS = "machine-status", "jobs.machine_status:machine_status"
-    OPTIMIZERS = "optimizers", "pipeline_responses:optimizer_roster"
-    LIBRARY = "library", "library:library"
-    BACKENDS = "backends", "backend_listing:list_backends"
-    BACKEND_HEALTH = "backend-health", "backend_listing:backend_health"
-    HIERARCHY = "hierarchy", "hierarchy:list_hierarchy"
-    HIERARCHY_STEPS = "hierarchy-steps", "cycle_reads:FamilyRay.window"
-    HIERARCHY_SUBTREE = "hierarchy-subtree", "hierarchy_subtree:hierarchy_subtree"
-    CYCLE_DASHBOARD = "cycle-dashboard", "served_dashboard:served_dashboard"
-    CYCLE_ROUND = "cycle-round", "cycle_reads:served_round"
-    CYCLE_ROUND_AUDIT = "cycle-round-audit", "cycle_reads:round_audit"
-    CYCLE_EXPORT = "cycle-export", "cycle_reads:export_cycle"
-    CYCLE_EVENTS = "cycle-events", "cycle_reads:cycle_event_frames"
-    CYCLE_FILES = "cycle-files", "cycle_files:list_cycle_files"
-    CYCLE_FILE = "cycle-file", "cycle_files:read_cycle_file"
-    EVIDENCE = "evidence", "evidence.read:select_evidence"
+    ME = "me"
+    USER_SETTINGS = "user-settings"
+    QUOTA_STATUS = "quota-status"
+    COUPON = "coupon"
+    ACTIVITY = "activity"
+    ACTIVE_SESSION = "active-session"
+    MACHINE_STATUS = "machine-status"
+    OPTIMIZERS = "optimizers"
+    LIBRARY = "library"
+    BACKENDS = "backends"
+    BACKEND_HEALTH = "backend-health"
+    HIERARCHY = "hierarchy"
+    HIERARCHY_STEPS = "hierarchy-steps"
+    HIERARCHY_SUBTREE = "hierarchy-subtree"
+    CYCLE_DASHBOARD = "cycle-dashboard"
+    CYCLE_ROUND = "cycle-round"
+    CYCLE_ROUND_AUDIT = "cycle-round-audit"
+    CYCLE_EXPORT = "cycle-export"
+    CYCLE_EVENTS = "cycle-events"
+    CYCLE_FILES = "cycle-files"
+    CYCLE_FILE = "cycle-file"
+    EVIDENCE = "evidence"
     # A read on a POST: no LLM call is made and nothing is minted.
-    HEAD_TO_HEAD_PRICE = "head-to-head-price", "head_to_head_price:price_head_to_head"
-    DRAFT = "draft", "datasets.draft_build:reopen_draft"
-    CAMPAIGN_PIPELINE = "campaign-pipeline", "pipeline_resolve:resolve_pipeline_at"
+    HEAD_TO_HEAD_PRICE = "head-to-head-price"
+    DRAFT = "draft"
+    CAMPAIGN_PIPELINE = "campaign-pipeline"
     # A read on a POST: nothing is written.
-    FORK_PREVIEW = "fork-preview", "pipeline_resolve:fork_preview"
-    CONFIG_MAP = "config-map", "config_map:campaign_config_map"
-    CAMPAIGN_STORAGE = "campaign-storage", "maintenance.storage_report:campaign_storage"
-    WORKSPACE_STORAGE = "workspace-storage", "maintenance.storage_report:workspace_storage"
-    DATASETS = "datasets", "origin_listing:dataset_index"
-    DATASET_PIPELINE = "dataset-pipeline", "pipeline_resolve:resolve_pipeline_for_dataset"
-    DATASET_CELLS = "dataset-cells", "scoring.measurement_log:measurement_log"
-    DATASET_CELL = "dataset-cell", "scoring.measurement_log:open_cell"
-    ORIGINS = "origins", "origin_listing:origin_index"
+    FORK_PREVIEW = "fork-preview"
+    CONFIG_MAP = "config-map"
+    CAMPAIGN_STORAGE = "campaign-storage"
+    WORKSPACE_STORAGE = "workspace-storage"
+    DATASETS = "datasets"
+    DATASET_PIPELINE = "dataset-pipeline"
+    DATASET_CELLS = "dataset-cells"
+    DATASET_CELL = "dataset-cell"
+    ORIGINS = "origins"

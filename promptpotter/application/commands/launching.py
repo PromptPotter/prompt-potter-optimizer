@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
@@ -14,6 +15,7 @@ from promptpotter.application.commands.dispatcher import (
     Dispatched,
     DispatchedToCycle,
     DispatchedToDraft,
+    RejectedError,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
@@ -25,7 +27,7 @@ from promptpotter.application.jobs.launcher.head_to_head import (
     admit_head_to_head,
     checkin_arms,
     dataset_arms,
-    replayed_head_to_head,
+    head_to_head_answer,
 )
 from promptpotter.application.jobs.launcher.launch import (
     Admitted,
@@ -53,10 +55,17 @@ from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import ComparisonExit, CycleSeed, OriginSource
+from promptpotter.domain.run_records import (
+    CommandEffect,
+    ComparisonExit,
+    CycleSeed,
+    LaunchedEffect,
+    LaunchedJob,
+    OriginSource,
+)
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import LedgerUnreadableError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
 
 if TYPE_CHECKING:
@@ -124,9 +133,39 @@ def parse_cycle_seed(
     return seed
 
 
-def _declined(dispatcher: CommandDispatcher, hop: CycleHop) -> Applier[object] | None:
-    refusal = dispatcher.run_state(hop).launch_refusal
-    return Applier.refusing(refusal) if refusal else None
+def _launch_applier(
+    dispatcher: CommandDispatcher,
+    run: Callable[[], Awaitable[Launched]],
+    *,
+    refused_on: CycleHop | None = None,
+) -> Applier[Launched]:
+    """A launch's applier: its ack records the launch, and a retry under its key answers that
+    recorded launch, read before *refused_on*'s launch refusal is asked."""
+
+    async def _run() -> Launched:
+        if refused_on is not None and (refusal := dispatcher.run_state(refused_on).launch_refusal):
+            raise RejectedError(refusal)
+        return await run()
+
+    async def _relaunched(effect: CommandEffect) -> Launched:
+        (launch,) = _recorded_launches(effect)
+        return Launched(launch, held=None)
+
+    return Applier(
+        _run, replay=_relaunched, effect_fn=lambda ran: LaunchedEffect(launches=[ran.launch])
+    )
+
+
+def _recorded_launches(effect: CommandEffect) -> list[LaunchedJob]:
+    """What a launch's ack recorded, which every launch kind's retry answers."""
+    if not isinstance(effect, LaunchedEffect):
+        raise LedgerUnreadableError(
+            ledger="the launch's ledger",
+            offset=None,
+            reason=f"a launch's ack names no job, its effect is {effect.kind!r}",
+            campaign_id=None,
+        )
+    return effect.launches
 
 
 def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> CycleHop:
@@ -142,11 +181,10 @@ def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> CycleHop:
     )
 
 
-async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[object]:
+async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[Launched]:
     dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.hop
-    if declined := _declined(dispatcher, hop):
-        return declined
-    return Applier.silent(
+    return _launch_applier(
+        dispatcher,
         lambda: launch(
             ExistingCycle(
                 _diag_target(dispatcher.stores, hop, payload.mode),
@@ -158,29 +196,30 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[o
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
-        )
+        ),
+        refused_on=hop,
     )
 
 
-async def step_cycle(dispatched: DispatchedToCycle[StepCyclePayload]) -> Applier[object]:
+async def step_cycle(dispatched: DispatchedToCycle[StepCyclePayload]) -> Applier[Launched]:
     dispatcher, hop = dispatched.dispatcher, dispatched.hop
-    if declined := _declined(dispatcher, hop):
-        return declined
     request = ExistingCycle(
         hop, dispatched.campaign, Budget(), step_rounds=dispatched.payload.step_rounds
     )
-    return Applier.silent(
+    return _launch_applier(
+        dispatcher,
         lambda: launch(
             request,
             RunMode(),
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
-        )
+        ),
+        refused_on=hop,
     )
 
 
-async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[object]:
+async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[Launched]:
     dispatcher, payload, campaign, hop = (
         dispatched.dispatcher,
         dispatched.payload,
@@ -222,7 +261,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
             dispatcher.pause_superseded(hop, fork)
         return launched
 
-    return Applier.silent(_apply_fork)
+    return _launch_applier(dispatcher, _apply_fork)
 
 
 def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str) -> None:
@@ -239,7 +278,7 @@ def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str
         logger.warning("fork %s: launch failed and its stub was kept (%s)", new_cycle_id, reason)
 
 
-async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object]:
+async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[Launched]:
     dispatcher, payload = dispatched.dispatcher, dispatched.payload
 
     async def _apply_mint() -> Launched:
@@ -260,7 +299,7 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
             inline=dispatcher.inline,
         )
 
-    return Applier.silent(_apply_mint)
+    return _launch_applier(dispatcher, _apply_mint)
 
 
 async def mint_head_to_head(
@@ -279,11 +318,13 @@ async def mint_head_to_head(
         )
         return await admitted.launched()
 
-    async def _replay(_: object) -> HeadToHeadLaunched:
+    async def _replay(effect: CommandEffect) -> HeadToHeadLaunched:
         # A retry under an applied act's key answers what it minted; a refused act's is a new act.
-        return replayed_head_to_head(stores, dispatcher.job_registry, request)
+        return head_to_head_answer(request, _recorded_launches(effect))
 
-    return Applier(_act, replay=_replay)
+    return Applier(
+        _act, replay=_replay, effect_fn=lambda ran: LaunchedEffect(launches=ran.launches)
+    )
 
 
 async def start_checkin(
@@ -293,43 +334,44 @@ async def start_checkin(
     stores = dispatcher.stores
 
     async def _admit() -> Admitted:
-        # The claim rides the admitted job to the end of its hold; a refusal before it ends it here.
-        try:
-            # Refused before the ack; the Start's own read waits for its slot (`_commit_checkin`).
-            draft = owned_draft(stores, claim.draft_id)
-            served = await draft_served(stores, draft)
-            assert_origin_ready(draft, draft_pipeline(stores, draft, served))
-            return admit(
-                CheckinStart(claim=claim, dataset_name=draft.dataset_name, budget=start.budget),
-                RunMode(diag=start.diag),
-                stores=stores,
-                job_registry=dispatcher.job_registry,
-                inline=dispatcher.inline,
-            )
-        except BaseException:
-            claim.release()
-            raise
+        # Refused before the ack; the Start's own read waits for its slot (`_commit_checkin`).
+        draft = owned_draft(stores, claim.draft_id)
+        served = await draft_served(stores, draft)
+        assert_origin_ready(draft, draft_pipeline(stores, draft, served))
+        return admit(
+            CheckinStart(claim=claim, dataset_name=draft.dataset_name, budget=start.budget),
+            RunMode(diag=start.diag),
+            stores=stores,
+            job_registry=dispatcher.job_registry,
+            inline=dispatcher.inline,
+        )
 
     async def _admit_arms(request: HeadToHeadRequest) -> AdmittedHeadToHead:
-        # Its draft lands once every arm passed its refusals; the claim rides on to the mint.
-        try:
-            source = await checkin_arms(stores, claim, request)
-            return await admit_head_to_head(
-                source,
-                request,
-                job_registry=dispatcher.job_registry,
-                holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
-            )
-        except BaseException:
-            claim.release()
-            raise
-
-    # A second Start on it refuses while this one holds it, and is not found once it minted.
-    if (request := start.head_to_head) is not None:
-        return Applier[Admitted | AdmittedHeadToHead](
-            lambda: _admit_arms(request), replay=None, ack="accepted"
+        # Its draft lands once every arm passed its refusals.
+        source = await checkin_arms(stores, claim, request)
+        return await admit_head_to_head(
+            source,
+            request,
+            job_registry=dispatcher.job_registry,
+            holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
         )
-    return Applier[Admitted | AdmittedHeadToHead](_admit, replay=None, ack="accepted")
+
+    def _admitted(admitted: Admitted | AdmittedHeadToHead) -> CommandEffect:
+        jobs = (
+            [admitted.job] if isinstance(admitted, Admitted) else [j for j, _ in admitted.admitted]
+        )
+        return LaunchedEffect(launches=[LaunchedJob.of(job) for job in jobs])
+
+    def _withdraw(admitted: Admitted | AdmittedHeadToHead, exc: BaseException) -> None:
+        admitted.withdraw(exc)
+
+    # The claim and the slot ride the admitted launch to its mint; a second Start refuses while it
+    # holds the claim, and is not found once it minted, so no retry reaches this ledger.
+    async def _run() -> Admitted | AdmittedHeadToHead:
+        request = start.head_to_head
+        return await _admit() if request is None else await _admit_arms(request)
+
+    return Applier(_run, replay=None, effect_fn=_admitted, ack="accepted", rides=_withdraw)
 
 
 async def dispatch_start_checkin(
@@ -341,6 +383,5 @@ async def dispatch_start_checkin(
 ) -> Launched | HeadToHeadLaunched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    outcome = await dispatcher.dispatch(call)
-    admitted = cast(Admitted | AdmittedHeadToHead, outcome.result)
-    return await admitted.launched()
+    outcome = await dispatcher.answer(start_checkin, call)
+    return await outcome.result.launched()

@@ -44,6 +44,7 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         tenant_id=None
         if args.all_tenants
         else registered_or_default_identity(args.tenant).tenant_id,
+        staged={},
     )
     roots = [str(root) for root in plan.roots]
     drops = [str(drop.path) for drop in plan.drops]

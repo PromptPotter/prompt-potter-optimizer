@@ -185,6 +185,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     WebSpendBound,
 )
+from promptpotter.domain.results import CycleResult
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
@@ -1648,7 +1649,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
                 sends=_CELLS,
             )
         except QuotaExceededError as exc:
-            shared.release(job.job_id, refusal=str(exc))
+            shared.release(job.job_id, exc)
             raise
         return job, held
 
@@ -1685,8 +1686,19 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
 
     # An embedded run holds a share through the same admission, and never a machine slot.
+    async def held_embedded(held: HeldBudget) -> tuple[None, CycleResult]:
+        assert held.admitted.usd == pytest.approx(1.0)
+        run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
+        assert run is not None and cycle_share(built_stores, run).usd == pytest.approx(0.5), (
+            "an embedded run held no share, or another one"
+        )
+        assert fork_c not in {j.hop for j in shared.list_running()}, (
+            "an embedded run took a machine slot to carry its share"
+        )
+        return None, cycle_result([], None, [])
+
     async def embedded() -> None:
-        async with embedded_share(
+        await embedded_share(
             _budgeted(Budget(usd=1.0)),
             stores=built_stores,
             dataset_name="ds1",
@@ -1694,19 +1706,12 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
             requested=Budget(),
             step_rounds=None,
             sends=_CELLS,
-        ) as (_, held):
-            assert held.admitted.usd == pytest.approx(1.0)
-            run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
-            assert run is not None and cycle_share(built_stores, run).usd == pytest.approx(0.5), (
-                "an embedded run held no share, or another one"
-            )
-            assert fork_c not in {j.hop for j in shared.list_running()}, (
-                "an embedded run took a machine slot to carry its share"
-            )
+            run=held_embedded,
+        )
 
     with pytest.raises(QuotaExceededError):
         asyncio.run(embedded())
-    shared.release(job_b.job_id)
+    shared.release(job_b.job_id, StopReason.CONVERGED)
     asyncio.run(embedded())
     assert shared.running_job_for(built_stores.campaigns.workspace, fork_c) is None, (
         "an embedded run kept its share past its exit"
@@ -1735,11 +1740,11 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     with pytest.raises(QuotaExceededError):
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0003"), None)
     for job in (job_a, job_b6):
-        shared.release(job.job_id)
+        shared.release(job.job_id, StopReason.CONVERGED)
     open_c, _ = launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0004"), None)
     with pytest.raises(QuotaExceededError):
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0005"), 1.0)
-    shared.release(open_c.job_id)
+    shared.release(open_c.job_id, StopReason.CONVERGED)
 
     # A launch landing mid-reshare waits it out: A holds $1 of $1 while a raise to $3 re-shares,
     # and B, launching at $3 meanwhile, is admitted on the shares as moved, never on a torn split.
@@ -1800,7 +1805,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     for job in shared.list_holding_spend():
         if job.on_campaign(built_stores.campaigns.workspace, "camp-8"):
-            shared.release(job.job_id)
+            shared.release(job.job_id, StopReason.CONVERGED)
     # A ceiling its campaign has spent admits nothing, siblings or none.
     bill(race[0], 3.0)
     with pytest.raises(QuotaExceededError):
@@ -1848,7 +1853,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         "a $2 delegate's share was cut from its account's claim, not the campaign's $7 left"
     )
     assert claim_held.reserve.usd == pytest.approx(2.0), "the delegate's claim did not bind it"
-    shared.release(claim.job_id)
+    shared.release(claim.job_id, StopReason.CONVERGED)
 
     # A planned head-to-head is priced before it is minted, at what the archive measured a cell of
     # its models costing and what an optimizer's own rounds cost here.
@@ -3132,7 +3137,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
                 sends=_CELLS,
             )[1]
         finally:
-            slots.release(launch.job_id)
+            slots.release(launch.job_id, StopReason.CONVERGED)
 
     async def pass_beside() -> None:
         async with paid_pass(
@@ -3321,7 +3326,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     ) -> asyncio.Task[None]:
         """The arm's own process, run and exited: its slot handed back, nothing spent."""
         detached.append(spec)
-        registry.release(spec.job_id)
+        registry.release(spec.job_id, StopReason.CONVERGED)
         return asyncio.create_task(asyncio.sleep(0))
 
     monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
@@ -3689,7 +3694,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     write_jsonl(reshaped, lines)
     with pytest.raises(LedgerUnreadableError):
         billed_spend([reshaped])
-    apply_reset(plan_reset(stores.projects_root, tenant_id=None))
+    apply_reset(plan_reset(stores.projects_root, tenant_id=None, staged={}))
     assert not stores.campaigns.iter_campaign_dirs(), "a reset kept a campaign it cannot read"
     assert account_usd() == pytest.approx(framed_total + 0.13), (
         "a reset over a reshaped ledger dropped the account's spend with it"

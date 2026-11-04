@@ -11,8 +11,8 @@
 **One registry, every host, no adapter adds a tool.**
 
 - **Tools.** Writes are the `domain/command_kinds.py::CommandKind` rows, already capability-gated. Reads
-  are the `domain/command_kinds.py::ReadKind` rows, each naming the `application/` callable that answers
-  it; every session route is bound to one row (`presentation/api/catalogue.py::bind_surface`), so the
+  are the `domain/command_kinds.py::ReadKind` rows, each answered by its `application/read_params.py::ReadParams`
+  model; every session route is bound to one row (`presentation/api/catalogue.py::bind_surface`), so the
   tool list is the whole surface.
 - **Resources.** The account's data, addressed by the hierarchy address grammar
   ([`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address).
@@ -47,7 +47,16 @@ A long-running call returns a task handle per MCP's Tasks extension
 
 ## Build order
 
-1. The registry over `CommandKind` and `ReadKind`, served in-process and over MCP stdio.
+1. **Done.** The registry over `CommandKind` and `ReadKind`, served in-process and over MCP stdio:
+   `application/host_surface.py::HOST_TOOLS` (every command a host may press, every read that answers
+   once) called through `application/host_surface.py::HostSession` (the dispatcher for a command, the
+   row's `ReadParams` for a read), each host request admitted once at its entry, and a command under
+   the idempotency key its caller sends; a kind its row answers as a task (`CommandKind.answering`)
+   answers an `application/host_surface.py::HostTask`, its status what its run returned
+   (`application/host_surface.py::job_status`), a reaped job's as its release stamped it
+   (`application/jobs/registry.py::JobRegistry.launched_by`), served by `tasks/get`, `tasks/result` and
+   `tasks/cancel`; the hierarchy as resources; the "reach the origin gate" prompt. `presentation/mcp/server.py::host_server` speaks it over stdio as `python -m promptpotter mcp`
+   (the `mcp` extra), acting as the terminal's own principal.
 2. The host endpoint, declared before its handler; a turn's steps are records on the account's workspace ledger.
 3. The webapp: the composer on every screen, steps, the one proposal shape.
 4. The check-in as the "reach the origin gate" prompt, and the delete list above.

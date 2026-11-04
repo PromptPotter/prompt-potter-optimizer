@@ -954,8 +954,9 @@ word's `git grep -c` for that sense is 0.
     its fault. **Re-test:** `git grep -n "skipping origin" -- promptpotter/application/origin_listing.py`.
   - `GET /auth/me` writes (`account.arrive`): a read catalogued as `ReadKind.ME` that opens an account.
     Action: arrival is the sign-in callback's act alone. **Re-test:** `git grep -n "arrive(" -- promptpotter/presentation`.
-    Until it ships, a host or MCP registry takes the user from `account_of` and never calls `arrive` or
-    `_announce_if_opened`: no MCP or delegate read opens an account.
+    Until it ships, the `me` read itself (`read_params.py::MeParams`) reads through
+    `account.py::account_read`, which writes nothing; the route alone arrives, since an open box has
+    no sign-in callback to arrive at.
   - Three routes are named `edit-draft-campaign`: its `/commands/` route and the two form doors in
     `routers/datasets/ingest.py` (`candidate-library`, `from-column`), so `catalogue.py::bind_surface`
     admits N routes per command where a read gets one. Action: one route per kind, the form doors a

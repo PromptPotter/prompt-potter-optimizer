@@ -25,7 +25,6 @@ from promptpotter.application.jobs.mint import (
     arm_plans,
     mint_arms,
     mint_framed_arms,
-    standing_arms,
 )
 from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
@@ -35,9 +34,9 @@ from promptpotter.domain.campaign_config import CampaignConfig, effective_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import runnable_definition
-from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -66,9 +65,11 @@ class HeadToHeadStarted(StrictModel):
 
 @dataclass(frozen=True, slots=True)
 class HeadToHeadLaunched:
-    """``exits`` end as each arm's process does; a replay watches none, since another act owns them."""
+    """``launches`` is what its ack records, arm by arm; ``exits`` end as each arm's process does,
+    and a replay watches none, since another act owns them."""
 
     started: HeadToHeadStarted
+    launches: list[LaunchedJob]
     exits: list[asyncio.Task[None]]
 
 
@@ -154,6 +155,13 @@ class AdmittedHeadToHead:
     admitted: list[tuple[Job, HeldBudget]]
     job_registry: JobRegistry
 
+    def withdraw(self, exc: BaseException) -> None:
+        """Every arm's slot given back, where the act that admitted them raised before any minted."""
+        stores = self.plans[0].session.store
+        for job, _ in self.admitted:
+            logger.warning("admitted arm %s withdrawn unrun: %s", job.job_id, exc)
+            release_slot(self.job_registry, job.job_id, exc, stores=stores, hop=None)
+
     async def minted(self) -> list[HeldArm]:
         """All arms minted, each job landed on its cycle; a failure stamps every minted cycle."""
         stores, job_registry = self.plans[0].session.store, self.job_registry
@@ -206,14 +214,11 @@ class AdmittedHeadToHead:
                         hop=session.hop,
                     )
                 raise
-        started = HeadToHeadStarted(
-            head_to_head_id=self.request.head_to_head_id,
-            arms=[
-                ArmStarted(arm_key=arm.arm_key, job_id=arm.held.job_id, hop=arm.held.session.hop)
-                for arm in arms
-            ],
-        )
-        return HeadToHeadLaunched(started, exits)
+        launches = [
+            LaunchedJob.of(job, arm.held.session.hop)
+            for (job, _), arm in zip(self.admitted, arms, strict=True)
+        ]
+        return head_to_head_answer(self.request, launches, exits)
 
 
 async def admit_head_to_head(
@@ -250,34 +255,22 @@ async def admit_head_to_head(
     return AdmittedHeadToHead(source, request, plans, admitted, job_registry)
 
 
-def replayed_head_to_head(
-    stores: Stores, job_registry: JobRegistry, request: HeadToHeadRequest
+def head_to_head_answer(
+    request: HeadToHeadRequest,
+    launches: list[LaunchedJob],
+    exits: list[asyncio.Task[None]] | None = None,
 ) -> HeadToHeadLaunched:
-    """The answer an applied act gave, read back off disk: each arm's campaign, and the launch
-    that first held its root cycle."""
-    arms = standing_arms(stores, request.head_to_head_id)
-    launches = sorted(
-        (
-            job
-            for job in job_registry.list_all(user_id=str(stores.identity.user_id))
-            if isinstance(job.holder, CampaignLaunch)
-        ),
-        key=lambda job: job.created_at,
-    )
-    started: list[ArmStarted] = []
-    for arm in request.arms:
-        campaign = arms.get(arm.arm_key)
-        job = (
-            None
-            if campaign is None
-            else next((j for j in launches if j.hop == campaign.root_hop), None)
-        )
-        if campaign is None or job is None:
-            raise NotFoundError(
-                f"arm {arm.arm_key} of head-to-head {request.head_to_head_id} was minted under "
-                "this idempotency key and is gone"
-            )
-        started.append(ArmStarted(arm_key=arm.arm_key, job_id=job.job_id, hop=campaign.root_hop))
+    """What the act answers from what its ack records, arm by arm in the request's order: first
+    as it launched, and again for a retry under its key, which watches no exit."""
+    started = [
+        ArmStarted(arm_key=arm.arm_key, job_id=launch.job_id, hop=launch.hop)
+        for arm, launch in zip(request.arms, launches, strict=True)
+        if launch.hop is not None
+    ]
+    if len(started) != len(request.arms):
+        raise ValueError(f"head-to-head {request.head_to_head_id}: an arm launched no cycle")
     return HeadToHeadLaunched(
-        HeadToHeadStarted(head_to_head_id=request.head_to_head_id, arms=started), []
+        HeadToHeadStarted(head_to_head_id=request.head_to_head_id, arms=started),
+        launches,
+        exits or [],
     )

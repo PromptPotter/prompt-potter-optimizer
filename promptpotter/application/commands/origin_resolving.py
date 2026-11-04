@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.datasets.draft_build import (
@@ -69,12 +69,12 @@ async def resolve_origin(
             draft=await read_draft_wire(stores, replayed),
         )
 
-    return Applier(_apply, replay=_on_replay, claim=dispatched.claim)
+    return Applier(_apply, replay=_on_replay)
 
 
 async def dispatch_origin_resolution(
     stores: Stores, call: CommandCall[ResolveOriginPayload]
 ) -> ResolveOriginResponse:
     """Calling ``resolve_origin_turn`` bare records no turn AND re-spends the call a replay serves."""
-    outcome = await CommandDispatcher(stores).dispatch(call)
-    return cast(ResolveOriginResponse, outcome.result)
+    outcome = await CommandDispatcher(stores).answer(resolve_origin, call)
+    return outcome.result

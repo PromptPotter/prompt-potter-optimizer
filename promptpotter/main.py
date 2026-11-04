@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import inspect
 import logging
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
@@ -15,8 +16,10 @@ from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from scalar_fastapi import get_scalar_api_reference
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application import health
 from promptpotter.application.account import record_refusal
@@ -34,16 +37,16 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
 from promptpotter.domain.account_words import refusal_words
-from promptpotter.domain.command_kinds import CommandKind
+from promptpotter.domain.command_kinds import MAX_UPLOAD_BYTES, CommandKind
 from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
 from promptpotter.presentation.api.catalogue import bind_surface
 from promptpotter.presentation.api.deps import (
-    admit_session,
     auth_is_open,
     build_stores_from_identity,
+    open_caller,
     require_site_records_token,
     resolve_identity,
 )
@@ -62,6 +65,7 @@ from promptpotter.presentation.api.routers.site_records import site_records_rout
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
+    ContentTooLargeError,
     PayloadInvalidError,
     PotterError,
     UnauthorizedError,
@@ -240,6 +244,9 @@ _COMMANDS = f"{_API}{commands_router.prefix}/"
 
 @app.exception_handler(HTTPException)
 async def routing_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    if isinstance(cause := exc.__cause__, PotterError):
+        # FastAPI wraps what its body parse raised (`BodyBoundMiddleware`'s refusal) as a 400.
+        return await potter_error_handler(request, cause)
     asked = request.url.path.removeprefix(_COMMANDS)
     if request.url.path.startswith(_COMMANDS) and asked not in CommandKind:
         return _error_response(
@@ -299,16 +306,29 @@ class RouterMount(NamedTuple):
 API_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(_contract, "", None),
     RouterMount(_health, _API, None),
-    RouterMount(backends_router, _API, admit_session),
-    RouterMount(campaigns_router, _API, admit_session),
-    RouterMount(active_router, _API, admit_session),
-    RouterMount(hierarchy_router, _API, admit_session),
-    RouterMount(datasets_router, _API, admit_session),
-    RouterMount(origins_router, _API, admit_session),
-    RouterMount(commands_router, _API, admit_session),
+    RouterMount(backends_router, _API, open_caller),
+    RouterMount(campaigns_router, _API, open_caller),
+    RouterMount(active_router, _API, open_caller),
+    RouterMount(hierarchy_router, _API, open_caller),
+    RouterMount(datasets_router, _API, open_caller),
+    RouterMount(origins_router, _API, open_caller),
+    RouterMount(commands_router, _API, open_caller),
     RouterMount(auth_flow_router, _API, None),
-    RouterMount(auth_router, _API, admit_session),
+    RouterMount(auth_router, _API, open_caller),
     RouterMount(site_records_router, _API, require_site_records_token),
+)
+_ROUTES = [
+    route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)
+]
+# Before the mounts, whose copies of the routes carry what it binds.
+bind_surface(
+    [
+        route
+        for mount in API_ROUTERS
+        if mount.gate is open_caller
+        for route in mount.router.routes
+        if isinstance(route, APIRoute)
+    ]
 )
 for _mount in API_ROUTERS:
     app.include_router(
@@ -316,19 +336,6 @@ for _mount in API_ROUTERS:
         prefix=_mount.prefix,
         dependencies=[] if _mount.gate is None else [Depends(_mount.gate)],
     )
-
-_ROUTES = [
-    route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)
-]
-bind_surface(
-    [
-        route
-        for mount in API_ROUTERS
-        if mount.gate is admit_session
-        for route in mount.router.routes
-        if isinstance(route, APIRoute)
-    ]
-)
 
 
 def _request_bodies() -> Iterator[type[BaseModel]]:
@@ -358,6 +365,58 @@ _deferred = sorted(
     {body.__name__ for body in _request_bodies() if not issubclass(body, RequestBody)}
 )
 assert not _deferred, f"request bodies that are no `RequestBody`: {_deferred}"
+
+# The largest body any route accepts: an upload at its cap, beside the one form part bounded by the
+# `max_part_size` a route's form parse runs with (FastAPI calls `Request.form()` bare).
+MAX_REQUEST_BYTES = (
+    MAX_UPLOAD_BYTES + inspect.signature(Request.form).parameters["max_part_size"].default
+)
+
+
+class BodyBoundMiddleware:
+    """Pure ASGI, so a stream passes through untouched: a body past `MAX_REQUEST_BYTES` is refused
+    by its declared length before a byte is read, and by the bytes counted as they arrive, before
+    any parse spools it — ahead of every gate a route's dependencies hold. A counted overrun raises
+    into the read that met it, and the app's own handler answers and banks that one refusal."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = Headers(scope=scope).get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_REQUEST_BYTES:
+            await _too_large(scope)(scope, receive, send)
+            return
+        counted = 0
+
+        async def bounded() -> Message:
+            nonlocal counted
+            message = await receive()
+            counted += len(message.get("body", b""))
+            if counted > MAX_REQUEST_BYTES:
+                raise ContentTooLargeError(_TOO_LARGE)
+            return message
+
+        await self.app(scope, bounded, send)
+
+
+_TOO_LARGE = f"A request body holds at most {MAX_REQUEST_BYTES} bytes."
+
+
+def _too_large(scope: Scope) -> JSONResponse:
+    return _error_response(
+        Request(scope),
+        status=ContentTooLargeError.http_status,
+        code=ContentTooLargeError.code,
+        message=_TOO_LARGE,
+    )
+
+
+# Innermost of the stack, so the refusal carries every header the outer seams add.
+app.add_middleware(BodyBoundMiddleware)
 
 # Credentialed, so never `*`: the methods the routes serve, and the headers a client sends beyond
 # the CORS-safelisted ones (the command key, and the validators a conditional read revalidates with).

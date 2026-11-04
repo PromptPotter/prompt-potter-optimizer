@@ -17,6 +17,7 @@ class Extra(StrEnum):
     DSPY = "dspy"
     EXCEL = "excel"
     HARBOR = "harbor"
+    MCP = "mcp"
     OBSERVABILITY = "observability"
 
 

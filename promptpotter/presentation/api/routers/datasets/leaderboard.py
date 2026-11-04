@@ -2,18 +2,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Query, Request, Response
+from fastapi import Request, Response
 
-from promptpotter.application.scoring.measurement_log import (
-    cells_scope,
-    measurement_log,
-    open_cell,
-)
-from promptpotter.domain.cells import Cell, CellsResponse, HardSampleOrder, HeatmapScope
+from promptpotter.application.read_params import DatasetCellParams, DatasetCellsParams
+from promptpotter.domain.cells import Cell, CellsResponse
 from promptpotter.domain.command_kinds import ReadKind
-from promptpotter.domain.cycle_paths import decode_cycle_path
-from promptpotter.domain.scoring import SampleStatus
-from promptpotter.presentation.api.deps import StoresDep
+from promptpotter.presentation.api.deps import CallerDep, read_input
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 
@@ -23,89 +17,19 @@ from promptpotter.presentation.api.routers.datasets._router import datasets_rout
 )
 def get_dataset_cells(
     request: Request,
-    name: str,
-    stores: StoresDep,
-    limit: int = Query(default=50, ge=1, le=1000, description="Samples per page."),
-    max_unmeasured: int | None = Query(
-        default=None,
-        ge=0,
-        le=1000,
-        description="Cap on unmeasured samples kept in the ranking; None = no trim.",
-    ),
-    scope: Annotated[
-        HeatmapScope,
-        Query(
-            description="dataset=cross-campaign; campaign=the cycle holding the campaign's "
-            "line (needs campaign_id); cycle=one cycle (needs both ids).",
-        ),
-    ] = "dataset",
-    campaign_id: str | None = Query(
-        default=None, description="Required when scope is campaign or cycle."
-    ),
-    cycle_id: str | None = Query(default=None, description="Required when scope=cycle."),
-    descend: str | None = Query(
-        default=None,
-        description=(
-            "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, "
-            "mirrors `?descend=` on the dashboard route). Present → read every scope from the "
-            "inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from."
-        ),
-    ),
-    order: Annotated[
-        HardSampleOrder | None,
-        Query(
-            description="Override the ranking key for this read; unset ⇒ the dataset's "
-            "`CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
-        ),
-    ] = None,
-    candidate_id: str | None = Query(
-        default=None,
-        description="Keep only this individual's cells (`CellCandidate.candidate_id`). A "
-        "campaign's candidates carry one; a dataset-scope column does not, so there it keeps "
-        "nothing.",
-    ),
-    round: int | None = Query(
-        default=None,
-        description="Keep only this round's cells. A dataset-scope column carries no round, so "
-        "there it keeps nothing.",
-    ),
-    status: Annotated[
-        SampleStatus | None, Query(description="Keep only cells with this mark.")
-    ] = None,
-    at: int | None = Query(
-        default=None,
-        ge=0,
-        description="Replay scope=cycle to this line of the cycle's own ledger — the dashboard "
-        "route's `at`: the candidates named and the cells walked by then. Refused on any other "
-        "scope, which no single ledger offset addresses.",
-    ),
+    caller: CallerDep,
+    read: Annotated[DatasetCellsParams, read_input(DatasetCellsParams)],
 ) -> Response:
-    """The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones holding a kept cell."""
-    cells = cells_scope(
-        stores,
-        name,
-        scope=scope,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        descend=decode_cycle_path(descend),
-        at=at,
-    )
+    cells = read.scoped(caller.stores)
     return conditional_json(
         request,
-        (cells.version(), limit, max_unmeasured, order, candidate_id, round, status),
-        lambda: measurement_log(
-            cells,
-            limit=limit,
-            max_unmeasured=max_unmeasured,
-            order=order,
-            candidate_id=candidate_id,
-            round=round,
-            status=status,
-        ),
+        (cells.version(), read),
+        lambda: read.logged(cells),
     )
 
 
 @datasets_router.get("/{name:path}/cells/{answer}", name=ReadKind.DATASET_CELL, response_model=Cell)
-async def get_dataset_cell(name: str, answer: str, stores: StoresDep) -> Cell:
-    """One answer opened: its row assembled into a trace."""
-    return await open_cell(stores, name, answer)
+async def get_dataset_cell(
+    caller: CallerDep, read: Annotated[DatasetCellParams, read_input(DatasetCellParams)]
+) -> Cell:
+    return await read.answer(caller)

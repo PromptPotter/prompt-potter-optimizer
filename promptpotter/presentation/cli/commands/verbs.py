@@ -724,6 +724,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "one. A change of state is recorded and told to the admin bot. Network only, zero LLM spend.",
     ),
     Verb(
+        "mcp",
+        "mcp_host:cmd_mcp",
+        help="Serve this workspace to a local host assistant over MCP stdio: every command and "
+        "read as a tool, campaigns and courses as resources, the check-in as a prompt — each "
+        "call as this terminal's own principal. Runs until the host closes stdin. Needs the "
+        "`mcp` extra.",
+    ),
+    Verb(
         "pin-roster",
         "pin_roster:cmd_pin_roster",
         help="Pin a published Harbor dataset's task roster into the harbor connector's resources "

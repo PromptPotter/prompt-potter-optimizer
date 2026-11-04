@@ -17,13 +17,9 @@ from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.initialization.wiring import bind_cycle_session, complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.launcher.admission import (
-    claim_cycle,
-    launch_interrupted,
-    release_slot,
-)
+from promptpotter.application.jobs.launcher.admission import claim_cycle, release_slot
 from promptpotter.application.jobs.mint import resolve_resume
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
@@ -223,7 +219,7 @@ async def run_held_job(
             hop=None if launch_interrupted(exc) else session.hop,
         )
         raise
-    job_registry.release(job_id)
+    job_registry.release(job_id, result.stop_reason, stepped=result.stepped)
     return result, observers
 
 

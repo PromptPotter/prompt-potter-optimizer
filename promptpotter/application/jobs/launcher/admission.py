@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
@@ -22,13 +24,13 @@ from promptpotter.application.jobs.quota import (
     share_campaign_ceiling,
     slot_rate,
 )
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner.termination import run_stop_reason
+from promptpotter.domain.command_kinds import PauseCyclePayload
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CampaignLaunch,
@@ -66,12 +68,13 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     MachineBusyError,
     NotFoundError,
+    TaskUncancellableError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
@@ -79,13 +82,14 @@ from promptpotter.shared.identity import acting_principal
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger(__name__)
 
 
-def launch_interrupted(exc: BaseException) -> bool:
-    """Someone ASKED the launch to stop; neither type is visible to ``except Exception``."""
-    return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
+# A share's run: started under its hold, it answers what it ran and the result its job's release
+# records.
+type SharedRun[S] = Callable[[HeldBudget], Awaitable[tuple[S, CycleResult]]]
 
 
 def release_slot(
@@ -96,13 +100,9 @@ def release_slot(
     stores: Stores,
     hop: CycleHop | None,
 ) -> None:
-    """A launch that never reached its admission (``Job.admitted``) was REFUSED, whatever raised."""
-    job = job_registry.get(job_id)
-    if (job is not None and job.admitted) or launch_interrupted(exc):
-        stop_reason = run_stop_reason(exc)
-    else:
-        stop_reason = StopReason.NOT_ADMITTED
-    job_registry.release(job_id, refusal=str(exc) if stop_reason is StopReason.NOT_ADMITTED else "")
+    """The cycle's stop is the job's release's reading of *exc*: a refused one is ``NOT_ADMITTED``."""
+    job = job_registry.release(job_id, exc)
+    stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
     # Best-effort — it must never mask *exc*.
     try:
         if hop is None:
@@ -456,8 +456,7 @@ def open_spend_book(
     )
 
 
-@asynccontextmanager
-async def embedded_share(
+async def embedded_share[S](
     config: CampaignConfig,
     *,
     stores: Stores,
@@ -466,8 +465,10 @@ async def embedded_share(
     requested: Budget,
     step_rounds: int | None,
     sends: tuple[Send, ...],
-) -> AsyncIterator[tuple[str, HeldBudget]]:
-    """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
+    run: SharedRun[S],
+) -> tuple[S, CycleResult]:
+    """A launch's admission with no slot, taken BEFORE anything paid: the job, then its hold, then
+    *run* under it, whose result the job's release records."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
@@ -476,7 +477,6 @@ async def embedded_share(
         hop=UNRESOLVED_HOP if hop is None else hop,
         holder=EmbeddedRun(dataset_name),
     )
-    admitted = False
     try:
         declared, asked = declare_run_budget(
             config.optimization.budget, stores=stores, hop=hop, requested=requested
@@ -492,20 +492,20 @@ async def embedded_share(
             step_rounds=step_rounds,
             sends=sends,
         )
-        admitted = True
         job_registry.mark_started(job.job_id)
-        yield job.job_id, held
+        ran = await run(held)
     except BaseException as exc:
-        job_registry.release(job.job_id, refusal="" if admitted else str(exc))
+        job_registry.release(job.job_id, exc)
         raise
-    job_registry.release(job.job_id)
+    job_registry.release(job.job_id, ran[1].stop_reason, stepped=ran[1].stepped)
+    return ran
 
 
-@contextmanager
-def inner_share(
-    config: CampaignConfig, *, stores: Stores, dataset_name: str, hop: CycleHop
-) -> Iterator[HeldBudget]:
-    """An L4 inner campaign's share, of what the enclosing run's book has left at its spawn."""
+async def inner_share[S](
+    config: CampaignConfig, *, stores: Stores, dataset_name: str, hop: CycleHop, run: SharedRun[S]
+) -> tuple[S, CycleResult]:
+    """An L4 inner campaign's share, of what the enclosing run's book has left at its spawn, and
+    *run* under it, whose result the job's release records."""
     enclosing = bound_spend_book()
     if enclosing is None:
         raise RuntimeError("an inner run spawns only under its enclosing run's book")
@@ -517,7 +517,6 @@ def inner_share(
         hop=hop,
         holder=InnerRun(dataset_name),
     )
-    admitted = False
     try:
         declared, asked = declare_run_budget(
             config.optimization.budget, stores=stores, hop=hop, requested=Budget()
@@ -533,19 +532,77 @@ def inner_share(
             sends=(),
             enclosing=enclosing.money_left(),
         )
-        admitted = True
         job_registry.mark_started(job.job_id)
-        yield held
+        ran = await run(held)
     except BaseException as exc:
-        job_registry.release(job.job_id, refusal="" if admitted else str(exc))
+        job_registry.release(job.job_id, exc)
         raise
-    job_registry.release(job.job_id)
+    job_registry.release(job.job_id, ran[1].stop_reason, stepped=ran[1].stepped)
+    return ran
 
 
 class PassStoppedError(ConflictError):
     """A pause reached the pass: what it measured is banked, and a rerun replays it."""
 
     code = "pass_stopped"
+
+
+class PassHold:
+    """A paid pass's hold of the cycle it scores, the one truth its stop reads: unheld until the
+    pass holds the cycle, held to its let-go, then ended. The hold, its let-go and a stop each act
+    under the hold's own lock, so a stop lands while the pass holds its cycle or not at all."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._cycle_dir: Path | None = None
+        self._ended = False
+
+    async def take(self, cycle_dir: Path) -> None:
+        async with self._lock:
+            hold_pass(cycle_dir)
+            self._cycle_dir, self._ended = cycle_dir, False
+
+    async def let_go(self, stores: Stores, holding: CycleHop | None) -> str | None:
+        """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked."""
+        async with self._lock:
+            try:
+                return None if holding is None else _take_pause(stores, holding)
+            finally:
+                if self._cycle_dir is not None:
+                    release_pass(self._cycle_dir)
+                self._cycle_dir, self._ended = None, True
+
+    @asynccontextmanager
+    async def stopping(self, stores: Stores, pause: PauseCyclePayload) -> AsyncIterator[None]:
+        """Where *pause* addresses the cycle this pass holds, its body sends it before any let-go:
+        a stop never lands on a run holding the cycle after. Refused before the pass holds it, when
+        nothing is spent yet, and once it let go."""
+        hop = CycleHop(campaign_id=pause.campaign_id, cycle_id=pause.cycle_id)
+        leaf_stores, leaf = await asyncio.to_thread(
+            resolve_cycle_path, stores, (hop, *decode_cycle_path(pause.descend))
+        )
+        async with self._lock:
+            if self._ended:
+                raise TaskUncancellableError("the pass ended: nothing is left to stop")
+            if self._cycle_dir != leaf_stores.campaigns.cycle_dir(leaf):
+                raise TaskUncancellableError(
+                    f"the pass holds {leaf.cycle_id} not yet, so no pause stops it; ask again"
+                )
+            yield
+
+    @contextmanager
+    def bound(self) -> Iterator[None]:
+        """A paid pass run inside this context holds its cycle through this hold, which the caller
+        that may stop it keeps."""
+        token = _BOUND_HOLD.set(self)
+        try:
+            yield
+        finally:
+            _BOUND_HOLD.reset(token)
+
+
+# The hold of the paid pass a caller's task runs, bound by the caller that may stop it.
+_BOUND_HOLD: ContextVar[PassHold | None] = ContextVar("pass_hold", default=None)
 
 
 @asynccontextmanager
@@ -568,15 +625,15 @@ async def paid_pass(
     )
     if job.queued:
         refuse_as_busy(stores, job_registry, job)
-    admitted = False
     holding: CycleHop | None = None
+    pass_hold = _BOUND_HOLD.get() or PassHold()
     try:
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
         )
         if hop is not None:
             cycle_dir = stores.campaigns.cycle_dir(hop)
-            hold_pass(cycle_dir)
+            await pass_hold.take(cycle_dir)
             holding = hop
             # Asked of a producer gone since, as a launch's RUNNING record empties the inbox.
             _take_pause(stores, hop)
@@ -606,7 +663,6 @@ async def paid_pass(
             opened=time.monotonic(),
             live=False,
         )
-        admitted = True
         job_registry.mark_started(job.job_id)
         unbind = bind_account(stores)
         try:
@@ -615,8 +671,8 @@ async def paid_pass(
         finally:
             unbind()
     except BaseException as exc:
-        job_registry.release(job.job_id, refusal="" if admitted else str(exc))
-        stopped_by = _let_go(stores, holding)
+        job_registry.release(job.job_id, exc)
+        stopped_by = await pass_hold.let_go(stores, holding)
         if stopped_by is not None and launch_interrupted(exc):
             raise PassStoppedError(
                 f"The {verb} pass stopped: {stopped_by}. Every cell it measured is banked, and a "
@@ -624,17 +680,7 @@ async def paid_pass(
             ) from None
         raise
     job_registry.release(job.job_id)
-    _let_go(stores, holding)
-
-
-def _let_go(stores: Stores, holding: CycleHop | None) -> str | None:
-    """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked."""
-    if holding is None:
-        return None
-    try:
-        return _take_pause(stores, holding)
-    finally:
-        release_pass(stores.campaigns.cycle_dir(holding))
+    await pass_hold.let_go(stores, holding)
 
 
 def _take_pause(stores: Stores, hop: CycleHop) -> str | None:

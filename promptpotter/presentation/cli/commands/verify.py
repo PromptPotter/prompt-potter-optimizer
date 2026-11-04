@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 
+from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
-from promptpotter.application.diagnostics.verify import VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
@@ -13,7 +13,8 @@ from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.command_kinds import PauseCyclePayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, command_address
 from promptpotter.domain.paired_reading import READING_STATE_INFO
-from promptpotter.presentation.cli.commands.launch import ctrl_c_pauses
+from promptpotter.domain.run_records import VERIFY_WORDS, VerifySaturated
+from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import BadRequestError, PayloadInvalidError
@@ -48,20 +49,16 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
     pause = PauseCyclePayload.model_validate({**address, "reason": "Ctrl+C"})
-    with ctrl_c_pauses(stores, [pause]):
-        dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
-
-    outcome = dispatched.result
-    assert isinstance(outcome, VerifyOutcome), "a fresh key applies, and the applier answers one"
-    reading = outcome.reading
-    if reading is None:
-        return CommandResult(
-            human=(
-                f"{spec.candidate_id}: every sample in the {outcome.dataset_name} search split is "
-                f"already measured for this config ({outcome.already_measured} total). "
-                "Nothing to add."
-            ),
+    with ctrl_c_stops_pass(stores, pause):
+        dispatched = await CommandDispatcher(stores).answer(
+            measuring.verify_candidate, CommandCall(payload)
         )
+
+    graded = dispatched.result
+    if isinstance(graded, VerifySaturated):
+        said = VERIFY_WORDS["saturated"].format(**graded.model_dump())
+        return CommandResult(human=f"{spec.candidate_id}: {said}")
+    reading = graded.reading
 
     verdict = {True: " — held", False: " — DROPPED", None: ""}[reading.held]
     lines = [

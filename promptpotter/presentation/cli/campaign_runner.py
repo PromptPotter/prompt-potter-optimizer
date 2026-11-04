@@ -101,7 +101,8 @@ def main() -> None:
     runner.close()
     if args.json_output or result.human is None:
         print(json.dumps(result.data, indent=2, default=str))
-    else:
+    elif result.human:
+        # An empty one prints nothing: a verb whose stdout was a wire (`mcp`) leaves it clean.
         print(result.human)
     if result.exit_code:
         sys.exit(result.exit_code)

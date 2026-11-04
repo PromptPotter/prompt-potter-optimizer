@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Query, Request, Response
+from fastapi import Request, Response
 
-from promptpotter.application.evidence.metric_catalogue import MEASURAND
-from promptpotter.application.evidence.read import Evidence, select_evidence
-from promptpotter.application.evidence.subjects import parse_subject
-from promptpotter.application.head_to_head_price import HeadToHeadPrice, price_head_to_head
+from promptpotter.application.evidence.read import Evidence
+from promptpotter.application.head_to_head_price import HeadToHeadPrice
+from promptpotter.application.read_params import EvidenceParams, HeadToHeadPriceParams
 from promptpotter.domain.command_kinds import ReadKind
-from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
-from promptpotter.presentation.api.deps import StoresDep
+from promptpotter.presentation.api.deps import CallerDep, read_input
 from promptpotter.presentation.api.routers.campaigns._conditional import hashed_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
@@ -20,124 +18,15 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 # No capability gate and no L4 gate: tenant-scoped, and an id naming nothing is simply absent.
 @campaigns_router.get("/evidence", name=ReadKind.EVIDENCE, response_model=Evidence)
 def get_evidence(
-    request: Request,
-    stores: StoresDep,
-    subject: Annotated[
-        list[str],
-        Query(
-            description=(
-                "Subjects to pool, one per repetition of the parameter: "
-                "`campaign:<campaign_id>` (its root origin), `course:<campaign_id>/<cycle_id>` "
-                "(one branch, read at its last elected winner) or "
-                "`candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span "
-                "campaigns and datasets, which the comparability verdict then reports on.\n\n"
-                "An L4 inner run is addressed like any other, plus the sandbox chain it lives "
-                "in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as "
-                "`?descend=` because it is the same question. A sandbox is structurally an "
-                "ordinary projects tree, so every kind above resolves inside one unchanged.\n\n"
-                "A MASK rides the address, `;`-separated, so the record and the "
-                "counterfactual can be two channels of one read: `;samples=3,7,11` restricts "
-                "every value to those samples, and `;lens=score:<formula>` (courses only) "
-                "re-decides the branch's elections under another criterion and reads it at the "
-                "winner that would have stood. The response carries what that changed in "
-                "`subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail."
-            )
-        ),
-    ] = [],  # noqa: B006 -- FastAPI reads the default to type the query, and never mutates it
-    dataset: Annotated[
-        str,
-        Query(
-            description=(
-                "Expand to one `campaign:` subject per campaign bound to this dataset, in addition "
-                "to any named by `subject`. Read off each manifest, so it catches an A/B arm, a "
-                "fork and a rename that a name-shaped guess would skip — which is what the browser "
-                "was doing client-side, then sending one query parameter per campaign."
-            )
-        ),
-    ] = "",
-    ranking: Annotated[
-        bool,
-        Query(
-            description=(
-                "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against "
-                "its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a "
-                "config one. Rows pool within ONE campaign and never across two — they share no "
-                "anchor to be compared through. OFF by default because it is the widest walk here: "
-                "the roster half reads one document per subject, while this opens EVERY round of "
-                "every campaign selected. Scored on the SELECTED metric, in its units."
-            )
-        ),
-    ] = False,
-    winner_chain: Annotated[
-        bool,
-        Query(
-            description=(
-                "Also serve the branch standing behind each course / candidate subject — the "
-                "winner chain from its origin to its head, each point read on its own cells. "
-                "OFF by default for the same reason as `ranking`: every point past the origin "
-                "opens a round file. A campaign subject serves none, having no branch."
-            )
-        ),
-    ] = False,
-    config: Annotated[
-        bool,
-        Query(
-            description=(
-                "Also serve WHAT each searchpoint is — one flat `key -> value` map over its "
-                "RESOLVED node config plus its prompt fields, which is what lines two of them "
-                "up against each other. OFF by default because a prompt field is the largest "
-                "thing this read puts on the wire and a four-channel comparison carries four."
-            )
-        ),
-    ] = False,
-    metric: Annotated[
-        str,
-        Query(
-            description=(
-                "Which number to compare on: a key from the catalogue the response echoes "
-                "back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved "
-                "against THIS selection: a metric no selected subject carries is not offered, "
-                "and `measurand` is the seed's own lift where the cells carry one and the cell's "
-                "own fitness where a cell is a sample."
-            )
-        ),
-    ] = MEASURAND,
-    grid: Annotated[
-        str,
-        Query(
-            description=(
-                "Cross two of the factors in `factors` and serve the POOLED value at each "
-                "coordinate — `dataset,llm_only.model`. Answers 'which combination', where the "
-                "factor marginals answer 'which level on average'. Every other factor is "
-                "marginalised into the cells and named in `grid.marginalised`; to hold one fixed, "
-                "narrow `subject` to its level instead, so the server pools over what is actually "
-                "being looked at. Requested rather than served for all pairs because a roster "
-                "varying on fifteen keys has 105 of them. Two axes at any number of factors."
-            )
-        ),
-    ] = "",
+    request: Request, caller: CallerDep, read: Annotated[EvidenceParams, read_input(EvidenceParams)]
 ) -> Response:
-    """The cross-subject read: the bench head-to-head, roster, comparability, replicates and decomposition, then a merged interval per subject with every pairwise test under the selected metric."""
-    evidence = select_evidence(
-        stores,
-        subjects=[parse_subject(raw) for raw in subject],
-        dataset=dataset,
-        grid=grid,
-        include_ranking=ranking,
-        include_winner_chain=winner_chain,
-        include_config=config,
-        metric=metric,
-    )
-    return hashed_json(request, evidence, stamp="generated_at")
+    return hashed_json(request, read.answer(caller), stamp="generated_at")
 
 
 @campaigns_router.post(
     "/head-to-head/price", name=ReadKind.HEAD_TO_HEAD_PRICE, response_model=HeadToHeadPrice
 )
-async def price_planned_head_to_head(stores: StoresDep, body: HeadToHeadPlan) -> HeadToHeadPrice:
-    """What a head-to-head plan costs before any of it is minted, in dollars, calls and wall clock;
-    each budget point carries the `mint-head-to-head` payload that mints its arms.
-
-    A read despite the POST: no LLM call is made and nothing is minted.
-    """
-    return await price_head_to_head(stores, body)
+async def price_planned_head_to_head(
+    caller: CallerDep, read: Annotated[HeadToHeadPriceParams, read_input(HeadToHeadPriceParams)]
+) -> HeadToHeadPrice:
+    return await read.answer(caller)

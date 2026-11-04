@@ -1904,6 +1904,43 @@
             ],
             "title": "ScoringPass",
             "type": "object"
+          },
+          "StopReason": {
+            "description": "Why a cycle's run ended or paused.",
+            "enum": [
+              "perfect_score",
+              "rounds_budget",
+              "lives_exhausted",
+              "paused",
+              "panel_cut",
+              "adapter_output_owed",
+              "crashed",
+              "diverged",
+              "optimizer_abort",
+              "converged",
+              "optimizer_exhausted",
+              "hard_cap_reached",
+              "diag_complete",
+              "target_hit",
+              "spend_budget",
+              "token_budget",
+              "host_allowance",
+              "wall_clock",
+              "origin_gate",
+              "backend_unreachable",
+              "provider_credit_exhausted",
+              "provider_throttled",
+              "price_list_unreachable",
+              "no_rate",
+              "render_error",
+              "optimizer_timeout",
+              "rebased_to_fork",
+              "producer_vanished",
+              "input_refused",
+              "not_admitted"
+            ],
+            "title": "StopReason",
+            "type": "string"
           }
         },
         "additionalProperties": false,
@@ -1937,6 +1974,17 @@
             "title": "Cycle Id",
             "type": "string"
           },
+          "ending": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StopReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "holder": {
             "discriminator": {
               "mapping": {
@@ -1966,6 +2014,23 @@
           "job_id": {
             "title": "Job Id",
             "type": "string"
+          },
+          "lapse": {
+            "anyOf": [
+              {
+                "enum": [
+                  "refused",
+                  "withdrawn",
+                  "orphaned"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lapse"
           },
           "principal_id": {
             "title": "Principal Id",
@@ -2021,6 +2086,11 @@
               }
             ],
             "title": "Started At"
+          },
+          "stepped": {
+            "default": false,
+            "title": "Stepped",
+            "type": "boolean"
           },
           "user_id": {
             "title": "User Id",

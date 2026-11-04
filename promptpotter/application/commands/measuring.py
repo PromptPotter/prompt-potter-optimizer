@@ -2,23 +2,44 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.diagnostics import verify
-from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
+from promptpotter.application.jobs.launcher.admission import PassHold, campaign_sends, paid_pass
 from promptpotter.application.runner.grade_bench import grade_line_bench
+from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phase_views import VerifyGradedView
+from promptpotter.domain.run_records import CommandEffect, NoEffect, VerifySaturated
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_verify
+from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import DispatchedToCycle
-    from promptpotter.domain.command_kinds import GradeBenchPayload, VerifyCandidatePayload
+    from promptpotter.domain.command_kinds import (
+        GradeBenchPayload,
+        PauseCyclePayload,
+        VerifyCandidatePayload,
+    )
+    from promptpotter.infrastructure.store.stores import Stores
+
+
+async def stop_pass(stores: Stores, hold: PassHold, pause: CommandCall[PauseCyclePayload]) -> None:
+    """Every door's stop of a paid pass in flight: *pause*, sent under the pass's own hold
+    (`PassHold.stopping`), so it reaches the pass or is refused, never a run holding the cycle after."""
+    async with hold.stopping(stores, pause.payload):
+        await CommandDispatcher(stores).dispatch(pause)
 
 
 async def verify_candidate(
     dispatched: DispatchedToCycle[VerifyCandidatePayload],
-) -> Applier[object]:
+) -> Applier[VerifyGradedView | VerifySaturated]:
+    """Answers the graded pass, or what was already measured where that is every sample; a retry
+    answers the candidate's pass as its cycle's ledger banked it, or the saturation its ack
+    recorded, never a second pass."""
     stores, hop, payload = dispatched.dispatcher.stores, dispatched.hop, dispatched.payload
 
-    async def _apply_verify() -> verify.VerifyOutcome:
+    async def _apply_verify() -> VerifyGradedView | VerifySaturated:
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
         async with paid_pass(
             stores=stores,
@@ -27,7 +48,7 @@ async def verify_candidate(
             declared=Budget(),
             sends=campaign_sends(stores, hop),
         ):
-            return await verify.verify_candidate(
+            outcome = await verify.verify_candidate(
                 stores=stores,
                 hop=hop,
                 candidate_id=payload.candidate_id,
@@ -35,10 +56,36 @@ async def verify_candidate(
                 strategy=payload.strategy,
                 seed=payload.seed,
             )
+        if outcome.verify_pass is None or outcome.reading is None:
+            return VerifySaturated(
+                dataset_name=outcome.dataset_name, already_measured=outcome.already_measured
+            )
+        return VerifyGradedView(verify_pass=outcome.verify_pass, reading=outcome.reading)
 
-    return Applier.silent(_apply_verify)
+    async def _banked(effect: CommandEffect) -> VerifyGradedView | VerifySaturated:
+        if isinstance(effect, VerifySaturated):
+            return effect
+        graded = scan_ledger_verify(stores.campaigns.ledger(hop)).graded
+        if (banked := graded.get(ArmKey(payload.candidate_id))) is None:
+            raise NotFoundError(f"{hop.cycle_id} banks no verify of {payload.candidate_id}")
+        return VerifyGradedView(verify_pass=banked[0], reading=banked[1])
+
+    def _effect(answer: VerifyGradedView | VerifySaturated) -> CommandEffect:
+        return answer if isinstance(answer, VerifySaturated) else NoEffect()
+
+    return Applier(_apply_verify, replay=_banked, effect_fn=_effect)
 
 
-async def grade_bench(dispatched: DispatchedToCycle[GradeBenchPayload]) -> Applier[object]:
+async def grade_bench(dispatched: DispatchedToCycle[GradeBenchPayload]) -> Applier[BenchScore]:
+    """Answers the line's headline; a retry answers it as the cycle's export restated it."""
     stores, hop = dispatched.dispatcher.stores, dispatched.hop
-    return Applier.silent(lambda: grade_line_bench(stores=stores, hop=hop))
+
+    async def _restated(_: CommandEffect) -> BenchScore:
+        export = stores.campaigns.read_export(hop)
+        if export is None:
+            raise NotFoundError(
+                f"{hop.campaign_id}/{hop.cycle_id} holds no export to read its bench"
+            )
+        return export.bench
+
+    return Applier(lambda: grade_line_bench(stores=stores, hop=hop), replay=_restated)

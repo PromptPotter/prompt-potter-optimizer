@@ -158,6 +158,19 @@ class DiagnosticError(PotterError):
     code = "diagnostic_refused"
 
 
+class TaskUncancellableError(ConflictError):
+    """A task whose act no command cancels, refused before any of its jobs is touched."""
+
+    code = "task_uncancellable"
+
+
+class IdempotencyKeyReusedError(PotterError):
+    """A key a ledger already holds for another act: a retry names the act it retries."""
+
+    http_status = 409
+    code = "idempotency_key_reused"
+
+
 class MachineBusyError(PotterError):
     """The holder may be the caller's OWN run, so the message stays neutral."""
 

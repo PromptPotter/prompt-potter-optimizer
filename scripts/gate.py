@@ -1464,8 +1464,9 @@ def _prove_tips(refs: str, names: Sequence[str]) -> int:
     return 1 if failed else 0
 
 
-# `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
-_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel")
+# `api`, `mcp`: mypy resolves fastapi and the MCP SDK. `harbor`, `dspy`, `mcp`: a test skipped
+# for a missing extra never ran.
+_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel", "mcp")
 # What decides the installed env; a tool table (`[tool.ruff]`, `[tool.deptry]`) does not.
 _INSTALL_KEYS = ("dependencies", "optional-dependencies", "requires-python")
 _LOCK_STAMP = _PINNED / "gate-lock.sha256"

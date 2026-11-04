@@ -30,6 +30,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import StoredConfigInvalidError
 
 ORIGIN_FIELD_MAX = 600
 
@@ -212,12 +213,14 @@ def checkin_provider() -> str:
     return checkin_manifest().config.provider
 
 
-def _checkin_template() -> OptimizerPromptTemplate:
+def checkin_template() -> OptimizerPromptTemplate:
     """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
     checkin = checkin_manifest()
     template = running_prompt(CHECKIN_NODE, checkin.config, checkin.manifest)
     if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
-        raise KeyError(f"Template 'checkin' references unknown slot(s): {sorted(unknown)}.")
+        raise StoredConfigInvalidError(
+            path="the `checkin` optimizer prompt", reason=f"unknown slot(s) {sorted(unknown)}"
+        )
     return template
 
 
@@ -229,7 +232,7 @@ async def run_checkin(
     context: LLMCallContext,
 ) -> tuple[CheckinOutput, int]:
     raw, _prompt, repair_attempts = await run_optimizer_node(
-        template=_checkin_template(),
+        template=checkin_template(),
         prompt_vars={"consultation_instruction": consultation_instruction},
         response_model=response_model,
         user_content=user_content,

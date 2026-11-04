@@ -1,22 +1,28 @@
 from __future__ import annotations
 
 import hmac
-from typing import Annotated
+import inspect
+from typing import Annotated, Any, get_origin
 
-from fastapi import Depends, Header, Request, UploadFile
+from fastapi import Depends, Header, Query, Request, UploadFile
+from pydantic import BaseModel, Field, create_model
+from pydantic.fields import FieldInfo
 
 from promptpotter.application.account import registered_or_default_identity
-from promptpotter.application.datasets.ingest import MAX_UPLOAD_BYTES
+from promptpotter.application.caller import Caller
+from promptpotter.application.commands.dispatcher import MAX_IDEMPOTENCY_KEY_CHARS
 from promptpotter.application.jobs.quota import refuse_request_rate
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.read_params import ReadParams
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import ReadKind
+from promptpotter.domain.command_kinds import MAX_UPLOAD_BYTES, CommandKind, ReadKind
+from promptpotter.domain.strict_model import RequestBody
+from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
-    BadRequestError,
-    ContentTooLargeError,
     NotFoundError,
+    PayloadInvalidError,
     ServiceUnavailableError,
     UnauthorizedError,
 )
@@ -48,30 +54,110 @@ def build_stores_from_identity(identity: IdentityDep) -> Stores:
 StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]
 
 
-def admit_session(request: Request, identity: IdentityDep) -> None:
-    """A read is what the catalogue names one (`ReadKind`), whatever its verb."""
+def get_job_registry(request: Request) -> JobRegistry:
+    registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
+    if registry is None:
+        raise ServiceUnavailableError("job registry not initialised")
+    return registry
+
+
+JobRegistryDep = Annotated[JobRegistry, Depends(get_job_registry)]
+
+
+def require_identity_bundle(request: Request) -> IdentityBundle:
+    """The install's sign-in configuration, set at startup; refused until it is."""
+    bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
+    if bundle is None:
+        raise ServiceUnavailableError(
+            "identity backend not initialised", code="identity_not_initialised"
+        )
+    return bundle
+
+
+def _drawn(request: Request, identity: IdentityDep) -> None:
+    """The request drawn on its principal's rate, read or write as the kind its route is named by
+    (`api/catalogue.py::bind_surface` names every one), before anything is built for it."""
     route = request.scope.get("route")
-    refuse_request_rate(identity, read=getattr(route, "name", None) in ReadKind)
+    refuse_request_rate(identity, read=isinstance(_NAMED[getattr(route, "name", "")], ReadKind))
 
 
-async def read_upload(request: Request, upload: UploadFile) -> bytes:
-    """Refused past ``MAX_UPLOAD_BYTES`` by the declared length, and still counted while streaming:
-    the header can lie or be absent."""
-    declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
-        raise _too_large(declared)
-    buf = bytearray()
-    while chunk := await upload.read(1024 * 1024):
-        buf.extend(chunk)
-        if len(buf) > MAX_UPLOAD_BYTES:
-            raise _too_large(len(buf))
-    return bytes(buf)
+def open_caller(
+    request: Request,
+    _rate: Annotated[None, Depends(_drawn)],
+    stores: StoresDep,
+    jobs: JobRegistryDep,
+) -> Caller:
+    """A session mount's gate: the request drawn on its rate first (`_drawn`, solved before the
+    stores), then its caller on the request's one `StoresDep`."""
+    configured = tuple(require_identity_bundle(request).config.configured)
+    return Caller(stores, jobs, configured)
 
 
-def _too_large(observed: int | str) -> ContentTooLargeError:
-    return ContentTooLargeError(
-        f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
+_NAMED: dict[str, CommandKind | ReadKind] = {k.value: k for k in (*CommandKind, *ReadKind)}
+
+
+CallerDep = Annotated[Caller, Depends(open_caller)]
+
+
+def _carried(field: FieldInfo) -> bool:
+    """A mapping or a model rides the JSON body; anything else rides the URL."""
+    annotation = field.annotation
+    return get_origin(annotation) is dict or (
+        isinstance(annotation, type) and issubclass(annotation, BaseModel)
     )
+
+
+def read_input(model: type[ReadParams]) -> Any:
+    """A read route's one input: its row's `ReadParams` model, each URL field a path parameter
+    where the route's path names it, else a query one (a list repeats), and the fields the body
+    carries one `RequestBody` named for the model. Each keeps its field's own constraints and
+    description, so a value the model refuses is refused before the route runs. The dependency's
+    signature returns *model*, which `api/catalogue.py::bind_surface` matches to the route's row."""
+    params: list[inspect.Parameter] = []
+    carried: dict[str, Any] = {}
+    for name, field in model.model_fields.items():
+        if _carried(field):
+            carried[name] = (field.annotation, field)
+            continue
+        spec: FieldInfo = (
+            Query(description=field.description)
+            if get_origin(field.annotation) is list
+            # FastAPI makes a plain field a path parameter where the route's path names it.
+            else Field(description=field.description)
+        )
+        spec.metadata = list(field.metadata)
+        params.append(
+            inspect.Parameter(
+                field.alias or name,
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=Annotated[field.annotation, spec],
+                default=inspect.Parameter.empty
+                if field.is_required()
+                else field.get_default(call_default_factory=True),
+            )
+        )
+    body: type[RequestBody] | None = None
+    if carried:
+        body = create_model(
+            f"{model.__name__.removesuffix('Params')}Body", __base__=RequestBody, **carried
+        )
+        params.append(inspect.Parameter("body", inspect.Parameter.KEYWORD_ONLY, annotation=body))
+
+    def build(**sent: Any) -> ReadParams:
+        if body is not None:
+            posted = sent.pop("body")
+            sent |= {name: getattr(posted, name) for name in carried}
+        return PayloadInvalidError.validating(model, sent)
+
+    signature = inspect.Signature(params, return_annotation=model)
+    build.__signature__ = signature  # type: ignore[attr-defined]
+    return Depends(build)
+
+
+async def bounded_read(upload: UploadFile) -> bytes:
+    """At most one byte past ``MAX_UPLOAD_BYTES``: the bytes' own bound (`UploadBytes`) refuses
+    that byte, so this read holds no policy of its own."""
+    return await upload.read(MAX_UPLOAD_BYTES + 1)
 
 
 def require_site_records_token(request: Request) -> None:
@@ -84,25 +170,11 @@ def require_site_records_token(request: Request) -> None:
         raise UnauthorizedError("site-records token required")
 
 
-def require_idempotency_key(
-    key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+def sent_idempotency_key(
+    key: Annotated[str, Header(alias="Idempotency-Key", max_length=MAX_IDEMPOTENCY_KEY_CHARS)] = "",
 ) -> str:
-    if not key or not key.strip():
-        raise BadRequestError(
-            "Idempotency-Key header is required on every command.",
-            code="idempotency_key_missing",
-        )
-    return key.strip()
+    """Read off the header alone: `CommandCall` refuses a command that names no key."""
+    return key
 
 
-IdempotencyKeyDep = Annotated[str, Depends(require_idempotency_key)]
-
-
-def get_job_registry(request: Request) -> JobRegistry:
-    registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
-    if registry is None:
-        raise ServiceUnavailableError("job registry not initialised")
-    return registry
-
-
-JobRegistryDep = Annotated[JobRegistry, Depends(get_job_registry)]
+IdempotencyKeyDep = Annotated[str, Depends(sent_idempotency_key)]

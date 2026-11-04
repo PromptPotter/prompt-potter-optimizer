@@ -46,9 +46,6 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import ConflictError, NotFoundError
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
-# Enforced by the web boundary only; the CLI relies on the per-row cap in ``read_tabular``.
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-
 
 async def refresh_capabilities(stores: Stores) -> None:
     await refresh_model_capabilities(Path(stores.base_dir))

@@ -147,27 +147,42 @@ def arrive(stores: Stores, *, device: Device | None) -> Arrival:
         existing = stores.users.load()
         if existing is not None:
             return Arrival(existing, opened=False)
-        identity = stores.identity
         held = count_accounts(stores.projects_root)
-        if not default_claim.is_host(identity) and held >= settings.MAX_ACCOUNTS:
+        if not default_claim.is_host(stores.identity) and held >= settings.MAX_ACCOUNTS:
             raise AccountCeilingError(
                 f"This box holds its ceiling of {settings.MAX_ACCOUNTS} accounts "
                 f"({held} now), so it opens no new one.",
                 details={"accounts": held, "ceiling": settings.MAX_ACCOUNTS},
             )
-        user = User(
-            user_id=str(identity.user_id),
-            tenant_id=str(identity.tenant_id),
-            email=identity.email,
-            created_at=utcnow_iso(),
-        )
+        user = _opening(stores.identity)
         _consent(stores, "account_created", at=user.created_at, device=device)
         stores.users.save(user)
     return Arrival(user, opened=True)
 
 
+def _opening(identity: IdentityContext) -> User:
+    return User(
+        user_id=str(identity.user_id),
+        tenant_id=str(identity.tenant_id),
+        email=identity.email,
+        created_at=utcnow_iso(),
+    )
+
+
 def account_of(stores: Stores) -> User:
+    """The account an act charges or edits, opened first where none is."""
     return arrive(stores, device=None).user
+
+
+def account_read(stores: Stores) -> User | None:
+    """The account a read answers, writing nothing; ``None`` for one not opened yet."""
+    return stores.users.load()
+
+
+def account_or_opening(stores: Stores) -> User:
+    """The limits and preferences the caller's account holds, writing nothing: one not opened yet
+    holds what `arrive` would open it with."""
+    return account_read(stores) or _opening(stores.identity)
 
 
 def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
@@ -206,8 +221,9 @@ class MeResponse(StrictModel):
     terms_accepted_version: str | None
 
 
-def me(stores: Stores, user: User, *, configured: Iterable[str]) -> MeResponse:
-    """``available_providers`` is the *configured* ones minus the connected one."""
+def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeResponse:
+    """``available_providers`` is the *configured* ones minus the connected one; *user* is
+    ``None`` for an account not opened yet, which has accepted no terms."""
     identity = stores.identity
     email, provider = identity.email, identity.provider
     return MeResponse(
@@ -222,7 +238,9 @@ def me(stores: Stores, user: User, *, configured: Iterable[str]) -> MeResponse:
         capabilities=sorted(identity.capabilities),
         access_state=identity.access_state,
         terms_version=TERMS_VERSION,
-        terms_accepted_version=user.terms_accepted.version if user.terms_accepted else None,
+        terms_accepted_version=user.terms_accepted.version
+        if user is not None and user.terms_accepted
+        else None,
     )
 
 
@@ -233,7 +251,7 @@ class UserSettings(StrictModel):
 
 
 def user_settings(stores: Stores) -> UserSettings:
-    return UserSettings(demo_mode_enabled=account_of(stores).demo_mode_enabled)
+    return UserSettings(demo_mode_enabled=account_or_opening(stores).demo_mode_enabled)
 
 
 def set_user_settings(stores: Stores, settings_sent: UserSettings) -> UserSettings:

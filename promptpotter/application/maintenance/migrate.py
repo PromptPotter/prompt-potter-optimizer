@@ -7,7 +7,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from promptpotter.application.maintenance.migrations import consent_trail
+from promptpotter.application.maintenance.migrations import consent_trail, job_ending
 from promptpotter.infrastructure.store.data_root import Staged
 
-MIGRATIONS: dict[str, Callable[[Path], list[Staged]]] = {"consent trail": consent_trail.staged}
+MIGRATIONS: dict[str, Callable[[Path], list[Staged]]] = {
+    "consent trail": consent_trail.staged,
+    "job ending": job_ending.staged,
+}

@@ -1982,7 +1982,9 @@
             "discriminator": {
               "mapping": {
                 "draft_opened": "#/components/schemas/DraftOpenedEffect",
-                "none": "#/components/schemas/NoEffect"
+                "launched": "#/components/schemas/LaunchedEffect",
+                "none": "#/components/schemas/NoEffect",
+                "verify_saturated": "#/components/schemas/VerifySaturated"
               },
               "propertyName": "kind"
             },
@@ -1992,6 +1994,12 @@
               },
               {
                 "$ref": "#/components/schemas/DraftOpenedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/LaunchedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/VerifySaturated"
               }
             ],
             "title": "Effect"
@@ -2028,6 +2036,10 @@
         "additionalProperties": false,
         "description": "``CommandDispatcher`` alone writes it, to the cycle's, its root's or the workspace ledger.",
         "properties": {
+          "act_digest": {
+            "title": "Act Digest",
+            "type": "string"
+          },
           "command_id": {
             "title": "Command Id",
             "type": "string"
@@ -2063,6 +2075,7 @@
           "command_id",
           "kind",
           "idempotency_key",
+          "act_digest",
           "issued_by"
         ],
         "title": "CommandRecord",
@@ -4330,6 +4343,61 @@
           "detail"
         ],
         "title": "LaunchReleasedRecord",
+        "type": "object"
+      },
+      "LaunchedEffect": {
+        "additionalProperties": false,
+        "description": "A launch, of any kind: each job it launched, in launch order, which a retry under its key\nanswers — after a job's record is reaped too.",
+        "properties": {
+          "kind": {
+            "const": "launched",
+            "default": "launched",
+            "title": "Kind",
+            "type": "string"
+          },
+          "launches": {
+            "items": {
+              "$ref": "#/components/schemas/LaunchedJob"
+            },
+            "title": "Launches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "launches"
+        ],
+        "title": "LaunchedEffect",
+        "type": "object"
+      },
+      "LaunchedJob": {
+        "additionalProperties": false,
+        "description": "What a launch answers of one job it launched: the job, the cycle it holds or will (``None``\nwhere a queued mint names none yet) and the words every surface names it by.",
+        "properties": {
+          "hop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleHop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "what": {
+            "title": "What",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "hop",
+          "what"
+        ],
+        "title": "LaunchedJob",
         "type": "object"
       },
       "LeftComparisonRecord": {
@@ -9493,6 +9561,32 @@
           "held_absent"
         ],
         "title": "VerifyReading",
+        "type": "object"
+      },
+      "VerifySaturated": {
+        "additionalProperties": false,
+        "description": "A verify that bought nothing: every sample of the candidate's search split was already\nmeasured for its config. Its answer, and the effect a retry under its key answers.",
+        "properties": {
+          "already_measured": {
+            "title": "Already Measured",
+            "type": "integer"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "kind": {
+            "const": "verify_saturated",
+            "default": "verify_saturated",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "already_measured"
+        ],
+        "title": "VerifySaturated",
         "type": "object"
       },
       "ViewAnchors": {

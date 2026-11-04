@@ -5615,6 +5615,7 @@
       },
       "EditDraftCampaignPayload": {
         "additionalProperties": false,
+        "description": "Sparse-patch a check-in draft; answers the draft as the patch left it.",
         "properties": {
           "draft_id": {
             "maxLength": 128,
@@ -6464,6 +6465,16 @@
         "title": "EvidenceVariance",
         "type": "object"
       },
+      "ExportTier": {
+        "enum": [
+          "chat",
+          "report",
+          "notebook",
+          "deploy",
+          "package"
+        ],
+        "type": "string"
+      },
       "FactorCell": {
         "additionalProperties": false,
         "description": "One cell of a 2-D projection — every subject sharing a (row, column) coordinate, pooled.\n\nServed rather than left to the browser for the reason every other number here is: a cell\nholding three subjects IS an aggregate, and a surface that averaged them would re-answer under\nits own guess at the weighting (``webapp/CLAUDE.md`` § Scoring authority).",
@@ -7056,7 +7067,7 @@
         "title": "ForkDirection",
         "type": "string"
       },
-      "ForkPreviewRequest": {
+      "ForkPreviewBody": {
         "additionalProperties": false,
         "properties": {
           "pipeline_overlay": {
@@ -7069,7 +7080,7 @@
         "required": [
           "pipeline_overlay"
         ],
-        "title": "ForkPreviewRequest",
+        "title": "ForkPreviewBody",
         "type": "object"
       },
       "ForkPreviewResponse": {
@@ -7523,6 +7534,19 @@
           "serial_s"
         ],
         "title": "HeadToHeadPrice",
+        "type": "object"
+      },
+      "HeadToHeadPriceBody": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/HeadToHeadPlan"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "HeadToHeadPriceBody",
         "type": "object"
       },
       "HeadToHeadRequest-Input": {
@@ -10362,6 +10386,7 @@
       },
       "MintCampaignPayload": {
         "additionalProperties": false,
+        "description": "Mint a campaign on an authored dataset and launch its root cycle.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget",
@@ -15416,6 +15441,7 @@
       },
       "SetSampleLookaheadPayload": {
         "additionalProperties": false,
+        "description": "Arm how many cells ahead the walk sends.",
         "properties": {
           "auto": {
             "default": false,
@@ -17511,6 +17537,104 @@
         "title": "VerifyCandidatePayload",
         "type": "object"
       },
+      "VerifyGradedView": {
+        "additionalProperties": false,
+        "description": "The pass is the fact, the reading a cache of one grading of it.",
+        "properties": {
+          "kind": {
+            "const": "verify_graded",
+            "default": "verify_graded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/VerifyReading"
+          },
+          "verify_pass": {
+            "$ref": "#/components/schemas/VerifyPass"
+          }
+        },
+        "required": [
+          "verify_pass",
+          "reading"
+        ],
+        "title": "VerifyGradedView",
+        "type": "object"
+      },
+      "VerifyPass": {
+        "additionalProperties": false,
+        "description": "The facts a verify pass banked, never a grade of them.",
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmName"
+          },
+          "cells": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "positions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Positions",
+            "type": "array"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "strategy": {
+            "enum": [
+              "random",
+              "hard"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "arm",
+          "sp_hash",
+          "cells",
+          "positions",
+          "strategy",
+          "seed",
+          "scorer_id"
+        ],
+        "title": "VerifyPass",
+        "type": "object"
+      },
       "VerifyReading": {
         "additionalProperties": false,
         "description": "A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones.",
@@ -17610,6 +17734,32 @@
           "held_absent"
         ],
         "title": "VerifyReading",
+        "type": "object"
+      },
+      "VerifySaturated": {
+        "additionalProperties": false,
+        "description": "A verify that bought nothing: every sample of the candidate's search split was already\nmeasured for its config. Its answer, and the effect a retry under its key answers.",
+        "properties": {
+          "already_measured": {
+            "title": "Already Measured",
+            "type": "integer"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "kind": {
+            "const": "verify_saturated",
+            "default": "verify_saturated",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "already_measured"
+        ],
+        "title": "VerifySaturated",
         "type": "object"
       },
       "WalkEnd": {
@@ -17854,7 +18004,7 @@
   "paths": {
     "/api/v1/auth/activity": {
       "get": {
-        "description": "Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.\n\n``group_by`` is ``model`` (the exact model string) or ``api_key`` (the provider that billed\nthe call, and whether the host's key or the caller's own sent it).",
+        "description": "Time-bucketed spend, requests and tokens over the window, each billed call at the price it\nwas stamped with.",
         "operationId": "activity_api_v1_auth_activity_get",
         "parameters": [
           {
@@ -17884,6 +18034,7 @@
             "required": false,
             "schema": {
               "default": "model",
+              "description": "`model` (the exact model string) or `api_key` (the provider that billed the call, and whether the host's key or the caller's own sent it).",
               "enum": [
                 "model",
                 "api_key"
@@ -18068,7 +18219,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "The caller's identity envelope; ``available_providers`` is the configured ones minus the connected one.",
+        "description": "The caller's identity envelope; ``available_providers`` is the configured ones minus the\nconnected one.",
         "operationId": "me_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -18100,7 +18251,7 @@
     },
     "/api/v1/auth/quota-status": {
       "get": {
-        "description": "The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never the raw nullable overrides.",
+        "description": "The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never\nthe raw nullable overrides.",
         "operationId": "quota_status_api_v1_auth_quota_status_get",
         "responses": {
           "200": {
@@ -18200,7 +18351,7 @@
     },
     "/api/v1/backends/{backend_id}/health": {
       "get": {
-        "description": "Whether a launch against this backend would be admitted, by the reading admission itself takes.\n\nA down backend is an answer, never an error; only an unregistered ``backend_id`` answers 404.",
+        "description": "Whether a launch against this backend would be admitted, by the reading admission itself\ntakes.\n\nA down backend is an answer, never an error; only an unregistered ``backend_id`` is not found.",
         "operationId": "backend_health_api_v1_backends__backend_id__health_get",
         "parameters": [
           {
@@ -18208,6 +18359,8 @@
             "name": "backend_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Backend Id",
               "type": "string"
             }
@@ -18243,7 +18396,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/config-map": {
       "get": {
-        "description": "One campaign's knob coupling and provenance map: what moves which estimand, what overwrites what, which knobs collide.\n\nRead over the config its root runs under; 404 on cross-user reads.",
+        "description": "One campaign's knob coupling and provenance map: what moves which estimand, what\noverwrites what, which knobs collide.\n\nRead over the config its root runs under; not found on a cross-user read.",
         "operationId": "config_map_api_v1_campaigns__campaign_id__config_map_get",
         "parameters": [
           {
@@ -18251,6 +18404,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18286,7 +18441,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset`` carries: the state as of that line.",
+        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one\n``campaign::cycle`` hop at a time. A cycle with no declared wiring answers ``warming_up``, an\nabsent one is not found; over HTTP it honours ``If-Modified-Since`` with a 304. ``at`` is an\noffset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset``\ncarries: the state as of that line.",
         "operationId": "cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
@@ -18294,6 +18449,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18303,6 +18460,8 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
               "type": "string"
             }
@@ -18314,12 +18473,14 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
             }
           },
@@ -18337,6 +18498,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A line of the leaf cycle's own ledger",
               "title": "At"
             }
           }
@@ -18379,7 +18541,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe": {
       "get": {
-        "description": "Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.\n\n404 only for an unknown cycle; a running, paused or finished one answers one ``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up at), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``, ``sequence`` = its ledger offset), with a heartbeat comment every 15 s.",
+        "description": "Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.\n\nNot found only for an unknown cycle; a running, paused or finished one answers one\n``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up\nat), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``,\n``sequence`` = its ledger offset), with a heartbeat comment every 15 s.",
         "operationId": "cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
         "parameters": [
           {
@@ -18387,6 +18549,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18396,6 +18560,8 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
               "type": "string"
             }
@@ -18407,12 +18573,14 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
             }
           }
@@ -18441,7 +18609,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/export": {
       "get": {
-        "description": "One reading of the cycle, chosen by what its reader does next — the CLI's `export --tier`.\n\n``chat`` and ``report`` are text to paste, ``deploy`` is ``export.json``; ``notebook`` and ``package`` are several files, served as one zip.\n``deploy`` and ``package`` answer 409 until the cycle has written ``export.json``.",
+        "description": "One reading of the cycle, chosen by what its reader does next — the CLI's ``export --tier``.\n\n``chat`` and ``report`` are text to paste, ``deploy`` is ``export.json``; ``notebook`` and\n``package`` are several files, served as one zip. ``deploy`` and ``package`` are refused as a\nconflict until the cycle has written ``export.json``.",
         "operationId": "cycle_export_api_v1_campaigns__campaign_id__cycles__cycle_id__export_get",
         "parameters": [
           {
@@ -18449,6 +18617,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18458,23 +18628,9 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "tier",
-            "required": true,
-            "schema": {
-              "enum": [
-                "chat",
-                "report",
-                "notebook",
-                "deploy",
-                "package"
-              ],
-              "title": "Tier",
               "type": "string"
             }
           },
@@ -18485,13 +18641,23 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tier",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExportTier"
             }
           }
         ],
@@ -18523,7 +18689,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file": {
       "get": {
-        "description": "The contents of one file under the cycle or campaign scope; with ``descend``, the inner cycle's, never the outer root's.",
+        "description": "The contents of one file under the cycle or campaign scope; with ``descend``, the inner\ncycle's, never the outer root's.",
         "operationId": "cycle_file_api_v1_campaigns__campaign_id__cycles__cycle_id__file_get",
         "parameters": [
           {
@@ -18531,6 +18697,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18540,33 +18708,9 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "cycle | campaign",
-            "in": "query",
-            "name": "scope",
-            "required": true,
-            "schema": {
-              "description": "cycle | campaign",
-              "enum": [
-                "cycle",
-                "campaign"
-              ],
-              "title": "Scope",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Relative path under the chosen scope root",
-            "in": "query",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "description": "Relative path under the chosen scope root",
-              "title": "Path",
               "type": "string"
             }
           },
@@ -18577,13 +18721,39 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "enum": [
+                "cycle",
+                "campaign"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "Relative path under the chosen scope root",
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
             }
           }
         ],
@@ -18617,7 +18787,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/files": {
       "get": {
-        "description": "The recursive file tree of the cycle directory plus the campaign-level artifacts, at any depth through ``descend``.",
+        "description": "The recursive file tree of the cycle directory plus the campaign-level artifacts, at any\ndepth through ``descend``.",
         "operationId": "cycle_files_api_v1_campaigns__campaign_id__cycles__cycle_id__files_get",
         "parameters": [
           {
@@ -18625,6 +18795,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18634,6 +18806,8 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
               "type": "string"
             }
@@ -18645,12 +18819,14 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
             }
           }
@@ -18685,7 +18861,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}": {
       "get": {
-        "description": "One closed round: its last close's arms and verdict, and the rows it names, each carrying its mark as ``status``.\n\nA fork answers for the rounds it inherited; a round that does not stand closed answers 404.\n``at`` is the dashboard route's: the round as it stood at that line of the cycle's own ledger.",
+        "description": "One closed round: its last close's arms and verdict, and the rows it names, each carrying\nits mark as ``status``.\n\nA fork answers for the rounds it inherited; a round that does not stand closed is not found.\n``at`` is the dashboard read's: the round as it stood at that line of the cycle's own ledger.",
         "operationId": "cycle_round_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__get",
         "parameters": [
           {
@@ -18693,6 +18869,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18702,6 +18880,8 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
               "type": "string"
             }
@@ -18711,6 +18891,7 @@
             "name": "round_num",
             "required": true,
             "schema": {
+              "minimum": 0,
               "title": "Round Num",
               "type": "integer"
             }
@@ -18722,12 +18903,14 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
             }
           },
@@ -18745,6 +18928,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A line of the leaf cycle's own ledger",
               "title": "At"
             }
           }
@@ -18787,6 +18971,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18796,6 +18982,8 @@
             "name": "cycle_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Cycle Id",
               "type": "string"
             }
@@ -18805,6 +18993,7 @@
             "name": "round_num",
             "required": true,
             "schema": {
+              "minimum": 0,
               "title": "Round Num",
               "type": "integer"
             }
@@ -18816,12 +19005,14 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
             }
           }
@@ -18864,7 +19055,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/fork-preview": {
       "post": {
-        "description": "Whether this steer takes the babysit path: the fork gate's own verdict, asked without forking.\n\nA read despite the POST: nothing is written, and no capability is needed to ask.",
+        "description": "Whether this steer takes the babysit path: the fork gate's own verdict, asked without\nforking.\n\nA read despite the POST: nothing is written, and no capability is needed to ask.",
         "operationId": "fork_preview_api_v1_campaigns__campaign_id__fork_preview_post",
         "parameters": [
           {
@@ -18872,6 +19063,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -18881,7 +19074,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ForkPreviewRequest"
+                "$ref": "#/components/schemas/ForkPreviewBody"
               }
             }
           },
@@ -18917,7 +19110,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/pipeline": {
       "get": {
-        "description": "What this campaign runs, the one server-owned answer; ownership-gated, 404 on cross-tenant reads.",
+        "description": "What this campaign runs, the one server-owned answer; ownership-gated, not found on a\ncross-tenant read.",
         "operationId": "campaign_pipeline_api_v1_campaigns__campaign_id__pipeline_get",
         "parameters": [
           {
@@ -18925,12 +19118,13 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
           },
           {
-            "description": "Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
             "in": "query",
             "name": "at",
             "required": false,
@@ -18972,7 +19166,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/storage": {
       "get": {
-        "description": "On-disk size of the campaign tree, split into its MECE leaves. 404 on cross-user.",
+        "description": "On-disk size of the campaign tree, split into its MECE leaves. Not found on a\ncross-user read.",
         "operationId": "campaign_storage_api_v1_campaigns__campaign_id__storage_get",
         "parameters": [
           {
@@ -18980,6 +19174,8 @@
             "name": "campaign_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Campaign Id",
               "type": "string"
             }
@@ -19023,15 +19219,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19083,15 +19274,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19143,15 +19329,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19203,15 +19384,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19263,15 +19439,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19323,15 +19494,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19383,15 +19549,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19443,15 +19604,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19503,15 +19659,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19563,15 +19714,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19623,15 +19769,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19683,15 +19824,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19743,15 +19879,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19766,11 +19897,11 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "$ref": "#/components/schemas/BenchScore"
                 }
               }
             },
@@ -19803,15 +19934,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19863,15 +19989,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19923,15 +20044,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -19983,15 +20099,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20043,15 +20154,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20103,15 +20209,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20163,15 +20264,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20223,15 +20319,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20283,15 +20374,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20343,15 +20429,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20403,15 +20484,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20463,15 +20539,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20523,15 +20594,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20583,15 +20649,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20643,15 +20704,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20703,15 +20759,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20771,15 +20822,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20831,15 +20877,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20891,15 +20932,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -20951,15 +20987,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -21011,15 +21042,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -21034,11 +21060,19 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VerifyGradedView"
+                    },
+                    {
+                      "$ref": "#/components/schemas/VerifySaturated"
+                    }
+                  ],
+                  "title": "Response Verify Candidate Api V1 Commands Verify Candidate Post"
                 }
               }
             },
@@ -21103,15 +21137,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -21163,15 +21192,10 @@
             "name": "Idempotency-Key",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -21215,7 +21239,7 @@
     },
     "/api/v1/datasets/{name}/cells": {
       "get": {
-        "description": "The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones holding a kept cell.",
+        "description": "The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones\nholding a kept cell.",
         "operationId": "dataset_cells_api_v1_datasets__name__cells_get",
         "parameters": [
           {
@@ -21223,12 +21247,13 @@
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The dataset name",
+              "minLength": 1,
               "title": "Name",
               "type": "string"
             }
           },
           {
-            "description": "Samples per page.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -21242,7 +21267,6 @@
             }
           },
           {
-            "description": "Cap on unmeasured samples kept in the ranking; None = no trim.",
             "in": "query",
             "name": "max_unmeasured",
             "required": false,
@@ -21262,7 +21286,6 @@
             }
           },
           {
-            "description": "dataset=cross-campaign; campaign=the cycle holding the campaign's line (needs campaign_id); cycle=one cycle (needs both ids).",
             "in": "query",
             "name": "scope",
             "required": false,
@@ -21279,13 +21302,13 @@
             }
           },
           {
-            "description": "Required when scope is campaign or cycle.",
             "in": "query",
             "name": "campaign_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
@@ -21297,13 +21320,13 @@
             }
           },
           {
-            "description": "Required when scope=cycle.",
             "in": "query",
             "name": "cycle_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 128,
                   "type": "string"
                 },
                 {
@@ -21315,25 +21338,24 @@
             }
           },
           {
-            "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
             "in": "query",
             "name": "descend",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact. Present, every scope is read from the inner sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
               "title": "Descend"
             }
           },
           {
-            "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
             "in": "query",
             "name": "order",
             "required": false,
@@ -21350,12 +21372,11 @@
                   "type": "null"
                 }
               ],
-              "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+              "description": "Override the ranking key for this read; unset, the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
               "title": "Order"
             }
           },
           {
-            "description": "Keep only this individual's cells (`CellCandidate.candidate_id`). A campaign's candidates carry one; a dataset-scope column does not, so there it keeps nothing.",
             "in": "query",
             "name": "candidate_id",
             "required": false,
@@ -21373,7 +21394,6 @@
             }
           },
           {
-            "description": "Keep only this round's cells. A dataset-scope column carries no round, so there it keeps nothing.",
             "in": "query",
             "name": "round",
             "required": false,
@@ -21391,7 +21411,6 @@
             }
           },
           {
-            "description": "Keep only cells with this mark.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -21415,7 +21434,6 @@
             }
           },
           {
-            "description": "Replay scope=cycle to this line of the cycle's own ledger — the dashboard route's `at`: the candidates named and the cells walked by then. Refused on any other scope, which no single ledger offset addresses.",
             "in": "query",
             "name": "at",
             "required": false,
@@ -21472,6 +21490,8 @@
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The dataset name",
+              "minLength": 1,
               "title": "Name",
               "type": "string"
             }
@@ -21481,6 +21501,8 @@
             "name": "answer",
             "required": true,
             "schema": {
+              "description": "The answer's address in the log",
+              "minLength": 1,
               "title": "Answer",
               "type": "string"
             }
@@ -21524,6 +21546,8 @@
             "name": "name",
             "required": true,
             "schema": {
+              "description": "The dataset name",
+              "minLength": 1,
               "title": "Name",
               "type": "string"
             }
@@ -21559,7 +21583,7 @@
     },
     "/api/v1/drafts/{draft_id}": {
       "get": {
-        "description": "Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded.",
+        "description": "Re-open a check-in: its draft and its last resolver turn. Not found once started or\ndiscarded.",
         "operationId": "draft_api_v1_drafts__draft_id__get",
         "parameters": [
           {
@@ -21567,6 +21591,8 @@
             "name": "draft_id",
             "required": true,
             "schema": {
+              "maxLength": 128,
+              "minLength": 1,
               "title": "Draft Id",
               "type": "string"
             }
@@ -21602,7 +21628,7 @@
     },
     "/api/v1/evidence": {
       "get": {
-        "description": "The cross-subject read: the bench head-to-head, roster, comparability, replicates and decomposition, then a merged interval per subject with every pairwise test under the selected metric.",
+        "description": "The cross-subject read: the bench head-to-head, roster, comparability, replicates and\ndecomposition, then a merged interval per subject with every pairwise test under the selected\nmetric.",
         "operationId": "evidence_api_v1_evidence_get",
         "parameters": [
           {
@@ -21621,19 +21647,17 @@
             }
           },
           {
-            "description": "Expand to one `campaign:` subject per campaign bound to this dataset, in addition to any named by `subject`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
             "in": "query",
             "name": "dataset",
             "required": false,
             "schema": {
               "default": "",
-              "description": "Expand to one `campaign:` subject per campaign bound to this dataset, in addition to any named by `subject`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip — which is what the browser was doing client-side, then sending one query parameter per campaign.",
+              "description": "Expand to one `campaign:` subject per campaign bound to this dataset, in addition to any named by `subject`. Read off each manifest, so it catches an A/B arm, a fork and a rename that a name-shaped guess would skip.",
               "title": "Dataset",
               "type": "string"
             }
           },
           {
-            "description": "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a config one. Rows pool within ONE campaign and never across two — they share no anchor to be compared through. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Scored on the SELECTED metric, in its units.",
             "in": "query",
             "name": "ranking",
             "required": false,
@@ -21645,7 +21669,6 @@
             }
           },
           {
-            "description": "Also serve the branch standing behind each course / candidate subject — the winner chain from its origin to its head, each point read on its own cells. OFF by default for the same reason as `ranking`: every point past the origin opens a round file. A campaign subject serves none, having no branch.",
             "in": "query",
             "name": "winner_chain",
             "required": false,
@@ -21657,7 +21680,6 @@
             }
           },
           {
-            "description": "Also serve WHAT each searchpoint is — one flat `key -> value` map over its RESOLVED node config plus its prompt fields, which is what lines two of them up against each other. OFF by default because a prompt field is the largest thing this read puts on the wire and a four-channel comparison carries four.",
             "in": "query",
             "name": "config",
             "required": false,
@@ -21669,7 +21691,6 @@
             }
           },
           {
-            "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected subject carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
             "in": "query",
             "name": "metric",
             "required": false,
@@ -21681,7 +21702,6 @@
             }
           },
           {
-            "description": "Cross two of the factors in `factors` and serve the POOLED value at each coordinate — `dataset,llm_only.model`. Answers 'which combination', where the factor marginals answer 'which level on average'. Every other factor is marginalised into the cells and named in `grid.marginalised`; to hold one fixed, narrow `subject` to its level instead, so the server pools over what is actually being looked at. Requested rather than served for all pairs because a roster varying on fifteen keys has 105 of them. Two axes at any number of factors.",
             "in": "query",
             "name": "grid",
             "required": false,
@@ -21723,13 +21743,13 @@
     },
     "/api/v1/head-to-head/price": {
       "post": {
-        "description": "What a head-to-head plan costs before any of it is minted, in dollars, calls and wall clock;\neach budget point carries the `mint-head-to-head` payload that mints its arms.\n\nA read despite the POST: no LLM call is made and nothing is minted.",
+        "description": "What a head-to-head plan costs before any of it is minted, in dollars, calls and wall\nclock; each budget point carries the ``mint-head-to-head`` payload that mints its arms.\n\nA read despite the POST: no LLM call is made and nothing is minted.",
         "operationId": "head_to_head_price_api_v1_head_to_head_price_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HeadToHeadPlan"
+                "$ref": "#/components/schemas/HeadToHeadPriceBody"
               }
             }
           },
@@ -21806,17 +21826,18 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 512,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "The L4 inner-cycle tail: `~`-joined `campaign::cycle` hops below the root hop, the hierarchy address's `inside` byte-exact.",
               "title": "Descend"
             }
           },
           {
-            "description": "Filter to one dataset",
             "in": "query",
             "name": "dataset",
             "required": false,
@@ -21834,7 +21855,6 @@
             }
           },
           {
-            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'unstarted' — the open check-ins; or 'all'",
             "in": "query",
             "name": "lifecycle",
             "required": false,
@@ -21845,7 +21865,6 @@
             }
           },
           {
-            "description": "Filter to one campaign id",
             "in": "query",
             "name": "campaign",
             "required": false,
@@ -21863,7 +21882,6 @@
             }
           },
           {
-            "description": "Keep only the courses a producer holds",
             "in": "query",
             "name": "attached",
             "required": false,
@@ -21875,7 +21893,6 @@
             }
           },
           {
-            "description": "0 serves campaigns alone, 1 their courses",
             "in": "query",
             "name": "depth",
             "required": false,
@@ -21919,7 +21936,7 @@
     },
     "/api/v1/hierarchy/{address}": {
       "get": {
-        "description": "The entry at ``address`` with every level under it: courses, rounds, candidates, inner campaigns.\n\n``at`` is a line of the ledger of ``at_cycle`` (a whole cycle path, root hop included; absent, the\ncampaign's root): a course minted later is not in the subtree, and run-state stays live.\n``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite),\n``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).\n``samples`` is a comma-separated sample-id mask; with neither, the subtree is the raw read. 404 where\nno entry stands at ``address``.",
+        "description": "The entry at ``address`` with every level under it: courses, rounds, candidates, inner\ncampaigns.\n\n``at`` is a line of the ledger of ``at_cycle``: a course minted later is not in the subtree,\nand run-state stays live. ``lens`` re-grades rows under another ``per_cell`` composite\n(``score:``), the same as weights (``dials:``), or with a gate off (``abort:<gate>_off`` or\n``abort:all_off``); ``samples`` masks to those sample ids. With neither, the subtree is the\nraw read. Not found where no entry stands at ``address``.",
         "operationId": "hierarchy_subtree_api_v1_hierarchy__address__get",
         "parameters": [
           {
@@ -21927,6 +21944,8 @@
             "name": "address",
             "required": true,
             "schema": {
+              "description": "The entry's hierarchy address",
+              "minLength": 1,
               "title": "Address",
               "type": "string"
             }
@@ -21944,6 +21963,7 @@
                   "type": "null"
                 }
               ],
+              "description": "`score:<formula>`, `dials:<term=weight,…>` or `abort:<variant>`",
               "title": "Lens"
             }
           },
@@ -21960,6 +21980,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A comma-separated sample-id mask",
               "title": "Samples"
             }
           },
@@ -21977,6 +21998,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A line of `at_cycle`'s own ledger",
               "title": "At"
             }
           },
@@ -21993,6 +22015,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A whole cycle path, root hop included; absent, the root's",
               "title": "At Cycle"
             }
           }
@@ -22050,7 +22073,7 @@
     },
     "/api/v1/hierarchy/{address}/@": {
       "get": {
-        "description": "The course's chronology: its steps, its forks' and its inner runs', merged by time.\n\nThe replay endpoint: the SSE tail always seeks to EOF, so history has no other home.\nWindowed newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior\nresponse (absent = the head window, malformed = 400, never a 304). Consecutive windows page back\nwithout overlap or hole; revalidate any window with ``If-None-Match``.",
+        "description": "The course's chronology: its steps, its forks' and its inner runs', merged by time.\n\nThe replay read: the SSE tail always seeks to EOF, so history has no other home. Windowed\nnewest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior\nwindow (absent = the head window, malformed = refused). Consecutive windows page back without\noverlap or hole; any window revalidates with ``If-None-Match``.",
         "operationId": "hierarchy_steps_api_v1_hierarchy__address____get",
         "parameters": [
           {
@@ -22058,6 +22081,8 @@
             "name": "address",
             "required": true,
             "schema": {
+              "description": "A course's hierarchy address",
+              "minLength": 1,
               "title": "Address",
               "type": "string"
             }
@@ -22087,6 +22112,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A prior window's `cursor_prev`",
               "title": "Before"
             }
           }
@@ -22121,7 +22147,7 @@
     },
     "/api/v1/library": {
       "get": {
-        "description": "Every snippet the caller's library holds, the install's packs beside its own, for a target or an optimizer prompt alike.",
+        "description": "Every snippet the caller's library holds, the install's packs beside its own, for a target\nor an optimizer prompt alike.",
         "operationId": "library_api_v1_library_get",
         "responses": {
           "200": {
@@ -22153,7 +22179,7 @@
     },
     "/api/v1/machine-status": {
       "get": {
-        "description": "Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see.",
+        "description": "Machine occupancy: how many campaigns may run here and how many do, and the slots the\ncaller may see.",
         "operationId": "machine_status_api_v1_machine_status_get",
         "responses": {
           "200": {
@@ -22185,7 +22211,7 @@
     },
     "/api/v1/optimizers": {
       "get": {
-        "description": "The optimizers this install can run, one per registered manifest: what ``optimization.optimizer`` accepts.",
+        "description": "The optimizers this install can run, one per registered manifest: what\n``optimization.optimizer`` accepts.",
         "operationId": "optimizers_api_v1_optimizers_get",
         "responses": {
           "200": {
@@ -22217,7 +22243,7 @@
     },
     "/api/v1/origins": {
       "get": {
-        "description": "Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is `GET /datasets`'.\n\nTenant-scoped, not owner-filtered.",
+        "description": "Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is the\n``datasets`` read's.\n\nTenant-scoped, not owner-filtered.",
         "operationId": "origins_api_v1_origins_get",
         "responses": {
           "200": {
@@ -22249,7 +22275,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "The caller-tenant's active-session pointer: its latest launch from any entry point.\n\nNo active session is a steady state: it answers 200 with null ids, and this route has no 404.",
+        "description": "The caller-tenant's active-session pointer: its latest launch from any entry point.\n\nNo active session is a steady state: it answers null ids, never a not-found.",
         "operationId": "active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {
@@ -22435,7 +22461,7 @@
     },
     "/api/v1/workspace/storage": {
       "get": {
-        "description": "On-disk size per campaign across the caller's workspace, fattest first, archived campaigns included.\n\nThe shared caches and a residual ``other`` slice ride along, so the total is the tenant's real footprint.",
+        "description": "On-disk size per campaign across the caller's workspace, fattest first, archived\ncampaigns included.\n\nThe shared caches and a residual ``other`` slice ride along, so the total is the tenant's real\nfootprint.",
         "operationId": "workspace_storage_api_v1_workspace_storage_get",
         "responses": {
           "200": {

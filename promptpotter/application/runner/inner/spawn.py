@@ -459,13 +459,12 @@ async def _run_inner_campaign(
         observers = build_run_observers(session=session, campaign_config=config)
         try:
             # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
-            with inner_share(
+            _, result = await inner_share(
                 config,
                 stores=session.store,
                 dataset_name=cell.spec.inner_dataset,
                 hop=session.hop,
-            ) as held:
-                _, result = await run_optimization(
+                run=lambda held: run_optimization(
                     opened.train_data,
                     opened.cycle,
                     session=session,
@@ -473,7 +472,8 @@ async def _run_inner_campaign(
                     budget=held,
                     mode=RunMode(),
                     optimizer=opened.optimizer,
-                )
+                ),
+            )
         finally:
             # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut one down.
             with contextlib.suppress(Exception):

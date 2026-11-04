@@ -42,7 +42,10 @@ class Landing(NamedTuple):
     @property
     def refusal(self) -> str | None:
         if any(one.found.kind.fate is Fate.SURVIVOR for one in self.unloadable):
-            return "a survivor does not load, and its reshape ships no migration"
+            return (
+                "a survivor does not load, and no migration maps it: the landed code owes one "
+                "(`maintenance/migrate.py::MIGRATIONS`)"
+            )
         if self.reset is not None and self.reset.refusal is not None:
             return self.reset.refusal
         if self.reset is None and (self.unknown or self.unloadable):
@@ -72,22 +75,41 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
     complete_registries(every_treatment=False)
     data_root = projects_root.parent
     staged = _staged(projects_root)
-    swept = plan_reset(projects_root, tenant_id=None) if reset else None
+    found_at: dict[Path, Found | None] = {}
+    why_at: dict[Path, str | None] = {}
+    for path in sorted({path for path, _st in iter_files(data_root)} | staged.keys()):
+        found = found_at[path] = classify(PurePosixPath(path.relative_to(data_root).as_posix()))
+        if found is not None and found.kind.fate is not Fate.RUN:
+            held = staged.get(path)
+            why_at[path] = unloadable_why(path, found, staged=None if held is None else held.data)
+    # A survivor that does not load refuses the landing whole; a reset is planned over survivors
+    # that load, read as staged.
+    survivor_refuses = any(
+        why is not None
+        and (found := found_at[path]) is not None
+        and found.kind.fate is Fate.SURVIVOR
+        for path, why in why_at.items()
+    )
+    swept = (
+        plan_reset(projects_root, tenant_id=None, staged={p: one.data for p, one in staged.items()})
+        if reset and not survivor_refuses
+        else None
+    )
     gone = set() if swept is None else {drop.path for drop in swept.drops}
     caches: list[Unloadable] = []
     unknown: list[Path] = []
     unloadable: list[Unloadable] = []
     proven = 0
-    for path in sorted({path for path, _st in iter_files(data_root)} | staged.keys()):
+    for path, found in found_at.items():
         if path in gone:
             continue
-        found = classify(PurePosixPath(path.relative_to(data_root).as_posix()))
         if found is None:
             unknown.append(path)
             continue
-        held = staged.get(path)
-        why = unloadable_why(path, found, staged=None if held is None else held.data)
-        if why is None:
+        if path not in why_at:
+            held = staged.get(path)
+            why_at[path] = unloadable_why(path, found, staged=None if held is None else held.data)
+        if (why := why_at[path]) is None:
             proven += 1
         elif found.kind.fate is Fate.CACHE:
             caches.append(Unloadable(path, found, why))

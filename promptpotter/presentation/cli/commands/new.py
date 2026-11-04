@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import re
 import shlex
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
 
+from promptpotter.application.commands import launching, workspace_edits
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
@@ -19,7 +22,6 @@ from promptpotter.application.datasets.authored import (
     campaign_file_block,
     validated_campaign_config,
 )
-from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.ingest import SlugTakenError
 from promptpotter.application.datasets.loaders import no_dataset_hint
@@ -29,6 +31,7 @@ from promptpotter.application.pipeline_resolve import draft_pipeline, draft_serv
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
+    MAX_UPLOAD_BYTES,
     ArmRequest,
     EditDraftCampaignPayload,
     HeadToHeadRequest,
@@ -61,7 +64,6 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
 
     from promptpotter.application.datasets.origin_readiness import FieldGap
-    from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadLaunched
     from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.checkin_draft import OriginResolution
@@ -179,12 +181,25 @@ def _raise_incomplete(
 
 async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
     file_path = Path(args.dataset)
-    payload = IngestUploadPayload(
-        blob=await asyncio.to_thread(file_path.read_bytes), filename=file_path.name, slug=args.slug
+
+    def _bounded_read() -> bytes:
+        # One byte past the cap, which the bytes' own bound refuses (`UploadBytes`).
+        with file_path.open("rb") as fh:
+            return fh.read(MAX_UPLOAD_BYTES + 1)
+
+    payload = PayloadInvalidError.validating(
+        IngestUploadPayload,
+        {
+            "blob": await asyncio.to_thread(_bounded_read),
+            "filename": file_path.name,
+            "slug": args.slug,
+        },
     )
     try:
-        outcome = await CommandDispatcher(stores).dispatch(CommandCall(payload))
-        draft: DraftCampaignWire = outcome.result
+        outcome = await CommandDispatcher(stores).answer(
+            workspace_edits.ingest_upload, CommandCall(payload)
+        )
+        draft = outcome.result
     except IngestError as exc:
         raise SystemExit(f"ERROR: could not parse {file_path.name}: {exc.message}") from None
     except SlugTakenError as exc:
@@ -286,20 +301,23 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     return await _run_origin(held, diag=args.diag)
 
 
-async def _dispatch_mint(
-    dispatcher: CommandDispatcher, mint: MintCampaignPayload | MintHeadToHeadPayload
-) -> Any:
+@contextlib.contextmanager
+def _named_dataset(
+    stores: Stores, mint: MintCampaignPayload | MintHeadToHeadPayload
+) -> Iterator[None]:
     try:
-        return (await dispatcher.dispatch(CommandCall(mint))).result
+        yield
     except DatasetAccessError:
         raise SystemExit(
-            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n"
-            + no_dataset_hint(dispatcher.stores)
+            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint(stores)
         ) from None
 
 
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
-    held = held_run(await _dispatch_mint(CommandDispatcher(stores, inline=inline), mint))
+    dispatcher = CommandDispatcher(stores, inline=inline)
+    with _named_dataset(stores, mint):
+        launched = (await dispatcher.dispatch(CommandCall(mint))).result
+    held = held_run(launched)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)
 
@@ -385,7 +403,10 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
-    launched: HeadToHeadLaunched = await _dispatch_mint(dispatcher, payload)
+    with _named_dataset(stores, payload):
+        launched = (
+            await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload))
+        ).result
     started = launched.started
     for arm in started.arms:
         cycle_dir = stores.campaigns.cycle_dir(arm.hop).absolute()

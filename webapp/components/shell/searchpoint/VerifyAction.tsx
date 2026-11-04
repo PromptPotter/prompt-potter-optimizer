@@ -2,12 +2,17 @@ import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
-import { READING_STATE_INFO, VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import {
+  READING_STATE_INFO,
+  VERIFY_STRATEGY_LABELS,
+  VERIFY_WORDS,
+  type CommandResponses,
+} from "@/lib/api/types.generated";
 import { wordKeys } from "@/lib/api/words";
 import { VERIFY_PASS_POLL_MS } from "@/lib/cadence";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
-import { unitCount } from "@/lib/format";
+import { filled, unitCount } from "@/lib/format";
 import {
   Chip,
   CommitInput,
@@ -18,6 +23,9 @@ import {
   MenuSep,
 } from "@/components/ui";
 import { VerifyReading } from "./VerifyReading";
+
+// The answer of a verify that bought nothing: every fresh cell was already measured.
+type Saturated = Extract<CommandResponses["verify-candidate"], { kind: "verify_saturated" }>;
 
 const STRATEGIES = wordKeys(VERIFY_STRATEGY_LABELS).map((value) => ({
   value,
@@ -34,6 +42,12 @@ export function VerifyAction({
   const cmd = useCommand<"verify-candidate">("verify-candidate");
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
+  const [saturated, setSaturated] = useState<Saturated | null>(null);
+  const [prevArm, setPrevArm] = useState(candidate.arm);
+  if (candidate.arm !== prevArm) {
+    setPrevArm(candidate.arm);
+    setSaturated(null);
+  }
   const sending = cmd.pending !== null;
   const { readings, passes, unit } = useVerify(path, sending ? VERIFY_PASS_POLL_MS : undefined);
 
@@ -46,14 +60,18 @@ export function VerifyAction({
 
   function run() {
     if (!path) return;
-    void cmd.run("verify-candidate", () =>
-      // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
-      postCommand("verify-candidate", {
-        ...cycleAddress(path),
-        candidate_id: candidate.arm,
-        strategy,
-        ...(samples === "" ? {} : { samples: Number(samples) }),
-      }),
+    setSaturated(null);
+    void cmd.run(
+      "verify-candidate",
+      () =>
+        // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
+        postCommand("verify-candidate", {
+          ...cycleAddress(path),
+          candidate_id: candidate.arm,
+          strategy,
+          ...(samples === "" ? {} : { samples: Number(samples) }),
+        }),
+      (answer) => setSaturated(answer.kind === "verify_saturated" ? answer : null),
     );
   }
 
@@ -122,6 +140,9 @@ export function VerifyAction({
         </p>
       )}
       <FailureLine failure={cmd.failure} />
+      {!busy && saturated && (
+        <p className="verify-action-note">{filled(VERIFY_WORDS.saturated, saturated)}</p>
+      )}
       {!busy && last?.failed_as != null && (
         <p className="verify-action-note error">
           The last verify failed: {READING_STATE_INFO[last.failed_as].sentence}

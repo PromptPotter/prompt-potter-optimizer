@@ -1,7 +1,8 @@
 """A leak, an escalation, or an unattended delete.
 
 Owns `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch
-fence, `infrastructure/identity/grants.py` and `application/jobs/reaper.py`. A key reaching the
+fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py`,
+`application/host_surface.py` and `presentation/mcp/`. A key reaching the
 logs, dataset content reaching the optimizer LLM unfenced, a path segment escaping its tenant
 dir, a grant that widens, a recursive delete nobody asked for. Irreversible in a multi-tenant
 product.
@@ -11,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import dataclasses
+import json
 import logging
 import os
 import re
@@ -20,6 +23,8 @@ import sys
 import threading
 import types
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any, cast, override
@@ -43,14 +48,25 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from offline_world import Router
 from pydantic import SecretStr
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 
 from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
+from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.ingest import ingest_draft
+from promptpotter.application.host_surface import (
+    CallTool,
+    HostSession,
+    TaskResultOf,
+    TaskStatusOf,
+    cancel_acts,
+    job_status,
+)
 from promptpotter.application.jobs import quota
+from promptpotter.application.jobs import registry as registry_module
+from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
     request_jobs,
@@ -86,10 +102,12 @@ from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
     CancelQueuedRunPayload,
     CommandKind,
+    MintCampaignPayload,
+    StepCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
-from promptpotter.domain.job import CampaignLaunch, ScoringPass
+from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
@@ -159,7 +177,7 @@ from promptpotter.infrastructure.store.site_records import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User, UserStore, count_accounts
-from promptpotter.main import API_ROUTERS, app
+from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, app
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
     require_site_records_token,
@@ -176,9 +194,12 @@ from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
+    IdempotencyKeyReusedError,
     NotFoundError,
+    PotterError,
     ServiceUnavailableError,
     StoredConfigInvalidError,
+    TaskUncancellableError,
     UnauthorizedError,
 )
 from promptpotter.shared.hashing import ADDRESS_HEX
@@ -462,7 +483,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         "a live run on other code did not hold the landing open"
     )
     assert registry.landing() is None, "a refused landing closed admission anyway"
-    registry.release(held.job_id)
+    registry.release(held.job_id, StopReason.CONVERGED)
     assert registry.close_for_landing(elsewhere) == [] and registry.landing() == elsewhere
     assert not registry.claim_next(waiting.job_id), "a landing let old code start a queued launch"
     with pytest.raises(ServiceUnavailableError):
@@ -537,6 +558,14 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
                 continue
             answer = anonymous.request(method, re.sub(r"\{[^}]+\}", "x", path))
             assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
+    # A body past the largest any route takes is refused before any gate spools it: by its declared
+    # length, and by its bytes where it declares none.
+    for declared in (True, False):
+        status, error, read = asyncio.run(_oversized_upload(declared))
+        assert (status, error) == (413, "too_large"), "an oversized body reached a route's parse"
+        assert read == (0 if declared else MAX_REQUEST_BYTES // _CHUNK + 1), (
+            "an oversized body was read past the first chunk that overran the bound"
+        )
 
     # A stranger's request is kept beside the website's visits; a signed-in person's is their own
     # trail's, and so is the admin's marked browser signed out. A query is kept only where nothing
@@ -548,17 +577,60 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         await send({"type": "http.response.start", "status": status, "headers": []})
         await send({"type": "http.response.body", "body": b""})
 
-    stranger = TestClient(OutsideVisitsMiddleware(answering), client=("34.178.107.69", 50000))
-    stranger.get("/api/v1/auth/callback/google?code=one-time-sign-in-code")
-    stranger.get("/.env?probe=1")
-    stranger.get("/signed-in")
-    stranger.get("/login", headers={"cookie": f"{OWNER_DEVICE_COOKIE_NAME}=1"})
+    outsider = TestClient(OutsideVisitsMiddleware(answering), client=("34.178.107.69", 50000))
+    outsider.get("/api/v1/auth/callback/google?code=one-time-sign-in-code")
+    outsider.get("/.env?probe=1")
+    outsider.get("/signed-in")
+    outsider.get("/login", headers={"cookie": f"{OWNER_DEVICE_COOKIE_NAME}=1"})
     TestClient(OutsideVisitsMiddleware(answering)).get("/from-this-side")
     kept = [(r.row["path"], r.row["query"]) for r in default_site_record_store().kept(APP_VISITS)]
     assert kept == [("/api/v1/auth/callback/google", ""), ("/.env", "probe=1")], (
         "an outside visit kept a served query, a signed-in request, the admin's browser, or this side"
     )
     asyncio.run(_open_sign_up_is_bounded(tmp_path / "perimeter", monkeypatch))
+
+
+_CHUNK = 1024 * 1024
+
+
+async def _oversized_upload(declared: bool) -> tuple[int, str, int]:
+    """An upload past `MAX_REQUEST_BYTES` through the app's raw ASGI door: a file part whose bytes
+    are one shared buffer sent over and over, so nothing body-sized is ever held."""
+    chunk = b"x" * _CHUNK
+    head = b'--b\r\nContent-Disposition: form-data; name="file"; filename="f"\r\n\r\n'
+    read = 0
+
+    async def receive() -> Message:
+        nonlocal read
+        read += 1
+        return {"type": "http.request", "body": head if read == 1 else chunk, "more_body": True}
+
+    sent: list[Message] = []
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    headers = [(b"content-type", b"multipart/form-data; boundary=b")]
+    if declared:
+        headers.append((b"content-length", str(MAX_REQUEST_BYTES + 1).encode()))
+    path = "/api/v1/commands/ingest-upload"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": headers,
+        "client": ("127.0.0.1", 50000),
+        "server": ("testserver", 80),
+    }
+    await app(scope, receive, send)
+    start, body = sent[0], b"".join(m.get("body", b"") for m in sent[1:])
+    return start["status"], json.loads(body)["error"], read
 
 
 async def _open_sign_up_is_bounded(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1030,6 +1102,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
             command_id=kind,
             kind=kind,
             idempotency_key=kind,
+            act_digest=kind,
             issued_by=SYSTEM_PRINCIPAL,
             timestamp=at,
         )
@@ -1280,17 +1353,17 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         f"a writer files what no data-root row names, or what its reader refuses: {written}"
     )
     with built_stores.drafts.hold("held-draft"):
-        held = plan_reset(built_stores.projects_root, tenant_id=None)
+        held = plan_reset(built_stores.projects_root, tenant_id=None, staged={})
     assert held.refusal is not None, "a reset's plan missed a held draft"
     hold_cycle(cycle_dir)
-    live = plan_reset(built_stores.projects_root, tenant_id=None)
+    live = plan_reset(built_stores.projects_root, tenant_id=None, staged={})
     assert live.refusal is not None, "a reset's plan missed a live producer"
     with pytest.raises(ConflictError):
         apply_reset(live)
     release_cycle(cycle_dir)
     assert campaigns.iter_campaign_dirs(), "a refused reset dropped a campaign"
     launched = len(registry.list_launched_today())
-    apply_reset(plan_reset(built_stores.projects_root, tenant_id=None))
+    apply_reset(plan_reset(built_stores.projects_root, tenant_id=None, staged={}))
     assert not campaigns.iter_campaign_dirs() and not draft_dirs(campaigns.workspace)
     assert launched == len(registry.list_launched_today()) == 1, (
         "a reset refilled the account's daily launch quota"
@@ -1339,6 +1412,43 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "a second landing migrated again, or left the tree unproven"
     )
 
+    # A job released before its release named an ending is migrated off its own record, ledgers
+    # unread: a refusal refused, any other orphaned (no live producer speaks for it), so a run
+    # released today lands without waiting on a sweep.
+    jobs = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 0)
+
+    def released_before(**bent: object) -> Path:
+        job = jobs.create(
+            user_id="u",
+            principal_id="u",
+            workspace=campaigns.workspace,
+            hop=CycleHop(campaign_id="", cycle_id=""),
+            holder=CampaignLaunch("ds1"),
+            stage=RunPhase.QUEUED,
+        )
+        old = {
+            key: value
+            for key, value in JOB_ADAPTER.dump_python(job, mode="json").items()
+            if key not in ("ending", "stepped", "lapse")
+        }
+        write_json(jobs.job_file(job.job_id), old | {"released_at": old["created_at"]} | bent)
+        return jobs.job_file(job.job_id)
+
+    old_jobs = {
+        released_before(stage=RunPhase.STARTING.value, refusal="over budget"): "refused",
+        released_before(): "orphaned",
+        released_before(
+            stage=RunPhase.RUNNING.value, admitted_at="2026-01-02T00:00:00Z"
+        ): "orphaned",
+    }
+    mapped = plan_landing(built_stores.projects_root, reset=False)
+    assert not mapped.refused, f"a released job waited on a sweep: {mapped.refusal}"
+    apply_landing(mapped)
+    landed_jobs = {path: jobs.get(path.stem) for path in old_jobs}
+    assert {path: job and job.lapse for path, job in landed_jobs.items()} == old_jobs, (
+        "a migrated job lost how it ended"
+    )
+
     # A process that loaded no optimizer still proves a ledger banking one's state.
     banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")
     close_round(
@@ -1357,3 +1467,271 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         check=False,
     )
     assert fresh.returncode == 0, f"a fresh process could not prove a banked state: {fresh.stderr}"
+
+
+# 4. The host surface
+
+# The stdio server as a host spawns it, in the `offline` fixture's world.
+_SERVE_MCP_OFFLINE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
+from pydantic import SecretStr
+from promptpotter.config.settings import settings
+for key in PROVIDER_KEYS:
+    setattr(settings, key, SecretStr(NOT_A_KEY))
+install_network(Router(FakeLLM(lambda _body: "ok"), FakeBackend([])))
+from promptpotter.presentation.cli.campaign_runner import main
+if sys.argv[3] == "terminal":
+    sys.argv = ["promptpotter", "--tenant", sys.argv[2], "mcp"]
+    main()
+else:
+    # A principal holding no rung, served as the terminal's would be.
+    import anyio, dataclasses
+    from promptpotter.application import account
+    from promptpotter.application.caller import Caller
+    from promptpotter.presentation.mcp.server import serve_stdio
+    stores = account.local_stores(tenant=sys.argv[2])
+    unranked = dataclasses.replace(stores.identity, capabilities=frozenset())
+    anyio.run(serve_stdio, Caller.holding(dataclasses.replace(stores, identity=unranked)))
+"""
+
+
+type _HostCall = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+@asynccontextmanager
+async def _stdio_host(tenant: str, who: str) -> AsyncIterator[_HostCall]:
+    """The real stdio server as a host spawns it, spoken to in its own wire: one JSON-RPC message
+    per line. A call answers its response, a refusal as an error or an ``isError`` result alike."""
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _SERVE_MCP_OFFLINE,
+        str(_REPO / "scripts"),
+        tenant,
+        who,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        cwd=_REPO,
+        limit=2**24,
+    )
+    assert child.stdin is not None and child.stdout is not None
+    stdin, stdout = child.stdin, child.stdout
+    asked = 0
+
+    async def send(message: dict[str, Any]) -> None:
+        stdin.write(json.dumps({"jsonrpc": "2.0", **message}).encode() + b"\n")
+        await stdin.drain()
+
+    async def ask(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        nonlocal asked
+        asked += 1
+        await send({"id": asked, "method": method, "params": params})
+        while True:
+            line = await stdout.readline()
+            assert line, f"the server exited before answering {method}"
+            said = json.loads(line)
+            if said.get("id") == asked and "method" not in said:
+                return cast(dict[str, Any], said)
+
+    async def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        said = await ask("tools/call", {"name": name, "arguments": arguments})
+        return said.get("result") or {"isError": True, "content": said.get("error")}
+
+    try:
+        hello = {"name": "test-host", "version": "0"}
+        opened = await ask(
+            "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": hello}
+        )
+        assert "result" in opened, opened
+        await send({"method": "notifications/initialized"})
+        yield call
+    finally:
+        stdin.close()
+        # Its exit is the kill's to cause, so the wait below ends on that signal, never a clock.
+        if child.returncode is None:
+            child.kill()
+        await child.wait()
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_host_drives_the_catalogue_as_the_terminal_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = f"host-{uuid.uuid4().hex[:8]}"
+    caller = Caller.holding(account.local_stores(tenant=tenant))
+    session = HostSession(caller)
+
+    async def answered(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return cast(dict[str, Any], (await session.answer(CallTool(name, arguments))).value)
+
+    def keyed(arguments: dict[str, Any]) -> dict[str, Any]:
+        return {**arguments, "idempotency_key": uuid.uuid4().hex}
+
+    blob = base64.b64encode(b"question,answer\n2+2,4\n3+3,6\n1+1,2\n").decode()
+    upload = {"blob": blob, "filename": "sums.csv"}
+    async with _stdio_host(tenant, "terminal") as host:
+        # A command lands in the terminal principal's account, which a read then answers alike.
+        flipped = not (await answered("user-settings", {}))["demo_mode_enabled"]
+        sent = await host("set-user-settings", keyed({"demo_mode_enabled": flipped}))
+        assert not sent.get("isError"), sent["content"]
+        here = await answered("user-settings", {})
+        there = await host("user-settings", {})
+        assert here == there.get("structuredContent") == {"demo_mode_enabled": flipped}, (
+            "a command over stdio landed in another account than the terminal's"
+        )
+
+        # The bytes arrive base64 and open the draft the in-process door opens from them.
+        opened = await host("ingest-upload", keyed(upload))
+        assert not opened.get("isError"), opened["content"]
+        draft = opened["structuredContent"]
+        reopened = await answered("draft", {"draft_id": draft["draft_id"]})
+        assert reopened["draft"] == draft, "the stdio draft is not the one a read reopens"
+        beside = await answered("ingest-upload", keyed(upload))
+        moved = {key for key in draft if draft[key] != beside[key]}
+        assert moved == {"draft_id", "created_at"}, f"the two doors parsed one file apart: {moved}"
+
+        # A key names one act, its bytes included: a corrected file re-sent under the key of the
+        # first is refused, never answered with the first file's draft.
+        reused = keyed(upload)
+        first = await host("ingest-upload", reused)
+        assert not first.get("isError"), first["content"]
+        replayed = await host("ingest-upload", reused)
+        assert replayed.get("structuredContent") == first["structuredContent"], (
+            "a retried act was not answered as it was first"
+        )
+        corrected = base64.b64encode(b"question,answer\n2+2,4\n3+3,6\n1+1,2\n4+4,8\n").decode()
+        moved_key = await host("ingest-upload", {**reused, "blob": corrected})
+        assert moved_key.get("isError") and "idempotency_key_reused" in json.dumps(moved_key), (
+            "a reused key on other bytes replayed the first act's answer"
+        )
+        # A payload nesting a model is digested in a process that built none of it before.
+        patched = {"draft_id": draft["draft_id"], "patch": {"slug": "sums-host"}}
+        edited = await host("edit-draft-campaign", keyed(patched))
+        assert not edited.get("isError"), edited["content"]
+
+    # A knob sent at its default is another act than the knob unsent: one key names one of them.
+    halting = {"dataset_name": "no-such-dataset", "optimization": {"halt_at_accuracy": 0.9}}
+    pair = [halting, {**halting, "optimization": {"halt_at_accuracy": 0.9, "optimizer": "potter"}}]
+    dispatcher = CommandDispatcher(caller.stores)
+    with pytest.raises(PotterError) as first_refusal:
+        await dispatcher.dispatch(CommandCall(MintCampaignPayload.model_validate(pair[0]), "k"))
+    assert first_refusal.value.code != "idempotency_key_reused"
+    with pytest.raises(IdempotencyKeyReusedError):
+        await dispatcher.dispatch(CommandCall(MintCampaignPayload.model_validate(pair[1]), "k"))
+
+    # The gate is the dispatcher's, whatever the door: a caller without the rung is refused, and
+    # nothing of its upload is kept.
+    def kept() -> list[Path]:
+        return sorted(Path(caller.stores.base_dir).rglob("*"))
+
+    before = await asyncio.to_thread(kept)
+    async with _stdio_host(tenant, "unranked") as host:
+        refused = await host("ingest-upload", keyed(upload))
+    assert refused.get("isError"), "a principal without the rung opened a draft over stdio"
+    assert await asyncio.to_thread(kept) == before, "a refused upload was kept"
+
+    # A task reads what its run returned: a stepped pause done, a spent budget failed, an asked
+    # pause and a withdrawal cancelled, a dead producer failed, a gate's hold waiting on its caller.
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    principal = acting_principal(caller.stores.identity).id
+
+    def launch() -> Job:
+        (job,) = request_jobs(
+            stores=caller.stores, job_registry=registry, holder=CampaignLaunch("ds1")
+        )
+        return job
+
+    def read(job: Job, *, held: bool = False) -> str:
+        read_back = registry.launched_by([job.job_id], principal_id=principal)
+        assert read_back is not None, "a held job read as another's"
+        return job_status(read_back[0], held=held)[0]
+
+    ended = {
+        (StopReason.PAUSED, True): "completed",
+        (StopReason.SPEND_BUDGET, False): "failed",
+        (StopReason.PAUSED, False): "cancelled",
+        (StopReason.CONVERGED, False): "completed",
+        (StopReason.CRASHED, False): "failed",
+    }
+    for (reason, stepped), status in ended.items():
+        job = launch()
+        assert read(job) == "working" and read(job, held=True) == "input_required"
+        registry.release(job.job_id, reason, stepped=stepped)
+        assert read(job) == status, f"a run that returned {reason} (stepped={stepped}) misread"
+    running, queued = launch(), launch()
+    assert queued.queued and not running.queued
+    # Every job's act is resolved before any is dispatched: one no command cancels refuses all,
+    # a cycle refusing the pause among them.
+    run_hop = CycleHop(campaign_id="c1", cycle_id="k1")
+    registry.update_target(running.job_id, hop=run_hop)
+    running = registry.get(running.job_id) or running
+    workspace = caller.stores.campaigns.workspace
+    run_dir = cycle_dir_for(workspace, run_hop)
+    run_dir.mkdir(parents=True)
+    with pytest.raises(TaskUncancellableError):
+        cancel_acts([queued, running], workspace)
+    CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(run_dir)
+    acts = cancel_acts([queued, running], workspace)
+    release_cycle(run_dir)
+    assert [(a.payload.kind, a.idempotency_key) for a in acts] == [
+        (CommandKind.CANCEL_QUEUED_RUN, f"host-task-cancel:{queued.job_id}"),
+        (CommandKind.PAUSE_CYCLE, f"host-task-cancel:{running.job_id}"),
+    ]
+    hold_cycle(run_dir)
+    elsewhere = dataclasses.replace(running, workspace=str(tmp_path / "sandbox"))
+    with pytest.raises(TaskUncancellableError):
+        cancel_acts([queued, elsewhere], workspace)
+    release_cycle(run_dir)
+    assert registry.cancel_queued(queued.job_id, principal_id=principal)
+    assert read(queued) == "cancelled", "a withdrawn launch reads as run"
+    # Its run's task ended without a release: the producer is gone, so the launch never will end.
+    died = asyncio.ensure_future(asyncio.sleep(0))
+    await died
+    registry.attach_task(running.job_id, died)
+    assert read(running) == "failed", "a launch whose run died reads as still working"
+
+    # A queued launch records the cycle its job already knows; once its job is reaped, a retry
+    # under its key replays that launch, and its task reads the job's own ending, never a relaunch.
+    step_hop = CycleHop(campaign_id="camp-step", cycle_id="cycle_step0000000")
+    stored_campaign(caller.stores, minted_campaign(step_hop))
+    caller.stores.campaigns.mint_cycle(step_hop)
+    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    stepping = HostSession(Caller(caller.stores, queuing))
+    step = StepCyclePayload(campaign_id=step_hop.campaign_id, cycle_id=step_hop.cycle_id)
+    endings = {"completed": StopReason.CONVERGED, "failed": StopReason.CRASHED, "cancelled": None}
+    # A waiter re-polls at once, so one woken on an ended job raises without a wall-clock wait.
+    monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
+    for status, ending in endings.items():
+        key = uuid.uuid4().hex
+        idle = set(launcher_launch._DETACHED)
+        ran = await CommandDispatcher(caller.stores, job_registry=queuing).dispatch(
+            CommandCall(step, key)
+        )
+        waiter = set(launcher_launch._DETACHED) - idle
+        assert waiter, "guard: the queued step left no waiter to wake"
+        assert isinstance(ran.result, launcher_launch.Launched)
+        launched = ran.result.launch
+        assert launched.hop == step_hop, "a queued step recorded no cycle its job knew"
+        if ending is None:
+            assert withdraw_queued(caller.stores, queuing, launched.job_id, principal_id=principal)
+        else:
+            queuing.release(launched.job_id, ending)
+            caller.stores.campaigns.release_claim(step_hop, job_id=launched.job_id, detail="ran")
+        # Its queue waiter wakes on the ended job and raises into a release of its own.
+        await asyncio.gather(*waiter, return_exceptions=True)
+        with pytest.MonkeyPatch.context() as later:
+            later.setattr(registry_module, "utcnow_iso", lambda: "2999-01-01T00:00:00Z")
+            queuing.reap_orphans()
+        assert queuing.get(launched.job_id) is None, "guard: the job was not reaped"
+        retried = {**step.model_dump(mode="json"), "idempotency_key": key}
+        task = (await stepping.answer(CallTool("step-cycle", retried))).task
+        assert task is not None
+        await stepping.answer(TaskResultOf(task.task_id))
+        read_back = await stepping.answer(TaskStatusOf(task.task_id))
+        assert read_back.status == status, f"a reaped {status} launch read {read_back.status}"
+        assert not queuing.list_queued(), "a retried launch launched again"
+    for detached in list(launcher_launch._DETACHED):
+        detached.cancel()

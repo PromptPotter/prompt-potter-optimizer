@@ -34,7 +34,7 @@ One minter, `domain/cycle_paths.py::hierarchy_address`; a course's address IS it
 
 ## Verbs
 
-`python -m promptpotter <verb> --help`. Written verbs are `presentation/cli/commands/verbs.py::_WRITTEN_VERBS`; every other verb is a `domain/command_kinds.py::CommandKind` row's `cli_verb`, its payload's fields its flags (`verbs.py::command_verb`); a `None` verb is browser-only.
+`python -m promptpotter <verb> --help`. Written verbs are `presentation/cli/commands/verbs.py::_WRITTEN_VERBS`; every other verb is a `domain/command_kinds.py::CommandKind` row's `cli_verb`, its payload's fields its flags (`verbs.py::command_verb`); a `BROWSER` row has none.
 
 | Verb | Does |
 |---|---|

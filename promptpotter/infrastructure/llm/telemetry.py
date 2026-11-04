@@ -306,6 +306,7 @@ def emit_command(
     kind: str,
     payload: dict[str, Any],
     idempotency_key: str,
+    act_digest: str,
     issued_by: Principal,
 ) -> int | None:
     return _append_record(
@@ -314,6 +315,7 @@ def emit_command(
             kind=kind,
             payload=dict(payload),
             idempotency_key=idempotency_key,
+            act_digest=act_digest,
             issued_by=issued_by,
         )
     )

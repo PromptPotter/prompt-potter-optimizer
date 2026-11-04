@@ -3,10 +3,15 @@ from __future__ import annotations
 import inspect
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.routing import APIRoute
 
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands import launching, workspace_edits
+from promptpotter.application.commands.dispatcher import (
+    CommandCall,
+    CommandDispatcher,
+    command_answer,
+)
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
 from promptpotter.application.commands.origin_resolving import (
@@ -30,12 +35,11 @@ from promptpotter.domain.command_kinds import (
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.presentation.api.catalogue import command_answer
 from promptpotter.presentation.api.deps import (
     IdempotencyKeyDep,
     JobRegistryDep,
     StoresDep,
-    read_upload,
+    bounded_read,
 )
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -87,7 +91,7 @@ async def start_checkin(
     )
     if isinstance(launched, HeadToHeadLaunched):
         return launched.started
-    return StartCheckinResponse(job_id=launched.job.job_id, hop=launched.hop)
+    return StartCheckinResponse(job_id=launched.launch.job_id, hop=launched.launch.hop)
 
 
 @commands_router.post(
@@ -103,9 +107,8 @@ async def mint_head_to_head(
 ) -> HeadToHeadStarted:
     """Mint and detach every arm, or none; a retry under the same key answers the same arms."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    outcome = await dispatcher.dispatch(CommandCall(payload, key))
-    launched: HeadToHeadLaunched = outcome.result
-    return launched.started
+    outcome = await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload, key))
+    return outcome.result.started
 
 
 @commands_router.post(
@@ -114,7 +117,6 @@ async def mint_head_to_head(
     name=CommandKind.INGEST_UPLOAD,
 )
 async def ingest_upload(
-    request: Request,
     stores: StoresDep,
     key: IdempotencyKeyDep,
     file: Annotated[
@@ -128,14 +130,15 @@ async def ingest_upload(
 ) -> DraftCampaignWire:
     """The kind's payload as a form: the file is its ``blob`` and ``filename``."""
     fields = {
-        "blob": await read_upload(request, file),
+        "blob": await bounded_read(file),
         "filename": file.filename or "",
         "slug": slug,
     }
     payload = PayloadInvalidError.validating(IngestUploadPayload, fields)
-    outcome = await CommandDispatcher(stores).dispatch(CommandCall(payload, key))
-    wire: DraftCampaignWire = outcome.result
-    return wire
+    outcome = await CommandDispatcher(stores).answer(
+        workspace_edits.ingest_upload, CommandCall(payload, key)
+    )
+    return outcome.result
 
 
 class _Dispatching:

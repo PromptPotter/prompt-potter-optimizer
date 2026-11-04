@@ -53,7 +53,7 @@ BASELINE = {
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     "p_served": 183,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 10,
+    "p_command": 12,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
     # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,
@@ -64,7 +64,7 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 27,
+    "test_functions": 28,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

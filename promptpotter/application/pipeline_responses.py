@@ -28,7 +28,7 @@ from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
 from promptpotter.domain.prompt_block import PackRefusal
 from promptpotter.domain.said import Tone
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.domain.strict_model import RequestBody, StrictModel
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.shared.plugin_registry import BUILT_IN
 from promptpotter.shared.worded import Worded
@@ -218,12 +218,6 @@ class CampaignPipelineResponse(StrictModel):
         "the L4 drill-in, on this read"
     )
     is_single_node: bool
-
-
-class ForkPreviewRequest(RequestBody):
-    pipeline_overlay: dict[str, Any] = Field(
-        description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
-    )
 
 
 SteerOutside = Literal["babysat", "refused"]

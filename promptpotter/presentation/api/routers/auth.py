@@ -12,17 +12,14 @@ from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account, health
-from promptpotter.application.jobs.account_activity import (
-    ActivityGroupBy,
-    ActivityResponse,
-    ActivityWindow,
-    account_activity,
-)
-from promptpotter.application.jobs.quota import (
-    CouponStatus,
-    QuotaStatus,
-    coupon_status,
-    quota_status,
+from promptpotter.application.jobs.account_activity import ActivityResponse
+from promptpotter.application.jobs.quota import CouponStatus, QuotaStatus
+from promptpotter.application.read_params import (
+    ActivityParams,
+    CouponParams,
+    MeParams,
+    QuotaStatusParams,
+    UserSettingsParams,
 )
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
@@ -43,10 +40,11 @@ from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.user_store import count_accounts
 from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import (
+    CallerDep,
     IdentityDep,
-    JobRegistryDep,
-    StoresDep,
     build_stores_from_identity,
+    read_input,
+    require_identity_bundle,
 )
 from promptpotter.presentation.api.middleware.oidc import (
     OWNER_DEVICE_COOKIE_NAME,
@@ -56,7 +54,6 @@ from promptpotter.presentation.api.middleware.oidc import (
 )
 from promptpotter.shared.errors import (
     NotFoundError,
-    ServiceUnavailableError,
 )
 from promptpotter.shared.identity import (
     AccessState,
@@ -83,15 +80,6 @@ def _is_declared_host_admin(email: str | None, issuer: str | None) -> bool:
         return False
     declared_issuer = settings.HOST_ADMIN_ISSUER.strip()
     return not declared_issuer or (issuer or "").strip() == declared_issuer
-
-
-def _require_bundle(request: Request) -> IdentityBundle:
-    bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
-    if bundle is None:
-        raise ServiceUnavailableError(
-            "identity backend not initialised", code="identity_not_initialised"
-        )
-    return bundle
 
 
 def _require_provider_client(bundle: IdentityBundle, provider: str) -> tuple[str, SignInClient]:
@@ -175,7 +163,7 @@ async def login(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
-    name, client = _require_provider_client(_require_bundle(request), provider)
+    name, client = _require_provider_client(require_identity_bundle(request), provider)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     response = RedirectResponse(url=client.authorize_url(state=state, nonce=nonce), status_code=307)
@@ -291,7 +279,7 @@ async def callback(
 
 @auth_flow_router.post("/logout")
 async def logout(request: Request) -> JSONResponse:
-    bundle = _require_bundle(request)
+    bundle = require_identity_bundle(request)
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     if session_id:
         bundle.session_store.delete(session_id)
@@ -349,45 +337,42 @@ def _announce_if_opened(
 
 @auth_router.get("/me", response_model=account.MeResponse, name=ReadKind.ME)
 def me(
-    request: Request, background: BackgroundTasks, identity: IdentityDep, stores: StoresDep
+    request: Request,
+    background: BackgroundTasks,
+    identity: IdentityDep,
+    caller: CallerDep,
+    read: Annotated[MeParams, read_input(MeParams)],
 ) -> account.MeResponse:
-    """The caller's identity envelope; ``available_providers`` is the configured ones minus the connected one."""
-    bundle = _require_bundle(request)
     # Opened at sign-in as a rule; here for an open box, which has none, and for a session that outlived its files.
     device = _device(request)
-    arrival = account.arrive(stores, device=device)
+    arrival = account.arrive(caller.stores, device=device)
     _announce_if_opened(background, arrival, identity, device)
-    return account.me(stores, arrival.user, configured=bundle.config.configured)
+    return read.answer(caller)
 
 
 @auth_router.get("/quota-status", response_model=QuotaStatus, name=ReadKind.QUOTA_STATUS)
-def get_quota_status(job_registry: JobRegistryDep, stores: StoresDep) -> QuotaStatus:
-    """The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never the raw nullable overrides."""
-    return quota_status(stores=stores, job_registry=job_registry)
+def get_quota_status(
+    caller: CallerDep, read: Annotated[QuotaStatusParams, read_input(QuotaStatusParams)]
+) -> QuotaStatus:
+    return read.answer(caller)
 
 
 @auth_router.get("/user-settings", response_model=account.UserSettings, name=ReadKind.USER_SETTINGS)
-def get_user_settings(stores: StoresDep) -> account.UserSettings:
-    """The current user's preferences."""
-    return account.user_settings(stores)
+def get_user_settings(
+    caller: CallerDep, read: Annotated[UserSettingsParams, read_input(UserSettingsParams)]
+) -> account.UserSettings:
+    return read.answer(caller)
 
 
 @auth_router.get("/activity", response_model=ActivityResponse, name=ReadKind.ACTIVITY)
 def activity(
-    stores: StoresDep,
-    window: ActivityWindow = "1d",
-    group_by: ActivityGroupBy = "model",
+    caller: CallerDep, read: Annotated[ActivityParams, read_input(ActivityParams)]
 ) -> ActivityResponse:
-    """Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.
-
-    ``group_by`` is ``model`` (the exact model string) or ``api_key`` (the provider that billed
-    the call, and whether the host's key or the caller's own sent it).
-    """
-    return account_activity(stores, window=window, group_by=group_by)
+    return read.answer(caller)
 
 
 @auth_router.get("/coupon", response_model=CouponStatus, name=ReadKind.COUPON)
-def get_coupon(stores: StoresDep) -> CouponStatus:
-    """The host's allowance for the caller on the box's keys: its face, what is left, and the keys
-    the caller sends on past it. What is left is derived from the ledgers, never a counter."""
-    return coupon_status(stores)
+def get_coupon(
+    caller: CallerDep, read: Annotated[CouponParams, read_input(CouponParams)]
+) -> CouponStatus:
+    return read.answer(caller)

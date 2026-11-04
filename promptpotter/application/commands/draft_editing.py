@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.datasets.draft_build import (
@@ -36,9 +36,7 @@ async def edit_draft_campaign(
         save_checkin_draft(stores, updated)
         return wire
 
-    return Applier(
-        _apply, replay=lambda _: reread_draft_wire(stores, draft_id), claim=dispatched.claim
-    )
+    return Applier(_apply, replay=lambda _: reread_draft_wire(stores, draft_id))
 
 
 async def discard_draft(dispatched: Dispatched[DiscardDraftPayload]) -> Applier[object]:
@@ -54,5 +52,5 @@ async def discard_draft(dispatched: Dispatched[DiscardDraftPayload]) -> Applier[
 async def dispatch_draft_patch(
     stores: Stores, call: CommandCall[EditDraftCampaignPayload]
 ) -> DraftCampaignWire:
-    outcome = await CommandDispatcher(stores).dispatch(call)
-    return cast(DraftCampaignWire, outcome.result)
+    outcome = await CommandDispatcher(stores).answer(edit_draft_campaign, call)
+    return outcome.result

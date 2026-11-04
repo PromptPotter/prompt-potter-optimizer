@@ -2600,6 +2600,7 @@ export interface RaisedCommand {
   evidence: string;
 }
 
+/** Sparse-patch a check-in draft; answers the draft as the patch left it. */
 export interface EditDraftCampaignPayload {
   draft_id: string;
   patch: EditDraftPatch;
@@ -3859,6 +3860,31 @@ export interface CommandAcceptedBody {
   command_id: string;
 }
 
+/** The pass is the fact, the reading a cache of one grading of it. */
+export interface VerifyGradedView {
+  kind: 'verify_graded';
+  verify_pass: VerifyPass;
+  reading: VerifyReading;
+}
+
+/** The facts a verify pass banked, never a grade of them. */
+export interface VerifyPass {
+  arm: ArmName;
+  sp_hash: string;
+  cells: [string, string, boolean][];
+  positions: number[];
+  strategy: 'random' | 'hard';
+  seed: number | null;
+  scorer_id: string;
+}
+
+/** A verify that bought nothing: every sample of the candidate's search split was already */
+export interface VerifySaturated {
+  kind: 'verify_saturated';
+  dataset_name: string;
+  already_measured: number;
+}
+
 /** What a pass did, or would do. */
 export interface ArchiveReport {
   files_touched: number;
@@ -4171,6 +4197,7 @@ export interface GradeBenchPayload {
   campaign_id: string;
 }
 
+/** Mint a campaign on an authored dataset and launch its root cycle. */
 export interface MintCampaignPayload {
   dataset_name: string;
   budget: Budget;
@@ -4495,6 +4522,7 @@ export interface SetConcurrentCyclesPayload {
   max_concurrent_cycles: number;
 }
 
+/** Arm how many cells ahead the walk sends. */
 export interface SetSampleLookaheadPayload {
   /** The full id: a prefix is the terminal's to resolve, before it builds a
    * payload. */
@@ -4672,7 +4700,7 @@ export interface CommandResponses {
   "discard-draft": CommandAcceptedBody;
   "edit-draft-campaign": DraftCampaignWire;
   "fork-cycle": CommandAcceptedBody;
-  "grade-bench": CommandAcceptedBody;
+  "grade-bench": BenchScore;
   "ingest-upload": DraftCampaignWire;
   "mint-campaign": CommandAcceptedBody;
   "mint-head-to-head": HeadToHeadStarted;
@@ -4693,7 +4721,7 @@ export interface CommandResponses {
   "step-cycle": CommandAcceptedBody;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
-  "verify-candidate": CommandAcceptedBody;
+  "verify-candidate": VerifyGradedView | VerifySaturated;
 }
 
 // promptpotter.domain.checkin_draft::SetupStep
@@ -5421,6 +5449,11 @@ export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
   "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
 };
 
+// Mirror of domain/run_records.py::VERIFY_WORDS, in display order.
+export const VERIFY_WORDS: Record<'saturated', string> = {
+  "saturated": "Every sample in the {dataset_name} search split is already measured for this config ({already_measured} total). Nothing to add.",
+};
+
 // Mirror of domain/run_standing.py::LIVES_WORDS, in display order.
 export const LIVES_WORDS: Record<LivesWord, string> = {
   "banked": "♥",
@@ -5542,6 +5575,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
   [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
   [THETA_CAVEAT_INFO, ["disjoint_scopes", "cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],
+  [VERIFY_WORDS, ["saturated"]],
   [LIVES_WORDS, ["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]],
   [SAMPLE_STATUS_LABELS, ["HIT", "MISS", "ERR", "UNSC"]],
   [CAP_AXIS_INFO, ["usd", "tokens", "rounds", "wall_clock_s"]],

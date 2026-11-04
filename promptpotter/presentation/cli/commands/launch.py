@@ -7,12 +7,14 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.measuring import stop_pass
+from promptpotter.application.jobs.launcher.admission import PassHold
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.views.render.phase import render_completion
@@ -90,34 +92,63 @@ def held_run(launched: object) -> HeldRun:
     return launched.held
 
 
-@contextlib.contextmanager
 def ctrl_c_pauses(
     stores: Stores, pauses: Sequence[PauseCyclePayload]
-) -> Iterator[Callable[[CyclePayload], None]]:
+) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
     """The first Ctrl+C sends *pauses* as the browser's press does, then cancels this task; the second force-quits."""
+
+    async def _pause_each() -> None:
+        for pause in pauses:
+            with contextlib.suppress(PotterError):
+                await CommandDispatcher(stores).dispatch(CommandCall(pause))
+
+    return _ctrl_c(stores, _pause_each)
+
+
+@contextlib.contextmanager
+def ctrl_c_stops_pass(
+    stores: Stores, pause: PauseCyclePayload
+) -> Iterator[Callable[[CyclePayload], None]]:
+    """A paid pass's Ctrl+C: *pause*, under the hold of the pass this task runs (`stop_pass`);
+    before it holds its cycle, or once it let go, the cancel alone ends it."""
+
+    hold = PassHold()
+
+    async def _stop() -> None:
+        with contextlib.suppress(PotterError):
+            await stop_pass(stores, hold, CommandCall(pause))
+
+    with hold.bound(), _ctrl_c(stores, _stop) as dispatch:
+        yield dispatch
+
+
+@contextlib.contextmanager
+def _ctrl_c(
+    stores: Stores, stop: Callable[[], Awaitable[None]]
+) -> Iterator[Callable[[CyclePayload], None]]:
     loop, run = asyncio.get_running_loop(), asyncio.current_task()
     assert run is not None
     asked: set[asyncio.Task[None]] = set()
 
-    async def send(payloads: Sequence[CyclePayload], *, then_cancel: bool) -> None:
+    async def send(payload: CyclePayload) -> None:
         try:
-            for payload in payloads:
-                try:
-                    await CommandDispatcher(stores).dispatch(CommandCall(payload))
-                except PotterError as exc:
-                    if not then_cancel:
-                        print(f"  {refusal_words(exc)}", flush=True)
+            await CommandDispatcher(stores).dispatch(CommandCall(payload))
+        except PotterError as exc:
+            print(f"  {refusal_words(exc)}", flush=True)
+
+    async def stop_then_cancel() -> None:
+        try:
+            await stop()
         finally:
-            if then_cancel:
-                run.cancel()
+            run.cancel()
 
-    def dispatch(payload: CyclePayload) -> None:
-        _send([payload], then_cancel=False)
-
-    def _send(payloads: Sequence[CyclePayload], *, then_cancel: bool) -> None:
-        task = loop.create_task(send(payloads, then_cancel=then_cancel))
+    def _spawn(coro: Coroutine[Any, Any, None]) -> None:
+        task = loop.create_task(coro)
         asked.add(task)
         task.add_done_callback(asked.discard)
+
+    def dispatch(payload: CyclePayload) -> None:
+        _spawn(send(payload))
 
     interrupted = False
 
@@ -126,7 +157,7 @@ def ctrl_c_pauses(
         if interrupted:
             raise KeyboardInterrupt
         interrupted = True
-        loop.call_soon_threadsafe(functools.partial(_send, pauses, then_cancel=True))
+        loop.call_soon_threadsafe(lambda: _spawn(stop_then_cancel()))
 
     previous = signal.signal(signal.SIGINT, on_sigint)
     try:

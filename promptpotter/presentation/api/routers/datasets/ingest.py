@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import File, Form, Request, UploadFile
+from fastapi import File, Form, UploadFile
 from pydantic import Field
 
 from promptpotter.application.commands.dispatcher import CommandCall
@@ -10,11 +10,12 @@ from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.draft_patch import candidate_library_from_column
 from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
-from promptpotter.domain.command_kinds import CommandKind, EditDraftCampaignPayload
+from promptpotter.domain.command_kinds import CommandKind, EditDraftCampaignPayload, UploadBytes
 from promptpotter.domain.draft_edit import EditDraftPatch
-from promptpotter.domain.strict_model import RequestBody
-from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep, read_upload
+from promptpotter.domain.strict_model import RequestBody, StrictModel
+from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep, bounded_read
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
+from promptpotter.shared.errors import PayloadInvalidError
 
 
 def _candidate_library_call(
@@ -24,13 +25,18 @@ def _candidate_library_call(
     return CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch), idempotency_key)
 
 
+class _LibraryFile(StrictModel):
+    """The uploaded library's bytes, under every upload's one bound."""
+
+    blob: UploadBytes
+
+
 @datasets_router.post(
     "/draft/candidate-library",
     response_model=DraftCampaignWire,
     name=CommandKind.EDIT_DRAFT_CAMPAIGN,
 )
 async def upload_candidate_library(
-    request: Request,
     stores: StoresDep,
     file: Annotated[
         UploadFile,
@@ -42,7 +48,8 @@ async def upload_candidate_library(
     key: IdempotencyKeyDep,
 ) -> DraftCampaignWire:
     """Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft."""
-    terms = parse_candidate_library(await read_upload(request, file), file.filename or "")
+    blob = PayloadInvalidError.validating(_LibraryFile, {"blob": await bounded_read(file)}).blob
+    terms = parse_candidate_library(blob, file.filename or "")
     return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, key))
 
 

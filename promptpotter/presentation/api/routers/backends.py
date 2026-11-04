@@ -1,30 +1,28 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter
 
-from promptpotter.application.backend_listing import (
-    BackendHealthResponse,
-    BackendResponse,
-    backend_health,
-    list_backends,
-)
+from promptpotter.application.backend_listing import BackendHealthResponse, BackendResponse
+from promptpotter.application.read_params import BackendHealthParams, BackendsParams
 from promptpotter.domain.command_kinds import ReadKind
+from promptpotter.presentation.api.deps import CallerDep, read_input
 
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
 @backends_router.get("", response_model=list[BackendResponse], name=ReadKind.BACKENDS)
-def get_backends() -> list[BackendResponse]:
-    """Every registered connector, at the endpoint the operator configured for it."""
-    return list_backends()
+def get_backends(
+    caller: CallerDep, read: Annotated[BackendsParams, read_input(BackendsParams)]
+) -> list[BackendResponse]:
+    return read.answer(caller)
 
 
 @backends_router.get(
     "/{backend_id}/health", response_model=BackendHealthResponse, name=ReadKind.BACKEND_HEALTH
 )
-async def get_backend_health(backend_id: str) -> BackendHealthResponse:
-    """Whether a launch against this backend would be admitted, by the reading admission itself takes.
-
-    A down backend is an answer, never an error; only an unregistered ``backend_id`` answers 404.
-    """
-    return await backend_health(backend_id)
+async def get_backend_health(
+    caller: CallerDep, read: Annotated[BackendHealthParams, read_input(BackendHealthParams)]
+) -> BackendHealthResponse:
+    return await read.answer(caller)

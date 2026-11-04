@@ -361,6 +361,8 @@ class CycleResult(StrictModel):
     result_prompt_fields: dict[str, dict[str, str]]
     result_pipeline_params: dict[str, Any] | None = None
     stop_reason: StopReason
+    # A pause at the round allowance its launch was started with (``step-cycle``).
+    stepped: bool = False
     started_at: str
     finished_at: str
     langfuse_trace_id: str | None = None

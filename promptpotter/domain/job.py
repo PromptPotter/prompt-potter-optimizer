@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal, assert_never, get_args
 from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.domain.phases import LaunchStage, RunPhase
+from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.spend import Budget
 
 # The slot is held before the mint resolves the cycle it will name; `update_target` fills it in.
@@ -66,6 +66,12 @@ class InnerRun:
     kind: Literal["inner_run"] = "inner_run"
 
 
+# How a released job ended where no run returned a `StopReason`, stamped by its release alone
+# (`JobRegistry.release`): `refused` was never admitted; `withdrawn` left the queue unrun;
+# `orphaned` lost its producer.
+JobLapse = Literal["refused", "withdrawn", "orphaned"]
+
+
 SlotHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
 JobHolder = Annotated[
     CampaignLaunch | ScoringPass | EmbeddedRun | InnerRun, Field(discriminator="kind")
@@ -101,8 +107,23 @@ class Job:
     # Unset = never granted a run, so its failure is a refusal.
     admitted_at: str | None = None
     producer_id: str = ""
-    # Non-empty IS the refused launch: set only where it was never admitted.
+    # What its run returned, stamped with `released_at`; a scoring pass that returned has none.
+    ending: StopReason | None = None
+    # Its run paused at the round allowance it was launched with (`step-cycle`).
+    stepped: bool = False
+    # How it ended where no run returned, stamped with `released_at` in place of an `ending`.
+    lapse: JobLapse | None = None
+    # The words of a `lapse` of `refused`, set nowhere else.
     refusal: str = ""
+
+    def __post_init__(self) -> None:
+        if self.released_at is None and (self.ending, self.lapse) != (None, None):
+            raise ValueError(f"job {self.job_id}: an ending is stamped with its release")
+        if self.ending is not None and self.lapse is not None:
+            raise ValueError(f"job {self.job_id}: a run's ending or a lapse, never both")
+        unsaid = self.released_at is not None and self.ending is None and self.lapse is None
+        if unsaid and not isinstance(self.holder, ScoringPass):
+            raise ValueError(f"job {self.job_id}: a released run names its ending")
 
     @property
     def what(self) -> str:

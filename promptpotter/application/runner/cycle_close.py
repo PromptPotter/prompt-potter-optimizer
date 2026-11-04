@@ -41,6 +41,7 @@ def build_cycle_result(
     session: Session,
     *,
     stop_reason: StopReason,
+    stepped: bool,
     cycle_error: ErrorRecord | None,
     finished_at: str,
     spend: SpendRollup | None,
@@ -82,6 +83,7 @@ def build_cycle_result(
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
+        stepped=stepped,
         started_at=session.state.launch_clock().started_at,
         finished_at=finished_at,
         cycle_id=session.cycle_id,
@@ -153,6 +155,7 @@ def close_cycle(
         cycle,
         session,
         stop_reason=stop_reason,
+        stepped=pause_cause is PauseCause.STEP and stop_reason is StopReason.PAUSED,
         cycle_error=cycle_error,
         finished_at=finished_at,
         # In-memory, never the debounced ``dashboard.json``.

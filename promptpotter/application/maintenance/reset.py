@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -50,6 +50,8 @@ class ResetPlan:
     kept: int
     # Why the reset may not go now; asked again under the claims, since a run may start after the plan.
     refusal: str | None
+    # What a landing writes beside the reset, each file read as it would then stand.
+    staged: Mapping[Path, bytes]
 
 
 def _owned_sandboxes(projects_root: Path, tenant_id: str) -> list[Path]:
@@ -71,13 +73,18 @@ def _drop(path: Path, size: int, data_root: Path) -> Drop | None:
     return Drop(path, size, found.kind) if found.kind.fate is Fate.RUN else None
 
 
-def _live(projects_root: Path, roots: tuple[Path, ...], drops: tuple[Drop, ...]) -> str | None:
+def _live(
+    projects_root: Path,
+    roots: tuple[Path, ...],
+    drops: tuple[Drop, ...],
+    staged: Mapping[Path, bytes],
+) -> str | None:
     """`delete`'s guard over every cycle the reset reaches, and every run a job holds there."""
     for drop in drops:
         if drop.kind in PRODUCER_LOCKS and producer_lock.held(drop.path):
             return f"{drop.path.parent} has a live producer — pause or stop it first"
     resolved = [root.resolve() for root in roots]
-    for job in JobRegistry.attach(jobs_dir(projects_root)).list_holding_spend():
+    for job in JobRegistry.as_staged(jobs_dir(projects_root), staged).list_holding_spend():
         if any(Path(job.workspace).resolve().is_relative_to(root) for root in resolved):
             return f"{job.what} ({job.job_id}) holds spend — pause or stop it first"
     return None
@@ -92,8 +99,11 @@ def _claimed(workspaces: tuple[WorkspaceDir, ...]) -> str | None:
     return None
 
 
-def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
-    """A named tenant is the caller's resolved identity, never a literal `default`: the first web sign-in renames it."""
+def plan_reset(
+    projects_root: Path, *, tenant_id: str | None, staged: Mapping[Path, bytes]
+) -> ResetPlan:
+    """A named tenant is the caller's resolved identity, never a literal `default`: the first web
+    sign-in renames it. *staged* is what a landing writes beside the reset."""
     data_root = projects_root.parent
     if tenant_id is None:
         roots: tuple[Path, ...] = (data_root,)
@@ -121,7 +131,8 @@ def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
         workspaces,
         held,
         kept,
-        _claimed(workspaces) or _live(projects_root, roots, held),
+        _claimed(workspaces) or _live(projects_root, roots, held, staged),
+        staged,
     )
 
 
@@ -137,7 +148,7 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
             for draft in draft_dirs(workspace):
                 held.enter_context(DraftStore(workspace).hold(draft.name))
                 claims.add(draft_claim_path(workspace, draft.name))
-        if (live := _live(plan.projects_root, plan.roots, plan.drops)) is not None:
+        if (live := _live(plan.projects_root, plan.roots, plan.drops, plan.staged)) is not None:
             raise ConflictError(f"refusing to reset: {live}")
         yield
         for drop in plan.drops:

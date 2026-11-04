@@ -6,8 +6,9 @@ import secrets
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -20,6 +21,8 @@ from promptpotter.application.jobs.interlock import (
     this_producer,
     this_producer_lock,
 )
+from promptpotter.application.runner.termination import run_stop_reason
+from promptpotter.config.paths import ENDED_JOBS_DIR
 from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
@@ -28,17 +31,19 @@ from promptpotter.domain.job import (
     CampaignLaunch,
     Job,
     JobHolder,
+    JobLapse,
     JobStage,
     ScoringPass,
     SlotHolder,
 )
-from promptpotter.domain.phases import LaunchStage, RunPhase
+from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
-from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     JobUnreadableError,
+    NotFoundError,
     ServiceUnavailableError,
     validation_reason,
 )
@@ -47,6 +52,13 @@ logger = logging.getLogger(__name__)
 
 # Each ask takes the machine-wide admission lock.
 _QUEUE_POLL_S = 2.0
+# How long a reaped job's ending stays readable by its id.
+_ENDED_KEPT = timedelta(days=7)
+
+
+def launch_interrupted(exc: BaseException) -> bool:
+    """Someone ASKED the launch to stop; neither type is visible to ``except Exception``."""
+    return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
 
 
 class JobRegistry:
@@ -56,9 +68,21 @@ class JobRegistry:
     def attach(cls, jobs_dir: Path) -> JobRegistry:
         return cls(jobs_dir, capacity=resolve_run_capacity)
 
-    def __init__(self, jobs_dir: Path, *, capacity: Callable[[int], int]) -> None:
+    @classmethod
+    def as_staged(cls, jobs_dir: Path, staged: Mapping[Path, bytes]) -> JobRegistry:
+        """The jobs as a landing would leave them: each file *staged* names reads as staged."""
+        return cls(jobs_dir, capacity=resolve_run_capacity, staged=staged)
+
+    def __init__(
+        self,
+        jobs_dir: Path,
+        *,
+        capacity: Callable[[int], int],
+        staged: Mapping[Path, bytes] | None = None,
+    ) -> None:
         self._dir = jobs_dir
-        self._dir.mkdir(parents=True, exist_ok=True)
+        self._staged = staged or {}
+        # Made by its first write (a job, a lock), never here: a landing's plan reads it and writes nothing.
         # Reentrant: under `admission_gate`, `_orphaned` and `release` retake it.
         self._lock = threading.RLock()
         # Its cross-process peer, nesting the same way.
@@ -181,7 +205,7 @@ class JobRegistry:
             job = self.get(job_id)
             if job is None or not job.queued or job.principal_id != principal_id:
                 return False
-            self.release(job_id)
+            self._end(job, lapse="withdrawn")
             return True
 
     def mark_admitted(self, job_id: str, reserve: Budget) -> None:
@@ -252,27 +276,75 @@ class JobRegistry:
         job.started_at = utcnow_iso()
         self._persist(job)
 
-    def release(self, job_id: str, *, refusal: str = "") -> None:
+    def release(
+        self, job_id: str, ended: StopReason | BaseException | None = None, *, stepped: bool = False
+    ) -> Job | None:
+        """Stamps what ended the job, the one reading of it, which the cycle's declared stop takes
+        (`admission.py::release_slot`): the `StopReason` its run returned (*stepped* where it
+        paused at its round allowance); a raise before its admission refused it, and an interrupt
+        or a raise after it is the stop it reads as (`run_stop_reason`); nothing at all is a
+        scoring pass that returned."""
         job = self.get(job_id)
         if job is None:
+            return None
+        match ended:
+            case StopReason():
+                self._end(job, ending=ended, stepped=stepped)
+            case BaseException() if not job.admitted and not launch_interrupted(ended):
+                self._end(job, lapse="refused", refusal=str(ended))
+            case BaseException():
+                self._end(job, ending=run_stop_reason(ended))
+            case None:
+                self._end(job)
+        return job
+
+    def _end(
+        self,
+        job: Job,
+        *,
+        ending: StopReason | None = None,
+        stepped: bool = False,
+        lapse: JobLapse | None = None,
+        refusal: str = "",
+    ) -> None:
+        # Stamped once: a queue waiter waking on a job already ended raises into a second release.
+        if job.released:
             return
         job.released_at = utcnow_iso()
-        job.refusal = refusal
+        job.ending, job.stepped, job.lapse, job.refusal = ending, stepped, lapse, refusal
+        job.__post_init__()
         self._persist(job)
         with self._lock:
-            self._tasks.pop(job_id, None)
+            self._tasks.pop(job.job_id, None)
+
+    def launched_by(self, job_ids: Sequence[str], *, principal_id: str) -> list[Job] | None:
+        """Each of *job_ids* as *principal_id* launched it, a reaped one as its release stamped it;
+        ``None`` where any is unknown or another's launch. A live job whose producer is gone reads
+        `orphaned` here before the sweep releases it: a reader never waits on one that will not
+        end."""
+        jobs = [self.get(job_id) or self._read(self._ended_path(job_id)) for job_id in job_ids]
+        known = [job for job in jobs if job is not None and job.principal_id == principal_id]
+        if not job_ids or len(known) != len(jobs):
+            return None
+        for job in known:
+            if not job.released and self._orphaned(job):
+                job.released_at, job.lapse = utcnow_iso(), "orphaned"
+        return known
 
     def get(self, job_id: str) -> Job | None:
         return self._read(self._path(job_id))
 
-    @staticmethod
-    def _read(path: Path) -> Job | None:
+    def _read(self, path: Path) -> Job | None:
         """``None``: no such job, or one deleted since the listing; a file that does not load raises."""
-        try:
-            with open_text_robust(path) as fh:
-                raw = fh.read()
-        except FileNotFoundError:
-            return None
+        raw: str | bytes
+        if (staged := self._staged.get(path)) is not None:
+            raw = staged
+        else:
+            try:
+                with open_text_robust(path) as fh:
+                    raw = fh.read()
+            except FileNotFoundError:
+                return None
         try:
             return JOB_ADAPTER.validate_json(raw)
         except ValidationError as exc:
@@ -281,7 +353,7 @@ class JobRegistry:
             ) from exc
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
-        """Released jobs included, until `reap_orphans` deletes one launched before today."""
+        """Released jobs included, until `reap_orphans` ends one launched before today."""
         out = [
             job
             for path in self._dir.glob("*.json")
@@ -372,12 +444,20 @@ class JobRegistry:
 
     def reap_orphans(self) -> None:
         """The sweep's, and no read's: releases each job whose producer is gone, reclaims that
-        producer's file, and deletes a release launched before today."""
+        producer's file, moves a release launched before today among the ended, and deletes an
+        ended record released over `_ENDED_KEPT` ago."""
         today = utcnow_iso()[:10]
+        kept_from = iso_z(datetime.now(UTC) - _ENDED_KEPT)
         with self.admission_gate():
+            for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
+                if (ended := self._read(path)) is not None and (
+                    ended.released_at or ""
+                ) < kept_from:
+                    unlink_robust(path)
             for job in self.list_all():
                 if job.released:
                     if not job.launched_on(today):
+                        self._persist(job, at=self._ended_path(job.job_id))
                         unlink_robust(self._path(job.job_id))
                 elif self._orphaned(job):
                     logger.warning(
@@ -385,13 +465,17 @@ class JobRegistry:
                         job.job_id,
                         job.stage.value,
                     )
-                    self.release(job.job_id)
+                    self._end(job, lapse="orphaned")
                     reclaim_producer(self._dir, job.producer_id)
 
-    def _persist(self, job: Job) -> None:
-        write_json(self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))
+    def _persist(self, job: Job, *, at: Path | None = None) -> None:
+        write_json(at or self._path(job.job_id), JOB_ADAPTER.dump_python(job, mode="json"))
 
     def _path(self, job_id: str) -> Path:
         if not job_id or "/" in job_id or "\\" in job_id or job_id.startswith("."):
-            raise ValueError(f"invalid job_id: {job_id!r}")
+            # Names no file this registry could hold, so no job: refused as any absent one is.
+            raise NotFoundError(f"no job {job_id!r}")
         return self._dir / f"{job_id}.json"
+
+    def _ended_path(self, job_id: str) -> Path:
+        return self._path(job_id).parent / ENDED_JOBS_DIR / f"{job_id}.json"

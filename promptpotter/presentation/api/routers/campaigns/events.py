@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from fastapi import Query
+from typing import Annotated
+
 from sse_starlette import EventSourceResponse
 
-from promptpotter.application.cycle_reads import cycle_event_frames, view_cycle
+from promptpotter.application.read_params import CycleEventsParams
 from promptpotter.domain.command_kinds import ReadKind
-from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
-from promptpotter.presentation.api.deps import StoresDep
+from promptpotter.presentation.api.deps import CallerDep, read_input
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
 
@@ -19,19 +19,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
     tags=["Stream"],
 )
 async def stream_cycle_events(
-    stores: StoresDep,
-    campaign_id: str,
-    cycle_id: str,
-    descend: str | None = Query(None),
+    caller: CallerDep, read: Annotated[CycleEventsParams, read_input(CycleEventsParams)]
 ) -> EventSourceResponse:
-    """Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.
-
-    404 only for an unknown cycle; a running, paused or finished one answers one ``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up at), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``, ``sequence`` = its ledger offset), with a heartbeat comment every 15 s.
-    """
-    cycle = view_cycle(
-        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
-    )
     # LF is the contract (the default is CRLF); X-Accel-Buffering is the header sse-starlette omits.
-    return EventSourceResponse(
-        cycle_event_frames(cycle), sep="\n", headers={"X-Accel-Buffering": "no"}
-    )
+    return EventSourceResponse(read.answer(caller), sep="\n", headers={"X-Accel-Buffering": "no"})

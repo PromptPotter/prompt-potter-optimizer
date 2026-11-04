@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import types
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
+
+from pydantic import BaseModel, SecretStr
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_kinds import (
@@ -41,9 +45,15 @@ from promptpotter.infrastructure.store.stores import (
     owned_draft_data,
     resolve_cycle_path,
 )
-from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import (
+    BadRequestError,
+    ConflictError,
+    IdempotencyKeyReusedError,
+    NotFoundError,
+    PayloadInvalidError,
+)
 from promptpotter.shared.identity import acting_principal, require_capability
-from promptpotter.shared.named_rows import imported
+from promptpotter.shared.named_rows import imported, returned
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
@@ -65,14 +75,22 @@ class _IdempotentMatch(FrozenModel):
 
 
 def _find_idempotent_command(
-    ledger: CycleEventLog, idempotency_key: str
+    ledger: CycleEventLog, kind: CommandKind, act_digest: str, idempotency_key: str
 ) -> _IdempotentMatch | None:
-    """Matched on the `CommandRecord` alone, a REJECTED attempt satisfies its key forever."""
+    """Matched on (kind, act, key), the act its retry names — the whole validated act, by its
+    digest; a key the ledger holds for another act is refused, never replayed. A REJECTED attempt
+    satisfies no key."""
     keyed: dict[str, int] = {}
     applied: _IdempotentMatch | None = None
     # The ledger's OWN offset, never a fork-chain position: the client aligns the SSE tail on it.
     for offset, record in ledger.iter():
         if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
+            if record.kind != kind or record.act_digest != act_digest:
+                raise IdempotencyKeyReusedError(
+                    f"Key {idempotency_key!r} already names a {record.kind} command with another "
+                    f"payload on this ledger; send this {kind} under a key of its own.",
+                    details={"command_id": record.command_id},
+                )
             keyed[record.command_id] = offset
         elif isinstance(record, CommandAckRecord) and record.status != "rejected":
             at = keyed.get(record.command_id)
@@ -84,14 +102,31 @@ def _find_idempotent_command(
 
 
 _HANDLER_PACKAGE = "promptpotter.application.commands"
+# The longest key a door accepts; each declares it on its own wire (a header, a tool's schema).
+MAX_IDEMPOTENCY_KEY_CHARS = 256
 
 
 @dataclass(frozen=True, slots=True)
 class CommandCall[P: CommandPayload]:
-    """A remote caller passes the key it retries under; every other caller sends once."""
+    """A remote door passes the key its caller retries under, and a retry under it answers the
+    first act; an in-process sender sends once, under a fresh one."""
 
     payload: P
     idempotency_key: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    def __post_init__(self) -> None:
+        key = self.idempotency_key.strip()
+        if not key:
+            raise BadRequestError(
+                "An idempotency key is required on every command a door sends.",
+                code="idempotency_key_missing",
+            )
+        if len(key) > MAX_IDEMPOTENCY_KEY_CHARS:
+            raise BadRequestError(
+                f"An idempotency key is at most {MAX_IDEMPOTENCY_KEY_CHARS} characters.",
+                code="idempotency_key_too_long",
+            )
+        object.__setattr__(self, "idempotency_key", key)
 
     @property
     def kind(self) -> CommandKind:
@@ -112,8 +147,11 @@ class Applier[R]:
     replay: Callable[[CommandEffect], Awaitable[R]] | None
     effect_fn: Callable[[R], CommandEffect] | None = None
     ack: CommandAckStatus = "applied"
-    # The draft claim this command holds through its ack; a Start hands its claim to the launch.
-    claim: DraftClaim | None = None
+    # Set where what `run` answers carries the act on past its ack (a Start's admitted launch holds
+    # its slot, and the draft's claim, to its mint): how that answer is given back where the act
+    # raises after `run` answered it. A draft command's claim is otherwise the dispatcher's until
+    # the act ends, and released on every raise.
+    rides: Callable[[R, BaseException], None] | None = None
 
     @staticmethod
     def silent(run: Callable[[], Awaitable[object]]) -> Applier[object]:
@@ -159,11 +197,29 @@ class CommandOutcome[R]:
     ack: CommandAckStatus
 
 
-def handler_of(kind: CommandKind) -> Callable[[Dispatched[Any]], Awaitable[Applier[Any]]]:
-    return cast(
-        Callable[[Dispatched[Any]], Awaitable[Applier[Any]]],
-        imported(_HANDLER_PACKAGE, kind.handler),
-    )
+# A kind's handler: what its row names, typed by the answer its applier carries.
+type Handler[R] = Callable[[Any], Awaitable[Applier[R]]]
+
+
+def handler_of(kind: CommandKind) -> Handler[Any]:
+    return cast(Handler[Any], imported(_HANDLER_PACKAGE, kind.handler))
+
+
+def command_answer(kind: CommandKind) -> object | None:
+    """The modelled `R` of the kind's handler's `Applier[R]`, what every door answers; `None` where
+    it answers the record instead: an `R` of `object`, or a launch's handle, which a task kind's
+    doors track as its task. Any other `R` no wire model carries is refused here."""
+    (applied,) = get_args(returned(handler_of(kind)))
+    if applied is object:
+        return None
+    arms = get_args(applied) if get_origin(applied) in (Union, types.UnionType) else (applied,)
+    if all(
+        arm is type(None) or (isinstance(arm, type) and issubclass(arm, BaseModel)) for arm in arms
+    ):
+        return cast(object, applied)
+    if kind.answering == "task":
+        return None
+    raise TypeError(f"{kind} applies {applied!r}, which no wire model carries")
 
 
 class CommandDispatcher:
@@ -195,8 +251,15 @@ class CommandDispatcher:
             )
         return await handler_of(kind)(dispatched)
 
-    async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[Any]:
-        """The payload's address base IS its target ledger."""
+    async def answer[R](self, handler: Handler[R], call: CommandCall[Any]) -> CommandOutcome[R]:
+        """`dispatch`, its answer typed by *handler*'s own `Applier[R]`: refused unless *handler*
+        is the one the call's row names, so the type a caller reads is what the act answers."""
+        if handler is not handler_of(call.kind):
+            raise TypeError(f"{call.kind} is answered by {call.kind.handler}, not {handler!r}")
+        return cast(CommandOutcome[R], await self.dispatch(call))
+
+    async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[object]:
+        """The payload's address base IS its target ledger; `answer` types what it answers."""
         match call.payload:
             case CyclePayload():
                 return await self._on_cycle(call)
@@ -258,24 +321,28 @@ class CommandDispatcher:
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
             applier = await self._applier(DispatchedToDraft(self, call.payload, claim))
+            draft_dir = self.stores.drafts.draft_dir(call.payload.draft_id)
+            outcome = await self._record_and_apply(
+                CycleEventLog.open(CycleDir(draft_dir)), call, applier
+            )
         except BaseException:
             claim.release()
             raise
-        draft_dir = self.stores.drafts.draft_dir(call.payload.draft_id)
-        try:
-            return await self._record_and_apply(
-                CycleEventLog.open(CycleDir(draft_dir)), call, applier
-            )
-        finally:
-            if applier.claim is not None:
-                applier.claim.release()
+        if applier.rides is None:
+            claim.release()
+        return outcome
 
     async def _record_and_apply[P: CommandPayload, R](
         self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]
     ) -> CommandOutcome[R]:
         kind, idempotency_key = call.kind, call.idempotency_key
+        # Off the loop: an upload's act hashes its bytes.
+        payload, act_digest = await asyncio.to_thread(call.payload.recorded)
         if applier.replay is not None:
-            existing = _find_idempotent_command(ledger, idempotency_key)
+            # The digest holds no secret's text, so a retry would match two secrets as one act.
+            if any(isinstance(value, SecretStr) for value in dict(call.payload).values()):
+                raise TypeError(f"{kind} replays, yet carries a secret its digest cannot name")
+            existing = _find_idempotent_command(ledger, kind, act_digest, idempotency_key)
             if existing is not None:
                 return CommandOutcome(
                     accepted=CommandAcceptedBody(command_id=existing.command_id),
@@ -290,8 +357,9 @@ class CommandDispatcher:
             emit_command(
                 command_id=command_id,
                 kind=kind,
-                payload=call.payload.model_dump(mode="json"),
+                payload=payload,
                 idempotency_key=idempotency_key,
+                act_digest=act_digest,
                 issued_by=acting_principal(self.stores.identity),
             )
             ack_status: CommandAckStatus = applier.ack
@@ -306,14 +374,20 @@ class CommandDispatcher:
                     command_id=command_id, status="rejected", detail=str(exc), effect=NoEffect()
                 )
                 raise
-            effect = (
-                applier.effect_fn(applied[0])
-                if (applier.effect_fn is not None and ack_status != "rejected")
-                else NoEffect()
-            )
-            emit_command_ack(
-                command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
-            )
+            try:
+                effect = (
+                    applier.effect_fn(applied[0])
+                    if (applier.effect_fn is not None and ack_status != "rejected")
+                    else NoEffect()
+                )
+                emit_command_ack(
+                    command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
+                )
+            except BaseException as exc:
+                # Admitted and never handed on: what the answer holds is given back in this scope.
+                if applied and applier.rides is not None:
+                    applier.rides(applied[0], exc)
+                raise
         finally:
             reset_cycle_ledger(token)
 
@@ -330,16 +404,17 @@ class CommandDispatcher:
     def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:
         """Rides the ledger bound by the fork command being recorded, which is the parent's."""
         command_id = str(uuid.uuid4())
-        payload = PauseCyclePayload(
+        payload, act_digest = PauseCyclePayload(
             campaign_id=parent.campaign_id,
             cycle_id=parent.cycle_id,
             reason=f"superseded by fork {by.cycle_id}",
-        )
+        ).recorded()
         emit_command(
             command_id=command_id,
             kind=CommandKind.PAUSE_CYCLE,
-            payload=payload.model_dump(mode="json"),
+            payload=payload,
             idempotency_key=command_id,
+            act_digest=act_digest,
             issued_by=acting_principal(self.stores.identity),
         )
         emit_command_ack(command_id=command_id, status="accepted", effect=NoEffect())

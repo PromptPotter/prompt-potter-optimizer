@@ -11,8 +11,9 @@ import asyncio
 import dataclasses
 import json
 import random
+import signal
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from itertools import count, product
 from math import sqrt
@@ -68,18 +69,36 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_clock, session_ruler_scope
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.caller import Caller
+from promptpotter.application.commands.dispatcher import (
+    CommandCall,
+    CommandDispatcher,
+    CommandOutcome,
+)
+from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
+from promptpotter.application.host_surface import (
+    CancelTask,
+    HostSession,
+    HostTask,
+    TaskStatusOf,
+    _Tracked,
+    host_tool,
+)
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     responses_of,
     theta_lift_over_parent,
 )
-from promptpotter.application.jobs.launcher.admission import PassStoppedError, paid_pass
+from promptpotter.application.jobs.launcher.admission import (
+    PassHold,
+    PassStoppedError,
+    paid_pass,
+)
 from promptpotter.application.optimizer_manifest import (
     binding_optimizer,
     select_optimizer,
@@ -203,6 +222,8 @@ from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimiz
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.command_kinds import (
+    CommandKind,
+    CommandPayload,
     OriginGateDecisionPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
@@ -253,6 +274,7 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
     CommandAckRecord,
+    CommandRecord,
     ComparisonExit,
     ForkSpec,
     ForkTrigger,
@@ -287,6 +309,7 @@ from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
 from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.llm.send_pacing import get_abort_check
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     SpendBook,
@@ -306,8 +329,15 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.presentation.cli.commands import launch as launch_cli
+from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
-from promptpotter.shared.errors import ConflictError, ErrorCategory, SendRefusedError
+from promptpotter.shared.errors import (
+    ConflictError,
+    ErrorCategory,
+    SendRefusedError,
+    TaskUncancellableError,
+)
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
@@ -1718,6 +1748,99 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
             "the pass left its pause unapplied, or kept the cycle after it stopped"
         )
+        # Every other door stops the pass by its own hold, in one step: the host's cancel and the
+        # terminal's Ctrl+C each pause it while it holds its cycle, and once it let go the stop
+        # answers that it ended, leaving no pause for whatever holds the cycle next.
+        host = HostSession(Caller(stores))
+
+        def paused_by() -> list[str]:
+            return [
+                record.payload["reason"]
+                for _, record in CycleEventLog.open(CycleDir(cycle_dir)).iter()
+                if isinstance(record, CommandRecord) and record.kind == CommandKind.PAUSE_CYCLE
+            ]
+
+        async def _held_pass(stop: Callable[[], Awaitable[object]]) -> None:
+            async with paid_pass(
+                stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+            ):
+                await stop()
+                # What every wait inside a pass does once a pause stands on its cycle.
+                if (abort := get_abort_check()) is not None and abort():
+                    raise asyncio.CancelledError("aborted")
+                raise AssertionError("a stop left the pass running")
+
+        async def _host_cancel() -> HostTask:
+            hold = PassHold()
+
+            async def _pass() -> tuple[CommandOutcome[Any], None]:
+                with hold.bound():
+                    await _held_pass(lambda: host.answer(CancelTask("held")))
+                raise AssertionError("a host cancel left the pass running")
+
+            running = asyncio.create_task(_pass())
+            host._tasks["held"] = _Tracked(
+                host_tool("verify-candidate"), CommandCall(pause), hold, running
+            )
+            await asyncio.wait([running])
+            return await host.answer(TaskStatusOf("held"))
+
+        before = len(paused_by())
+        cancelled = asyncio.run(_host_cancel())
+
+        async def _ctrl_c() -> str:
+            stopped = asyncio.Event()
+
+            async def _stop(*args: Any) -> None:
+                try:
+                    await stop_pass(*args)
+                finally:
+                    stopped.set()
+
+            async def _press() -> None:
+                signal.raise_signal(signal.SIGINT)
+                # The stop it sent lands, then cancels this task.
+                await stopped.wait()
+
+            with monkeypatch.context() as patched:
+                patched.setattr(launch_cli, "stop_pass", _stop)
+                with pytest.raises(PassStoppedError) as ended, ctrl_c_stops_pass(stores, pause):
+                    await _held_pass(_press)
+            return str(ended.value)
+
+        pressed = asyncio.run(_ctrl_c())
+        assert cancelled.status == "cancelled" and "pass stopped" in cancelled.status_message, (
+            "a host cancel left the pass running"
+        )
+        assert "pass stopped" in pressed, "a Ctrl+C left the pass running"
+        assert len(paused_by()) == before + 2 and paused_by()[-1] == pause.reason, (
+            "a host cancel or a Ctrl+C ended the pass without its pause"
+        )
+        assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
+            "a door's stop left its pause standing, or the pass kept its cycle"
+        )
+
+        async def _stop_after(hold: PassHold) -> str:
+            with pytest.raises(TaskUncancellableError) as refused:
+                await stop_pass(stores, hold, CommandCall(pause))
+            return str(refused.value)
+
+        async def _let_go() -> str:
+            hold = PassHold()
+            with hold.bound():
+                async with paid_pass(
+                    stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+                ):
+                    pass
+            return await _stop_after(hold)
+
+        assert asyncio.run(_let_go()).startswith("the pass ended"), (
+            "a stop after the let-go still asked to be sent again"
+        )
+        assert standing_controls(cycle_dir).pause is None, "a stop after the let-go left a pause"
+        assert "not yet" in asyncio.run(_stop_after(PassHold())), (
+            "a stop before the pass held its cycle sent a pause"
+        )
         # A spent budget stops the pass and names the bound; the held passes beside it stand.
         earlier = origin_pass.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
         book = require_spend_book("the bench journey")
@@ -1762,6 +1885,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             cycle,
             session,
             stop_reason=StopReason.ROUNDS_BUDGET,
+            stepped=False,
             cycle_error=None,
             finished_at="",
             spend=None,
@@ -2975,7 +3099,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     control = RunControl(cycle_dir=command_dir)
     address = {"campaign_id": command_hop.campaign_id, "cycle_id": command_hop.cycle_id}
 
-    def press(payload: Any, key: str) -> str:
+    def press(payload: CommandPayload, key: str) -> str:
         outcome = asyncio.run(CommandDispatcher(commanded).dispatch(CommandCall(payload, key)))
         return outcome.accepted.command_id
 

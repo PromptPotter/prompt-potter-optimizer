@@ -17,6 +17,7 @@ from promptpotter.config.paths import (
     ACCOUNTS_LOCK,
     ADMISSION_LOCK,
     BLOCK_PACKS_DIR,
+    ENDED_JOBS_DIR,
     INSTALL_CACHE_DIR,
     JOB_LOGS_DIR,
     JOBS_DIR,
@@ -246,6 +247,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE),
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
+    Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
     Kind("job log", _INSTALL, f"{JOBS_DIR}/{JOB_LOGS_DIR}/*.log", Fate.RUN),
     Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE),
     Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE),
