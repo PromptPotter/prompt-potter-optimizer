@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useState, type CSSProperties } from "react";
 import type { ServedRound } from "@/lib/api/types";
 import { CardFrame, SegmentedControl } from "@/components/ui";

@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useRef, useState } from "react";
 import { cyclePathUrl } from "@/lib/api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";

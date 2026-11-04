@@ -6,9 +6,9 @@ import { ErrorBoundary } from "@/components/ui";
 import { RegistryProvider } from "@/lib/state/registry";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
 import { WorkspaceProvider } from "@/lib/workspace";
+import { mount } from "./mount";
 
-export default function Home() {
-  return (
+mount(
     <ErrorBoundary>
       {/* The address reads the registry and view memory, so both sit above it. */}
       <RegistryProvider>
@@ -21,6 +21,5 @@ export default function Home() {
           </WorkspaceProvider>
         </ViewMemoryProvider>
       </RegistryProvider>
-    </ErrorBoundary>
-  );
-}
+    </ErrorBoundary>,
+);

@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useState } from "react";
 import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";

@@ -1,6 +1,6 @@
 # webapp/app — CLAUDE.md
 
-**The barrel order IS the cascade** — `app/styles/index.css` is the only stylesheet `app/layout.tsx` imports: `foundation/` first, `domains/` (one file per feature, `@media` co-located) after, the cross-cutting tail files last; never reintroduce a `globals.css`. <!-- probe: git grep -cE "\.css" -- webapp/app/layout.tsx <= 1 --> Every `components/ui/*.module.css` sits in `@layer ui` (the `*` reset in `@layer ui.reset`), so a call-site class beats a primitive default.
+**The barrel order IS the cascade** — `app/styles/index.css` is the only stylesheet `app/mount.tsx` imports: `foundation/` first, `domains/` (one file per feature, `@media` co-located) after, the cross-cutting tail files last; never reintroduce a `globals.css`. <!-- probe: git grep -cE "\.css" -- webapp/app/mount.tsx <= 1 --> Every `components/ui/*.module.css` sits in `@layer ui` (the `*` reset in `@layer ui.reset`), so a call-site class beats a primitive default.
 
 **Type, space and colour come from tokens, never a literal** (`--text-*`, `--space-*`, hues in `foundation/tokens.css`; greys exempt); a breakpoint reuses a `--bp-*` token. Exceptions: `16px` on a touch text input (iOS zoom), sub-4px hairlines, `fontSize: 0`. A categorical ink comes from `theme.ts` (`seriesColor` for `<canvas>`, `seriesVar` elsewhere).
 

@@ -1,4 +1,3 @@
-"use client";
 import { FailureLine, Said } from "@/components/ui";
 import { BACKEND_REACHABILITY_INFO, TONES, type Said as SaidRow } from "@/lib/api/types.generated";
 import { cycleAddress, postCommand } from "@/lib/api/commands";

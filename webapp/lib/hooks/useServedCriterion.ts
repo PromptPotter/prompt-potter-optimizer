@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";

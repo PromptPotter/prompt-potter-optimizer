@@ -49,4 +49,4 @@
 
 ## Brand identity
 
-`lib/brand.ts` is the single brand source (`NEXT_PUBLIC_*`-overridable). **Never render "verified" while `BRAND.verification` says `self-declared`.**
+`lib/brand.ts::BRAND` is the single brand source: `vite.config.ts` resolves `brand-of.ts::brandOf` once from the `VITE_*` overrides and defines the result, which the page head, the manifest and `BRAND` all read (`brand-of.ts` holds the defaults; the names are spelled there and in `deploy-linux/brand-env.sh` only). **Never render "verified" while `BRAND.verification` says `self-declared`.**

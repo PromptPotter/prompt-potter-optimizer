@@ -1,5 +1,3 @@
-"use client";
-
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api";

@@ -1,13 +1,15 @@
-import path from "node:path";
 import { defineConfig } from "vitest/config";
+import { brandOf } from "./lib/brand-of";
 
 // Neither project isolates: files share module state, so a test that writes a module-level store or a global resets it itself.
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname),
+      "@": import.meta.dirname,
     },
   },
+  // What `vite.config.ts` defines from the deploy's `VITE_*`; a test sees the defaults.
+  define: { __BRAND__: JSON.stringify(brandOf({})) },
   test: {
     isolate: false,
     pool: "threads",

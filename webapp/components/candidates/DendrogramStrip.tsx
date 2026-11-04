@@ -1,4 +1,3 @@
-"use client";
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { barValueLabel, type DisplayMetric } from "@/lib/derivations";

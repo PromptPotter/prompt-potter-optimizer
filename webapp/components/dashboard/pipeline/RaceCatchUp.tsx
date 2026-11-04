@@ -1,4 +1,3 @@
-"use client";
 import { useCycleStream } from "@/lib/poll";
 
 // Members that caught up on a race, under the optimizer that ran it; nothing until one has.

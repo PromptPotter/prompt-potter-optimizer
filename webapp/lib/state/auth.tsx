@@ -1,5 +1,3 @@
-"use client";
-
 import {
   createContext,
   useCallback,
@@ -91,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const closeAuthPrompt = useCallback(() => setAuthPrompt(PROMPT_CLOSED), []);
 
-  // `window.location`, not `useSearchParams`, whose Suspense requirement breaks static export.
+  // The sign-in outcome rides the query string; read it once on mount, then strip it.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const url = new URL(window.location.href);

@@ -1,5 +1,3 @@
-"use client";
-
 import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
@@ -19,7 +17,7 @@ type Props = {
 export function Dialog({ open, title, onClose, children, footer }: Props) {
   const cardRef = useDialogA11y(open, onClose);
 
-  if (!open || typeof document === "undefined") return null;
+  if (!open) return null;
 
   // mousedown, not click: a drag started inside the card and released outside must not close it.
   return createPortal(

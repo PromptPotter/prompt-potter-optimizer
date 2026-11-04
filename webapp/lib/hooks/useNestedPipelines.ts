@@ -1,4 +1,3 @@
-"use client";
 // Starts BELOW the dataset `ConnectorProvider` already holds, so the first hop is not re-fetched.
 
 import { datasetPipelineRead } from "@/lib/api";

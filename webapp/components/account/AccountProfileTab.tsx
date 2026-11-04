@@ -1,5 +1,3 @@
-"use client";
-
 import { AccountSection } from "./AccountSection";
 import { PROVIDER_LABEL, ProviderIcon } from "./providers";
 import { Badge, Button, CopyButton, Empty, FailureLine } from "@/components/ui";

@@ -1,4 +1,3 @@
-"use client";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { ObserveState } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";

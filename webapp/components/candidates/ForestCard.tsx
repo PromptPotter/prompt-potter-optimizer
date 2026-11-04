@@ -1,4 +1,3 @@
-"use client";
 import { useMemo } from "react";
 import type { ServedDashboard } from "@/lib/api";
 import {

@@ -91,7 +91,7 @@ OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"
 # half is proven and which is only intended.
 #
 # The ONE declaration of the name this unit wears. `brand-env.sh` fans it out
-# both ways: the engine's copy into `.env`, the `NEXT_PUBLIC_*` twins exported
+# both ways: the engine's copy into `.env`, the `VITE_*` twins exported
 # for the webapp build. Leave a line commented to keep the upstream default —
 # an unset value is never written, so nothing here half-brands the install.
 #

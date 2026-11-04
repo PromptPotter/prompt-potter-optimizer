@@ -179,7 +179,7 @@ if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == "Enforcing" ]]
   sudo restorecon -RF "$INSTALL_DIR/.venv/bin" || roll_back "restorecon failed"
 fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes
-# NEXT_PUBLIC_* in at build time — so skipping this would silently repaint the
+# VITE_* in at build time — so skipping this would silently repaint the
 # install upstream at the next deploy.
 WEBAPP_TOUCHED=1
 build_webapp || roll_back "the webapp build failed"

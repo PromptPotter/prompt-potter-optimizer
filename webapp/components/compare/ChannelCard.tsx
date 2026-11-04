@@ -1,5 +1,3 @@
-"use client";
-
 import type { SubjectReading } from "@/lib/api";
 import { SUBJECT_KIND_LABELS } from "@/lib/api/types.generated";
 import type { CladogramChannel } from "@/components/candidates/Forest";

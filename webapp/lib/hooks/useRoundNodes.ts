@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import { roundAuditRead } from "@/lib/api";
 import { useCycleStream } from "@/lib/poll";

@@ -1,4 +1,3 @@
-"use client";
 import { Fragment } from "react";
 import type { LeafBytes } from "@/lib/api";
 import { LEAF_INFO } from "@/lib/api/types.generated";

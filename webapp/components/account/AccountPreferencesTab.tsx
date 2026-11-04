@@ -1,5 +1,3 @@
-"use client";
-
 import { AccountSection } from "./AccountSection";
 import { FailureLine, ReadState, Switch } from "@/components/ui";
 import { patchUserSettings, userSettingsRead } from "@/lib/api";

@@ -6,8 +6,7 @@ import path from "node:path";
 
 // `--auth=on` closes `deps.py::auth_is_open`; a session is a file minted directly.
 
-// `__dirname`, not `import.meta.url`: Playwright's loader compiles this file to CommonJS.
-const WEBAPP = path.resolve(__dirname, "..");
+const WEBAPP = path.resolve(import.meta.dirname, "..");
 
 export type FakeIssuer = {
   baseURL: string;
@@ -40,8 +39,9 @@ export async function startFakeIssuer(
 
   // Annotated: the ambient `process.env` is narrowed, so its spread has no `delete`-able members.
   const env: NodeJS.ProcessEnv = { ...process.env, PP_E2E_PORT: port, PROMPTPOTTER_HOME: home };
-  // Deleted, not inherited: the runner's own shell may carry it.
+  // Deleted, not inherited: the runner's own shell may carry them, and this server mints its own world.
   delete env.PP_E2E_RESET;
+  delete env.PP_E2E_WORLD;
   const proc = spawn("node", [path.join(WEBAPP, "e2e", "serve.mjs"), "--auth=on", "--backend=offline"], {
     cwd: WEBAPP,
     stdio: "inherit",

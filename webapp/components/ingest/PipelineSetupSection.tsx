@@ -1,4 +1,3 @@
-"use client";
 import type { ReactNode } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { useConnector } from "@/lib/hooks/useConnector";

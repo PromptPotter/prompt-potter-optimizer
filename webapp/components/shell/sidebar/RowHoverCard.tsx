@@ -1,4 +1,3 @@
-"use client";
 import { Fragment, useState, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { readyData, useRead } from "@/lib/hooks/useRead";

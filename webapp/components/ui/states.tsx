@@ -82,7 +82,7 @@ export function ReadState<T>({
   return <Loading className={className}>Reading {subject}…</Loading>;
 }
 
-// The `/login/` trailing slash matches `next.config.ts::trailingSlash`.
+// `/login/`, with its slash: the page is `app/login/index.html`, and `StaticFiles` redirects the bare path.
 export function SignInPrompt({ message, className }: { message: ReactNode; className?: string }) {
   return (
     <p className={cx("note-empty", className)}>

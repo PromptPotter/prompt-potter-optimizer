@@ -1,4 +1,3 @@
-"use client";
 import type { ReactNode } from "react";
 import { Badge, Button, CopyButton, Icon, Said, VendorLogo } from "@/components/ui";
 import { familyOfGlance, openColumns } from "@/components/shell/families";

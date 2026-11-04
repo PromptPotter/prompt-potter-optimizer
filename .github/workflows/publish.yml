@@ -82,7 +82,7 @@ jobs:
       # No `--no-webapp`, and that is the whole difference from ci.yml's wheel job. The
       # wheel CI proves is API-only, so three things are exercised for the first time
       # here: the `assets/webapp/**` package-data glob, the mount that reads it, and the
-      # credential scan over a Next.js bundle — which inlines every NEXT_PUBLIC_* value.
+      # credential scan over the Vite bundle — which inlines each VITE_* value the webapp reads.
       - name: Build the wheel
         run: uv run python scripts/build_release.py
 

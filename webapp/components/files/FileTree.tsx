@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useState } from "react";
 import { filesRead, type FileEntry } from "@/lib/api";
 import { useActivePointer, useRegistry } from "@/lib/state/registry";

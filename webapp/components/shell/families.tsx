@@ -1,4 +1,3 @@
-"use client";
 import type { ReactNode } from "react";
 import { FAMILY_IDS, nodeOfKey, type FamilyId, type View } from "@/lib/address";
 import type { FigureKey } from "@/lib/derivations";

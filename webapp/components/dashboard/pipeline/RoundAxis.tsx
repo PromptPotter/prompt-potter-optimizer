@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useRef } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream } from "@/lib/poll";

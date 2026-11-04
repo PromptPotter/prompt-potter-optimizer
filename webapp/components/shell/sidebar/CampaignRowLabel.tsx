@@ -1,4 +1,3 @@
-"use client";
 import { VendorLogo } from "@/components/ui";
 import type { HierarchyCampaign, HierarchyCourse, ListedCampaign } from "@/lib/api";
 import { STATUS_MARK_INFO } from "@/lib/api/types.generated";

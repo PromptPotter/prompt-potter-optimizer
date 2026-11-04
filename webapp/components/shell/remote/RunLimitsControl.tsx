@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { cycleAddress, postCommand, type Budget, type MeteredSpend } from "@/lib/api";
 import { CAP_AXIS_INFO, CEILING_METER_LABELS } from "@/lib/api/types.generated";

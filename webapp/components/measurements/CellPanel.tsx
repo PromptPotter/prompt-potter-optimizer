@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { cellRead, type Cell, type CellRow, type CellSpan } from "@/lib/api";
 import { RATE_PRICED_LABEL, SAMPLE_STATUS_LABELS } from "@/lib/api/types.generated";

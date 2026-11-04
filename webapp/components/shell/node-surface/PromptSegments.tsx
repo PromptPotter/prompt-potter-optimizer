@@ -1,5 +1,3 @@
-"use client";
-
 import type { LibraryResponse } from "@/lib/api";
 import { cx } from "@/lib/cx";
 import {

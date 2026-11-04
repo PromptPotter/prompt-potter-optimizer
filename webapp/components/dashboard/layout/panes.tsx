@@ -1,4 +1,3 @@
-"use client";
 // The dashboard's view families: each a run of `.box-grid` boxes, read top-down in the preset's order.
 import { memo, useMemo } from "react";
 import { CardFrame, Said } from "@/components/ui";

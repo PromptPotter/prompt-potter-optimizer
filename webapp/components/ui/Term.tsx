@@ -1,4 +1,3 @@
-"use client";
 import type { ReactNode } from "react";
 import { HoverCard } from "./HoverCard";
 import s from "./Term.module.css";

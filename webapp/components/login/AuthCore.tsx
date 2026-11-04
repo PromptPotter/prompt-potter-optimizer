@@ -1,4 +1,3 @@
-"use client";
 import { Said } from "@/components/ui";
 import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types.generated";
 import type { SignInRefusal } from "@/lib/state/auth";

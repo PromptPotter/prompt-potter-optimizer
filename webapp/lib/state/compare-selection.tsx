@@ -1,4 +1,3 @@
-"use client";
 // Not in `view-memory.tsx`: that record is per campaign, and a comparison spans several.
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";

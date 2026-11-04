@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/components/ui";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";

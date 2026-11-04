@@ -1,6 +1,6 @@
 # webapp — CLAUDE.md
 
-Next.js static export at `out/`, mounted at `/` by FastAPI; the API is the carved-out `/api/v1`. It polls, renders and issues control verbs through `POST /commands/{kind}`; **it never recomputes a score.**
+A React app built by Vite into `out/` (`vite.config.ts`; each page an `app/**/index.html`), mounted at `/` by FastAPI; the API is the carved-out `/api/v1`. It polls, renders and issues control verbs through `POST /commands/{kind}`; **it never recomputes a score.**
 
 ## Owned elsewhere
 
@@ -33,18 +33,8 @@ A reset may seed from `lib/state/view-memory.tsx` (per-campaign ids, flags and U
 
 ## Testing posture
 
-The gate is `python scripts/gate.py --web`. **Vitest covers reader-side derivations and `lib/read-cache.ts` / `useRead`** only, on fixtures of the SERVED shape (`lib/test-fixtures.ts`), never a cast `dashboard.json`. **The browser walk (`npm run e2e`) owns "does it render against a served cycle"**; the gate runs its `cold` tier ([`e2e/README.md`](e2e/README.md)). A component-render test earns its place only for a class no other tier catches. Smoke by hand at `http://localhost:8001/`: as-is for **anon**, `PROMPTPOTTER_AUTH=off` for **authed + live** at zero spend; [`../dev/oidc-local/`](../dev/oidc-local/) for the real OIDC round-trip.
+The gate is `python scripts/gate.py --web`; its standalone typecheck is what makes `strict` real (`vite build` checks no types). **Vitest covers reader-side derivations and `lib/read-cache.ts` / `useRead`** only, on fixtures of the SERVED shape (`lib/test-fixtures.ts`), never a cast `dashboard.json`. **The browser walk (`npm run e2e`) owns "does it render against a served cycle"**; the gate runs its `cold` tier ([`e2e/README.md`](e2e/README.md)). A component-render test earns its place only for a class no other tier catches. Smoke by hand at `http://localhost:8001/`: as-is for **anon**, `PROMPTPOTTER_AUTH=off` for **authed + live** at zero spend; [`../dev/oidc-local/`](../dev/oidc-local/) for the real OIDC round-trip.
 
 ## Build + run
 
-**One build mode (`next.config.ts`); no env switch adds a second.** Source maps ship to the box only (`scripts/build_release.py::stage_webapp`). **Visual work: `npm run dev`** on :3000, proxying `/api/*` to :8001; a real OIDC login needs the built app on :8001.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+**One build mode (`vite.config.ts`); no env switch adds a second.** Its `shell` plugin writes what every page shares (the head, `manifest.webmanifest`, `build-id.txt`) from `lib/brand-of.ts::brandOf`; a page's `index.html` holds only `#root` and its entry. Source maps ship to the box only (`scripts/build_release.py::stage_webapp`). **Visual work: `npm run dev`** on :3000, proxying `/api/*` to :8001; a real OIDC login needs the built app on :8001. A rebuild swaps chunk hashes under open tabs; `ui/ErrorBoundary` reloads once (a `sessionStorage` stamp) and, with storage blocked, asks instead of looping.

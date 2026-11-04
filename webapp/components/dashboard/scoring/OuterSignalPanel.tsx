@@ -1,5 +1,3 @@
-"use client";
-
 import { memo, useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
 import type { MeasuredLift, RoundAdvance, ServedRound } from "@/lib/api/types";

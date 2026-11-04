@@ -1,4 +1,3 @@
-"use client";
 import { useCallback, useRef, type PointerEvent, type KeyboardEvent } from "react";
 
 

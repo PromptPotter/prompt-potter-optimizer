@@ -23,24 +23,11 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "types": ["vite/client", "node"],
     "paths": {
       "@/*": ["./*"]
     }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
-  ],
-  // `next typegen` re-adds `.next/dev/types` to `include` and keeps `exclude`, and rewrites the
-  // gitignored `next-env.d.ts`, whose import would otherwise reach a `next dev` session's types.
-  "exclude": ["node_modules", ".next/dev"]
+  "include": ["**/*.ts", "**/*.tsx", "**/*.mts"],
+  "exclude": ["node_modules", "out"]
 }

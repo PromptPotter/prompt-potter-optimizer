@@ -1,4 +1,3 @@
-"use client";
 import type { RunStanding } from "@/lib/api/types";
 import { HoverCard } from "@/components/ui";
 

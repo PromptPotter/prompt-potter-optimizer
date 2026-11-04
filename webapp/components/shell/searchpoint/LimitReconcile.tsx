@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import type { Budget, OptimizerLimit, RunLimitOverrides } from "@/lib/api";
 import { budgetAxis, capLines, readSpend } from "@/lib/derivations";

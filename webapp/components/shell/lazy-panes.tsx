@@ -1,24 +1,32 @@
-"use client";
+import { lazy, Suspense } from "react";
 
-import dynamic from "next/dynamic";
+const loadChat = () => import("@/components/chat/ChatPane");
+const loadFiles = () => import("@/components/files/FilesPane");
 
-const PANE_LOADING = () => <div className="content" aria-busy="true" />;
+const LazyChat = lazy(() => loadChat().then((m) => ({ default: m.ChatPane })));
+const LazyFiles = lazy(() => loadFiles().then((m) => ({ default: m.FilesPane })));
 
-export const ChatPane = dynamic(
-  () => import("@/components/chat/ChatPane").then((m) => m.ChatPane),
-  { ssr: false, loading: PANE_LOADING },
-);
-export const FilesPane = dynamic(
-  () => import("@/components/files/FilesPane").then((m) => m.FilesPane),
-  { ssr: false, loading: PANE_LOADING },
-);
+const PANE_LOADING = <div className="content" aria-busy="true" />;
+
+export function ChatPane() {
+  return (
+    <Suspense fallback={PANE_LOADING}>
+      <LazyChat />
+    </Suspense>
+  );
+}
+
+export function FilesPane() {
+  return (
+    <Suspense fallback={PANE_LOADING}>
+      <LazyFiles />
+    </Suspense>
+  );
+}
 
 // A miss is swallowed: it resurfaces at the real load, which `ui/ErrorBoundary` owns.
 export function preloadLazyPanes(): void {
-  for (const chunk of [
-    import("@/components/chat/ChatPane"),
-    import("@/components/files/FilesPane"),
-  ]) {
+  for (const chunk of [loadChat(), loadFiles()]) {
     void chunk.catch(() => undefined);
   }
 }

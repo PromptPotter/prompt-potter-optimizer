@@ -1,4 +1,3 @@
-"use client";
 // Mount `ConnectorProvider` ONCE above its consumers: one health poll per app.
 
 import {

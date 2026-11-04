@@ -1,4 +1,3 @@
-"use client";
 import { Button, FailureLine, Term } from "@/components/ui";
 import { postCommand } from "@/lib/api/commands";
 import { BENCH_REFUSAL_INFO } from "@/lib/api/types.generated";

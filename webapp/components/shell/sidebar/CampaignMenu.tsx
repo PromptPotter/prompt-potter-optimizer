@@ -1,4 +1,3 @@
-"use client";
 import { useId, useState } from "react";
 import { postCommand, type ListedCampaign } from "@/lib/api";
 import { tagValue } from "@/lib/derivations";

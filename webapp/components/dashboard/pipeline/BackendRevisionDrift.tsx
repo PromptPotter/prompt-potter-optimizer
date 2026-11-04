@@ -1,4 +1,3 @@
-"use client";
 import { useCycleStream } from "@/lib/poll";
 
 // Served, never refused: this launch measures on the backend as it is.

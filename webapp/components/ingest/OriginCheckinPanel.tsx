@@ -1,5 +1,3 @@
-"use client";
-
 import type { DraftPatch, OriginLastResolution, RaisedCommand } from "@/lib/api";
 import { QuestionAnswer } from "./QuestionAnswer";
 

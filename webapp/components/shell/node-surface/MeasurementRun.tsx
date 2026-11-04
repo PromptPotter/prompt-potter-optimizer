@@ -1,4 +1,3 @@
-"use client";
 import { useMemo, useState, type ReactNode } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { useLeafIsL4, useWorkspace } from "@/lib/workspace";

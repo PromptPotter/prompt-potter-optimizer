@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
 export const STORAGE_KEYS = {
@@ -88,9 +86,7 @@ export function useLocalStorage<T>(
     return parsed;
   }, [key]);
 
-  const getServerSnapshot = useCallback((): T => cfg.current.initial, []);
-
-  const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const value = useSyncExternalStore(subscribe, getSnapshot);
 
   const store = useCallback(
     (next: T | ((prev: T) => T)) => {

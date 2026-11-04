@@ -303,13 +303,11 @@ def free_mb() -> int:
 
 # What one unit of each fan-out commits: the slope of its check's job peak across widths.
 _OFFLINE_RUN_CHILD_MB = 108
-_NEXT_WORKER_MB = 80
 # Each lane's heaviest check at full width (offline-run; a cold eslint): below their sum, in turn.
 _PY_LANE_MB = 1200
 _WEB_LANE_MB = 1000
-# Past these, free memory is no reason to widen: the OS kills concurrent processes on low memory.
+# Past this, free memory is no reason to widen: the OS kills concurrent processes on low memory.
 OFFLINE_RUN_CHILDREN_MAX = 8
-NEXT_WORKERS_MAX = 4
 
 
 @dataclass(frozen=True)
@@ -328,10 +326,6 @@ class RamBudget:
     def offline_run_children(self, tasks: int) -> int:
         fit = self.free_mb // _OFFLINE_RUN_CHILD_MB
         return max(2, min(fit, tasks, os.cpu_count() or 2, OFFLINE_RUN_CHILDREN_MAX))
-
-    def next_workers(self) -> int:
-        fit = self.free_mb // _NEXT_WORKER_MB
-        return max(1, min(fit, (os.cpu_count() or 2) - 1, NEXT_WORKERS_MAX))
 
 
 def peak_mb() -> int:

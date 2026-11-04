@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfAddress } from "@/lib/ids";

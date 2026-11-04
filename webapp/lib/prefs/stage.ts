@@ -1,5 +1,3 @@
-"use client";
-
 import { BOOL, STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 
 export function useStageView(): [boolean, (on: boolean) => void] {

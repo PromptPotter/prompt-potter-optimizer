@@ -5,7 +5,7 @@ const answering = (build: string | null) =>
 
 async function clientBuiltAs(build: string) {
   vi.resetModules();
-  vi.stubEnv("NEXT_PUBLIC_WEBAPP_BUILD", build);
+  vi.stubEnv("VITE_WEBAPP_BUILD", build);
   return import("@/lib/api/client");
 }
 

@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";

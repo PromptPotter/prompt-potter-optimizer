@@ -12,8 +12,12 @@ acting.
 
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
-  `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.
-  **Re-test:** `npx playwright test --project=cold` logs no 429.
+  `/hierarchy`, `/auth/*`, `/datasets`; the `walk` tier on the offline-run world reads 429 in 2 to 5
+  specs a run, as the bucket drains across a fast walk. It meters the host, whom
+  `quota.py::refuse_write_rate` exempts and `quota.py::refuse_read_rate` does not. Action: the limit
+  admits one tab's own polling cadence and exempts the host. **Rides with:** the quota read rate (arc A2);
+  the `walk` tier is enabled after it lands.
+  **Re-test:** `npx playwright test --project=cold --project=walk` logs no 429.
 - **Left by the upload check-in's 422** (`25be69eac` cut rows on every draft read; fixed 2026-11-02 by
   gating `startability.py::draft_samples` on `origin_readiness.py::columns_confirmed`):
   - **"Run the resolver now" lives three times**: webapp `useIngestFlow` (`advance`, `land`,
@@ -238,8 +242,19 @@ import-graph script before and after; close each wave with `gate.py --only layer
   null pane (the phone's campaign list is the sidebar), so naming it on a wide screen opens a chip
   that draws nothing. **Re-test:** every family has a pane.
 - **The `walk` tier rots unseen**: the gate runs only `cold`, so a walk assertion outlives the control
-  it names. Action: the gate walks a world built by `scripts/offline_run.py`, which needs none of the
-  operator's campaigns. **Re-test:** `gate.py` lists a walk check.
+  it names. The world is built: `PP_E2E_WALK_WORLD=<offline-run>/potter` serves a copy through
+  `e2e/walk_world.py`, and every walk spec passes there but the ones the read bucket 429s. Action:
+  the gate's `playwright` check adds `--project=walk` on that world. **Blocked by** § URGENT "The
+  per-principal read rate limit". **Re-test:** `gate.py` lists a walk check.
+- **The Vite build leaves five things standing**:
+  - The derivations barrel pulls the network layer into every chunk that imports it.
+  - Babel (React Compiler) is 87% of build time.
+  - Chunks exceed 500 kB.
+  - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank`, `@next/next/*`.
+  - `headers.py::_WEBAPP_CSP` `style-src 'self'` may now hold, with no inline style from the framework: check the console first.
+- **minimatch alert #171** (dev-scope, lint-time only): no eslint / `@eslint/eslintrc` / jsx-a11y /
+  typescript-estree release takes minimatch >= 11.0.1. **Rides with:** the first eslint / ts-eslint / jsx-a11y
+  release on minimatch >= 11.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
@@ -573,8 +588,7 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 
 ### The member backbone
 
-- **The dev loop still serializes on two tools:** `next-build` peaks near 4 GB (rides the Vite arc),
-  and Vitest's pool fails a worker that takes past its hard-coded 90 s to start (`WORKER_START_TIMEOUT`),
+- **The dev loop still serializes on Vitest:** its pool fails a worker that takes past its hard-coded 90 s to start (`WORKER_START_TIMEOUT`),
   which a host loaded from outside the gate lock (a builder's bare `pytest` or `vitest`) still trips,
   though the gate runs it `alone` on one unisolated worker per project. **Re-test:** five builders
   plus one full gate with no reap and no gate waiting longer than its own run.
@@ -639,11 +653,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   **Re-test:** five candidates at 1920×1080 without horizontal scroll.
 - **Optimizer-model repair rate on L2/L3 structured output is unmeasured.** **Rides with:** the next
   supervised campaign that escalates. **Re-test:** the share of its L2/L3 calls that needed a parse repair.
-- **The dashboard carries Next.js only as a build tool** (`output: "export"`; FastAPI serves
-  `webapp/out`), and `eslint-config-next` pulls `braces` (GHSA-vfj7-8cjw-p6xm), failing `gate.py --only npm-audit`.
-  Action: build with Vite, keep the `out` directory; settle first whether the rebuilt ESLint set
-  pulls `braces` back. **Rides with:** the next webapp dependency pass. **Re-test:**
-  `git grep -n '"next"' webapp/package.json`; `npm ls braces` in `webapp/`.
 - **`tests/test_scoring.py::_peer_cycle` stands a `Cycle` up by hand**, banking a C0 report
   `application/origin.py::establish_campaign_origin` cannot produce. Action: a backend whose answers
   produce the asserted origin, started through run init. **Rides with:** any change to how run init
@@ -1060,14 +1069,8 @@ word's `git grep -c` for that sense is 0.
 - **Seen framing snippets in a prompt**:
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).
-  - `vitest.config.ts` loads as CommonJS (Vite warns on every run).
-- **A side worktree cannot pass the full gate**: Turbopack refuses the `node_modules` junction
-  ("points out of the filesystem root"), so `next-build` and `playwright` never run there, and pytest's
-  `compileall` breaks on long Temp paths. A rebuilt commit series is therefore gated without them.
-  **Re-test:** the full gate green in a worktree.
-- **The installed webapp packages drift from `package.json`**: `npm ls` reports `next@16.3.8` against
-  `16.4.1` and `vitest@4.1.11` against `^4.1.12`, so the gate builds with versions the lock does not
-  name. **Re-test:** `npm ls --depth=0` clean.
+- **A side worktree cannot pass the full gate**: pytest's `compileall` breaks on long Temp paths,
+  so a rebuilt commit series is gated without it. **Re-test:** the full gate green in a worktree.
 - **Seen bounding the perimeter** (2026-10-29):
   - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
     `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against

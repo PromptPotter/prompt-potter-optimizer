@@ -1,5 +1,3 @@
-"use client";
-
 import type { MeasuredUnit, VerificationMark } from "@/lib/api/types";
 import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
 import { unitCount } from "@/lib/format";

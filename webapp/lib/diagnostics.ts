@@ -136,13 +136,8 @@ export function clearIncidents(): void {
   write(EMPTY);
 }
 
-/** The stable EMPTY identity, so first paint matches the static export. */
-function emptyIncidents(): Ring {
-  return EMPTY;
-}
-
 export function useIncidents(): Ring {
-  return useSyncExternalStore(subscribeIncidents, getIncidents, emptyIncidents);
+  return useSyncExternalStore(subscribeIncidents, getIncidents);
 }
 
 // Never ship it anywhere from here: decisions.md § 0004 keeps privileged outbound work out of the app.

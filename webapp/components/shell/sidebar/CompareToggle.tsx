@@ -1,5 +1,3 @@
-"use client";
-
 import type { HierarchyCampaign } from "@/lib/api";
 import { defaultChannel, useCompareSelection } from "@/lib/state/compare-selection";
 

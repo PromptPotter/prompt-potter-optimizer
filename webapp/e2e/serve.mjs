@@ -46,7 +46,7 @@ if (BACKEND !== "offline" && BACKEND !== "live") {
 
 for (const [what, where, remedy] of [
   ["venv interpreter", PYTHON, "python scripts/gate.py"],
-  ["static export", path.join(WEBAPP, "out", "index.html"), "npm run build"],
+  ["built app", path.join(WEBAPP, "out", "index.html"), "npm run build"],
 ]) {
   if (!existsSync(where)) {
     console.error(`[e2e] no ${what} at ${where} — run \`${remedy}\``);
@@ -63,6 +63,22 @@ if (home && process.env.PP_E2E_RESET === "1" && process.env.PP_E2E_KEEP !== "1")
   if (process.env.PP_E2E_DROP_CACHES === "1") args.push("--drop-caches");
   const reset = spawnSync(PYTHON, args, { cwd: REPO, stdio: "inherit", env: PYTHON_ENV });
   if (reset.status !== 0) process.exit(reset.status ?? 2);
+}
+
+// `PP_E2E_WORLD` (an environment value, so no shell parses the path) names a run's workspace this home
+// becomes a copy of (`walk_world.py`); never served itself.
+const WORLD = process.env.PP_E2E_WORLD;
+if (WORLD && !home) {
+  console.error("[e2e] PP_E2E_WORLD needs PROMPTPOTTER_HOME: the world is copied there, never served in place");
+  process.exit(2);
+}
+if (home && WORLD) {
+  const world = spawnSync(PYTHON, [path.join(WEBAPP, "e2e", "walk_world.py"), WORLD], {
+    cwd: REPO,
+    stdio: "inherit",
+    env: PYTHON_ENV,
+  });
+  if (world.status !== 0) process.exit(world.status ?? 2);
 }
 
 // TEED so `harness.ts` fails on faults the server swallows, which the browser's console guard never sees.

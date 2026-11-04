@@ -1,5 +1,3 @@
-"use client";
-
 import { BOOL, STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 
 // Default off, so the `/hierarchy/{address}` read behind it never fires.

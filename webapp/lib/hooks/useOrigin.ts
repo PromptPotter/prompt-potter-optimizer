@@ -1,4 +1,3 @@
-"use client";
 // served: the course's `facts.origin`; null until the subtree places it.
 
 import { useMemo } from "react";

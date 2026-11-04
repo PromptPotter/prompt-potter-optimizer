@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { FileTree } from "./FileTree";

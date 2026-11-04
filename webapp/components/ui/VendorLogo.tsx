@@ -1,4 +1,3 @@
-"use client";
 // Never fetch a logo at runtime: OpenRouter's icon path answers a miss with HTTP 200 HTML.
 import type { CSSProperties } from "react";
 import { cx } from "@/lib/cx";

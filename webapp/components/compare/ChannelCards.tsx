@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import type { Evidence, SubjectReading } from "@/lib/api";
 import { readingPath } from "@/lib/api/reads";

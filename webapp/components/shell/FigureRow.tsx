@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { Term } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";

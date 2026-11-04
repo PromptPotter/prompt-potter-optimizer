@@ -1,4 +1,3 @@
-"use client";
 import { Figure, FigureRow } from "@/components/shell/FigureRow";
 import { Loading, Said } from "@/components/ui";
 import { figureOf } from "@/lib/derivations";

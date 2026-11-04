@@ -1,4 +1,3 @@
-"use client";
 import { useViewedCourse } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";

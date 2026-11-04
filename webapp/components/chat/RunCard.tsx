@@ -1,4 +1,3 @@
-"use client";
 import { useCycleStream } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { HierarchyCourse } from "@/lib/api";

@@ -1,4 +1,3 @@
-"use client";
 import { DataTable, Term, type Column } from "@/components/ui";
 import type { MeteredSpend } from "@/lib/api";
 import {

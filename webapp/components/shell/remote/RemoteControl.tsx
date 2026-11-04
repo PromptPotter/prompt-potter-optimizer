@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { FailureLine } from "@/components/ui";
 import { cx } from "@/lib/cx";

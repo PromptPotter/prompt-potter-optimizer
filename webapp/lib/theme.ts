@@ -61,7 +61,6 @@ export function barChartDefaults(
 }
 
 export function getCss(name: string): string {
-  if (typeof window === "undefined") return "";
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
@@ -88,7 +87,6 @@ export function applyChartDefaults(): void {
 type Theme = "light" | "dark";
 
 export function readStoredTheme(): Theme {
-  if (typeof window === "undefined") return "light";
   try {
     const v = window.localStorage.getItem(STORAGE_KEYS.theme);
     if (v === "dark" || v === "light") return v;
@@ -99,7 +97,6 @@ export function readStoredTheme(): Theme {
 }
 
 export function applyTheme(t: Theme): void {
-  if (typeof document === "undefined") return;
   if (t === "light") {
     document.documentElement.setAttribute("data-theme", "light");
   } else {

@@ -5,7 +5,7 @@ to [`../CLAUDE.md`](../CLAUDE.md) § Testing posture; this page is the runbook.
 
 ```bash
 cd webapp
-npm run e2e                 # build the export, then walk it (walk + cold)
+npm run e2e                 # build the app, then walk it (walk + cold)
 npm run e2e:fast            # skip the build — iterating on specs
 npm run e2e:watch           # the same, in a browser you can watch
 npm run e2e:ui              # step, time-travel, pick locators
@@ -14,9 +14,12 @@ npx playwright test --project=walk -g "theme"    # one slice
 
 First time on a machine: `npx playwright install chromium`.
 
-**`gate.py` runs the `cold` tier and only that** — it is the one world any machine has, so it is
-what CI can honestly walk. `walk` needs the operator's own campaigns and `spend` needs money, so
-both stay desk tiers run by hand.
+**`gate.py` runs `cold` only** — `walk` waits on the read bucket ([`code-debt-cleanup.md`](../../docs/specs/code-debt-cleanup.md)
+§ The webapp's vanilla pass), and `spend` needs money. `walk` reads no operator campaign when
+`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only offline-run` leaves
+at `.gate_cache/offline-run/potter` — and `walk_world.py` serves a throwaway copy of it whose
+account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
+own workspace, a desk tier run by hand.
 
 **The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
 without `spend` serves the throwaway world `offline`: `serve_app.py` answers `TERMNORM_URL` with
@@ -27,7 +30,7 @@ TermNorm at :8000 once turned a CI-red spec green at the push hook.
 
 | Project | Workspace | Covers |
 |---|---|---|
-| `walk` | the checkout's `.promptpotter/`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
+| `walk` | a copy of `PP_E2E_WALK_WORLD`, else the checkout's `.promptpotter/`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
 | `cold` | a throwaway `PROMPTPOTTER_HOME` | the zero-campaign path a new account meets: consent gate, empty reads, dataset picker. |
 | `spend` | the same throwaway world | two campaigns taken to a measured round, each under `PP_E2E_BUDGET_USD`. **Real money** — `PP_E2E_SPEND=1`, and the dataset's backend must be up. `run.spec.ts` is the browser ingest path, `l4.spec.ts` the recursion; each spec's header states why it is minted the way it is. |
 
@@ -52,6 +55,7 @@ without it rather than inherit one.
 | `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
 | `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |
+| `PP_E2E_WALK_WORLD` | — | the run `walk` serves a copy of, at `<tmp>/promptpotter-e2e-walk`, with the `offline` backend (offline-run's `potter/`, say); never reuses a server already up |
 | `PP_E2E_BASE_URL` | — | walk a server already up (your `:8001`, a deployed box); the walk server then never starts |
 | `PP_E2E_SPEND` | — | `1` arms the spend tier |
 | `PP_E2E_DATASET` | `email-tagging` | what the spend tier starts from; must be a dataset the ingest seam resolves rows for |

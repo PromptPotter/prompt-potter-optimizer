@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";

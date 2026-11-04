@@ -1,5 +1,3 @@
-"use client";
-
 import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
 import type { MeasuredLift, MetricReading, PairwiseComparison } from "@/lib/api/types";
 import { cx } from "@/lib/cx";

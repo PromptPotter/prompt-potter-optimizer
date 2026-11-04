@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import { dashboardRead, isWarming } from "@/lib/api";
 import type { MeasuredUnit, VerificationMark, VerifyReading } from "@/lib/api/types";

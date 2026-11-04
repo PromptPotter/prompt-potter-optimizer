@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { Said } from "@/components/ui";
 import { cx } from "@/lib/cx";

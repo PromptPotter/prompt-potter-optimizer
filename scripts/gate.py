@@ -834,7 +834,7 @@ def _ruff(*argv: str) -> Callable[[Selection], Outcome]:
 
 
 def _tsc(_sel: Selection) -> Outcome:
-    # `next build` checks neither this nor eslint: next.config sets `typescript.ignoreBuildErrors`.
+    # `vite build` strips types and checks none, so this is the one type check.
     return run(_node("npm", "run", "typecheck"), _WEBAPP)
 
 
@@ -844,7 +844,8 @@ def _eslint(sel: Selection) -> Outcome:
 
 
 def _playwright(_sel: Selection) -> Outcome:
-    # Only `cold`: `walk` reads the operator's own `.promptpotter/` and `spend` costs real money.
+    # Only `cold`: `walk` drains the host's read bucket (`quota.py::refuse_read_rate`) and `spend`
+    # costs real money.
     return run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
 
 
@@ -985,7 +986,7 @@ class Check:
     light: bool = False
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
-    # or its peak (next-build's) is more than any lane beside it leaves free.
+    # or its peak is more than any lane beside it leaves free.
     alone: bool = False
     # The check that builds what it reads: earlier in its lane, and brought along by `--only`.
     after: str = ""
@@ -1297,18 +1298,11 @@ CHECKS: tuple[Check, ...] = (
     Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
     Check(
-        "next-build",
+        "vite-build",
         "web",
-        lambda _: run(
-            _node("npm", "run", "build"),
-            _WEBAPP,
-            NEXT_BUILD_CPUS=str(RamBudget.read().next_workers()),
-        ),
-        alone=True,
+        lambda _: run(_node("npm", "run", "build"), _WEBAPP),
         builds="webapp/out/index.html",
     ),
-    # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored
-    # `next-env.d.ts` that imports them; the exclude in `tsconfig.json` keeps out `.next/dev`.
     Check("tsc", "web", _tsc, on_commit=True),
     Check(
         "playwright",
@@ -1316,7 +1310,7 @@ CHECKS: tuple[Check, ...] = (
         _playwright,
         landing=True,
         alone=True,
-        after="next-build",
+        after="vite-build",
         product=("webapp/out",),
         # The cold server's backend is the offline world's (`e2e/serve_app.py`).
         reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME, "scripts/offline_world.py"),
@@ -1648,7 +1642,7 @@ def main() -> int:
             if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
         ]
     if not args.staged:
-        # `--only playwright` brings `next-build` along, so it never reads a build older than its sources.
+        # `--only playwright` brings `vite-build` along, so it never reads a build older than its sources.
         named = {c.name: c for c in CHECKS}
         for check in list(checks):
             while check.after and named[check.after] not in checks:

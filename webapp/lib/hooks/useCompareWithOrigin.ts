@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
 import { useCompareSelection, type CompareChannel } from "@/lib/state/compare-selection";

@@ -1,4 +1,3 @@
-"use client";
 import { useMemo } from "react";
 import { liveCandidates, useCycleStream } from "@/lib/poll";
 import type { ServedRound } from "@/lib/api/types";

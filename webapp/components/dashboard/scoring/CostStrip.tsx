@@ -1,4 +1,3 @@
-"use client";
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import type { CheckinQuestion, DraftPatch } from "@/lib/api";
 import { setIn } from "./SchemaFields";

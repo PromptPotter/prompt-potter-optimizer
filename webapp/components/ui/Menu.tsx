@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { Popover } from "./Popover";

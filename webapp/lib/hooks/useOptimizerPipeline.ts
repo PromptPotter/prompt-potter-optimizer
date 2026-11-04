@@ -1,5 +1,3 @@
-"use client";
-
 import { optimizerPipelineRead } from "@/lib/api";
 import { pipelineReadStatus } from "@/lib/derivations";
 import type { PipelineDoc, PipelineStatus } from "@/lib/types";

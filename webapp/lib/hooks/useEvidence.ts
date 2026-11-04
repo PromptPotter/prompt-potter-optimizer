@@ -1,5 +1,3 @@
-"use client";
-
 import { evidenceRead } from "@/lib/api/reads";
 import type { Evidence } from "@/lib/api/types";
 import { useRead, type ReadFailure } from "@/lib/hooks/useRead";

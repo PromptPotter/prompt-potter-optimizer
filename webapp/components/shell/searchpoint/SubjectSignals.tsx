@@ -1,4 +1,3 @@
-"use client";
 // served: `SubjectReading.cell_means` — each side a mean over that point's own cells.
 import type { OriginEvidence } from "@/lib/hooks/useOriginEvidence";
 import { CELL_MEAN_ROWS } from "@/lib/cell-means";

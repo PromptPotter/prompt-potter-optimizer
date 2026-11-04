@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo, useState } from "react";
 import { pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
@@ -139,10 +137,8 @@ function SeriesHoverPopup({
   loadedSet: number[] | null;
   seedSet: number[];
 }) {
-  const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
-  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
-  const left = Math.min(hover.x + 14, vw - 320);
-  const top = Math.min(hover.y + 14, vh - 280);
+  const left = Math.min(hover.x + 14, window.innerWidth - 320);
+  const top = Math.min(hover.y + 14, window.innerHeight - 280);
   const isLoaded = sameSampleSet(loadedSet, seedSet);
   return (
     <div role="tooltip" className="st-hover" style={{ left, top }}>

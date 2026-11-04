@@ -1,5 +1,3 @@
-"use client";
-
 import { AccountSection } from "./AccountSection";
 import { Button, CommitInput, Empty, FailureLine, ReadState } from "@/components/ui";
 import {

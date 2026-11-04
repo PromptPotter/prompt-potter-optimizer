@@ -1,5 +1,3 @@
-"use client";
-
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { buildIsStale } from "@/lib/api";
 import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
@@ -16,7 +14,9 @@ interface State {
   reload: ReloadOutcome | null;
 }
 
-const MISSING_CHUNK = /ChunkLoadError|Failed to load chunk|Loading chunk \S+ failed|dynamically imported module|Importing a module script failed/i;
+// What a lazy load throws once the old build's chunk (or its CSS) is gone; a failed hover prefetch throws nothing.
+const MISSING_CHUNK =
+  /dynamically imported module|Importing a module script failed|Unable to preload CSS/i;
 
 // Two faces of one cause: a piece of the old build is gone from disk, or the old build read an answer the new API shaped.
 function fromStaleBuild(error: Error): boolean {

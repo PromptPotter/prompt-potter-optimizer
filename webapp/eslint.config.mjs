@@ -1,24 +1,27 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
-
-const a11y = nextVitals.find((c) => c.plugins?.["jsx-a11y"]).plugins["jsx-a11y"].configs.recommended.rules;
+import jsxA11y from "eslint-plugin-jsx-a11y";
+import reactHooks from "eslint-plugin-react-hooks";
+import tseslint from "typescript-eslint";
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  {
+    files: ["**/*.{js,jsx,mjs,ts,tsx,mts}"],
+    extends: [reactHooks.configs.flat.recommended, jsxA11y.flatConfigs.recommended],
+  },
   // A focusable `separator` is the ARIA window-splitter widget, so its tab stop is its own.
   {
     rules: {
-      ...a11y,
       "jsx-a11y/label-has-associated-control": ["error", { controlComponents: ["CommitInput"] }],
       "jsx-a11y/no-noninteractive-tabindex": ["error", { tags: [], roles: ["tabpanel", "separator"], allowExpressionValues: true }],
     },
   },
   {
     files: ["**/*.ts", "**/*.tsx"],
+    extends: [tseslint.configs.recommended],
     languageOptions: { parserOptions: { projectService: true } },
     rules: {
+      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/no-unused-expressions": "warn",
       "@typescript-eslint/no-unnecessary-condition": "error",
       // `||` on a string reads "" as unset (an env var, a served label); `??` would keep it.
       "@typescript-eslint/prefer-nullish-coalescing": ["error", { ignorePrimitives: { string: true } }],
@@ -28,10 +31,7 @@ const eslintConfig = defineConfig([
     },
   },
   globalIgnores([
-    ".next/**",
     "out/**",
-    "build/**",
-    "next-env.d.ts",
     // Playwright writes and removes it while the gate's lint walks the tree.
     "test-results/**",
   ]),

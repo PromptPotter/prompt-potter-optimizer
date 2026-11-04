@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { postCommand } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";

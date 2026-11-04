@@ -1,4 +1,3 @@
-"use client";
 import type { PairwiseComparison } from "@/lib/api/types";
 import type { CellRow } from "@/lib/api";
 import { usePresetCells } from "@/lib/hard-samples";

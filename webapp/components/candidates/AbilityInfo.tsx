@@ -1,5 +1,3 @@
-"use client";
-
 import { THETA_CAVEAT_INFO, type AbilityReading } from "@/lib/api/types.generated";
 import type { ThetaCaveat as Caveat } from "@/lib/types";
 import { Said } from "@/components/ui";

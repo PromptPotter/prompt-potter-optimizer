@@ -1,4 +1,3 @@
-"use client";
 // Never retries: each send mints a fresh idempotency key, so a retry is a second command.
 
 import { useRef, useState } from "react";

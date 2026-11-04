@@ -1,4 +1,3 @@
-"use client";
 import { useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";

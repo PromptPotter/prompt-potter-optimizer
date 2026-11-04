@@ -1,5 +1,3 @@
-"use client";
-
 import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
 import { createModuleStore } from "@/lib/state/module-store";
 

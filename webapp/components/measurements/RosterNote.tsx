@@ -1,4 +1,3 @@
-"use client";
 import { Empty, FailureLine, Loading } from "@/components/ui";
 import { useHardSamples } from "@/lib/hard-samples";
 

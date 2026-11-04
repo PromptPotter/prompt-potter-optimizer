@@ -8,7 +8,7 @@ test.describe("app shell", () => {
       "href",
       "#main-content",
     );
-    // Never the brand literal: `lib/brand.ts` is NEXT_PUBLIC_*-overridable for whitelabel.
+    // Never the brand literal: `lib/brand.ts` is VITE_*-overridable for whitelabel.
     await expect(page.locator("#main-content")).toBeVisible();
   });
 

@@ -1,4 +1,3 @@
-"use client";
 // For geometry that must FIT a box (a grid folding to its width); a style alone stays in CSS.
 
 import { useEffect, useState, type RefObject } from "react";

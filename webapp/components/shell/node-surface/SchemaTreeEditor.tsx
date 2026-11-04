@@ -1,4 +1,3 @@
-"use client";
 import { Button, Chip, CommitInput, ValueList } from "@/components/ui";
 import { LockButton } from "./NodeConfigEditor";
 

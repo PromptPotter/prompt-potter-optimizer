@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
 import { CardFrame, DataTable, Empty, FailureLine, Loading, type Column } from "@/components/ui";
