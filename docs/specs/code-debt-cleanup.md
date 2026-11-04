@@ -49,7 +49,7 @@ acting.
 **Rides with:** one arc; 4 absorbs 7.
 
 4. **Run scope is ~21 ambient `ContextVar`s bound piecemeal** — telemetry, send pacing, spend book,
-   optimizer manifest, archive memory scope, coupon, measurement context, judges, spawn, harbor;
+   optimizer manifest, archive memory scope, coupon, measurement context, judges, spawn;
    `set_cycle_ledger` bound at 6 sites, `bind_memory_scope` sets without a reset token, one ledger with
    three doors (the var, `RunCallbacks.ledger`, `LaunchState.ledger`), an unbound memory scope defaulting
    to `OpenAt()` (the whole archive). Action: one frozen `RunScope` bound once at the run seam.
@@ -78,9 +78,6 @@ acting.
     **Re-test:** `git grep -c "logger.warning" -- promptpotter/application/bench/resume_and_fork/repair.py`.
 11. **The `evidence` CLI is a 731-line renderer in presentation** — `presentation/cli/commands/evidence.py`.
     Action: rows plus a label table in `application/views/evidence.py`. **Re-test:** `wc -l` of the file.
-12. **`connectors/harbor.py` patches litellm module globals** (`_billed_acompletion`, `_refused_aresponses`,
-    `_BLOCK`) and classifies failures by regex over stderr. Action: an injected client through the bench's
-    admitted send; typed exit data. **Re-test:** `git grep -n "_billed_acompletion" -- promptpotter`.
 
 ### The engine swept by shape (debt hunt 2026-11-02)
 
@@ -1049,9 +1046,6 @@ word's `git grep -c` for that sense is 0.
     at a used-up coupon runs one TermNorm cell.
   - `api_keys.json` holds account keys in plaintext at rest, beside `user.json`. Action: encrypt under a
     box secret, or name the file in access-model's at-rest table. **Re-test:** `cat` one.
-  - `registry.get_llm_client` caches up to 256 clients by key, so a removed key's secret stays in
-    memory until evicted; resolution re-reads `api_keys.json` each send, so it is never SENT. **Re-test:**
-    remove a key, then read `get_llm_client.cache_info()`.
   - A resumed cycle's prior metering counts as the box's in its book's coupon reserve
     (`SpendBook.take_up` reads only unreported own-key holds), so a resumed own-key run reserves more of
     the coupon than it draws. Conservative, not a leak. **Re-test:** resume an own-key cycle and read its
@@ -1068,6 +1062,10 @@ word's `git grep -c` for that sense is 0.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
     **Re-test:** the Host allowance section with a token-bound grant.
   - `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
+- **Seen moving harbor's agent onto our client** (2026-11-04):
+  - `LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed (the book holds it
+    as unreported), so `_AgentModel.cost_usd` can read a reported sum below the book's. **Re-test:** one
+    5xx then an answer, read the row's `cost_usd` against the ledger.
 - **Seen removing the migrations** (2026-10-30):
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
@@ -1081,7 +1079,8 @@ word's `git grep -c` for that sense is 0.
 each fix is one more copy; the remedy is the upstream redesign.
 
 - `infrastructure/llm/send_pacing.py::SendBudget` stops at the relay's door: TermNorm's
-  `_MAX_ATTEMPTS` and terminus-2 × litellm retry on their own budgets. **Re-test:**
+  `_MAX_ATTEMPTS`, and terminus-2's `_query_llm` thrice over `connectors/harbor.py::_AgentModel` (each
+  send inside on our budget), retry on their own. **Re-test:**
   `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`.
 
 ## Blocked

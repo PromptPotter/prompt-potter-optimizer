@@ -55,6 +55,7 @@ async def _one(client: LLMClientBase, model: str, rung: str | None) -> RungReadi
                 ChatRequest(
                     messages=[{"role": "user", "content": _PROMPT}],
                     model=model,
+                    temperature=0.0,
                     max_tokens=_MAX_TOKENS,
                     reasoning_effort=rung,
                 ),

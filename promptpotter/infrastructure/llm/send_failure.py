@@ -5,7 +5,11 @@ from __future__ import annotations
 import ssl
 
 from promptpotter.infrastructure.llm.spend_book import SendOutcome, replied
-from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
+from promptpotter.shared.errors import (
+    ErrorCategory,
+    SendRefusedError,
+    UngeneratedRequestError,
+)
 
 
 def failed_send(
@@ -13,8 +17,8 @@ def failed_send(
 ) -> SendOutcome:
     if isinstance(exc, SendRefusedError):
         return SendOutcome(sent=False, may_have_billed=False, failure=exc.category, detail=str(exc))
-    if isinstance(exc, RequestTooLargeError):
-        # It carries the provider's 413/429 as its cause, and is terminal: refused ungenerated.
+    if isinstance(exc, UngeneratedRequestError):
+        # It carries the provider's refusal as its cause.
         return SendOutcome(
             sent=True, may_have_billed=False, failure=ErrorCategory.CLIENT, detail=str(exc)
         )

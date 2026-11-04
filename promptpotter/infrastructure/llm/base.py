@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, TypeVar
 
 from pydantic import SecretStr
@@ -51,23 +53,27 @@ _R = TypeVar("_R")
 WIRE_TIMEOUT_S = 600.0
 
 
-def wire_client(base_url: str, headers: dict[str, str], *, timeout_s: float) -> httpx.AsyncClient:
-    """Resends nothing: `LLMClientBase._admitted_send` is the one loop, and each resend a bill."""
+@functools.cache
+def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
+    """One pool per host, holding no key: each send carries its own (`post_json`).
+
+    Resends nothing: `LLMClientBase._admitted_send` is the one loop, and each resend a bill."""
     import httpx
 
     return httpx.AsyncClient(
         base_url=base_url,
-        headers=headers,
         timeout=httpx.Timeout(timeout_s, connect=5.0),
         limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
         verify=tls_context(),
     )
 
 
-async def post_json(http: httpx.AsyncClient, path: str, body: dict[str, Any]) -> httpx.Response:
+async def post_json(
+    http: httpx.AsyncClient, path: str, body: dict[str, Any], *, headers: dict[str, str]
+) -> httpx.Response:
     import httpx
 
-    reply = await http.post(path, json=body)
+    reply = await http.post(path, json=body, headers=headers)
     if not reply.is_success:
         # httpx's own message names the status alone; the provider's words are the diagnosis.
         raise httpx.HTTPStatusError(
@@ -111,7 +117,18 @@ class ProviderKey(NamedTuple):
     paid_by: KeySource
 
 
+@dataclass
+class SendPacing:
+    """What one provider ACCOUNT's sends share across clients and cycles; it holds no key."""
+
+    rate_limiter: RateLimiter | None
+    # Per MODEL: a gateway throttles one model's upstream while the rest answer.
+    backpressure: dict[str, Backpressure] = field(default_factory=dict)
+
+
 class LLMClientBase(ABC):
+    """Lives as long as its caller's key resolution: the key is never held past it."""
+
     SENDS: ClassVar[frozenset[str]]
     CREDIT_REFUSAL_STATUSES: ClassVar[frozenset[int]]
     RATE_CAP_HEADERS: ClassVar[tuple[str, str]]
@@ -122,14 +139,13 @@ class LLMClientBase(ABC):
         provider: str,
         display_name: str,
         key: ProviderKey,
-        rate_limiter: RateLimiter | None,
+        pacing: SendPacing,
     ):
         self._provider = provider
         self._provider_name = display_name
         self._key = key
-        self._rate_limiter = rate_limiter
-        # Per MODEL: a gateway throttles one model's upstream while the rest answer.
-        self._backpressure: dict[str, Backpressure] = {}
+        self._rate_limiter = pacing.rate_limiter
+        self._backpressure = pacing.backpressure
 
     def pushback(self, model: str) -> BackpressureReading | None:
         held = self._backpressure.get(model)
@@ -152,7 +168,7 @@ class LLMClientBase(ABC):
         label: CallLabel,
         *,
         model: str,
-        messages: list[dict[str, str]],
+        messages: Sequence[Mapping[str, object]],
         sent: object,
         max_tokens: int | None,
         send: Callable[[], Awaitable[tuple[object | None, _R]]],

@@ -27,9 +27,7 @@ import os
 import re
 import tempfile
 import time
-from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, get_args
 
@@ -55,20 +53,19 @@ from promptpotter.infrastructure.docker_host import (
     forget_package_cache,
     machine_step,
 )
-from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
-from promptpotter.infrastructure.llm.openai_compat import (
-    ReplyBilling,
-    cell_gateway_body,
-    sent_effort,
+from promptpotter.infrastructure.llm.registry import (
+    get_llm_client,
+    host_key,
+    host_key_attr,
+    openai_compat_spec,
+    providers,
 )
-from promptpotter.infrastructure.llm.registry import openai_compat_spec
+from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
-    Admission,
     Billed,
     CallLabel,
-    SendOutcome,
     admitted,
     answered,
     reservation_left,
@@ -76,9 +73,11 @@ from promptpotter.infrastructure.llm.spend_book import (
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning, rate_priced_usd
 from promptpotter.shared.errors import (
     CellInfrastructureError,
-    CellThrottledError,
     CellUnscoreableError,
+    ContextOverflowError,
     ErrorCategory,
+    NoApiKeyError,
+    SendRefusedError,
     cell_failure,
     is_provider_credit_refusal,
 )
@@ -87,7 +86,7 @@ from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator, Mapping
+    from collections.abc import Mapping, Sequence
     from types import ModuleType
 
     from harbor.environments.docker.docker import DockerEnvironment
@@ -101,7 +100,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Harbor's agents import litellm, which otherwise fetches its price map over the network at import.
+# Harbor's agents load litellm, which otherwise fetches its price map over the network at import.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 
@@ -119,17 +118,24 @@ SKILL_KEY = "skill_opened"
 
 INSTRUMENT_KEY = "harbor_instrument"
 
-AGENT_KWARG_KEYS = frozenset(
+# What the agent's model is SENT, by our client (`_AgentModel`): never terminus-2's own sender.
+_SEND_KEYS = ("temperature", "top_p", "reasoning_effort", "max_tokens", "max_input_tokens")
+# What terminus-2 itself reads.
+_TERMINUS_KEYS = ("max_turns", "parser_name", "enable_summarize", "store_all_messages")
+# Owned by `nodes.agent.config`, so a panel's `agent.kwargs` may set none of them.
+AGENT_KWARG_KEYS = frozenset((*_SEND_KEYS, *_TERMINUS_KEYS))
+# What terminus-2 hands its own sender, which `_AgentModel` replaces: set, each would reach no wire.
+_DISCARDED_SENDER_KEYS = frozenset(
     {
-        "max_turns",
-        "temperature",
-        "reasoning_effort",
-        "top_p",
-        "parser_name",
-        "enable_summarize",
-        "interleaved_thinking",
+        "api_base",
+        "model_info",
         "max_thinking_tokens",
-        "store_all_messages",
+        "use_responses_api",
+        "llm_backend",
+        "llm_kwargs",
+        "llm_call_kwargs",
+        "collect_rollout_details",
+        "interleaved_thinking",
     }
 )
 
@@ -150,16 +156,29 @@ class _AgentDeclares(NamedTuple):
     tools: tuple[tuple[str, str], ...]
     # Written into its logs dir by every step it runs: `_layout_fault` refuses a clean step without one.
     logs: tuple[str, ...]
+    # Its every send goes through `agent._llm`, which `_AgentModel` replaces; `False`: it sends none.
+    model_seam: bool
 
 
-# Absent declares nothing: oracle and nop write no logs, an installed agent's ATIF is best-effort.
+# An in-process agent is declared or refused (`_attempt`): one sending past `_llm` would
+# reach its provider unadmitted. An installed agent sends from its container, its ATIF best-effort.
 # terminus-2's tools mirror `TmuxSession._install_recording_tools`; `run` dumps its trajectory in `finally`.
 _AGENTS: dict[str, _AgentDeclares] = {
     "terminus-2": _AgentDeclares(
-        tools=(("tmux", "tmux -V"), ("asciinema", "asciinema --version")), logs=(_TRAJECTORY,)
+        tools=(("tmux", "tmux -V"), ("asciinema", "asciinema --version")),
+        logs=(_TRAJECTORY,),
+        model_seam=True,
     ),
+    "oracle": _AgentDeclares(tools=(), logs=(), model_seam=False),
+    "nop": _AgentDeclares(tools=(), logs=(), model_seam=False),
 }
-_UNDECLARED = _AgentDeclares(tools=(), logs=())
+_UNDECLARED = _AgentDeclares(tools=(), logs=(), model_seam=False)
+
+
+def _agent_name(panel: Mapping[str, Any] | None) -> str:
+    return ((panel or {}).get("agent") or {}).get("name") or "terminus-2"
+
+
 # `TmuxSession._detect_system_info`'s probe order, which decides the install command it runs.
 _PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "apk", "pacman", "brew", "pkg", "zypper")
 
@@ -176,9 +195,10 @@ _REGISTRY_TIMEOUT_S = 30.0
 _ROSTER_DIR = Path(__file__).parent / "resources"
 _REGISTRY_NAME = re.compile(r"[\w.-]+")
 
+# The harness's own words (Docker, a registry pull): our sends fail typed (`_AgentModel.failure`).
 _HARNESS_NETWORK_FAILURE = re.compile(
     r"no such host|Temporary failure in name resolution|failed to fetch oauth token|"
-    r"TLS handshake timeout|i/o timeout|dial tcp|Network is unreachable|APIConnectionError"
+    r"TLS handshake timeout|i/o timeout|dial tcp|Network is unreachable"
 )
 _FETCH_FAILURE = re.compile(
     r"^Err:\d+ https?://|Failed to fetch https?://|Temporary failure resolving|"
@@ -189,7 +209,15 @@ _FETCH_FAILURE = re.compile(
 _HARNESS_TIMEOUTS = frozenset(
     {"EnvironmentStartTimeoutError", "AgentSetupTimeoutError", "VerifierTimeoutError"}
 )
-_PROVIDER_THROTTLE = re.compile(r"\bRateLimitError\b")
+# What a send ends a cell on, never a score: the agent never saw the provider answer.
+_NOT_THE_PROMPT = frozenset(
+    {
+        ErrorCategory.PROVIDER_THROTTLED,
+        ErrorCategory.PROVIDER_CREDIT,
+        ErrorCategory.CONNECTION,
+        ErrorCategory.SERVER,
+    }
+)
 
 # FIXED, never a search axis: a candidate writing its own description could win by being uninviting.
 _SKILL_NAME = "task-approach"
@@ -307,10 +335,19 @@ def pin_roster(dataset: str, version: str) -> Path:
 
 
 def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
-    if owned := sorted(set((panel.get("agent") or {}).get("kwargs") or {}) & AGENT_KWARG_KEYS):
+    agent = panel.get("agent") or {}
+    kwargs = set(agent.get("kwargs") or {})
+    if owned := sorted(kwargs & AGENT_KWARG_KEYS):
         raise ValueError(
             f"harbor connector: the panel sets {owned} under `agent.kwargs`, which "
             f"`pipeline.nodes.{AGENT_NODE}.config` owns and lays over it. Delete them here."
+        )
+    seamed = _AGENTS.get(_agent_name(panel), _UNDECLARED).model_seam
+    if seamed and (discarded := sorted(kwargs & _DISCARDED_SENDER_KEYS)):
+        raise ValueError(
+            f"harbor connector: the panel sets {discarded} under `agent.kwargs`, which configure "
+            "the agent's own sender; `_AgentModel` sends in its place, so they would reach no "
+            "wire. Delete them here."
         )
     resolved = _resolve_tasks(panel)
     for task in resolved["tasks"]:
@@ -373,40 +410,28 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
 
 
 # Hashed into every cell's identity (`_identity_config`): respelling it re-keys every banked cell.
-_REASONING_CHANNEL = "extra_body.reasoning"
+_AGENT_SENDER = "registry-client.ChatRequest"
 
 
 def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
+    if discarded := sorted(cfg.keys() & _DISCARDED_SENDER_KEYS):
+        raise ValueError(
+            f"harbor connector: `nodes.{AGENT_NODE}.config` sets {discarded}, which configure "
+            "terminus-2's own sender; `_AgentModel` sends in its place, so they would reach no "
+            "wire. Delete them."
+        )
     fields: dict[str, Any] = {SKILL_DELIVERY_KEY: _skill_delivery(cfg)}
     if prompt := cfg.get("prompt"):
         fields["prompt"] = prompt
     if model := cfg.get("model"):
         fields["model"] = model
-    via = str(cfg.get("provider") or "")
-    if via:
-        fields["provider"] = via
-    kwargs = {k: v for k, v in cfg.items() if k in AGENT_KWARG_KEYS}
-    effort = sent_effort(kwargs.pop("reasoning_effort", None))
-    body = cell_gateway_body(
-        openai_compat_spec(via),
-        via,
-        route_order=cfg.get("route_order"),
-        reasoning_effort=effort,
-    )
-    call_kwargs: dict[str, Any] = {}
-    if body is not None:
-        # litellm's `drop_params` drops `reasoning_effort` on a model it does not list.
-        call_kwargs["extra_body"] = body
-    elif effort is not None:
-        kwargs["reasoning_effort"] = effort
-    if (reply := cfg.get("max_tokens")) is not None:
-        call_kwargs["max_tokens"] = int(reply)
-    if call_kwargs:
-        kwargs["llm_call_kwargs"] = call_kwargs
-    if (context := cfg.get("max_input_tokens")) is not None:
-        # Unsent, terminus-2 assumes the whole window: 1M tokens for a model litellm lacks.
-        kwargs["model_info"] = {"max_input_tokens": int(context)}
-    if kwargs:
+    if provider := cfg.get("provider"):
+        fields["provider"] = provider
+    if send := {k: cfg[k] for k in _SEND_KEYS if cfg.get(k) is not None}:
+        fields["send"] = send
+    if route := cfg.get("route_order"):
+        fields.setdefault("send", {})["route_order"] = list(route)
+    if kwargs := {k: cfg[k] for k in _TERMINUS_KEYS if k in cfg}:
         fields["agent_kwargs"] = kwargs
     return fields
 
@@ -422,25 +447,62 @@ def harbor_wire_adapter(
     return payload
 
 
-def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None:
+def _refuse_send_faults(
+    agent_name: str, model: str | None, provider: str | None, send: Mapping[str, Any]
+) -> None:
+    """What `_AgentModel` would otherwise meet mid-episode, refused before a cell is bought."""
+    where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
+    if model is None and provider is None:
+        if _AGENTS.get(agent_name, _UNDECLARED).model_seam:
+            raise ValueError(
+                f"{where} names no model and no provider, so its {agent_name} agent has "
+                "nothing to send on."
+            )
+        return
+    if not model or not provider:
+        raise ValueError(
+            f"{where} names a {'provider' if provider else 'model'} and no "
+            f"{'model' if provider else 'provider'}, so its agent has nothing to send on."
+        )
+    if provider not in providers():
+        raise ValueError(f"{where}: no LLM provider {provider!r}; have {sorted(providers())}.")
+    if send.get("max_input_tokens") is None:
+        raise ValueError(
+            f"{where} declares no `max_input_tokens`: terminus-2 summarizes against it, and "
+            "nothing else tells it the model's window."
+        )
+    spec = openai_compat_spec(provider)
+    if send.get("route_order") and (spec is None or not spec.gateway):
+        raise ValueError(
+            f"{where} sets `route_order` on {provider!r}, which is no gateway: it has no host "
+            "behind it to route to."
+        )
+
+
+def _sent_spend_bound(
+    node: str, cfg: Mapping[str, Any], experiment: Mapping[str, Any] | None
+) -> LLMSpendBound | None:
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
-    sent = _agent_fields(dict(cfg)).get("agent_kwargs") or {}
-    call = sent.get("llm_call_kwargs") or {}
-    turns = sent.get("max_turns")
-    reply = call.get("max_tokens")
-    context = (sent.get("model_info") or {}).get("max_input_tokens")
+    fields = _agent_fields(dict(cfg))
+    send, agent = fields.get("send") or {}, fields.get("agent_kwargs") or {}
+    _refuse_send_faults(_agent_name(experiment), fields.get("model"), fields.get("provider"), send)
+    turns, reply, context = (
+        agent.get("max_turns"),
+        send.get("max_tokens"),
+        send.get("max_input_tokens"),
+    )
     if turns is None or reply is None or context is None:
         return None
-    summarized = _TERMINUS_SUMMARY_CALLS if sent.get("enable_summarize", True) else 0
-    route = (call.get("extra_body") or {}).get("provider") or {}
+    summarized = _TERMINUS_SUMMARY_CALLS if agent.get("enable_summarize", True) else 0
+    # Our client holds each send at the dearest host: its gateway route falls back, capped.
     return LLMSpendBound(
         kind="llm",
         attempts=int(turns) * (1 + summarized),
-        input_tokens=context,
-        max_tokens=reply,
-        hosts=None if route.get("allow_fallbacks", True) else tuple(route["order"]),
+        input_tokens=int(context),
+        max_tokens=int(reply),
+        hosts=None,
     )
 
 
@@ -480,7 +542,7 @@ def _identity_config(
         [
             experiment.get("agent") or {},
             experiment.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
-            _REASONING_CHANNEL,
+            _AGENT_SENDER,
         ]
     )
     return {AGENT_NODE: {INSTRUMENT_KEY: fingerprint}}
@@ -807,18 +869,9 @@ def _trial_failures(result: TrialResult) -> list[tuple[str, str]]:
     ]
 
 
-def _provider_throttle(result: TrialResult) -> str | None:
-    failures = _trial_failures(result)
-    for _, detail in failures:
-        if _PROVIDER_THROTTLE.search(detail):
-            return detail
-    if any(kind == "AgentTimeoutError" for kind, _ in failures):
-        return _first_line(_trial_root(result) / "trial.log", _PROVIDER_THROTTLE)
-    return None
-
-
 def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | None:
     for kind, detail in _trial_failures(result):
+        # An installed agent's provider speaks only through the harness's words.
         if is_provider_credit_refusal(detail):
             return (
                 f"the provider account is out of credit: {detail[:300]}",
@@ -932,9 +985,8 @@ def _trial_tokens(result: TrialResult) -> TokenAccount | None:
 
 
 def _step_tokens(
-    result: TrialResult, episode: _Episode, cost_usd: float | None
+    usage: TokenAccount | None, cost_usd: float | None, episode: _Episode
 ) -> dict[str, StepUsage]:
-    usage = _trial_tokens(result)
     if usage is None and cost_usd is None:
         return {}
     usage = usage or TokenAccount()
@@ -1005,6 +1057,9 @@ class _Episode:
     agent_kwargs: dict[str, Any]
     model: str | None
     provider: str | None
+    # What `_AgentModel` puts on each send (`_SEND_KEYS`, `route_order`).
+    send: dict[str, Any]
+    declared: _AgentDeclares | None
     environment: str
     cached: bool
     prompt: str | None
@@ -1037,8 +1092,9 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
     agent_cfg = panel.get("agent") or {}
     agent_kwargs = dict(agent_cfg.get("kwargs") or {})
     agent_kwargs.update(payload.get("agent_kwargs") or {})
-    agent_name = agent_cfg.get("name") or "terminus-2"
-    declared = _AGENTS.get(agent_name, _UNDECLARED)
+    agent_name = _agent_name(panel)
+    declared = _AGENTS.get(agent_name)
+    tools, logs = (declared or _UNDECLARED).tools, (declared or _UNDECLARED).logs
     return _Episode(
         query=sample.query,
         task=task,
@@ -1049,6 +1105,8 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         # From the node config, never the panel's agent block (`datasets/CLAUDE.md`).
         model=payload.get("model"),
         provider=payload.get("provider"),
+        send=dict(payload.get("send") or {}),
+        declared=declared,
         environment=agent_cfg.get("environment") or "docker",
         cached=panel.get(PACKAGE_CACHE_KEY) in PACKAGE_CACHE_SCOPES,
         prompt=payload.get("prompt"),
@@ -1056,10 +1114,10 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
         tools=tuple(
             (tool, probe)
-            for tool, probe in declared.tools
+            for tool, probe in tools
             if tool != "asciinema" or agent_kwargs.get("record_terminal_session") is not False
         ),
-        agent_logs=declared.logs,
+        agent_logs=logs,
     )
 
 
@@ -1097,118 +1155,151 @@ def _install_system_skill(trial: Trial, agent_name: str, prompt: str) -> None:
     trial.agent._prompt_template = _system_skill_template(template, prompt)
 
 
-@dataclass
-class ReportedCost:
-    _usd: float = 0.0
-    _priced: int = 0
-    _silent: bool = False
+def _install_model(trial: Trial, agent_name: str, model: _AgentModel) -> None:
+    # Private API, as `_install_system_skill`: `run` builds its `Chat` over `_llm`, after this.
+    if not hasattr(trial.agent, "_llm"):
+        raise RuntimeError(
+            f"harbor connector: agent {agent_name!r} holds no `_llm`, so its sends cannot be ours."
+        )
+    trial.agent._llm = model
 
-    def count(self, outcome: SendOutcome) -> None:
-        if outcome.reported is None:
-            self._silent = self._silent or outcome.may_have_billed
-            return
-        for part in outcome.reported.parts:
-            if part.cost_usd is None:
-                self._silent = True
+
+def _chat_message(turn: Mapping[str, Any]) -> ChatMessage:
+    role = turn.get("role")
+    if role not in ("system", "user", "assistant"):
+        raise ValueError(f"harbor connector: the agent's history holds a {role!r} turn.")
+    return {"role": role, "content": str(turn.get("content") or "")}
+
+
+class _AgentModel:
+    """terminus-2's model (``agent._llm``): each of its sends goes out on the registry's client,
+    admitted, paced and billed there, on the box's key (``CONNECTOR.cell_payer``)."""
+
+    def __init__(self, model: str | None, provider: str | None, send: Mapping[str, Any]) -> None:
+        assert model and provider, "refused at resolve (`_refuse_send_faults`)"
+        payer = CONNECTOR.cell_payer
+        if payer != "host":
+            raise RuntimeError(
+                f"harbor connector: its cells draw the {payer!r} wallet, and only the box's "
+                "keys are in a cell's reach."
+            )
+        key = host_key(provider)
+        if key is None:
+            raise NoApiKeyError(provider=provider, key=host_key_attr(provider))
+        self._client = get_llm_client(provider, key)
+        self._model, self._provider, self._send = model, provider, dict(send)
+        self.usage = TokenAccount()
+        self._answered = 0
+        self._cost: float | None = 0.0
+        # A refusal is raised again on every later call: terminus-2 retries a failed query, and
+        # would answer around a send we refused.
+        self._ended: SendRefusedError | None = None
+        # The last send's fault no answer has followed: terminus-2 retries it, and a trial
+        # ending on it never measured the prompt.
+        self._fault: Exception | None = None
+
+    async def call(
+        self,
+        prompt: str,
+        message_history: Sequence[Mapping[str, Any]] = (),
+        # `Chat`'s log path and Responses-API chain id: this wire reads neither, and a panel's
+        # `llm_call_kwargs` are refused before a trial (`_DISCARDED_SENDER_KEYS`).
+        **_chat: object,
+    ) -> Any:
+        from harbor.llms.base import (
+            ContextLengthExceededError,
+            LLMResponse,
+            OutputLengthExceededError,
+        )
+        from harbor.models.metric.usage_info import UsageInfo
+
+        if self._ended is not None:
+            raise self._ended
+        send = self._send
+        request = ChatRequest(
+            [*map(_chat_message, message_history), {"role": "user", "content": prompt}],
+            self._model,
+            temperature=send.get("temperature"),
+            max_tokens=send.get("max_tokens"),
+            reasoning_effort=send.get("reasoning_effort"),
+            top_p=send.get("top_p"),
+            route_order=send.get("route_order"),
+        )
+        try:
+            reply = await self._client.chat(request, label=_AGENT_SEND)
+        except ContextOverflowError as exc:
+            # terminus-2 summarizes its history on this, and resends.
+            raise ContextLengthExceededError(str(exc)) from exc
+        except Exception as exc:
+            if failed_send(exc).may_have_billed:
+                self._cost = None
+            if isinstance(exc, SendRefusedError):
+                self._ended = exc
             else:
-                self._usd += part.cost_usd
-                self._priced += 1
+                self._fault = exc
+            raise
+        self._fault = None
+        self._answered += 1
+        self.usage += reply.usage
+        if self._cost is not None:
+            self._cost = None if reply.cost_usd is None else self._cost + reply.cost_usd
+        if reply.finish_reason == "length":
+            raise OutputLengthExceededError(
+                f"{self._model} stopped at its max_tokens", truncated_response=reply.content
+            )
+        return LLMResponse(
+            content=reply.content,
+            reasoning_content=reply.reasoning or None,
+            model_name=reply.model,
+            # Harbor's own tally, which no bill reads: an unreported cost is its zero.
+            usage=UsageInfo(
+                prompt_tokens=reply.usage.input,
+                completion_tokens=reply.usage.output,
+                cache_tokens=reply.usage.cache_read or 0,
+                cost_usd=reply.cost_usd or 0.0,
+            ),
+        )
+
+    def get_model_context_limit(self) -> int:
+        return int(self._send["max_input_tokens"])
+
+    def get_model_output_limit(self) -> int | None:
+        reply = self._send.get("max_tokens")
+        return None if reply is None else int(reply)
 
     @property
-    def usd(self) -> float | None:
-        """``None`` once any send that may have billed was silent: unknown, never a smaller price."""
-        return self._usd if self._priced and not self._silent else None
+    def spent(self) -> TokenAccount | None:
+        return self.usage if self._answered else None
+
+    @property
+    def cost_usd(self) -> float | None:
+        """``None`` once any send that may have billed reported no cost: never a smaller price."""
+        return self._cost if self._answered else None
+
+    def failure(self, result: TrialResult) -> tuple[str, ErrorCategory] | None:
+        """What ended the episode that was never the prompt's doing; our own refusal raises."""
+        if self._ended is not None:
+            outcome = failed_send(self._ended)
+            if outcome.failure not in _NOT_THE_PROMPT:
+                raise self._ended
+            return outcome.detail[:300], outcome.failure
+        if self._fault is not None and (
+            (outcome := failed_send(self._fault)).failure in _NOT_THE_PROMPT
+        ):
+            return outcome.detail[:300], outcome.failure
+        if self._client.pushback(self._model) is not None and any(
+            kind == "AgentTimeoutError" for kind, _ in _trial_failures(result)
+        ):
+            return (
+                f"the agent ran out of time while {self._provider} held its sends",
+                ErrorCategory.PROVIDER_THROTTLED,
+            )
+        return None
 
 
-@dataclass(frozen=True)
-class _Block:
-    label: CallLabel
-    model: str | None
-    provider: str | None
-    cost: ReportedCost = field(default_factory=ReportedCost)
-
-    def settle(self, admission: Admission, outcome: SendOutcome) -> None:
-        admission.close(outcome)
-        self.cost.count(outcome)
-
-
-_BLOCK: ContextVar[_Block | None] = ContextVar("litellm_sends_billed", default=None)
-_UNMETERED: dict[str, Callable[..., Awaitable[Any]]] = {}
-
-
-@contextmanager
-def litellm_sends_billed_as(
-    label: CallLabel, *, model: str | None, provider: str | None
-) -> Iterator[ReportedCost]:
-    """Priced as the owner's ``(model, provider)`` pair: litellm's model string is never split back."""
-    _meter()
-    block = _Block(label, model, provider)
-    token = _BLOCK.set(block)
-    try:
-        yield block.cost
-    finally:
-        _BLOCK.reset(token)
-
-
-def _meter() -> None:
-    import litellm
-
-    if _UNMETERED:
-        return
-    _UNMETERED["acompletion"] = litellm.acompletion
-    _UNMETERED["aresponses"] = litellm.aresponses
-    litellm.acompletion = _billed_acompletion
-    litellm.aresponses = _refused_aresponses
-
-
-async def _billed_acompletion(*args: Any, **kwargs: Any) -> Any:
-    send = _UNMETERED["acompletion"]
-    if (block := _BLOCK.get()) is None:
-        return await send(*args, **kwargs)
-    label = block.label
-    if kwargs.get("stream"):
-        raise RuntimeError(f"{label.node}: a streamed litellm send reports no bill at its send")
-    model, provider = block.model, block.provider
-    messages = kwargs.get("messages", args[1] if len(args) > 1 else None)
-    bound = send_bound(
-        await hold_ceiling(model, provider) if model and provider else None,
-        sent=messages,
-        max_tokens=kwargs.get("max_tokens"),
-    )
-    with admitted(
-        label, bound, model=model, provider=provider, paid_by=CONNECTOR.cell_payer
-    ) as admission:
-        try:
-            reply = await send(*args, **kwargs)
-        except BaseException as exc:
-            # Cancelled with the send out, it left and nothing said what it cost.
-            left = SendOutcome(sent=True, may_have_billed=True)
-            block.settle(admission, failed_send(exc) if isinstance(exc, Exception) else left)
-            raise
-        billing = ReplyBilling.model_validate(reply, from_attributes=True)
-        block.settle(admission, answered(billing.bill(model=None)))
-        return reply
-
-
-async def _refused_aresponses(*args: Any, **kwargs: Any) -> Any:
-    if (block := _BLOCK.get()) is not None:
-        raise RuntimeError(
-            f"{block.label.node}: litellm's Responses API is not metered here, so a send through "
-            "it would reach the provider unbilled — run the agent on chat completions"
-        )
-    return await _UNMETERED["aresponses"](*args, **kwargs)
-
-
-async def _billed_run(trial: Trial, episode: _Episode) -> tuple[TrialResult, float | None]:
-    from harbor.agents.installed.base import BaseInstalledAgent
-
+async def _installed_run(trial: Trial, episode: _Episode) -> TrialResult:
+    """An installed agent sends from its container: one send here, settled on Harbor's token read."""
     model, provider = episode.model, episode.provider
-    if not isinstance(trial.agent, BaseInstalledAgent):
-        # Its sends go through litellm in this process, each billed as it is made.
-        with litellm_sends_billed_as(_AGENT_SEND, model=model, provider=provider) as reported:
-            result = await trial.run()
-        return result, reported.usd
-    # An installed agent sends from its container: one send here, settled on Harbor's token read.
     with admitted(
         _AGENT_SEND,
         reservation_left(),
@@ -1225,14 +1316,25 @@ async def _billed_run(trial: Trial, episode: _Episode) -> tuple[TrialResult, flo
         admission.close(
             answered(None if usage is None else Billed(usage, None, model=model, provider=provider))
         )
-    return result, None
+    return result
 
 
-async def _attempt(episode: _Episode) -> tuple[TrialResult, float, float | None]:
+class _Ran(NamedTuple):
+    result: TrialResult
+    elapsed_s: float
+    usage: TokenAccount | None
+    cost_usd: float | None
+    failure: tuple[str, ErrorCategory] | None
+
+
+async def _attempt(episode: _Episode) -> _Ran:
+    from harbor.agents.installed.base import BaseInstalledAgent
     from harbor.environments.docker.docker import DockerEnvironment
     from harbor.trial.trial import Trial
 
     prompt, in_system_prompt = episode.prompt, episode.in_system_prompt
+    seamed = episode.declared is not None and episode.declared.model_seam
+    model = _AgentModel(episode.model, episode.provider, episode.send) if seamed else None
     if episode.cached:
         with machine_step():
             await ensure_package_cache()
@@ -1243,6 +1345,14 @@ async def _attempt(episode: _Episode) -> tuple[TrialResult, float, float | None]
         # Before `Trial.create`: it builds or pulls the image, which is part of the cell's cost.
         start = time.monotonic()
         trial = await Trial.create(_trial_config(episode, skills))
+        installed = isinstance(trial.agent, BaseInstalledAgent)
+        if model is not None:
+            _install_model(trial, episode.agent_name, model)
+        elif episode.declared is None and not installed:
+            raise ValueError(
+                f"harbor connector: agent {episode.agent_name!r} runs in this process and is "
+                "undeclared (`_AGENTS`), so its sends would reach its provider unadmitted."
+            )
         if prompt and in_system_prompt:
             _install_system_skill(trial, episode.agent_name, prompt)
         if isinstance(trial.agent_environment, DockerEnvironment):
@@ -1250,8 +1360,14 @@ async def _attempt(episode: _Episode) -> tuple[TrialResult, float, float | None]
                 await _reuse_task_image(
                     trial.agent_environment, episode.tools, proxied=episode.cached
                 )
-        result, cost_usd = await _billed_run(trial, episode)
-        return result, time.monotonic() - start, cost_usd
+        if installed:
+            result = await _installed_run(trial, episode)
+            return _Ran(result, time.monotonic() - start, _trial_tokens(result), None, None)
+        result = await trial.run()
+        elapsed = time.monotonic() - start
+        if model is None:
+            return _Ran(result, elapsed, None, None, None)
+        return _Ran(result, elapsed, model.spent, model.cost_usd, model.failure(result))
 
 
 async def _back_off(
@@ -1287,17 +1403,13 @@ async def _run_episode(
     budget = drawn_budget()
     while True:
         try:
-            result, elapsed, cost_usd = await _attempt(episode)
+            ran = await _attempt(episode)
         except CellInfrastructureError as exc:
             cause, category = str(exc), exc.category
         else:
-            attempts.append(_step_tokens(result, episode, cost_usd))
-            if (throttle := _provider_throttle(result)) is not None:
-                raise CellThrottledError(
-                    f"harbor task {query!r} was throttled by its model provider: {throttle}",
-                    spent=_sum_spend(attempts),
-                )
-            if (failure := _infrastructure_failure(result)) is None:
+            result, elapsed = ran.result, ran.elapsed_s
+            attempts.append(_step_tokens(ran.usage, ran.cost_usd, episode))
+            if (failure := ran.failure or _infrastructure_failure(result)) is None:
                 break
             cause, category = failure
         forget_package_cache()

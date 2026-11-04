@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import functools
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -14,6 +14,7 @@ from promptpotter.infrastructure.llm.base import (
     WIRE_TIMEOUT_S,
     LLMClientBase,
     ProviderKey,
+    SendPacing,
     hold_ceiling,
     post_json,
     wire_client,
@@ -27,12 +28,12 @@ from promptpotter.infrastructure.llm.json_parse import (
     try_groq_json_validate_repair,
 )
 from promptpotter.infrastructure.llm.pricing import PriceTier
-from promptpotter.infrastructure.llm.request import ChatRequest
+from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest, Tool, ToolCall
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
     OPENAI_RPM_HEADER,
     OPENAI_TPM_HEADER,
-    RateLimiter,
+    raise_if_context_overflow,
     raise_if_request_too_large,
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
@@ -53,9 +54,40 @@ def _strip_titles(node: object) -> object:
     return node
 
 
-class ReplyBilling(BaseModel):
-    """What a bill reads off an OpenAI-shaped reply: ours, or one litellm received for an agent."""
+class _WireToolCall(BaseModel):
+    id: str
+    name: str = Field(validation_alias=AliasPath("function", "name"))
+    # A JSON string on this wire, parsed at the client so no reader sees the wire's spelling.
+    arguments: str = Field("{}", validation_alias=AliasPath("function", "arguments"))
 
+    def parsed(self, provider_name: str) -> ToolCall:
+        try:
+            arguments = json.loads(self.arguments or "{}")
+        except json.JSONDecodeError as err:
+            raise ValueError(
+                f"{provider_name} returned tool call {self.name!r} whose arguments are "
+                f"no JSON: {truncate(self.arguments, 300)}"
+            ) from err
+        if not isinstance(arguments, dict):
+            raise ValueError(
+                f"{provider_name} returned tool call {self.name!r} whose arguments are "
+                f"no object: {truncate(self.arguments, 300)}"
+            )
+        return ToolCall(id=self.id, name=self.name, arguments=arguments)
+
+
+class _Choice(BaseModel):
+    content: str | None = Field(None, validation_alias=AliasPath("message", "content"))
+    reasoning: str | None = Field(None, validation_alias=AliasPath("message", "reasoning"))
+    tool_calls: list[_WireToolCall] | None = Field(
+        None, validation_alias=AliasPath("message", "tool_calls")
+    )
+    finish_reason: str | None = None
+
+
+class ChatReply(BaseModel):
+    model: str
+    choices: list[_Choice] = Field(default_factory=list)
     # Every `usage` names its prompt count, so its absence is the reply's: a bill that never came.
     prompt_tokens: int | None = Field(None, validation_alias=AliasPath("usage", "prompt_tokens"))
     completion_tokens: int | None = Field(
@@ -84,21 +116,10 @@ class ReplyBilling(BaseModel):
             cache_write=self.cache_write_tokens or 0,
         )
 
-    def bill(self, *, model: str | None) -> Billed | None:
+    def bill(self) -> Billed | None:
         if self.prompt_tokens is None:
             return None
-        return Billed(self.tokens, self.cost, self.served_by, model)
-
-
-class _Choice(BaseModel):
-    content: str | None = Field(None, validation_alias=AliasPath("message", "content"))
-    reasoning: str | None = Field(None, validation_alias=AliasPath("message", "reasoning"))
-    finish_reason: str | None = None
-
-
-class ChatReply(ReplyBilling):
-    model: str
-    choices: list[_Choice] = Field(default_factory=list)
+        return Billed(self.tokens, self.cost, self.served_by, self.model)
 
     @property
     def finish_reason(self) -> str | None:
@@ -233,12 +254,47 @@ class _ParsedReply:
     repair_errors: list[str] = field(default_factory=list)
 
 
-def _llm_response(landed: _ParsedReply) -> LLMResponse:
+def _wire_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+    wire: list[dict[str, Any]] = []
+    for message in messages:
+        turn: dict[str, Any] = {"role": message["role"], "content": message["content"]}
+        if calls := message.get("tool_calls"):
+            turn["tool_calls"] = [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])},
+                }
+                for call in calls
+            ]
+        if (answers := message.get("tool_call_id")) is not None:
+            turn["tool_call_id"] = answers
+        wire.append(turn)
+    return wire
+
+
+def _wire_tools(tools: tuple[Tool, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": _strip_titles(tool.parameters),
+            },
+        }
+        for tool in tools
+    ]
+
+
+def _llm_response(landed: _ParsedReply, provider_name: str) -> LLMResponse:
     response = landed.response
+    choice = response.choices[0]
     # ``reasoning_tokens`` is a SUBSET of ``completion_tokens``, never a fourth total.
     return LLMResponse(
         content=landed.content,
-        reasoning=response.choices[0].reasoning or "",
+        reasoning=choice.reasoning or "",
+        tool_calls=[call.parsed(provider_name) for call in choice.tool_calls or ()],
         model=response.model,
         usage=response.tokens + landed.first,
         cost_usd=billed_cost(landed.first_cost, response.cost),
@@ -262,6 +318,7 @@ class OpenAICompatibleClient(LLMClientBase):
             "top_p",
             "seed",
             "route_order",
+            "tools",
         }
     )
     CREDIT_REFUSAL_STATUSES = frozenset({402, 403})
@@ -270,25 +327,25 @@ class OpenAICompatibleClient(LLMClientBase):
     def __init__(
         self,
         key: ProviderKey,
+        pacing: SendPacing,
         *,
         provider: str,
         spec: ProviderSpec,
-        rate_limiter: RateLimiter | None = None,
     ):
         super().__init__(
             provider=provider,
             display_name=spec.display_name,
             key=key,
-            rate_limiter=rate_limiter,
+            pacing=pacing,
         )
         self._spec = spec
 
-    @functools.cached_property
-    def _http(self) -> httpx.AsyncClient:
-        return wire_client(
-            self._spec.base_url,
-            {"Authorization": f"Bearer {self._key.secret.get_secret_value()}"},
-            timeout_s=self._spec.timeout,
+    async def _post(self, body: dict[str, Any]) -> httpx.Response:
+        return await post_json(
+            wire_client(self._spec.base_url, timeout_s=self._spec.timeout),
+            "chat/completions",
+            body,
+            headers={"Authorization": f"Bearer {self._key.secret.get_secret_value()}"},
         )
 
     async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse:
@@ -299,7 +356,7 @@ class OpenAICompatibleClient(LLMClientBase):
             return result
         response, content, validation_err, parsed = result
         if validation_err is None:
-            return _llm_response(_ParsedReply(response, content, parsed))
+            return _llm_response(_ParsedReply(response, content, parsed), self._provider_name)
         landed = await self._climb_retry_ladder(
             request_params,
             response_model,
@@ -309,16 +366,23 @@ class OpenAICompatibleClient(LLMClientBase):
             content,
             validation_err,
         )
-        return landed if isinstance(landed, LLMResponse) else _llm_response(landed)
+        return (
+            landed
+            if isinstance(landed, LLMResponse)
+            else _llm_response(landed, self._provider_name)
+        )
 
     async def _request_params(self, request: ChatRequest) -> dict[str, Any]:
         seed, top_p = request.seed, request.top_p
         response_model, response_schema = request.response_model, request.response_schema
         request_params: dict[str, Any] = {
             "model": request.model,
-            "messages": request.messages,
-            "temperature": request.temperature,
+            "messages": _wire_messages(request.messages),
         }
+        if request.temperature is not None:
+            request_params["temperature"] = request.temperature
+        if request.tools:
+            request_params["tools"] = _wire_tools(request.tools)
         if request.max_tokens is not None:
             request_params["max_tokens"] = request.max_tokens
         # The price the call is admitted on (`base.py::_admitted_send`), so no host bills past it.
@@ -479,7 +543,7 @@ class OpenAICompatibleClient(LLMClientBase):
 
         async def send() -> tuple[object | None, LLMResponse | ChatReply]:
             try:
-                reply = await post_json(self._http, "chat/completions", request_params)
+                reply = await self._post(request_params)
             except httpx.HTTPStatusError as refused:
                 recovered = self._try_recover_from_refusal(refused, request_params, response_model)
                 if recovered is None:
@@ -491,14 +555,16 @@ class OpenAICompatibleClient(LLMClientBase):
             if isinstance(reply, LLMResponse):
                 # A salvaged 400 was generated, and billed, but its body reports no usage.
                 return None
-            return reply.bill(model=reply.model)
+            return reply.bill()
 
         response = await self._admitted_send(
             label,
             model=request_params["model"],
             messages=request_params["messages"],
             sent={
-                k: request_params[k] for k in ("messages", "response_format") if k in request_params
+                k: request_params[k]
+                for k in ("messages", "response_format", "tools")
+                if k in request_params
             },
             max_tokens=request_params.get("max_tokens"),
             send=send,
@@ -510,6 +576,9 @@ class OpenAICompatibleClient(LLMClientBase):
         if not response.choices:
             raise ValueError(f"{self._provider_name} returned empty choices")
         content = response.choices[0].content or ""
+        if response.choices[0].tool_calls:
+            # The calls are the answer: no schema governs a turn that asks for tools.
+            return response, content, None, None
 
         try:
             parsed = parse_response_content(
@@ -526,6 +595,7 @@ class OpenAICompatibleClient(LLMClientBase):
         response_model: type[BaseModel] | None,
     ) -> LLMResponse | None:
         raise_if_request_too_large(exc, self._provider_name)
+        raise_if_context_overflow(exc, self._provider_name)
         if exc.response.status_code == 404:
             model_name = request_params.get("model", "unknown")
             raise ValueError(

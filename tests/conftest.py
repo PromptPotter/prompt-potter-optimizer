@@ -23,7 +23,8 @@ from promptpotter.application.optimizer_manifest import binding_optimizer, selec
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.infrastructure.llm import pricing
-from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.base import wire_client
+from promptpotter.infrastructure.llm.registry import send_pacing
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -60,12 +61,14 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     pricing.load_rates.cache_clear()
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
-    get_llm_client.cache_clear()
+    send_pacing.cache_clear()
+    wire_client.cache_clear()
     unbind = bind_account(workspace(tmp_path / "account"))
     yield world
     unbind()
     restore()
-    get_llm_client.cache_clear()
+    send_pacing.cache_clear()
+    wire_client.cache_clear()
     pricing.load_rates.cache_clear()
     # A refused request reads as a provider error, which a journey can assert past unseen.
     assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"

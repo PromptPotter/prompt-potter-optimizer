@@ -2094,6 +2094,32 @@
             },
             "title": "TokenAccount",
             "type": "object"
+          },
+          "ToolCall": {
+            "additionalProperties": false,
+            "description": "One call a model asked for: ``arguments`` parsed, never the wire's JSON string.",
+            "properties": {
+              "arguments": {
+                "additionalProperties": true,
+                "title": "Arguments",
+                "type": "object"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "arguments"
+            ],
+            "title": "ToolCall",
+            "type": "object"
           }
         },
         "additionalProperties": false,
@@ -2171,6 +2197,14 @@
             "default": null,
             "description": "WHICH upstream host answered, where the provider is a gateway that routes onward; ``None`` where it is its own host. Distinct from the provider, which names who we called and so reads the same for every route through it. Analytical like ``reasoning`` — never a gate, metric or cache key.",
             "title": "Served By"
+          },
+          "tool_calls": {
+            "description": "The calls the model asked for, in its order; empty where it answered in text or was offered no tools. A tool call's ``content`` may be empty: the calls are the answer.",
+            "items": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "title": "Tool Calls",
+            "type": "array"
           },
           "usage": {
             "$ref": "#/$defs/TokenAccount",
@@ -2537,6 +2571,32 @@
             },
             "title": "TokenAccount",
             "type": "object"
+          },
+          "ToolCall": {
+            "additionalProperties": false,
+            "description": "One call a model asked for: ``arguments`` parsed, never the wire's JSON string.",
+            "properties": {
+              "arguments": {
+                "additionalProperties": true,
+                "title": "Arguments",
+                "type": "object"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "arguments"
+            ],
+            "title": "ToolCall",
+            "type": "object"
           }
         },
         "additionalProperties": false,
@@ -2614,6 +2674,14 @@
             "default": null,
             "description": "WHICH upstream host answered, where the provider is a gateway that routes onward; ``None`` where it is its own host. Distinct from the provider, which names who we called and so reads the same for every route through it. Analytical like ``reasoning`` — never a gate, metric or cache key.",
             "title": "Served By"
+          },
+          "tool_calls": {
+            "description": "The calls the model asked for, in its order; empty where it answered in text or was offered no tools. A tool call's ``content`` may be empty: the calls are the answer.",
+            "items": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "title": "Tool Calls",
+            "type": "array"
           },
           "usage": {
             "$ref": "#/$defs/TokenAccount",

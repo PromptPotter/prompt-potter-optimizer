@@ -224,7 +224,7 @@ class BackendClient:
 
     def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
-            return sent(node.name, cfg)
+            return sent(node.name, cfg, self.workload.experiment)
         return node.spend_bound
 
     def priced_as(self, cfg: Mapping[str, Any]) -> tuple[str | None, str | None]:

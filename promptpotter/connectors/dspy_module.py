@@ -313,7 +313,9 @@ def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
     return own
 
 
-def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None:
+def _sent_spend_bound(
+    node: str, cfg: Mapping[str, Any], _experiment: Mapping[str, Any] | None
+) -> LLMSpendBound | None:
     if node != PROGRAM_NODE:
         return None
     calls, context, reply = cfg.get("max_calls"), cfg.get("max_input_tokens"), cfg.get("max_tokens")

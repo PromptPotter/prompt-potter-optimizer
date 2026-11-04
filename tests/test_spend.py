@@ -228,7 +228,7 @@ from promptpotter.infrastructure.llm.pricing import (
     Rate,
     RateCeiling,
 )
-from promptpotter.infrastructure.llm.request import ChatRequest
+from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
     SendBudget,
@@ -241,7 +241,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     SpendBook,
     admitted,
-    answered,
     bind_spend_book,
     replied,
     reserved,
@@ -414,7 +413,7 @@ class _Reply(BaseModel):
     answer: str = Field(description="The answer.")
 
 
-_MESSAGES = [{"role": "user", "content": "q"}]
+_MESSAGES: list[ChatMessage] = [{"role": "user", "content": "q"}]
 _MAX_PRICE = {"max_price": {"prompt": 500000.0, "completion": 250000.0}}
 _EVERY_FIELD: dict[str, Any] = {
     "temperature": 0.3,
@@ -2510,29 +2509,22 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             dspy_cell(1, fail)
         assert hole.value.category is category, f"{fail!r}: a provider's failure scored a cell"
 
-    # A cell billed send by send reserves its bound and holds only what is out.
-    spoke, mixed = harbor.ReportedCost(), harbor.ReportedCost()
-    for cost, heard in ((0.01, (spoke, mixed)), (None, (mixed,))):
-        for block in heard:
-            block.count(answered(Billed(TokenAccount(input=10, output=5), cost)))
-    assert (spoke.usd, mixed.usd) == (0.01, None), (
-        "one silent send makes the REPORTED sum unknown, never the smaller price of those that spoke"
-    )
+    # A cell billed send by send, through the agent's model seam, reserves its bound and holds
+    # only what is out.
     turns: list[Any] = []
+    seams: list[Any] = []
     cut_short = [True]
     three_answered = asyncio.Event()
 
     async def episode_run(_workload: Any, _sample: Any, _payload: dict[str, Any]) -> dict[str, Any]:
+        seams.append(
+            seam := harbor._AgentModel(
+                "gpt-x", "openai", {"max_tokens": 100, "max_input_tokens": 1000}
+            )
+        )
         for n in range(4):
             wire.hang = cut_short[0] and n == 3
-            turns.append(
-                await keyed_client("openai").chat(
-                    ChatRequest(
-                        [{"role": "user", "content": f"turn {n}"}], "gpt-x", max_tokens=100
-                    ),
-                    label=CallLabel("agent", "backend"),
-                )
-            )
+            turns.append(await seam.call(f"turn {n}"))
             if len(turns) == 3:
                 three_answered.set()
         return {"data": {"terminal_node": "agent"}}
@@ -2583,12 +2575,40 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     assert purse.held_at(CELL, whole).usd == pytest.approx(episode_usd), (
         "a cell that ran to its end did not teach what such a cell bills"
     )
+    episode_bills = _token_bills(turns_ledger)[len(cut_bills) :]
+    assert seams[-1].spent.input == sum(r.input_tokens for r in episode_bills), (
+        "the cell's row counts other tokens than its sends billed"
+    )
+    assert seams[-1].cost_usd is None, (
+        "sends that reported no cost summed to a REPORTED price: unknown, never a smaller one"
+    )
     turn = CallLabel("agent", "backend")
     resumed = spend_book(1.0, usd_reserve=None)
     assert resumed.held_at(turn, whole) == whole, "a fresh book held a turn below its bound"
     resumed.take_up(turns_ledger)
     assert resumed.held_at(turn, whole) == purse.held_at(turn, whole) != whole, (
         "a book armed over that ledger (a resume) holds a turn at its bound, not what turns billed"
+    )
+
+    # An agent whose sends died on the provider's 5xx never measured the prompt.
+    wire.down = True
+
+    async def downed_turn() -> Any:
+        seam = harbor._AgentModel("gpt-x", "openai", {"max_tokens": 100, "max_input_tokens": 1000})
+        with (
+            under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await seam.call("turn")
+        return seam
+
+    with spending_under(unbounded_spend_book()):
+        downed = jumping_clock(downed_turn())
+    wire.down = False
+    # Read before the trial's result: a send's fault decides alone.
+    ended = downed.failure(cast("Any", None))
+    assert ended is not None and ended[1] is ErrorCategory.SERVER, (
+        f"an episode the provider's 5xx ended scored as the prompt's failure: {ended!r}"
     )
 
 

@@ -7,7 +7,7 @@ import threading
 import time
 import weakref
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -20,7 +20,12 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_provider_eased,
     emit_provider_hold,
 )
-from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
+from promptpotter.shared.errors import (
+    ContextOverflowError,
+    ErrorCategory,
+    RequestTooLargeError,
+    SendRefusedError,
+)
 
 if TYPE_CHECKING:
     import httpx
@@ -420,8 +425,9 @@ async def held_wait(total_sec: float, label: str) -> None:
         report_throttle_stall(loop_now() - started)
 
 
-def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
-    char_count = sum(len(m.get("content", "")) for m in messages)
+def estimate_tokens(messages: Sequence[Mapping[str, object]], max_output: int | None) -> int:
+    """Over any provider's turns: only the text counts, whichever wire spells the rest."""
+    char_count = sum(len(str(m.get("content") or "")) for m in messages)
     return char_count // 4 + (max_output or 0)
 
 
@@ -458,6 +464,22 @@ def raise_if_request_too_large(exc: httpx.HTTPStatusError, provider_name: str) -
         limit=limit,
         requested=requested,
     ) from exc
+
+
+# The providers' own words for a prompt past the model's window (OpenAI, OpenRouter, Anthropic).
+_CONTEXT_OVERFLOW = re.compile(
+    r"context_length_exceeded|maximum context length|context window|prompt is too long",
+    re.IGNORECASE,
+)
+
+
+def raise_if_context_overflow(exc: httpx.HTTPStatusError, provider_name: str) -> None:
+    if exc.response.status_code not in (400, 413):
+        return
+    said = exc.response.text
+    if _CONTEXT_OVERFLOW.search(said) is None:
+        return
+    raise ContextOverflowError(provider_name=provider_name, said=said[:300]) from exc
 
 
 def apply_discovered_caps(
@@ -499,7 +521,7 @@ class WindowSlot:
 @asynccontextmanager
 async def window_slot(
     rate_limiter: RateLimiter | None,
-    messages: list[dict[str, str]],
+    messages: Sequence[Mapping[str, object]],
     max_output: int | None,
     *,
     provider_name: str,
@@ -589,7 +611,7 @@ class RateLimiter:
 
     async def _reserve(
         self,
-        messages: list[dict[str, str]],
+        messages: Sequence[Mapping[str, object]],
         max_output: int | None,
         *,
         provider_name: str,

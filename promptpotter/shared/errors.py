@@ -378,7 +378,11 @@ class LedgerUnreadableError(ConflictError):
         )
 
 
-class RequestTooLargeError(RuntimeError):
+class UngeneratedRequestError(RuntimeError):
+    """A request refused before any generation: terminal, never resent, never billed."""
+
+
+class RequestTooLargeError(UngeneratedRequestError):
     def __init__(
         self,
         *,
@@ -402,6 +406,14 @@ class RequestTooLargeError(RuntimeError):
             f"the free Groq on_demand tier caps at {limit}\n"
             f"  - or shorten the optimizer prompt (the dataset's task.md)."
         )
+
+
+class ContextOverflowError(UngeneratedRequestError):
+    """The provider refused the prompt as past the model's window."""
+
+    def __init__(self, *, provider_name: str, said: str) -> None:
+        self.provider_name = provider_name
+        super().__init__(f"{provider_name}: the prompt exceeds the model's context window: {said}")
 
 
 class ResumeDivergenceError(RuntimeError):

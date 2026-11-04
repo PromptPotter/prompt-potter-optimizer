@@ -137,7 +137,9 @@ def dbllmbench_wire_adapter(
     return payload
 
 
-def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None:
+def _sent_spend_bound(
+    node: str, cfg: Mapping[str, Any], _experiment: Mapping[str, Any] | None
+) -> LLMSpendBound | None:
     if node != WRITER_NODE:
         return None
     context, reply = cfg.get("max_input_tokens"), cfg.get("max_tokens")

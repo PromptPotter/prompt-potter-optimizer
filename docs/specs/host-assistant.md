@@ -26,8 +26,8 @@ A long-running call returns a task handle per MCP's Tasks extension
 
 ## The webapp's host
 
-- **A server-side loop of model, tools and messages**: `infrastructure/llm/request.py::ChatRequest` gains
-  `tools` and multi-turn messages; the provider adapters parse tool calls; the call goes through
+- **A server-side loop of model, tools and messages** (`infrastructure/llm/request.py::ChatRequest.tools`,
+  `ChatMessage`; each adapter answers `LLMResponse.tool_calls`); the call goes through
   `bench/llm_call.py::llm_call`, so it is bound to a ledger and billed like any send.
 - **It acts as the user**: every tool call dispatches under the session's `IdentityContext`, no new credential.
 - **A write fires on the user's click**: a write tool call renders as ONE proposal shape whose click fires
@@ -47,12 +47,11 @@ A long-running call returns a task handle per MCP's Tasks extension
 
 ## Build order
 
-1. `ChatRequest` gains `tools` and multi-turn messages; each provider adapter parses tool calls.
-2. The registry over `CommandKind` and `ReadKind`, served in-process and over MCP stdio.
-3. The host endpoint, declared before its handler; a turn's steps are records on the account's workspace ledger.
-4. The webapp: the composer on every screen, steps, the one proposal shape.
-5. The check-in as the "reach the origin gate" prompt, and the delete list above.
-6. MCP over streamable HTTP, on R1.
+1. The registry over `CommandKind` and `ReadKind`, served in-process and over MCP stdio.
+2. The host endpoint, declared before its handler; a turn's steps are records on the account's workspace ledger.
+3. The webapp: the composer on every screen, steps, the one proposal shape.
+4. The check-in as the "reach the origin gate" prompt, and the delete list above.
+5. MCP over streamable HTTP, on R1.
 
 **Closes when** a new account drops a CSV whose headers are its own and the webapp's host takes it through
 the origin gate and starts the campaign; the same steps from Claude Code over MCP stdio reach the same draft.

@@ -75,8 +75,8 @@ AuthTokenFn = Callable[[], str | None]
 
 EndpointFn = Callable[[], str]
 
-# `(node name, node config) -> what one run of that node can bill`.
-SentSpendBound = Callable[[str, Mapping[str, Any]], NodeSpendBound | None]
+# `(node name, node config, the run's experiment) -> what one run of that node can bill`.
+SentSpendBound = Callable[[str, Mapping[str, Any], Mapping[str, Any] | None], NodeSpendBound | None]
 
 # `pipeline_params -> Delivery`, resolved from the params a run hashes.
 PromptDelivery = Callable[[dict[str, Any] | None], Delivery]

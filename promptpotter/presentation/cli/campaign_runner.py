@@ -20,8 +20,8 @@ from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.parsers import build_parser
 from promptpotter.shared.errors import (
     PotterError,
-    RequestTooLargeError,
     SendRefusedError,
+    UngeneratedRequestError,
 )
 from promptpotter.shared.named_rows import imported
 
@@ -81,7 +81,7 @@ def main() -> None:
     runner = asyncio.Runner()
     try:
         result = runner.run(run)
-    except (RequestTooLargeError, SendRefusedError, PotterError) as exc:
+    except (UngeneratedRequestError, SendRefusedError, PotterError) as exc:
         runner.close()
         if args.json_output and isinstance(exc, PotterError):
             print(json.dumps({"error": exc.code, "message": str(exc), **exc.details}, default=str))

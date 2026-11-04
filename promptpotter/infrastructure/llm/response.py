@@ -6,6 +6,7 @@ from pydantic import Field
 
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.request import ToolCall
 
 
 class LLMResponse(StrictModel):
@@ -65,6 +66,13 @@ class LLMResponse(StrictModel):
             "Parsed response. Typed Pydantic instance when ``chat`` was "
             "called with ``response_model``; plain dict when only "
             "``response_schema`` was supplied; ``None`` for text-mode."
+        ),
+    )
+    tool_calls: list[ToolCall] = Field(
+        default_factory=list,
+        description=(
+            "The calls the model asked for, in its order; empty where it answered in text or was "
+            "offered no tools. A tool call's ``content`` may be empty: the calls are the answer."
         ),
     )
     schema_repair_errors: list[str] = Field(

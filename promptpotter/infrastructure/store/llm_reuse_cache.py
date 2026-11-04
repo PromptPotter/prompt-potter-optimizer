@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.io import read_bytes_optional, write_text
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.llm.request import ChatMessage
 
 logger = logging.getLogger(__name__)
 
 
 def hash_call(
     *,
-    messages: list[dict[str, str]],
+    messages: list[ChatMessage],
     model: str | None,
     provider: str,
     temperature: float,

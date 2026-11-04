@@ -25,7 +25,11 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
-from promptpotter.shared.errors import CellSendRefusedError, RequestTooLargeError, SendRefusedError
+from promptpotter.shared.errors import (
+    CellSendRefusedError,
+    SendRefusedError,
+    UngeneratedRequestError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +76,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         except SendRefusedError as exc:
             # `spent` is empty: `measure_sample` bills the backend spend before any judge runs.
             raise CellSendRefusedError(str(exc), category=exc.category, spent={}) from exc
-        except (httpx.HTTPError, RequestTooLargeError, ValueError) as exc:
+        except (httpx.HTTPError, UngeneratedRequestError, ValueError) as exc:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"
 

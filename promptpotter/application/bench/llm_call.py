@@ -31,7 +31,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     extract_parsed_json,
 )
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.llm.request import ChatRequest
+from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
@@ -133,7 +133,7 @@ def _ledger_response_payload(response: LLMResponse) -> Any:
 class _Call:
     label: str
     merged: dict[str, Any]
-    messages: list[dict[str, str]]
+    messages: list[ChatMessage]
     response_model: type[BaseModel] | None
     response_schema: dict[str, Any] | None
     context: LLMCallContext
@@ -169,7 +169,7 @@ def _merged_config(node: str, overrides: dict[str, Any]) -> dict[str, Any]:
 
 def _reuse_key(
     merged: dict[str, Any],
-    messages: list[dict[str, str]],
+    messages: list[ChatMessage],
     response_model: type[BaseModel] | None,
     response_schema: dict[str, Any] | None,
 ) -> str:
@@ -320,7 +320,7 @@ def _call_record(
 
 
 async def llm_call(
-    messages: list[dict[str, str]],
+    messages: list[ChatMessage],
     *,
     node: str,
     context: LLMCallContext,
@@ -399,7 +399,7 @@ async def run_optimizer_node(
 ) -> tuple[Any, str, int]:
     prompt = template.compile_prompt(**prompt_vars)
     if user_content is not None:
-        messages: list[dict[str, str]] = [
+        messages: list[ChatMessage] = [
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_content},
         ]

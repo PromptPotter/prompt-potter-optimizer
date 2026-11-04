@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import functools
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.pipeline_overlay import normalize_model_id
-from promptpotter.domain.spend import draws_coupon
+from promptpotter.domain.spend import KeySource, draws_coupon
 from promptpotter.infrastructure.llm.anthropic import AnthropicClient
-from promptpotter.infrastructure.llm.base import LLMClientBase, ProviderKey
+from promptpotter.infrastructure.llm.base import LLMClientBase, ProviderKey, SendPacing
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
 from promptpotter.infrastructure.llm.send_pacing import build_rate_limiter
 
@@ -122,41 +123,33 @@ def default_routes() -> dict[str, dict[str, list[str]]]:
     return {name: pins for name, spec in _OPENAI_COMPAT_SPECS.items() if spec.gateway and pins}
 
 
-def _rate_caps(provider: str, key: ProviderKey) -> tuple[int | None, int | None]:
+def _rate_caps(provider: str, paid_by: KeySource) -> tuple[int | None, int | None]:
     """`RATE_LIMITS` are the box's provider accounts' caps: an account's own key learns its own."""
-    caps = (settings.RATE_LIMITS.get(provider) or []) if draws_coupon(key.paid_by) else []
+    caps = (settings.RATE_LIMITS.get(provider) or []) if draws_coupon(paid_by) else []
     return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
 
 
-def _make_openai_compat(
-    provider: str, spec: ProviderSpec, key: ProviderKey
-) -> OpenAICompatibleClient:
-    rpm, tpm = _rate_caps(provider, key)
-    return OpenAICompatibleClient(
-        key, provider=provider, spec=spec, rate_limiter=build_rate_limiter(rpm, tpm)
-    )
-
-
-def _make_anthropic_client(key: ProviderKey) -> AnthropicClient:
-    rpm, tpm = _rate_caps("anthropic", key)
-    return AnthropicClient(key, rate_limiter=build_rate_limiter(rpm, tpm))
-
-
-_PROVIDER_FACTORIES: dict[str, Callable[[ProviderKey], LLMClientBase]] = {
+_PROVIDER_FACTORIES: dict[str, Callable[[ProviderKey, SendPacing], LLMClientBase]] = {
     **{
-        name: functools.partial(_make_openai_compat, name, spec)
+        name: functools.partial(OpenAICompatibleClient, provider=name, spec=spec)
         for name, spec in _OPENAI_COMPAT_SPECS.items()
     },
-    "anthropic": _make_anthropic_client,
+    "anthropic": AnthropicClient,
 }
 
-# Bounded: under open signup each account's own key is one more client held.
-_CLIENTS_HELD = 256
+# Bounded: under open signup each account's own key is one more account paced.
+_ACCOUNTS_PACED = 256
 
 
-@functools.lru_cache(maxsize=_CLIENTS_HELD)
+@functools.lru_cache(maxsize=_ACCOUNTS_PACED)
+def send_pacing(provider: str, _account: str, paid_by: KeySource) -> SendPacing:
+    """``_account`` is the key's DIGEST, which only keys what is held: no secret outlives a send."""
+    rpm, tpm = _rate_caps(provider, paid_by)
+    return SendPacing(build_rate_limiter(rpm, tpm))
+
+
 def get_llm_client(provider: str, key: ProviderKey) -> LLMClientBase:
-    """Cached per KEY: rate-limiter state is per provider account and shared across cycles.
+    """A client for one resolution, sharing its ACCOUNT's pacing across clients and cycles.
 
     The key is the caller's resolution (`application/jobs/coupon.py::paying_key`), never
     read here: which wallet a send draws is an account's question, not a provider's."""
@@ -164,4 +157,5 @@ def get_llm_client(provider: str, key: ProviderKey) -> LLMClientBase:
     if factory is None:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))
         raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
-    return factory(key)
+    account = hashlib.sha256(key.secret.get_secret_value().encode()).hexdigest()
+    return factory(key, send_pacing(provider, account, key.paid_by))
