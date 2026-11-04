@@ -29,11 +29,11 @@ BASELINE = {
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 2,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 96,
+    "config_leaf_fields": 93,
     # `Settings` fields — what the environment can set.
     "settings_env": 46,
     # Parameters annotated `Any`.
-    "any_params": 43,
+    "any_params": 42,
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 67,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
@@ -42,7 +42,7 @@ BASELINE = {
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
     # transition written as a branch beside the tables was policy the count could not see.
-    "escalation_rules": 12,
+    "escalation_rules": 11,
     # Function-local imports of the package's own modules. The bare invocation's first-run check
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 7,
@@ -60,7 +60,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 324,
+    "p_reads": 323,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.

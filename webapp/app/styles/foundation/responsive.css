@@ -56,7 +56,7 @@
 
 /* Gated on (pointer:coarse), not width: a touchscreen laptop gets the 44px floor too. */
 @media (pointer:coarse){
-  button:not(.btn-tight):not(.account-nav-item),
+  button:not(.account-nav-item),
   a[role="button"],
   input[type="submit"],
   input[type="button"]{

@@ -14,7 +14,6 @@
 .subject-signal-now.is-higher{color:var(--color-warn)}
 .subject-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;min-height:20px}
 .subject-head>*{flex:0 0 auto}
-.subject-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 
 .subject-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}

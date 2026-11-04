@@ -1,15 +1,14 @@
 /* Unlike a `ui/*.module.css` these are NOT in `@layer ui`: their place in the barrel is their precedence. */
 h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 .meta{font-size:var(--text-base);color:var(--color-text-secondary);display:flex;align-items:center;gap:var(--space-6)}
-.avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);color:var(--color-accent);font-weight:500}
 
 .hearts-dead{line-height:1;font-size:.85em}
 
 .card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-16);min-width:0}
 .card-title{font-size:var(--text-md);font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
 .card-title > h2{font:inherit}
+.chart-frame{position:relative;height:var(--chart-h);width:100%;min-width:0}
 
-.table-wrap{overflow-x:auto;max-height:340px;overflow-y:auto}
 table{width:100%;border-collapse:collapse;font-size:var(--text-base)}
 th{font-size:var(--text-sm);font-weight:500;color:var(--color-text-secondary);padding:var(--space-6) var(--space-10);text-align:left;border-bottom:0.5px solid var(--color-border);position:sticky;top:0;background:var(--color-background-primary)}
 td{padding:var(--space-8) var(--space-10);border-bottom:0.5px solid var(--color-border);vertical-align:top;color:var(--color-text-secondary)}

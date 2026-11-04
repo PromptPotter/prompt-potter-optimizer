@@ -3,7 +3,6 @@ import type {
   LookaheadDepth,
   PauseReading,
   RunPhase,
-  RunPhaseInfo,
   RunStatus,
   SampleLookahead,
   StopReason,
@@ -29,11 +28,6 @@ export function phaseIs(runPhase: RunPhase | null | undefined, fact: PhaseFact):
   return runPhase != null && RUN_PHASE_INFO[runPhase][fact];
 }
 
-export function phaseParked(runPhase: RunPhase, attached: boolean): string {
-  const info: RunPhaseInfo = RUN_PHASE_INFO[runPhase];
-  return attached ? info.parked_attached : info.parked;
-}
-
 export function dockPriority(runPhase: RunPhase): number {
   return RUN_PHASE_INFO[runPhase].dock_priority;
 }
@@ -50,7 +44,7 @@ export function runNextStep(status: RunStatus): string {
 /** A pause's next step: its stop reason's, or — asked, not yet reached — where the run stops. */
 export function pauseNextStep(pause: PauseReading): string {
   return pause.stop_reason === null
-    ? RUN_PHASE_INFO.paused.parked_attached
+    ? RUN_PHASE_INFO.paused.parked
     : STOP_REASON_INFO[pause.stop_reason].next_step;
 }
 

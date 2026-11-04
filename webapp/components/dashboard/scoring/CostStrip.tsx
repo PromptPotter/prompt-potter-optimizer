@@ -34,13 +34,13 @@ export const CostStrip = memo(function CostStrip() {
 
   return (
     <CardFrame title={<span>Spend by round</span>}>
-      <div style={{ position: "relative", height: 140 }}>
+      <div className="chart-frame">
         {rounds.length === 0 ? (
           <div
             style={{
               color: "var(--color-text-secondary)",
               fontSize: "var(--text-sm)",
-              padding: 16,
+              padding: "var(--space-16)",
             }}
           >
             Cost lands per round as calls bill. Nothing has been spent yet.

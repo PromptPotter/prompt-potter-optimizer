@@ -4,7 +4,7 @@
 .hs-mini-btn:hover{border-color:var(--color-accent)}
 .hs-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .hs-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary)}
-.hs-mini-btn.resizable{resize:both;min-width:30px;min-height:14px;max-width:90%;max-height:50vh}
+.hs-mini-btn.resizable{resize:both;min-width:30px;max-width:90%;max-height:50vh}
 .hs-mini-btn.resizable::-webkit-resizer{background:transparent}
 .hs-mini-btn.resizable::after{content:"";position:absolute;right:1px;bottom:1px;width:5px;height:5px;background:repeating-linear-gradient(135deg,var(--color-accent) 0 1.5px,transparent 1.5px 3px);opacity:0;transition:opacity .12s;pointer-events:none}
 .hs-mini-btn.resizable:hover::after{opacity:1}
@@ -52,6 +52,10 @@
 .st-chip.current{color:var(--color-new);border-color:var(--color-new-border);background:var(--color-new-bg)}
 .st-chip.planned{color:var(--color-text-secondary);background:var(--color-background-secondary)}
 
+/* Only a fine pointer resizes it, so only there may it shrink under the touch floor. */
+@media (pointer:fine){
+  .hs-mini-btn.resizable{min-height:14px}
+}
 @media (pointer:coarse){
   .hs-mini-btn.resizable{resize:none}
 }

@@ -549,10 +549,6 @@
   background: var(--color-background-secondary);
   font-variant-numeric: tabular-nums;
 }
-.l4-cell-subject {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 .l4-cell-n {
   color: var(--color-text-secondary);
   font-size: var(--text-sm);

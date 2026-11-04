@@ -336,7 +336,6 @@ class RunPhaseInfo(NamedTuple):
     action: RunAction | None
     no_action: str
     parked: str
-    parked_attached: str
 
 
 QUEUE_STARTS_ITSELF = "it starts by itself when a slot frees"
@@ -351,7 +350,6 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         None,
         f"Queued — {QUEUE_STARTS_ITSELF}.",
         "waiting for a machine slot",
-        "waiting for a machine slot",
     ),
     RunPhase.STARTING: RunPhaseInfo(
         "Starting",
@@ -362,11 +360,10 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         None,
         "Starting up…",
         "coming up",
-        "coming up",
     ),
-    RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", "", ""),
+    RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", ""),
     # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
-    RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", "", "", ""),
+    RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", "", ""),
     # Asked to pause, an attached producer runs on to its checkpoint.
     RunPhase.PAUSED: RunPhaseInfo(
         "Paused",
@@ -376,7 +373,6 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         2,
         "resume",
         "",
-        "resumable",
         "stopping at its next checkpoint",
     ),
     # Blocked on the operator, so it leads the dock.
@@ -389,13 +385,12 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         None,
         "Holding for you — the chat says what it waits on.",
         "awaiting your decision",
-        "awaiting your decision",
     ),
     RunPhase.DETACHED: RunPhaseInfo(
-        "Detached", False, False, False, 3, "start", "", "producer gone", "producer gone"
+        "Detached", False, False, False, 3, "start", "", "producer gone"
     ),
     RunPhase.TERMINAL: RunPhaseInfo(
-        "Ended", False, True, False, 3, "start", "", "", "writing its last files"
+        "Ended", False, True, False, 3, "start", "", "writing its last files"
     ),
 }
 
@@ -445,7 +440,7 @@ class RunAdmission(FrozenModel):
             offers, refusal = None, declined
         elif declined:
             # The phase names a verb its producer does not admit yet.
-            offers, refusal = None, f"{info.parked_attached.capitalize()}."
+            offers, refusal = None, f"{info.parked.capitalize()}."
         else:
             offers, refusal = info.action, ""
         return cls(

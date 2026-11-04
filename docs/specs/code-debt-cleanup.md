@@ -215,10 +215,9 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `WINDOW_LABEL`, `AccountView::SECTIONS`, …) and the tone vocabularies off `domain/said.py::Tone` (`l4-eff-*`,
   `verdictTone`, PipelineFlow's). Canonical: served label constants, one tone. **Re-test:** each table
   served or deleted.
-- **Size literals and the seed-once latch**: chart `height: 140`
-  (`git grep -n "height: 140" -- webapp/components`) beside `--chart-h`, which is a `clamp()`, so the
-  two disagree on purpose or by accident; the seed-once latch hand-built at each
-  `git grep -n -i "seeded" -- webapp/components webapp/lib` site; `STORAGE_KEYS` mixes hook and
+- **The seed-once latch** hand-built at each
+  `git grep -n -i "seeded" -- webapp/components webapp/lib` site (one hook is the fix, and
+  `lib/hooks/` is arc W1's); `STORAGE_KEYS` mixes hook and
   non-hook keys and `side-panel:*` has no `promptpotter.` prefix.
   **Re-test:** one latch.
 - **Modules still off the `lib/CLAUDE.md` § Where a module lives rule**, blocked by the run-card
@@ -286,7 +285,7 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 - Three ways into Compare (the toolbar menu, `CompareOriginAction`, the forest).
 - Teaching prose in `title=`: the `FitnessLegend` hint, the toolbar, the dendrogram `<title>`, `CompareOriginAction`, `RoundVerdict`.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
-- `CostStrip` sizes itself inline (`height: 140`); `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
+- `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 
 ### The webapp swept by shape (debt hunt 2026-11-02)
@@ -389,13 +388,6 @@ fixtures.
   **Re-test:** `git grep -nE "<select|parseCapIn|capInput" -- webapp/components`.
 
 **G. Dead and ratchets.**
-- **No reader**: `run-phase.ts::phaseParked` (the last reader of `domain/phases.py::RunPhaseInfo.parked`,
-  which goes with it), `terms.ts::targetNodeIds`, `TERMS.composite`; CSS `.avatar`, `.table-wrap`,
-  `.family-cladogram-head`, `.l4-cell-subject`, `.limit-input-usd`, `.limit-usd-prefix`,
-  `.subject-note`, `.unit-library-id`, `.tag-hit` / `.tag-miss` / `.tag-err`, `.btn-tight` (and the
-  `:not(.btn-tight)` in `responsive.css`), `.hsp-note`, `.chat-tools-err`, `.chat-decision-err`.
-  **Re-test:** `git grep -nE "phaseParked|targetNodeIds|TERMS\.composite" -- webapp`; each class name
-  against `webapp/components` and `webapp/lib`.
 - **Teaching prose in `title=` across many surfaces** beyond § The candidates surface's list. Action: a
   gate ratchet. **Re-test:** `git grep -cE 'title=("[^"]{60,}|\{\`[^\`]{60,})' -- webapp/components`.
 - Minor: `CandidateRow` re-derives "retired" after `splitRetired`; `reads.ts::filesRead` builds the
@@ -936,6 +928,9 @@ word's `git grep -c` for that sense is 0.
   sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
+- **A declined pause refuses with "."**: `phases.py::RUN_PHASE_INFO` gives `RUNNING` and `SCORING` a
+  parked `""`, which `RunAdmission` capitalizes into the refusal. **Re-test:** each phase whose
+  action can be declined parks a non-empty word.
 - **A cold server folds every ledger before the first page answers**: the first
   `GET /hierarchy?depth=1` waits on a full `LEDGER_FOLDS` pass over every `projects/` ledger, and
   the browser shows a sidebar stuck on "loading…". On 2026-10-30, with 91 MB / 129k lines in
@@ -1083,9 +1078,7 @@ word's `git grep -c` for that sense is 0.
     pane means editing Python strings. **Re-test:** `git grep -n "API keys" -- promptpotter`.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
     **Re-test:** the Host allowance section with a token-bound grant.
-  - The onboarding dialogs use raw `<button className="login-button">`, not `ui/Button`; and
-    `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
-    **Re-test:** `git grep -n "login-button" -- webapp/components/onboarding`.
+  - `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
 - **Seen removing the migrations** (2026-10-30):
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.

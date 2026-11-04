@@ -6,6 +6,8 @@ import { brandOf, softwareApplicationLd, type Brand } from "./lib/brand-of";
 
 const WEBAPP = import.meta.dirname;
 const APP = path.join(WEBAPP, "app");
+// `vitest.config.ts` resolves through it too.
+export const RESOLVE = { alias: { "@": WEBAPP } };
 
 const CARD_TITLE = "PromptPotter — automatic prompt optimizer for better AI answers";
 const CARD_DESC =
@@ -53,6 +55,15 @@ function head(brand: Brand): HtmlTagDescriptor[] {
   ];
 }
 
+// The globals a build compiles in; `vitest.config.ts` defines through it too, on the defaults.
+export function defines(brand: Brand, build: string | null): Record<string, string> {
+  return {
+    // A bare global, not `import.meta.env.*`: Vitest moves those into `process.env`, which stringifies an object.
+    __BRAND__: JSON.stringify(brand),
+    ...(build ? { "import.meta.env.VITE_WEBAPP_BUILD": JSON.stringify(build) } : {}),
+  };
+}
+
 // What every page shares and the server reads beside them: the head, the manifest, the build id.
 function shell(brand: Brand, build: string | null): Plugin {
   return {
@@ -86,12 +97,8 @@ export default defineConfig(({ command, mode }) => {
     root: APP,
     publicDir: path.join(WEBAPP, "public"),
     envDir: WEBAPP,
-    resolve: { alias: { "@": WEBAPP } },
-    define: {
-      // A bare global, not `import.meta.env.*`: Vitest moves those into `process.env`, which stringifies an object.
-      __BRAND__: JSON.stringify(brand),
-      ...(build ? { "import.meta.env.VITE_WEBAPP_BUILD": JSON.stringify(build) } : {}),
-    },
+    resolve: RESOLVE,
+    define: defines(brand, build),
     plugins: [
       react(),
       babel({ presets: [reactCompilerPreset()] }),

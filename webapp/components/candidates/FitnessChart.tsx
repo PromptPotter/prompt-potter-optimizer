@@ -560,7 +560,7 @@ export const FitnessChart = memo(function FitnessChart({
   }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
-    <div className="fitness-chart-frame">
+    <div className="chart-frame">
       <Chart<"bar" | "line">
         type="bar"
         data={data}

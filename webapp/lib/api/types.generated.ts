@@ -4750,7 +4750,6 @@ export interface RunPhaseInfo {
   action: 'pause' | 'resume' | 'start' | null;
   no_action: string;
   parked: string;
-  parked_attached: string;
 }
 
 export interface ReadingStateInfo {
@@ -4884,14 +4883,14 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
 
 // Mirror of domain/phases.py::RUN_PHASE_INFO.
 export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "waiting for a machine slot", parked_attached: "waiting for a machine slot" },
-  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "coming up", parked_attached: "coming up" },
-  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "", parked_attached: "" },
-  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "", parked_attached: "" },
-  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "resumable", parked_attached: "stopping at its next checkpoint" },
-  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "awaiting your decision", parked_attached: "awaiting your decision" },
-  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone", parked_attached: "producer gone" },
-  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "", parked_attached: "writing its last files" },
+  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "waiting for a machine slot" },
+  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "coming up" },
+  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
+  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
+  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "stopping at its next checkpoint" },
+  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "awaiting your decision" },
+  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone" },
+  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "writing its last files" },
 };
 
 // Mirror of domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS.

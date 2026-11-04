@@ -16,7 +16,6 @@
 .cand-tree-row > button:hover,.cand-tree-row > button[aria-pressed="true"]{opacity:1}
 .cand-tree-row > button svg{width:12px;height:12px}
 .cand-view-count{font-size:var(--text-xs);font-weight:700;line-height:1;font-family:var(--font-mono)}
-.fitness-chart-frame{position:relative;height:var(--chart-h);width:100%;min-width:0}
 .fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:var(--space-8)}
 .fitness-legend .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:var(--space-4);vertical-align:middle;background:var(--ink)}
 .fitness-legend .swatch.mark{width:7px;height:7px;border-radius:0;transform:rotate(45deg);background:transparent;border:1.4px solid var(--ink)}

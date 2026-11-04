@@ -16,7 +16,6 @@
 .lineage-inherit-link:hover{color:var(--color-text-primary)}
 
 .family-cladogram{margin-top:8px}
-.family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px var(--space-4);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-secondary)}
 .family-cladogram-viewport{max-height:60vh;overflow:auto;resize:vertical}
 .family-cladogram-forest{margin-top:6px}
 .family-cladogram-forest:first-of-type{margin-top:0}
