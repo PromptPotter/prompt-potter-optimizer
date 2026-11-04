@@ -116,6 +116,11 @@ export function RoundFileView({
         {election?.verdict_reason && (
           <div className="round-file-summary-row round-file-dim">{election.verdict_reason}</div>
         )}
+        {election?.reelection && (
+          <div className="round-file-summary-row round-file-dim">
+            re-elected by {election.reelection.by.display}: {election.reelection.reason}
+          </div>
+        )}
         <FailureLine failure={failure} />
       </div>
 

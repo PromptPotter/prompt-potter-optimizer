@@ -234,6 +234,16 @@ class EscalationKnobs(StrictModel):
             "(default None) so on-disk audit shape doesn't drift between modes."
         ),
     )
+    reelect_capability: Annotated[bool, Knob(Estimand.CONTROLLER)] = Field(
+        description=(
+            "L2/L3 re-election, a ``fork_proposal`` naming ``stand_on``. When True and "
+            "``rebase_capability`` holds, the ``rebase_capability`` injection adds the "
+            "ELECTIONS table (each round's pick, locked in or on the full panel, its later "
+            "reads as the parent, the arms it beat) and L2 + L3 may stand the fork on any arm "
+            "listed there; its round is restated electing that arm on the fork's ledger. When "
+            "False, the table renders nowhere and the field is off the wire."
+        ),
+    )
     terminate_capability: Annotated[bool, Knob(Estimand.CONTROLLER)] = Field(
         description=(
             "L2/L3 terminate_proposal emission. When True, the "

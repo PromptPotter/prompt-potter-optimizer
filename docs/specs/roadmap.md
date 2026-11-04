@@ -321,11 +321,7 @@ Round 4 elected nobody, although C4.4 and C4.3 each read 12/20 against the paren
 
 **Lock-in stays a goal, past real significance.** Several mechanisms, each catching what another misses:
 
-1. **First: L2 sees the elections and can re-elect.**
-   - A dispatch-hub panel shows L2, per round, who was elected and how: locked in at n cells, or on the full panel. It also shows the pick's later reads as parent, and the near-misses left unelected.
-   - L2 may then name any individual this cycle measured, a previous winner or another arm, as the line's parent, citing those cells.
-   - This rides the layer-control channel behind its own capability bit, as `fork_proposal` and `terminate_proposal` do. Today `fork_proposal` stands only on a promoted individual; widen it before adding a second door.
-   - L2's write set (`optimizers/potter/CLAUDE.md` § L2) grows by exactly this, and each re-election is a ledger event.
+1. **Closed: L2 sees the elections and can re-elect** — `fork_proposal.stand_on` behind `reelect_capability` ([`../../promptpotter/application/optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) § The layer-control channel — `fork_proposal` + `terminate_proposal`). Check: `tests/test_scoring.py::test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved`, a fork standing on an unelected arm re-elects it.
 2. **Then, at the root: the election picks the right winner with lock-in on.**
    - **Lock in only past an anytime-valid bound.** The pilot's rule is a mixture likelihood ratio on θ at level α/K per arm. PoBB's per-cell posterior bar stops being a lock rule. This pulls Sequence item 4's "anytime-valid confidence sequences as the default stopping rule" forward.
    - **The standing pick's evidence pools across rounds.** Its reads as parent on each round's fresh subset count toward its θ, so a lucky lock-in is dethroned by the same election (C5.6 by round 7).
@@ -336,8 +332,7 @@ Each change moves what the loop decides: diff it with [`../developer/offline-run
 
 **Closes when:**
 - an offline replay of that cycle elects no pick that its later reads as parent contradict;
-- the pilot's equal-arms simulation shows false locks at the stated level on the landed rule;
-- L2, shown a contradicted pick, re-elects.
+- the pilot's equal-arms simulation shows false locks at the stated level on the landed rule.
 
 ## Origin-resolution check-in
 

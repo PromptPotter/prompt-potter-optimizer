@@ -18,6 +18,8 @@ from promptpotter.domain.run_records import (
     RaceStandingRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
+    RoundRestatedRecord,
+    RoundStatement,
 )
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -48,6 +50,23 @@ def stated_line(
     standing = RunStanding.after(line, lives=None if lives is None else lives.bank, outlay=outlay)
     [series] = difficulty.level_series([line])
     return line, series, standing
+
+
+def restated_round(
+    closing: RoundResult,
+    prior: Sequence[RoundResult],
+    difficulty: DifficultyView,
+    *,
+    lives: LivesConfig | None,
+    close: RoundStatement,
+    slot_of: Mapping[str, int],
+) -> RoundRestatedRecord:
+    """*closing* stated again under its round's own anchors and outlay (*close*), never the
+    launch restating it."""
+    line, series, standing = stated_line(
+        closing, prior, difficulty, lives=lives, outlay=close.run_standing.outlay
+    )
+    return RoundRestatedRecord.of(line, slot_of, series, standing, close.anchors)
 
 
 @dataclass

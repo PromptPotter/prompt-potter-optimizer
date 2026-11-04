@@ -86,12 +86,16 @@ from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchGate
 from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
 from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
-from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
+from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, build_bundle
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
 )
-from promptpotter.application.optimizers.potter.dispatch.schemas import L3PlanOutput
+from promptpotter.application.optimizers.potter.dispatch.schemas import (
+    L3PlanOutput,
+    fork_proposal_model,
+)
+from promptpotter.application.optimizers.potter.escalation.firing import _rebase_request
 from promptpotter.application.optimizers.potter.escalation.rules import (
     EscalationInputs,
     NextAction,
@@ -241,7 +245,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
-from promptpotter.domain.results import InRunCells, RoundResult
+from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
@@ -301,7 +305,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import ConflictError, ErrorCategory, SendRefusedError
-from promptpotter.shared.identity import SYSTEM_PRINCIPAL
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
@@ -2824,6 +2828,83 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         for cp in proposed.proposals
     ]
     assert fatal == [["forbidden_axis"], []], "an L1 edit of answer_format reached the backend"
+
+    # A layer that forks standing on an arm its round left unelected re-elects it: the round the
+    # fork hangs from is restated electing that arm, so the line continues from it.
+    with _peer_cycle(
+        workspace(tmp_path / "reelect"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {},
+        lambda _p, _s: True,
+    ) as (cycle, callbacks):
+        origin_key = ArmKey(cycle.parent.id)
+        origin_arm = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=cycle.parent)
+        # Walked on no cell this cycle's bank draws, so no panel renders a row the bank lacks.
+        unwalked = {ArmKey(f"c{i}"): sheet(()) for i in range(3)}
+        line = [
+            round_result(0, arms={origin_key: origin_arm}, selected=origin_key, cells={}),
+            round_result(1, candidates_scored=3, optimizer_state=optimizer_state(), cells=unwalked),
+        ]
+        forking = NodeContext(
+            RoundContext(cycle=cycle, round_num=2, callbacks=callbacks),
+            optimizers.NODE_MEMBERS.get("l2_context"),
+        )
+        set_cycle(cycle, line=line)
+        assert build_bundle(forking, Ladder()).reelect_offer == {}, (
+            "an improving line, which builds on its parent, was offered a fork"
+        )
+        close_round(callbacks.ledger, line, cycle=cycle)
+        line.append(
+            round_result(
+                2, improved=False, candidates_scored=1, optimizer_state=optimizer_state(), cells={}
+            )
+        )
+        set_cycle(cycle, line=line)
+        close_round(callbacks.ledger, line, cycle=cycle)
+        forking = NodeContext(
+            RoundContext(cycle=cycle, round_num=3, callbacks=callbacks),
+            optimizers.NODE_MEMBERS.get("l2_context"),
+        )
+        stalled = build_bundle(forking, Ladder())
+        offer = stalled.reelect_offer
+        # c0 sits on both rounds' panels: one entry, its first listing.
+        assert offer == {
+            "C1.1": RoundArm(round=1, arm=ArmKey("c0")),
+            "C1.2": RoundArm(round=1, arm=ArmKey("c1")),
+            "C1.3": RoundArm(round=1, arm=ArmKey("c2")),
+        }, "a stalled layer may stand a fork on another arm than the picks and those they outranked"
+        assert "ELECTIONS" in DispatchHub.render("rebase_capability", stalled), (
+            "an arm two rounds list kept the layer's prompt from composing"
+        )
+        standing = fork_proposal_model(tuple(offer))
+        refork = _rebase_request(
+            forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
+        )
+        assert refork is not None and refork.fork_from_round == 2, (
+            "a fork standing on a round-1 arm cuts at round 2"
+        )
+        hangs_from = refork.hangs_from
+        assert hangs_from is not None and hangs_from.election is not None
+        assert (hangs_from.election.selected, hangs_from.optimizer_state.population) == (
+            ArmKey("c1"),
+            [line[1].arms[ArmKey("c1")].individual],
+        ), "the restated round elects another arm than the one the layer stood the fork on"
+        assert line[1].election is not None and line[1].election.selected == ArmKey("c0"), "guard"
+        assert (
+            hangs_from.election.reelection
+            == Reelection(by=Principal("l2_context/round_3", "l2_context"), reason="r")
+            and hangs_from.election.verdict_reason == line[1].election.verdict_reason
+        ), "a re-election is not told apart from the selector's own verdict"
+        stood_on_pick = _rebase_request(
+            forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
+        )
+        assert stood_on_pick is not None and stood_on_pick.hangs_from is None, (
+            "a fork on the round's own pick restated an election it already holds"
+        )
+        with pytest.raises(ValidationError):
+            standing.model_validate({"reason": "r", "stand_on": "C9.9"})
 
     # Folded back on resume: a layer fires AFTER the round it reads has closed, so what it
     # authors is on no close.

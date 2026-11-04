@@ -7,13 +7,16 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.domain.arms import arm_name, is_leader_eligible
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
@@ -108,6 +111,47 @@ BLOCK_ID_INSTRUCTION = (
 )
 # The scorer parses these, so an edit to one scores near 0 however good its reasoning.
 L1_HELD_PROMPT_FIELDS: tuple[str, ...] = ("answer_format",)
+# The ELECTIONS panel's reach: its latest rounds, and per round the challengers its pick beat.
+ELECTION_ROUNDS_SHOWN = 8
+UNELECTED_SHOWN = 2
+
+
+class ElectionRow(NamedTuple):
+    """One round's election as a layer that may re-elect reads it: the pick, and the best of the
+    panel arms left unelected, in the round's own rank."""
+
+    round: RoundOutcome
+    picked: ArmKey | None
+    unelected: tuple[ArmKey, ...]
+
+
+def election_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
+    rows: list[ElectionRow] = []
+    for rr in rounds:
+        if rr.round == 0 or rr.election is None:
+            continue
+        picked = rr.election.selected
+        ranked = (row.reading.arm.key for row in rr.ranked())
+        unelected = tuple(
+            key
+            for key in ranked
+            if key != picked and key in rr.panel and is_leader_eligible(rr.panel[key])
+        )
+        rows.append(ElectionRow(rr, picked, unelected[:UNELECTED_SHOWN]))
+    return rows[-ELECTION_ROUNDS_SHOWN:]
+
+
+def reelection_roster(rounds: Sequence[RoundOutcome], *, parent: str) -> dict[str, RoundArm]:
+    """By label, every arm the ELECTIONS panel lists, the one the line stands on now left out: a
+    `fork_proposal.stand_on` names one, and the fork continues from it. An arm two rounds list is
+    one entry, its first listing."""
+    roster: dict[ArmKey, tuple[str, RoundArm]] = {}
+    for row in election_rows(rounds):
+        for key in ((row.picked,) if row.picked is not None else ()) + row.unelected:
+            if key != parent and key not in roster:
+                label = arm_name(key, row.round.arms[key], row.round.round).label
+                roster[key] = (label, RoundArm(round=row.round.round, arm=key))
+    return dict(roster.values())
 
 
 def l1_target_schema(schema: PipelineSchema) -> PipelineSchema:
@@ -212,6 +256,7 @@ class InjectionBundle:
     axes: AxisIndex | None
     block_access: Access
     rebase_capability: bool
+    reelect_capability: bool
     terminate_capability: bool
     schema_field_rename: bool
     # 0 silences the shot menu as an empty `demo_pool` does, withdrawing the `shots` slot.
@@ -264,6 +309,21 @@ class InjectionBundle:
             tuple(p.id for p in self.recombination_pool),
             tuple(locus.name for locus in self.recombination_loci),
         )
+
+    @property
+    def rebase_offered(self) -> bool:
+        """Whether the fork directive renders: a TIGHT budget builds on the parent, never forks."""
+        return (
+            self.rebase_capability
+            and self.cycle_slice.exploration_budget != ExplorationBudget.TIGHT
+        )
+
+    @property
+    def reelect_offer(self) -> dict[str, RoundArm]:
+        """What `fork_proposal.stand_on` may name, by label; empty withdraws the panel and the field."""
+        if not (self.rebase_offered and self.reelect_capability):
+            return {}
+        return reelection_roster(self.measured_rounds, parent=self.parent.id)
 
     @property
     def terminate_offer(self) -> str | None:

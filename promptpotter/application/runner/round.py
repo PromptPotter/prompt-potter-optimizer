@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
-from promptpotter.application.bench.round_analysis import compute_round_diagnostics
+from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
@@ -33,15 +33,13 @@ from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.phase import stop_next_lines
-from promptpotter.domain.arms import ArmState, Concluded, Measured, Proposal, is_leader_eligible
+from promptpotter.domain.arms import ArmState, Measured, Proposal, is_leader_eligible
 from promptpotter.domain.cell_fold import unscoreable_cells
 from promptpotter.domain.optimizer_state import RoundOutput
-from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason
 from promptpotter.domain.results import Election, RoundResult
-from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
 from promptpotter.domain.run_standing import line_reference, rounds_without_advance, stalls_left
 from promptpotter.domain.scoring import CellSheet
@@ -138,42 +136,31 @@ def _round_result(
             f"{(leading or 'no arm')[:12]} as the one the round is read off"
         )
     cycle = ctx.cycle
-    arms: dict[ArmKey, ArmState] = {key: read.state for key, read in measured.filed.items()}
-    cells = {key: read.rows for key, read in measured.filed.items()}
-    # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
-    ended_on = winner or measured.parent.key
     reference = line_reference(cycle.rounds, origin=ArmKey(cycle.origin_round.origin.individual.id))
     assert reference.arm == measured.parent.key, "a round re-reads the candidate its line stands on"
-    head, head_rows = arms[ended_on], cells[ended_on]
-    assert isinstance(head, Concluded)
-    not_attempted = max(0, head.expected_samples - len(head_rows)) if winner else 0
-    elected_round = RoundResult(
-        round=ctx.round_num,
-        arms=arms,
-        reference=reference,
-        folds=measured.folds,
-        cells=cells,
-        overlap_results=measured.on_panel,
-        election=Election(
+    return ended_on(
+        Election(
             selected=winner,
             leading=leading,
-            ended_on=ended_on,
+            # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
+            ended_on=winner or measured.parent.key,
             electable=len(measured.electable),
             fit=measured.fit,
             elects_on=elects_on,
             verdict_reason=selection.verdict_reason,
             ruler=cycle.difficulty.stamp,
         ),
-        health=compute_round_health(
-            results=head_rows.cells,
-            prior_healths=assemble_prior_healths(ctx.cycle.rounds, ctx.round_num),
-            not_attempted=not_attempted,
-        ),
+        priors=cycle.rounds,
+        schema=cycle.session.pipeline_schema,
         # Until `measure_overlap` lands, after every pick this round makes.
-        overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, winner is not None),
+        overlap=ReadingState.PENDING,
+        round=ctx.round_num,
+        arms={key: read.state for key, read in measured.filed.items()},
+        reference=reference,
+        folds=measured.folds,
+        cells={key: read.rows for key, read in measured.filed.items()},
+        overlap_results=measured.on_panel,
     )
-    diagnostics = compute_round_diagnostics(elected_round, cycle.session.pipeline_schema)
-    return elected_round.model_copy(update={"diagnostics": diagnostics})
 
 
 def _unbought_cells(arm: ArmState, rows: CellSheet, cut: StopReason | None) -> int:

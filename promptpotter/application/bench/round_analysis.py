@@ -4,19 +4,66 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
+from promptpotter.domain.arms import Concluded
+from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import RoundResult
-from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
+from promptpotter.domain.results import Election, RoundResult
+from promptpotter.domain.results_health import (
+    UNKNOWN_STEP,
+    assemble_prior_healths,
+    compute_round_health,
+    terminal_node,
+)
 from promptpotter.domain.round_diagnostics import NearMiss, RoundDiagnostics, SampleDiag
 from promptpotter.domain.scoring import graded_answer
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.domain.scoring import GradedCell
+    from promptpotter.domain.arms import ArmState
+    from promptpotter.domain.cell_fold import ScoreSummary
+    from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
+    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 _RANK_BUCKET_KEYS: tuple[str, ...] = ("1", "2-5", "6-10", "11-20", "not_found")
 _TOP_K_LEVELS: tuple[int, ...] = (1, 3, 5, 10)
+
+
+def ended_on(
+    election: Election,
+    *,
+    round: int,
+    arms: dict[ArmKey, ArmState],
+    reference: RoundArm | None,
+    folds: dict[ArmKey, ScoreSummary],
+    cells: dict[ArmKey, CellSheet],
+    overlap_results: dict[str, CellSheet],
+    priors: Sequence[RoundResult],
+    schema: PipelineSchema | None,
+    overlap: ReadingState,
+) -> RoundResult:
+    """A round ending on *election*: what it reads off that arm (election, health, overlap,
+    diagnostics) stated once, for its selector at the close and for a layer that re-elects it
+    (`node_context.py::Lineage.reelected`)."""
+    head, rows = arms[election.ended_on], cells[election.ended_on]
+    assert isinstance(head, Concluded), "a round ends on an arm it concluded"
+    picked = election.selected is not None
+    rr = RoundResult(
+        round=round,
+        arms=arms,
+        reference=reference,
+        folds=folds,
+        cells=cells,
+        overlap_results=overlap_results,
+        election=election,
+        health=compute_round_health(
+            results=rows.cells,
+            prior_healths=assemble_prior_healths(priors, round),
+            not_attempted=max(0, head.expected_samples - len(rows)) if picked else 0,
+        ),
+        overlap=OverlapReading.unpaired(overlap, round, picked),
+    )
+    return rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, schema)})
 
 
 # The bench calls it, outside any hashed module, and an optimizer prompt renders what it returns.

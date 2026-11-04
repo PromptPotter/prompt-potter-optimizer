@@ -15,6 +15,7 @@ from promptpotter.application.bench.children import (
 )
 from promptpotter.application.bench.llm_call import InjectionBreakdown, LLMCallContext, llm_call
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.intelligence.earned_blocks import (
     answer_space_signature,
     earned_blocks_for,
@@ -23,6 +24,7 @@ from promptpotter.application.mask.backprop import select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
+from promptpotter.application.run_callbacks import restated_round
 from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -38,7 +40,7 @@ from promptpotter.domain.opt_search_point import (
     node_source,
     taken,
 )
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
 from promptpotter.domain.results import round_document_digest
@@ -72,8 +74,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.results import Reelection, RoundResult
     from promptpotter.domain.ruler import LevelSeries
+    from promptpotter.domain.run_records import RoundStatement
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
@@ -194,6 +197,55 @@ class Lineage(CycleRead):
     def rounds(self) -> Sequence[RoundResult]:
         """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what the node declares."""
         return [rr.model_copy(update={"optimizer_state": None}) for rr in self._cycle.rounds]
+
+    def reelected(self, at: RoundArm, reelection: Reelection) -> RoundStatement:
+        """Round *at* restated as electing its arm *by* a layer, on the round's own anchors and
+        outlay: what a fork standing on an arm its round left unelected banks as the round it
+        hangs from (`runner/entry.py::_mint_and_rebase_fork`). The selector's verdict stays its own."""
+        cycle = self._cycle
+        session = cycle.session
+        held = next(rr for rr in cycle.rounds if rr.round == at.round)
+        assert held.election is not None, "a re-election restates a round that elected"
+        election = held.election.model_copy(
+            update={
+                "selected": at.arm,
+                "leading": at.arm,
+                "ended_on": at.arm,
+                "reelection": reelection,
+            }
+        )
+        stated = ended_on(
+            election,
+            round=held.round,
+            arms=held.arms,
+            reference=held.reference,
+            folds=held.folds,
+            cells=held.cells,
+            overlap_results=held.overlap_results,
+            priors=cycle.rounds,
+            schema=session.pipeline_schema,
+            overlap=ReadingState.NOT_ASKED,
+        )
+        rr = held.model_copy(
+            update={
+                "election": stated.election,
+                "health": stated.health,
+                "overlap": stated.overlap,
+                "diagnostics": stated.diagnostics,
+                "optimizer_state": held.closed_state.model_copy(
+                    update={"population": [held.arms[at.arm].individual]}
+                ),
+            }
+        )
+        standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
+        return restated_round(
+            rr,
+            cycle.rounds,
+            cycle.difficulty,
+            lives=cycle.config.optimization.lives,
+            close=standing.rounds[at.round].close,
+            slot_of=session.bank.slot_of,
+        )
 
     def branch_round(self, *, changing: bool) -> int | None:
         """The closed round a fork of this line stands on (UCB over the campaign's lineage); ``None`` where none may."""

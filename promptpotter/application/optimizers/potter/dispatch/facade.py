@@ -362,6 +362,7 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
         blocks=_by_field(ctx.drawn(BlockPool)),
         runtime_failures=tuple(target.runtime_failures()),
         rebase_capability=escalation.rebase_capability,
+        reelect_capability=escalation.reelect_capability,
         terminate_capability=escalation.terminate_capability,
         schema_field_rename=generate.schema_field_rename,
         measured_unit=target.measured_unit,

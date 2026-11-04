@@ -498,8 +498,8 @@ def assemble_prior_healths(
     rounds: Sequence[RoundResult],
     round_num: int,
 ) -> list[DegradationHealth]:
-    """Oldest→newest: ``_trailing_degraded`` walks it reversed."""
-    return [r.health for r in rounds if r.round != round_num]
+    """The rounds before *round_num*, oldest→newest: ``_trailing_degraded`` walks it reversed."""
+    return [r.health for r in rounds if r.round < round_num]
 
 
 @shapes_optimizer_prompt

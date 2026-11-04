@@ -3296,6 +3296,17 @@
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
+          "reelection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reelection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "ruler": {
             "$ref": "#/components/schemas/RulerStamp"
           },
@@ -3380,6 +3391,17 @@
             "default": "election",
             "title": "Record Type",
             "type": "string"
+          },
+          "reelection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reelection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "round": {
             "title": "Round",
@@ -6629,6 +6651,25 @@
         ],
         "title": "ReadingState",
         "type": "string"
+      },
+      "Reelection": {
+        "additionalProperties": false,
+        "description": "A layer restating a round as electing another arm than its selector's, and why.",
+        "properties": {
+          "by": {
+            "$ref": "#/components/schemas/Principal"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "reason"
+        ],
+        "title": "Reelection",
+        "type": "object"
       },
       "ResolvedRunRecord": {
         "additionalProperties": false,

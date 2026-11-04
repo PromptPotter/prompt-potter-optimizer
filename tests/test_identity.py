@@ -2023,6 +2023,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         axes=None,
         block_access="open",
         rebase_capability=True,
+        reelect_capability=True,
         terminate_capability=True,
         schema_field_rename=False,
         shot_k_max=0,

@@ -322,6 +322,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         axes=None,
         block_access="open",
         rebase_capability=True,
+        reelect_capability=True,
         terminate_capability=True,
         schema_field_rename=False,
         shot_k_max=0,

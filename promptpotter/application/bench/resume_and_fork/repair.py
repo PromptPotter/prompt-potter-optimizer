@@ -8,16 +8,12 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fo
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimizers.nodes import RoundContext
-from promptpotter.application.run_callbacks import stated_line
+from promptpotter.application.run_callbacks import restated_round
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.run_records import (
-    ForkDirection,
-    ForkTrigger,
-    RoundRestatedRecord,
-)
+from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import ConflictError, ErrorCategory
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
@@ -94,18 +90,16 @@ def _rebank_on_branch(
     for t in rounds:
         if t.round not in retired:
             continue
-        # Under its round's own anchors and outlay, never the resuming launch's.
-        close = closes[t.round].close
-        line, series, standing = stated_line(
-            t,
-            rounds,
-            cycle.difficulty,
-            lives=cycle.config.optimization.lives,
-            outlay=close.run_standing.outlay,
-        )
         offset = session.store.campaigns.rebank_round(
             branch,
-            RoundRestatedRecord.of(line, session.bank.slot_of, series, standing, close.anchors),
+            restated_round(
+                t,
+                rounds,
+                cycle.difficulty,
+                lives=cycle.config.optimization.lives,
+                close=closes[t.round].close,
+                slot_of=session.bank.slot_of,
+            ),
         )
         # The restatement MOVES the document's address; the retired one re-folds to the holed round.
         restated[t.round] = t.model_copy(update={"at_offset": offset})

@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import re
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -281,6 +281,30 @@ class ForkProposal(OptimizerResponseModel):
     )
 
 
+class StandingForkProposal(ForkProposal):
+    """A ``fork_proposal`` that may name the arm it stands on; only ``fork_proposal_model`` builds
+    one, its ``stand_on`` closed on what ``InjectionBundle.reelect_offer`` lists."""
+
+    stand_on: str = ""
+
+
+STAND_ON_DESCRIPTION = (
+    "An arm label from the ELECTIONS panel: the fork continues from that arm, its round "
+    "re-elected to it. Name one only where its cells there contradict the pick that stands. "
+    "Empty lets the engine pick where the fork stands."
+)
+
+
+@functools.lru_cache(maxsize=8)
+def fork_proposal_model(offer: tuple[str, ...]) -> type[StandingForkProposal]:
+    """``stand_on`` validated against *offer*: a label it does not list fails the parse."""
+    return create_model(
+        "ForkProposal",
+        __base__=StandingForkProposal,
+        stand_on=(Literal[("", *offer)], Field("", description=STAND_ON_DESCRIPTION)),
+    )
+
+
 class TerminateProposal(OptimizerResponseModel):
     reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
         default="",
@@ -368,20 +392,28 @@ def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
     return {"type": "array", "items": spec, "maxItems": offer.children}
 
 
+def _standing_on(offer: tuple[str, ...]) -> dict[str, Any]:
+    """The ``fork_proposal`` field override that puts ``stand_on`` on the wire; none for no offer."""
+    if not offer:
+        return {}
+    return {"fork_proposal": (fork_proposal_model(offer) | None, None)}
+
+
 @functools.lru_cache(maxsize=4)
 def build_l2_response_model(
     withheld: frozenset[str],
     recombination: RecombinationOffer | None = None,
     terminating: bool = False,
+    stand_on: tuple[str, ...] = (),
 ) -> type[L2ContextOutput]:
-    """``None`` *recombination* offers no slot."""
+    """``None`` *recombination* offers no slot; an empty *stand_on* offers no re-election."""
     base: type[L2ContextOutput] = {
         (False, False): L2ContextOutput,
         (True, False): L2RecombiningOutput,
         (False, True): L2TerminatingOutput,
         (True, True): L2RecombiningTerminatingOutput,
     }[recombination is not None, terminating]
-    fields: dict[str, Any] = {}
+    fields: dict[str, Any] = _standing_on(stand_on)
     if withheld:
         schema = layout_json_schema(
             NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION, withheld=withheld
@@ -416,6 +448,15 @@ class L3PlanOutput(OptimizerResponseModel):
 
 class L3TerminatingOutput(L3PlanOutput):
     terminate_proposal: TerminateProposal | None = None
+
+
+@functools.lru_cache(maxsize=4)
+def build_l3_response_model(
+    *, terminating: bool, stand_on: tuple[str, ...] = ()
+) -> type[L3PlanOutput]:
+    base = L3TerminatingOutput if terminating else L3PlanOutput
+    fields = _standing_on(stand_on)
+    return create_model("L3PlanOutput", __base__=base, **fields) if fields else base
 
 
 # At import, not in a test: a model on plain `StrictModel` typechecks and passes the drift gate.

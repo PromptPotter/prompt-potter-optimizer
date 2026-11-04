@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L3_PLAN_MAX_CHARS,
+    ElectionRow,
     InjectionBundle,
     InjectionKind,
     Item,
+    election_rows,
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -20,7 +22,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     effective_optimizer_prompts,
 )
-from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
+from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
@@ -28,10 +30,12 @@ from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
     from promptpotter.domain.optimizer_state import CritiqueReadout
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import RoundOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -291,12 +295,66 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
     citable=False,
 )
 def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
-    if not b.rebase_capability or b.cycle_slice.exploration_budget == ExplorationBudget.TIGHT:
+    if not b.rebase_offered:
         return []
     unlockable = not b.schema_field_rename and any(
         SCHEMA_RENAME_PARAM in n.param_keys for n in b.pipeline_schema.nodes
     )
-    return [Item(_REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else ""))]
+    directive = _REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else "")
+    if not b.reelect_offer:
+        return [Item(directive)]
+    # The one carrier of the labels `fork_proposal.stand_on` names, so it renders only beside the field.
+    lines = [_election_line(row, b.measured_rounds) for row in election_rows(b.measured_rounds)]
+    return [Item(directive + _STAND_ON_TEXT), Item("\n".join([_ELECTIONS_HEADER, *lines]))]
+
+
+_STAND_ON_TEXT = (
+    " It may set stand_on = an arm label from ELECTIONS: the fork then continues from that arm, "
+    "its round re-elected to it, instead of where the engine would stand it — only where that "
+    "arm's cells contradict the pick that stands."
+)
+
+_ELECTIONS_HEADER = (
+    "ELECTIONS — each round's pick and how it won (locked in on part of its panel, or on the full "
+    "panel), its reads as the parent in the rounds after, and the arms it beat; hits/cells read."
+)
+
+
+def _read(rr: RoundOutcome, key: ArmKey) -> str:
+    fold = rr.folds.get(key)
+    if fold is None or fold.accuracy is None or not fold.total:
+        return "unscored"
+    return f"{round(fold.accuracy * fold.total)}/{fold.total}"
+
+
+def _how_won(rr: RoundOutcome, key: ArmKey) -> str:
+    arm = rr.arms[key]
+    if isinstance(arm, Measured) and arm.locked_in is not None:
+        fold = rr.folds.get(key)
+        walked = 0 if fold is None else fold.walked
+        return f"locked in at {walked} of {arm.expected_samples} cells, {_read(rr, key)}"
+    return f"on the full panel, {_read(rr, key)}"
+
+
+def _election_line(row: ElectionRow, later: Sequence[RoundOutcome]) -> str:
+    rr = row.round
+    label = {key: arm_name(key, arm, rr.round).label for key, arm in rr.arms.items()}
+    if row.picked is None:
+        ref = rr.reference
+        held = f" (the parent read {_read(rr, ref.arm)})" if ref and ref.arm in rr.arms else ""
+        parts = [f"r{rr.round}: none elected{held}"]
+    else:
+        parts = [f"r{rr.round}: elected {label[row.picked]}, {_how_won(rr, row.picked)}"]
+        reads = [
+            f"r{s.round} {_read(s, row.picked)}"
+            for s in later
+            if s.round > rr.round and s.reference is not None and s.reference.arm == row.picked
+        ]
+        if reads:
+            parts.append("as parent: " + ", ".join(reads))
+    if row.unelected:
+        parts.append("unelected: " + ", ".join(f"{label[k]} {_read(rr, k)}" for k in row.unelected))
+    return "  " + " · ".join(parts)
 
 
 # Offered only where the round measured a backend fault (`InjectionBundle.terminate_offer`): a layer

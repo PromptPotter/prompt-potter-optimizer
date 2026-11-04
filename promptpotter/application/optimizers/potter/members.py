@@ -51,6 +51,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3PlanOutput,
     L3TerminatingOutput,
     build_l2_response_model,
+    build_l3_response_model,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation.firing import (
@@ -403,6 +404,7 @@ class L2Context(LayoutNode):
             bundle.silent_l1_panels,
             bundle.recombination_offer(self.name),
             terminating=bundle.terminate_offer is not None,
+            stand_on=tuple(bundle.reelect_offer),
         )
 
     def parse(self, ctx: NodeContext, raw: L2ContextOutput) -> TransitionResult:
@@ -532,7 +534,9 @@ class L3Plan(LayoutNode):
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
-        return L3PlanOutput if bundle.terminate_offer is None else L3TerminatingOutput
+        return build_l3_response_model(
+            terminating=bundle.terminate_offer is not None, stand_on=tuple(bundle.reelect_offer)
+        )
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
         rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"

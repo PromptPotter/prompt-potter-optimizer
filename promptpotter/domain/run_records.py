@@ -1371,3 +1371,15 @@ class RebaseRequest(FrozenModel):
     reason: str
     issued_by: Principal
     config_overrides: ConfigOverrides | None = None
+    # The round the fork hangs from, re-elected to the arm a layer named: banked on the fork's
+    # ledger as that round, so the line continues from it. ``None`` keeps the round's own pick.
+    hangs_from: RoundStatement | None = None
+
+    @model_validator(mode="after")
+    def _hangs_from_its_branch(self) -> Self:
+        if self.hangs_from is not None and self.hangs_from.round != self.fork_from_round - 1:
+            raise ValueError(
+                f"a fork cut at round {self.fork_from_round} hangs from round "
+                f"{self.fork_from_round - 1}, not the round {self.hangs_from.round} it re-elects"
+            )
+        return self

@@ -1311,6 +1311,7 @@ export interface Election {
   fit: Record<string, ArmFit>;
   elects_on: 'accuracy' | 'composite' | 'ability';
   verdict_reason: string | null;
+  reelection: Reelection | null;
   ruler: RulerStamp;
 }
 
@@ -1320,6 +1321,18 @@ export interface ArmFit {
   theta_se: number | null;
   theta_caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   vs_reference: PairedReading | null;
+}
+
+/** A layer restating a round as electing another arm than its selector's, and why. */
+export interface Reelection {
+  by: Principal;
+  reason: string;
+}
+
+/** Who issued an act: the id an audit joins on, and the name a surface shows for it. */
+export interface Principal {
+  id: string;
+  display: string;
 }
 
 /** One rank-ordered row of a round's scoreboard: an arm's reading at its rank. */

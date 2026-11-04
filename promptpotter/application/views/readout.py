@@ -41,7 +41,15 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
-from promptpotter.domain.arms import Concluded, Cut, Measured, Measuring, Proposed, arm_elimination
+from promptpotter.domain.arms import (
+    Concluded,
+    Cut,
+    Measured,
+    Measuring,
+    Proposed,
+    arm_elimination,
+    arm_name,
+)
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
@@ -247,6 +255,13 @@ class ReadoutProjection(Projection):
 
     def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
         self._closed[record.round] = record
+        election = record.election
+        if election is not None and election.selected and (stated := election.reelection):
+            picked = arm_name(election.selected, record.arms[election.selected], record.round)
+            self._write(
+                f"  {DIM}· r{record.round} re-elected {picked.label} by {stated.by.display}: "
+                f"{stated.reason}{RESET}"
+            )
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._closed[record.round] = record

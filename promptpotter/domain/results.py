@@ -35,6 +35,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import (
     SCOPE_ROLES,
     IndividualWalk,
@@ -94,6 +95,13 @@ def _round_walks[C: tuple[Any, ...]](
     ]
 
 
+class Reelection(FrozenModel):
+    """A layer restating a round as electing another arm than its selector's, and why."""
+
+    by: Principal
+    reason: str
+
+
 class Election(FrozenModel):
     """What a round's selector decided over its arms, by key; ``selected`` null = the round HELD."""
 
@@ -118,6 +126,8 @@ class Election(FrozenModel):
     elects_on: DisplayMetric
     # The selector's own reason; ``None`` on the origin round, which chose between nobody.
     verdict_reason: str | None = None
+    # ``None`` where the selector's pick stands; ``verdict_reason`` stays the selector's.
+    reelection: Reelection | None = None
     # The δ scale the election read, whether or not a θ was fit on it.
     ruler: RulerStamp
 

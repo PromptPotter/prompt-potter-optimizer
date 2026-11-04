@@ -14,6 +14,7 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import load_optimizer_prompt
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     ForkProposal,
+    StandingForkProposal,
     TerminateProposal,
 )
 from promptpotter.application.optimizers.potter.escalation.rules import (
@@ -41,6 +42,7 @@ from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
+from promptpotter.domain.results import Reelection
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,
@@ -52,11 +54,15 @@ from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.identity import Principal
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pydantic import BaseModel
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
+    from promptpotter.domain.paired_reading import RoundArm
     from promptpotter.domain.phase_views import OptimizerStepEnterView
+    from promptpotter.domain.run_records import RoundStatement
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +146,10 @@ class LayerCall(NamedTuple):
     ctx: NodeContext
 
 
-async def _run_transition(fired: LayerCall, fire: Fire) -> TransitionResult | None:
-    """``None`` when the layer's output never parsed."""
+async def _run_transition(
+    fired: LayerCall, fire: Fire
+) -> tuple[TransitionResult, InjectionBundle] | None:
+    """With the bundle it was composed from; ``None`` when the layer's output never parsed."""
     layer, ctx = fired
     ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_view(ctx, fire))
     ladder = ctx.slice(Ladder)
@@ -185,10 +193,10 @@ async def _run_transition(fired: LayerCall, fire: Fire) -> TransitionResult | No
 
     layer.land(ctx, result)
     ctx.read(Progress).phase(layer.phase.phase, "exit", layer.exit_view(ctx, result))
-    return result
+    return result, bundle
 
 
-def _layer_control(fired: LayerCall, result: TransitionResult) -> None:
+def _layer_control(fired: LayerCall, result: TransitionResult, bundle: InjectionBundle) -> None:
     """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
     layer, ctx = fired
     capability = ctx.knobs(EscalationKnobs)
@@ -215,18 +223,34 @@ def _layer_control(fired: LayerCall, result: TransitionResult) -> None:
                 "%s emitted fork_proposal while rebase_capability is off — ignored",
                 layer.layer_id,
             )
-        elif fork := _rebase_request(ctx, layer.layer_id, result.fork_proposal):
+        elif fork := _rebase_request(
+            ctx, layer.layer_id, result.fork_proposal, bundle.reelect_offer
+        ):
             raise StopLoop(StopReason.REBASED, fork=fork)
 
 
 def _rebase_request(
-    ctx: NodeContext, layer_id: str, proposal: ForkProposal
+    ctx: NodeContext, layer_id: str, proposal: ForkProposal, offer: Mapping[str, RoundArm]
 ) -> RebaseRequest | None:
     round_num = ctx.round_num
     unlock = proposal.unlock_schema_field_rename and not (
         ctx.knobs(L1GenerateKnobs).schema_field_rename
     )
-    branch = ctx.read(Lineage).branch_round(changing=unlock)
+    reason = proposal.reason or f"{layer_id} fork_proposal"
+    issued_by = Principal(f"{layer_id}/round_{round_num}", layer_id)
+    lineage = ctx.read(Lineage)
+    hangs_from: RoundStatement | None = None
+    # The parse closed `stand_on` on the offer (`schemas.py::fork_proposal_model`).
+    stand_on = proposal.stand_on if isinstance(proposal, StandingForkProposal) else ""
+    if stand_on:
+        at = offer[stand_on]
+        branch: int | None = at.round
+        held = next(rr for rr in lineage.rounds if rr.round == at.round)
+        assert held.election is not None, "ELECTIONS lists only rounds that elected"
+        if held.election.selected != at.arm:
+            hangs_from = lineage.reelected(at, Reelection(by=issued_by, reason=reason))
+    else:
+        branch = lineage.branch_round(changing=unlock)
     if branch is None:
         series = ctx.read(Ruler).level_series
         withheld = sorted(
@@ -252,8 +276,8 @@ def _rebase_request(
     request = RebaseRequest(
         fork_from_round=branch + 1,
         trigger=ForkTrigger.OPTIMIZER_REBASE,
-        reason=proposal.reason or f"{layer_id} fork_proposal",
-        issued_by=Principal(f"{layer_id}/round_{round_num}", layer_id),
+        reason=reason,
+        issued_by=issued_by,
         config_overrides=(
             ConfigOverrides(
                 nodes={"l1_generate": ManifestNodeOverlay(config={"schema_field_rename": True})}
@@ -261,13 +285,16 @@ def _rebase_request(
             if unlock
             else None
         ),
+        hangs_from=hangs_from,
     )
     logger.info(
-        "%s emitted fork_proposal; UCB stands the fork on round %d of %d%s "
+        "%s emitted fork_proposal; %s stands the fork on round %d of %d%s%s "
         "— cycle will exit with REBASED",
         layer_id,
+        "it" if stand_on else "UCB",
         branch,
         round_num,
+        f", re-electing {stand_on}" if hangs_from is not None else "",
         ", unlocking schema_field_rename" if unlock else "",
     )
     return request
@@ -275,12 +302,13 @@ def _rebase_request(
 
 async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> TransitionResult | None:
     """The ladder is the controller's: it banks the fire once the layer landed, before the layer's control channel."""
-    result = await _run_transition(fired, fire)
-    if result is None:
+    landed = await _run_transition(fired, fire)
+    if landed is None:
         return None
+    result, bundle = landed
     ctx.put(fired.layer.record(ctx.slice(Ladder), fire))
     ctx.restate(Ladder)
-    _layer_control(fired, result)
+    _layer_control(fired, result, bundle)
     return result
 
 

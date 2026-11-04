@@ -241,7 +241,8 @@ def _mint_and_rebase_fork(
 ) -> tuple[PreparedRun, Session, RunObservers]:
     """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree. The
     fork's cap is what its line has left; its working state is the parent's latest, since the cut
-    rewinds the line, never what the optimizer learned on it."""
+    rewinds the line, never what the optimizer learned on it. A re-election is the round it hangs
+    from, so the line continues from the arm a layer named."""
     parent = session.hop
     store = session.store.campaigns
     cut = rebase_req.fork_from_round
@@ -264,7 +265,9 @@ def _mint_and_rebase_fork(
         seed=CycleSeed(config_overrides=overrides),
     )
     child = CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id)
-    branch = store.standing_rounds(child, moment=None).rounds[cut - 1].close
+    branch = (
+        rebase_req.hangs_from or store.standing_rounds(child, moment=None).rounds[cut - 1].close
+    )
     store.rebank_round(
         child, branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices}))
     )

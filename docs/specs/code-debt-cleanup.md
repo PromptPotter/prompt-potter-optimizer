@@ -683,12 +683,11 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   where no prompt node declares `problem_description` (`promptpotter-self` hit it; its `task.md` dropped the
   two). Action: decomposition writes the splice fields only where the schema has a splice target.
   **Re-test:** a check-in on a params-only backend commits no splice field and mints.
-- **A fork can name one change only**: `ForkProposal.unlock_schema_field_rename` is the sole config a
-  rebase applies, so once it is unlocked a layer's fork is admitted only as a backtrack the engine
-  picks. L3's measured asks (stand on an arm read but never adopted, e.g. C3.3; narrow a dead param
-  axis) have no channel: standing on a non-elected arm needs the fork's first round to elect it.
-  Action: decide which fork-only changes exist and name each as a `ForkProposal` member mapped to one
-  `ConfigOverrides`/seed edit. **Re-test:** `git grep -n "class ForkProposal" -A20 -- promptpotter`.
+- **A fork cannot narrow a dead param axis**: `ForkProposal.unlock_schema_field_rename` is the sole
+  config a rebase applies (`stand_on` re-elects, it changes no config), so L3's measured ask to drop
+  an axis value no arm gained on has no channel. Action: decide whether a narrowed
+  `param_allowed_values` is fork-only, and if so name it as a `ForkProposal` member mapped to one
+  `ConfigOverrides` edit. **Re-test:** `git grep -n "class ForkProposal" -A20 -- promptpotter`.
 - **The L4 estimator digest does not see the line series**: `CycleResult.bench_round_levels` now spans
   the line (`runner/bench.py::line_bench_series`), which `domain/l4/proxies.py` reads unchanged, so a
   rebased cell banked under the per-cycle series and one under the line series share an estimator

@@ -27,7 +27,7 @@ Routing: [`dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
 
 **L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation/rules.py` is the policy** — rules route, they never diagnose or stop; L2 judges recoverability, and `terminate_proposal` is its exit for a backend fault.
 
-- **L2 writes exactly `l1_layout` and `l1_overrides`, one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params` — and, as recombination host, `recombinations` (ids and loci only, added by the next round's `l1_generate`). Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
+- **L2 writes exactly `l1_layout` and `l1_overrides`, one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params` — and, as recombination host, `recombinations` (ids and loci only, added by the next round's `l1_generate`), plus the layer-control channel below. Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
 - **No layer writes `task_context`** — no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
 
 ## L3 — what `l3_plan` may write
@@ -36,7 +36,7 @@ Routing: [`dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
-**Each sits behind its capability bit; terminate outranks fork.** `terminate_proposal` is in the reply schema only where `InjectionBundle.terminate_offer` holds; a blank reason is ignored, an honored one stops the cycle `optimizer_abort`. `fork_proposal` names no round — UCB picks the node (`mask/backprop.py::select_branch_round`). `unlock_schema_field_rename` is a bool: a layer never moves its own spend ceiling.
+**Each sits behind its capability bit; terminate outranks fork.** `terminate_proposal` is in the reply schema only where `InjectionBundle.terminate_offer` holds; a blank reason is ignored, an honored one stops the cycle `optimizer_abort`. `fork_proposal` names no round — UCB picks the node (`mask/backprop.py::select_branch_round`) — but behind `reelect_capability` it may name `stand_on`, an arm label from the ELECTIONS table (`potter/dispatch/bundle.py::InjectionBundle.reelect_offer`; any other label fails parse, `potter/dispatch/schemas.py::fork_proposal_model`): the fork stands on that arm and its round is restated electing it on the fork's ledger (`RebaseRequest.hangs_from`), the act carried as `results.py::Election.reelection`. `unlock_schema_field_rename` is a bool: a layer never moves its own spend ceiling.
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
