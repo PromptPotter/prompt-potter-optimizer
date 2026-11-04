@@ -17,7 +17,7 @@ Four declarations whose omission yields WRONG NUMBERS rather than a missing feat
 anything = "my_package.connector:CONNECTOR"
 ```
 
-The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `domain/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py).
+The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `domain/campaign_config.py` or `promptpotter/infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py).
 
 **What a plugin is held to, and that it is trusted code, not sandboxed** — [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed. v1 promises those rules do not tighten, and that entry points never lower the trust bar nor become a sandbox. Built-ins are not entry points.
 
