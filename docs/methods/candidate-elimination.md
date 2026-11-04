@@ -190,4 +190,4 @@ The replayer (`optimizers/potter/resume.py::_pobb_replay_snapshot`) feeds the re
 Why this family of stop rules, its prior art, and the lineage search as MCTS:
 [`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another.
 
-The `classify_result()` rule table: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result-fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
+The `classify_result()` rule table: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
