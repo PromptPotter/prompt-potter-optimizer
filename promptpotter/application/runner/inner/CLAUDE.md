@@ -1,10 +1,8 @@
 # application/runner/inner/ — the L4 recursion's machinery
 
-**The `promptpotter` connector's `in_process_run` delegates to `spawn.py::run_inner_cycle`**; its graph is served (`pipeline_declaration`) off the manifest the panel's cells run.
-
 ## Where L4 lives
 
-**L4's law is `domain/l4/` (pure over `CycleResult`); its machinery is this package** — `tasks`, `spawn_context`, `spawn`. That L4 is a recursion, not a 4th layer, is [`../../optimizers/potter/CLAUDE.md`](../../optimizers/potter/CLAUDE.md) § Add no 4th layer.
+**L4's law is `domain/l4/` (pure over `CycleResult`); its machinery is this package** (`tasks`, `spawn_context`, `spawn`). The `promptpotter` connector's `in_process_run` delegates to `spawn.py::run_inner_cycle`. L4 is a recursion, not a 4th layer: [`../../optimizers/potter/CLAUDE.md`](../../optimizers/potter/CLAUDE.md) § Add no 4th layer.
 
 ## What a change here keeps
 

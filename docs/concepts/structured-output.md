@@ -1,71 +1,98 @@
 # Structured output — the second prompt
 
-The JSON Schema is serialized into the **input**. Field names, order, and `description` strings are tokens the model reads before writing anything. A schema is not a post-generation filter — it is text that conditions generation from the most privileged position available: adjacent to the slot it governs, while your task instruction sits thousands of tokens upstream competing with everything else.
+The JSON Schema is serialized into the **input**: field names, order and `description` strings are tokens the
+model reads before writing anything, adjacent to the slot they govern, while the task instruction sits
+thousands of tokens upstream. Three levers:
 
-Three levers, in increasing order of neglect.
-
-**1. The name.** `rationale`, `notes`, `evidence`, `scratch` are four different requests; the model has strong priors about what belongs under each key. But a name is usually **frozen** — it is a wire contract. Downstream code reads `result["candidate"]`; validators branch on `evidence_grounding.field`; an n8n node branches on its `enum`. Rename it and the pipeline breaks, loudly if you are lucky. Same for the dot-path a nested field sits on, and for `enum` values: those *are* the value space something downstream switches on. **A real lever, and mostly not yours to pull.**
-
-**2. The coordinates.** Fields are generated in schema order, and each becomes context for the next. `{answer, reasoning}` commits to the answer, then rationalizes it — fluently, which is worse than nothing, because it's now evidence you trust. `{reasoning, answer}` puts the reasoning in context before the answer is emitted. Same fields, same descriptions. Different mechanism. Nesting obeys the same rule: an inner object generates wherever its parent field sits.
-
-*Live example.* `L1Variant` (`application/optimizers/potter/dispatch/schemas.py`) generates `evidence_grounding` **before** the delta slots it justifies (`pipeline_overlay`, `prompt_fields_updates`). Emitted after, a citation can only rationalize a mutation already made — and the `evidence_grounding_present` check would police a symptom its own schema caused.
-
-**The required set binds as hard as the order.** A required narration field generated *above* optional delta slots lets a model name a change, cite a panel for it, and mutate nothing — the schema asks for the story and treats the substance as garnish. So the payload generates before the prose that reports it (`changes_description`), a variant that changes nothing against its parent is rejected as `no_op_variant` by `validators/l1_invariants.py` (over `domain/candidate_diff.py::candidate_delta`) — never at parse, where one rejection costs the whole batch — and no unbounded free-text identifier leads the object, where a decoder derails into repetition. The prompt's `answer_format` lists the fields in the same order; a schema that disagrees with its own prose teaches twice, contradictorily.
-
-**3. The description.** The only natural language placed *inside* the field-filling loop. [`../developer/conventions.md`](../developer/conventions.md) § Prose in the source keeps `Field(description=)` out of the docstring rules for exactly this reason. They are prompt.
+1. **The name.** `rationale`, `notes`, `evidence`, `scratch` are four different requests — but a name is a
+   wire contract, and so are a nested dot-path and `enum` values: something downstream switches on them.
+2. **The coordinates.** Fields are generated in schema order, each context for the next: `{answer, reasoning}`
+   commits, then rationalizes; `{reasoning, answer}` puts the reasoning in context first. Nesting obeys the
+   same rule. *Live example:* `L1Variant` (`application/optimizers/potter/dispatch/schemas.py`) generates
+   `evidence_grounding` **before** the delta slots it justifies. The required set binds as hard as the order:
+   the payload generates before the prose that reports it (`changes_description`), a variant that changes
+   nothing against its parent is rejected as `no_op_variant` by `validators/l1_invariants.py` (over
+   `domain/candidate_diff.py::candidate_delta`) — never at parse, where one rejection costs the whole batch —
+   and no unbounded free-text identifier leads the object. The prompt's `answer_format` lists the fields in
+   the same order.
+3. **The description.** The only natural language inside the field-filling loop;
+   [`../developer/conventions.md`](../developer/conventions.md) § Prose in the source keeps
+   `Field(description=)` out of the docstring rules for this reason. They are prompt.
 
 ## A place to think is part of the ask
 
-Before any of those levers: does the model have **anywhere to put its reasoning**? A schema of `{answer}` alone does not just omit the rationale — it removes the room to derive one, and the model answers straight from the prompt. Hand it a bare classification slot and you get a label with nothing behind it. `{reasoning, answer}` is not instrumentation bolted onto `{answer}`; it is a different, better request, which is why lever 2 above is about order and this is about *existence*.
-
-Two mechanisms, one principle, and both are captured:
-
-- **The schema slot** — a `reasoning` field on a node's `output_schema` (justlogic's `{reasoning, answer}`). Ordered first, so thinking is in context before the answer commits.
-- **The provider's native channel** — `message.reasoning` on the OpenAI-compat wire, captured as `LLMResponse.reasoning` for reasoning models.
-
-**Both are strictly analytical.** They ride the ledger to the audit twin and the operator's node-detail pane, and they never reach a gate, metric, validator, scorer or cache key — score a model's narration of its work instead of its work, and the loop learns to narrate. The corollary that catches people: **neither has a code reader, and neither is dead** — `LLMResponse.reasoning`'s field note in `infrastructure/llm/response.py` is the standing answer. Do not remove a thinking channel because nothing branches on it — nothing branching on it is the design.
+A schema of `{answer}` alone removes the room to derive one. Two channels, both captured: a `reasoning` field
+on a node's `output_schema`, ordered first; and the provider's native `message.reasoning`, captured as
+`LLMResponse.reasoning`. **Both are strictly analytical** — they ride the ledger to the audit twin and the
+node-detail pane and never reach a gate, metric, validator, scorer or cache key, or the loop learns to narrate.
+Neither has a code reader, and neither is dead (`infrastructure/llm/response.py`'s field note).
 
 ## Which levers are actually free
 
 | Lever | Who reads it | Safe to change? |
 |---|---|---|
 | Field **name** / dot-path | downstream parsers, validators, the wire | **No** — contract |
-| Field **type** | the parser, and every consumer of the parsed value | **No** — contract |
+| Field **type** | the parser, every consumer of the parsed value | **No** — contract |
 | `enum` **values** | whatever branches on the value | **No** — that *is* the value space |
 | `enum` **order** + per-value gloss | nobody but the model | **Yes** |
 | Field **order** | nobody but the model | **Yes** — a parsed object is unordered |
-| **`description`** | nobody but the model | **Yes** — no code reads it |
+| **`description`** | nobody but the model | **Yes** |
 
-**What the optimizer may reach, and how it is stopped.** `description` is free and open by default — no campaign toggle, because a toggle on a free lever is a fallback chain wearing a flag. It is a **core, target-level** lever: any pipeline node that ships an `output_schema` gets one param per field, `output_schema_descriptions.<path>` (dotted into nested fields, through a list's items), so `l1_generate` rewriting `llm_only`'s `{reasoning, answer}` descriptions is the ordinary case, not an L4 special case. Being ordinary params, each locks like any other: the check-in's field tree locks a field and everything under it, until a descendant is unlocked again. Pydantic stays the sole default, so there is no lift table and nothing to keep in sync. The field **name** is the one contract lever the optimizer may pull, and only after an L2/L3 fork opens the `l1_generate` node's `schema_field_rename` (off in potter's manifest); it is safe there because a rename is a presentation transform — the emitted schema advertises the new name, a `validation_alias` binds it back, and no downstream reader observes it. **Type, `enum` values, and the schema itself have no toggle at all**: `SCHEMA_OWNED_FIELDS` (`domain/pipeline_schema.py`) subtracts `output_schema` / `schema_family` / `schema_version` / `answer_fields` from every emittable param surface, so the LLM cannot emit a key that does not exist. Structural, not policed per round.
+**What the optimizer may reach.** `description` is open by default — no campaign toggle, because a toggle on
+a free lever is a fallback chain wearing a flag: any node that ships an `output_schema` gets one param per
+field, `output_schema_descriptions.<path>`, an ordinary target-level param that locks like any other. The field
+**name** is the one contract lever the optimizer may pull, only after an L2/L3 fork opens `l1_generate`'s
+`schema_field_rename` (off in potter's manifest): a rename is a presentation transform — the emitted schema
+advertises the new name, a `validation_alias` binds it back. **Type, `enum` values and the schema itself have
+no toggle**: `SCHEMA_OWNED_FIELDS` (`domain/pipeline_schema.py`) subtracts `output_schema` / `schema_family` /
+`schema_version` / `answer_fields` from every emittable param surface. `never_axis` says who may SEARCH a key,
+never who may set it, so `answer_fields` stays settable on a fork. The schema is a tree the "Structured
+output" view renders and a check-in authors field by field.
 
-**Fenced from the optimizer, not from the operator.** `never_axis` says who may SEARCH a key, never who may set it: it is not an edit gate, so `answer_fields` stays settable on a fork. The SCHEMA itself is not a config row: it is a tree — names, types, enums, the prose under each field — and the "Structured output" view renders it, resolved at this searchpoint. A check-in authors one in that view, field by field; until a node has one, the toggle below stays pinned to `text`.
+**Whether the node uses a schema AT ALL is ours.** `response_format` is synthesized onto every LLM node at
+parse time (`SCHEMA_TOGGLE_PARAM`), because PromptPotter puts the schema on the wire: `json` sends
+`output_schema` + `answer_fields`; `text` sends neither, and the answer is found by the matcher's own contract
+(its `formula/matchers.py::MATCHERS` entry's `note`). Three pins ride the value space: a node declaring no
+schema, a node graded on several slots (pinned to `json`), a model that does not accept the key
+(`PipelineSchema._refused`). Why a connector must not declare it too —
+[`../developer/node-standard.md`](../developer/node-standard.md) § The shape, and what PromptPotter reads of it.
 
-**Whether the node uses a schema AT ALL is a different lever, and it is OURS.** `response_format` is synthesized onto every LLM node at parse time (`SCHEMA_TOGGLE_PARAM`) rather than declared by the backend, because PromptPotter is what puts the schema on the wire. `json` sends `output_schema` + `answer_fields`; `text` sends neither, and the answer is then found by the matcher's own contract (its `formula/matchers.py::MATCHERS` entry's `note`, authored into the origin at check-in). Three bounds ride the value space rather than a badge, since L1 is shown the space, emits into it and is validated against it: a node declaring no schema has nothing to switch to, a node graded on several slots has no prose form to switch to (pinned to `json` at parse), and a model that does not accept the key cannot be asked for a structure at all (`PipelineSchema._refused`). One value is the pin, so each draws as a shut row. **Why a connector must not declare it too** — owned by [`../developer/node-standard.md`](../developer/node-standard.md) § The shape, and what PromptPotter reads of it.
-
-An `enum` is easy to misfile. Its *values* are contract — `evidence_grounding_present` rejects a `field` outside the round's citable set, and an n8n node dispatches on its operation enum, so renaming one breaks the consumer exactly as a field rename would. What is free is the *order* the values are listed in (the model reads the first as prototypical) and any per-value gloss. Same split as everywhere else: the tokens the model reads are free; the tokens something branches on are not.
-
-*Corollary — an enum whose value space is per-call belongs on the wire schema, not on the model.* `evidence_grounding.field` is grafted per round in `build_l1_response_schema` from `citable_fields(layout, …)`, the one statement of the menu, so a citable name the prompt never rendered is unrepresentable. **If a value space depends on state, freezing it in a model is a second declaration that will silently diverge from the first** — and the validator checking the frozen copy waves the fabrications through.
-
-**A schema-mutating optimizer is scoped to the free levers explicitly** — handed the whole schema, it renames `candidate` and takes the pipeline down.
+*An enum whose value space is per-call belongs on the wire schema, not on the model.* `evidence_grounding.field`
+is grafted per round in `build_l1_response_schema` from `citable_fields(layout, …)`, so a citable name the
+prompt never rendered is unrepresentable; a frozen copy in a model would silently diverge. A schema-mutating
+optimizer is scoped to the free levers explicitly.
 
 ## Enforcement is provider-dependent
 
-Some providers implement structured output as **constrained decoding** — a grammar masks the token distribution, so an invalid token cannot be sampled. Others treat it as a strong suggestion and validate afterward, or not at all. Ours does both: per `VariantEvidenceGrounding`'s docstring, not every provider honours the grafted enum, so the validator enforces it.
-
-So the schema **teaches** more reliably than it **compels.** Where the grammar doesn't bind, the name, the position, and the prose are the entire mechanism — the opposite of the usual intuition.
-
-Two rules follow for every optimizer wire. **No prose field carries a `maxLength`**: where the host's grammar binds it even on a `strict: false` wire, every answer ends mid-sentence at the cap, unmarked. The prompt asks for the short form, and the parse boundary cuts past a cap with a visible mark (`schemas.py::_truncate_marked`) or rejects (`l1_strict.py::l1_prose_within_ceiling`). **A value the loop must be able to refuse is one a check can read off the prompt** — a panel name, a row id — never free text closed by a grafted enum: `VariantEvidenceGrounding.field` has its validator, and `L1Variant.targets_rows` is ids for the same reason.
+Some providers implement structured output as constrained decoding; others validate afterward, or not at
+all. The schema **teaches** more reliably than it **compels**, so `VariantEvidenceGrounding`'s validator
+enforces the grafted enum. Two rules for every optimizer wire: **no prose field carries a `maxLength`** —
+where the grammar binds, every answer ends mid-sentence at the cap, unmarked; the prompt asks for the short
+form and the parse boundary cuts with a visible mark (`schemas.py::_truncate_marked`) or rejects
+(`l1_strict.py::l1_prose_within_ceiling`). **A value the loop must be able to refuse is one a check can read
+off the prompt** — a panel name, a row id (`L1Variant.targets_rows`) — never free text closed by a grafted enum.
 
 ## Extraction is a double seam — slot first, label second
 
-Two things both called "answer extraction" run in sequence, in different repos. The **backend** arm runs first: TermNorm's `_step_llm_only` destructures the structured-output SLOTS named by `answer_fields` before the body is posted back — one slot as its value, several as the JSON object of exactly them. The **matcher** arm runs here, in `application/scoring/formula/matchers.py`, pulling the LABEL out of what is left (the last bold span, the last `\boxed{N}`) and deciding HIT/MISS. So no matcher will ever see the raw envelope: `fields_match` parses only the object of graded slots the backend projected, and a matcher digging a field out of a whole response is fixing the wrong seam. Display-side extraction is a third thing again (`application/views/render/sample.py`).
+The **backend** destructures the structured-output SLOTS named by `answer_fields` before the body is posted
+back — one slot as its value, several as the JSON object of exactly them. The **matcher**
+(`application/scoring/formula/matchers.py`) pulls the LABEL out of what is left and decides HIT/MISS; no
+matcher sees the raw envelope, and one digging a field out of a whole response is fixing the wrong seam.
+Display-side extraction is a third thing (`application/views/render/sample.py`).
 
 ## Several graded fields — one item per call
 
-A node is optimized as a whole when `answer_fields` names several slots and the per-sample formula is `fields_match(predicted, ground_truth)`: the gold is an object `{field: [accepted, …]}` (`""` the value "not stated", `null` a field the row does not grade), each field is matched alone under one normalization (case, whitespace, a bool's or a number's spelling), and the cell's fitness is the share of its graded fields right. A slot outside `answer_fields` rides along ungraded, in the working.
-
-**The share, never one item per field.** θ is fit on graded responses in [0, 1] with a Pearson dispersion (`intelligence/rasch.py::_dispersion`), so a share of K fields is a binomial proportion the fit already reads. Splitting a sample into (sample × field) items would treat K verdicts drawn from ONE generation as independent — the fields of a call rise and fall together — understating every θ SE and so firing PoBB's cuts and the election early; it would also give one paid call K δ entries and K cost charges. `hit` stays all-fields-right (`HIT_THRESHOLD` is 1.0), and the per-field verdicts ride the grade (`Grade.field_hits`) into the arm's fold (`CellFold.field_accuracy`), which the readout prints per arm and per round — which field moved, beside the one number the election reads.
+A node is optimized as a whole when `answer_fields` names several slots and the per-sample formula is
+`fields_match(predicted, ground_truth)`: the gold is `{field: [accepted, …]}` (`""` "not stated", `null` a field
+the row does not grade), each field matched alone under one normalization, the cell's fitness the share of its
+graded fields right. **The share, never one item per field**: θ is fit on graded responses in [0, 1] with a
+Pearson dispersion (`intelligence/rasch.py::_dispersion`); splitting a sample into (sample × field) items would
+treat K verdicts from ONE generation as independent, understating every θ SE and firing PoBB's cuts early.
+`hit` stays all-fields-right (`HIT_THRESHOLD` is 1.0); per-field verdicts ride `Grade.field_hits` into
+`CellFold.field_accuracy`, which the readout prints per arm and per round.
 
 ## Shape-determinism ≠ content-determinism
 
-Structured output is often called "quasi-deterministic." It is not. Same schema, same temperature, two calls → different values. A schema constrains **shape**; it guarantees a parseable object with the fields you named and nothing about whether the values are right. What shape buys is **bounded estimation**: a typed field can be compared, comparisons aggregate with an error bar, and composite fitness, θ and candidate elimination all rest on the answer arriving in a slot we named, positioned and described.
+Same schema, same temperature, two calls → different values. A schema constrains **shape**: a parseable object
+with the fields named, nothing about whether the values are right. What shape buys is bounded estimation — a
+typed field can be compared, and comparisons aggregate with an error bar.

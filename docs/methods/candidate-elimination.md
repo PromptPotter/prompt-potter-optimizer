@@ -188,6 +188,6 @@ The replayer (`optimizers/potter/resume.py::_pobb_replay_snapshot`) feeds the re
 2. **Small-*n* θ.** Few observations do NOT keep the gate conservative — ties narrow both `se` (`p_best` 0.124 at a low base rate, `sealqa/longseal-12`). Step 4 bounds that; the EB hyperprior on ability variance keeps the fit from collapsing.
 
 Why this family of stop rules, its prior art, and the lineage search as MCTS:
-[`../research/related-work.md`](../research/related-work.md) § Why PoBB's family and not another.
+[`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another.
 
 The `classify_result()` rule table: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result-fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).

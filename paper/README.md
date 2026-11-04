@@ -2,11 +2,11 @@
 
 Why this is not under `docs/`: that tree describes the system to someone working on it, and a page
 that argues about a *field* has no owner there. The one exception is
-[`docs/research/related-work.md`](../docs/research/related-work.md), the argument against the peers,
+[`docs/research/landscape.md`](../docs/research/landscape.md), the argument against the peers,
 which the public `README.md` links; the manuscript cites it and keeps no second copy.
 
-**What M14 is, and its rules — owned by the root [`CLAUDE.md`](../CLAUDE.md) § The closing
-directive.** Read it there. **The subject changed when M13 became the bench:** the contribution is
+**What M14 is, and its rules — owned by [`roadmap.md`](../docs/specs/roadmap.md) § Sequence.**
+Read it there. **The subject changed when M13 became the bench:** the contribution is
 that the stopping rule and the comparability guard are *executable* here and that every peer ran
 under them. Pricing a lift in wall clock and dollars is the evidence for that, no longer the claim.
 

@@ -1,11 +1,6 @@
 # The access model — four boundaries
 
-> **The one page a security audit opens.** Each trust boundary, its kind, where it is enforced (by
-> symbol), and the honestly-deferred gap. The code wins a disagreement. Box setup and the admin bot
-> are [`../../deploy-linux/README.md`](../../deploy-linux/README.md)'s.
-
-Four boundaries — **host-admin > owner > delegate > loop** — of **four different kinds**. Keeping
-them distinct, and never collapsing the hierarchy, is the whole design.
+Each trust boundary, its kind and where it is enforced, by symbol. The decisions behind each are [`../decisions.md`](../decisions.md) § 0002 to § 0005; box setup and the admin bot [`../../deploy-linux/README.md`](../../deploy-linux/README.md).
 
 | Boundary | Kind | Enforced by | Failure response |
 |---|---|---|---|
@@ -14,213 +9,57 @@ them distinct, and never collapsing the hierarchy, is the whole design.
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `owned_campaign` rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
-**A dataset read belongs to no boundary.** `promptpotter/assets/datasets/` is install content,
-tracked in git and already on the disk of anyone holding the install, so a capability over it guards
-nothing. **Ownership, not permission, is the split:** private data belongs in the tenant. Never add a
-`datasets.*` capability; `infrastructure/store/dataset_access.py::resolve_dataset` is a resolver,
-not a gate.
-
----
+**A dataset read belongs to no boundary.** `promptpotter/assets/datasets/` is install content; private data belongs in the tenant. Never add a `datasets.*` capability: `infrastructure/store/dataset_access.py::resolve_dataset` is a resolver, not a gate.
 
 ## host-admin ↔ user — host privilege
 
-The person who **runs the box** is not a user who owns a tenant on it, and the two never collapse:
-on the team-online deployment every signup owns its tenant with the full owner set, so what
-separates a host admin is a small, explicitly-named set.
+**Host-admin acts only through the operator-admin channel** (`presentation/admin_bot.py` — the blocklist, `/grant`, `/revoke`, `/spend`, `/trail`), outbound-only. **No `/commands/{kind}` verb is admin-only**; `HOST_ADMIN_EMAIL` → `maybe_claim_default` answers only which tenant the terminal resolves, and cross-tenant reads (`jobs/install_spend.py::read_install_spend`) are never an inbound route.
 
-**Host-admin acts only through the operator-admin channel** (`presentation/admin_bot.py` — the
-blocklist, `/grant`, `/revoke`, `/spend`, `/trail`), outbound-only and never an inbound API route
-([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)). **No `/commands/{kind}` verb
-is admin-only.** Who is host-admin is the chat-id lock and nothing else; the default-claim marker
-(`HOST_ADMIN_EMAIL` → `maybe_claim_default`) answers only which tenant the terminal resolves, never a
-capability. Cross-tenant reads (`jobs/install_spend.py::read_install_spend`) are never an inbound
-route either.
-
-**`set-sample-lookahead` is the verb that tests it.** It spends the box's shared provider key and
-rate bucket, so a holder can throttle every other user — and it still sits at `campaign.lookahead`,
-its OWN rung in `CAMPAIGN_CAP_BY_NAME`, so a host can withhold it from a delegate without
-withholding the run. It is not `campaign.babysit`: the overshoot sample is discarded, so it cannot
-steer a measurement. What bounds the abuse is the spend ceiling plus that carve; how deep a walk
-reaches is [`candidate-elimination.md`](../methods/candidate-elimination.md)'s. **It is
-browser-only**, and the absence is its gate — owned by
-[`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead. Its
-address descends into a nested run (`domain/command_kinds.py::CyclePayload.inner_refusal`), because
-the arming is not inherited and each layer is armed by naming it.
-
----
+`set-sample-lookahead` spends the box's shared key, so it sits at `campaign.lookahead`, its own rung in `CAMPAIGN_CAP_BY_NAME`, withheld without withholding the run; the overshoot sample steers no measurement. Browser-only — [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead; a nested address arms each layer by naming it (`domain/command_kinds.py::CyclePayload.inner_refusal`).
 
 ## owner ↔ delegate — authorization
 
-**What a principal may do** is one definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from
-which `OWNER_COMMAND_CAPABILITIES` is derived; it is the ONLY capability set.
-
-**Who holds what:** every authenticated user owns their own tenant. An `active` one holds the full
-owner set; a `blocked` one (`shared/identity.py::AccessState`) holds an empty set
-(`middleware/oidc.py::_session_capabilities`). The local operator gets the full set from
-`default_identity` on the CLI / auth-off path. A **delegate** holds an attenuated subset.
-
-**The capability ladder, delegated sub-principals, the per-grant ceiling and the bounded step verb**
-— owned by [decisions.md § 0005](../decisions.md#0005-delegated-principals-and-capability-scoping).
-Enforced at: `require_capability` in the dispatcher's `_applier`
-(`application/commands/dispatcher.py`, the same 404); the one-level rule at
-`grants.py::grant_principal`; attenuation clamped at read by
-`infrastructure/identity/grants.py::resolve_effective_capabilities` under
-`middleware/oidc.py::_delegated_identity`, so a hand-edited over-grant in `grants.json` holds
-nothing extra.
-
----
+One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which `OWNER_COMMAND_CAPABILITIES` derives. An `active` user holds the full owner set, a `blocked` one (`shared/identity.py::AccessState`) none (`middleware/oidc.py::_session_capabilities`); the local operator the full set from `default_identity`; a delegate an attenuated subset, clamped at read by `infrastructure/identity/grants.py::resolve_effective_capabilities` under `middleware/oidc.py::_delegated_identity`. Enforced at `require_capability` in the dispatcher's `_applier` (`application/commands/dispatcher.py`); the one-level rule at `grants.py::grant_principal`.
 
 ## user ↔ user — tenancy
 
-**Cross-tenant isolation is structural, not a check.** `build_stores`
-(`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id` and the
-caches at `Stores.archive_home`; a constructed `Stores` cannot name another tenant's directory.
-`SHARED_ARCHIVE` is the one deliberate crossing — a cache hit then tells one account what another
-ran ([decisions.md § 0002](../decisions.md#0002-identity-foundation)) — and that home is the
-host's alone to compact or purge. `Stores.tenant_id` derives from the identity; today
-`tenant_id == user_id`.
+**Isolation is structural.** `build_stores` (`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id` and the caches at `Stores.archive_home`; the served API builds only from the session (`deps.py::resolve_identity`). `SHARED_ARCHIVE` is the one deliberate crossing ([`../decisions.md`](../decisions.md) § 0008), the host's alone to compact or purge. Today `tenant_id == user_id`.
 
-**The guarantee is "no constructed `Stores` crosses a tenant", not "no read crosses a tenant".** A
-second `build_stores` under another identity crosses freely — the two deliberate readers are
-`user_store.py::count_accounts` and `read_install_spend` — and so does `--tenant <any>` from a
-shell. **Through the served API the isolation holds absolutely** (`deps.py::resolve_identity` builds
-only from the session); the shell is the boundary § loop ↔ everything concedes.
+**Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it exists and is the caller's, else `NotFoundError`; `routers/origins.py` alone is tenant-scoped (a CLI-minted campaign's owner differs from a browser session's `user_id`).
 
-**A block pack is the install's or one account's, and only an account's is written.** The install's
-(`config/paths.py::block_packs_root`) is read-only to every account, beside which each reads its own
-under its tenant (`Stores.block_packs`, a `config/prompt_blocks.py::PackShelf`); a name both hold is
-refused, never shadowed. `bank-snippet` writes the account's own pack alone, at the
-`campaign.create` rung, so an anonymous caller (401) and a blocked one (404) write nothing, and a
-`packs` knob resolves in its run's account, so naming `account` draws the run's own.
-
-**Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it
-exists and is the caller's, else `NotFoundError` — missing and cross-owner collapse to one 404.
-**One deliberate exception:** `routers/origins.py` is tenant-scoped, not owner-scoped, because a
-CLI-minted campaign's owner differs from a browser session's `user_id` within one tenant.
-
-**All writes** flow through one `CommandDispatcher`, stamping `issued_by`
-(`shared/identity.py::Principal`) on a `CommandRecord`; the read API is otherwise read-only.
-
----
+**A block pack is the install's or one account's, and only an account's is written** (`config/paths.py::block_packs_root` read-only; `Stores.block_packs` per account; a name both hold is refused). **All writes** flow through one `CommandDispatcher`, stamping `issued_by` (`shared/identity.py::Principal`) on a `CommandRecord`.
 
 ## loop ↔ everything — OS privilege
 
-The genuinely-partial boundary.
+- A run is a separate OS process from the API (`jobs/launcher/run_job.py::spawn_job` hands the identity and held ceiling over stdin), a child of the API's unit — same OS user, `.env`, keys and hardening.
+- Terminal and server hold the same machine slot (`jobs/launcher/admission.py::admit_and_hold`), a machine-wide OS lock released only by proving its producer's lock gone (`jobs/interlock.py`).
+- The hardened unit (`deploy-linux/install-service.sh`) bounds the API and its runs (`KillMode=process`); a set `DATA_DIR` keeps the service from rewriting its own source, venv and `.env`; the bot's secrets ride `BOT_ENV_FILE`.
+- Every tenant-controlled path is inert: the scoring formula AST-allowlisted (`application/scoring/formula/compiler.py`), YAML `safe_load`ed, slugs regex-validated, the provider registry closed. The launch seam: `jobs/launcher/launch.py::launch`, `jobs/launcher/head_to_head.py::admit_head_to_head`, `application/embedded_run.py`.
 
-- **CLI and web-launched runs are separate OS processes** from the API
-  (`jobs/launcher/run_job.py::spawn_job` hands the identity and held ceiling over stdin), but a web
-  run is a child of the API's unit: same OS user, `.env`, provider keys and hardening — a separate
-  process, not a separate principal.
-- **Both hold the same machine slot** (`jobs/launcher/admission.py::admit_and_hold`). Admitting
-  takes a machine-wide OS lock and a slot is released only by proving its producer's lock gone
-  (`jobs/interlock.py`), so terminal and server reap each other's dead slots but never stop a live one.
+## The perimeter
 
-**Shipped (3a) — the hardened unit** (`deploy-linux/install-service.sh`): no capabilities,
-`ProtectSystem=strict`, a `@system-service` syscall filter, kernel protections, optional
-`MemoryMax`; it bounds the API and the runs it spawns (`KillMode=process`). Only a set `DATA_DIR`
-takes away the service's ability to rewrite its own source, venv and `.env`.
+- **One public port behind Cloudflare Tunnel**, outbound-only; uvicorn binds `127.0.0.1` with `--proxy-headers --forwarded-allow-ips=127.0.0.1`; TermNorm binds `127.0.0.1:8000`, never tunneled.
+- **AuthN:** OIDC, RS256 pinned, `iss`/`aud`/`exp`/`iat`/`sub` checked; an `email` only where the issuer vouched for it (`identity/verifier.py` requires `email_verified`; `identity/github.py` reads the verified list only). Missing session → 401 at `deps.py::resolve_identity`; the cookie is httponly / secure / samesite=lax, opaque.
+- **Every router is mounted behind its gate** (`main.py::API_ROUTERS`); public is declared there by `None`: `/health`, the sign-in flow (`auth.py::auth_flow_router`), `/docs` + `/openapi.json` (`main.py::_contract`) and the static webapp.
+- **Sign-up is open and signing up is the grant.** A stranger is bounded by the host coupon (`Settings.HOST_COUPON`, or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key (`coupon.py::keyed_client`, [`../decisions.md`](../decisions.md) § 0003). `oidc.py::resolve_access_state` answers `blocked` only for a revoked email.
+- **Accounts are bounded: `Settings.MAX_ACCOUNTS`**, counted off disk (`user_store.py::count_accounts`) where an account opens (`promptpotter/application/account.py::arrive`), under one OS lock; an existing account always signs in and the host always opens one.
+- **The first web sign-in RENAMES `.promptpotter/projects/default/` to `.promptpotter/projects/{user_id}/`** (`identity/default_claim.py`).
+- **Coupon exemption is one definition with two readings** — `identity/default_claim.py::_is_host`, off a live identity (`is_host`) or a directory walk (`is_host_tenant_dir`). **Who may claim the box is DECLARED** — `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`, and `HOST_ADMIN_ISSUER` where set.
+- **One route opens to a token instead of a session:** `/api/v1/site-records/{table}` (`deps.py::require_site_records_token`, constant-time; unset → 404), outside every tenant.
+- **CORS answers `Settings.ALLOWED_ORIGINS` alone** (`settings.py::Settings._exact_origins`); response headers are `presentation/api/middleware/headers.py::ResponseHeadersMiddleware`. PP↔TermNorm: a shared bearer token plus TermNorm's IP allowlist ([`backend-integration.md`](backend-integration.md) § Connection security).
 
-**Partly applied (3b) — the loop principal.** The `.env` secret split (`BOT_ENV_FILE`) exists. A
-`promptpotter-loop` user and cycle-scoped `ReadWritePaths` are absent, gated on 3c.
+## What bounds resource use
 
-**Deferred (3c) — a launched run as its own sandboxed principal.** Until it lands, web-launched
-loops are bounded by 3a only. **The TRIGGER is the first time a tenant can supply anything
-EXECUTABLE** — a custom node, a plugin connector, arbitrary Python. Until then a boundary is built
-against a guess, and the guess decides its shape: every tenant-controlled path is audited inert (the
-scoring formula AST-allowlisted in `application/scoring/formula/compiler.py`, YAML `safe_load`ed,
-slugs regex-validated, the provider registry closed). Waiting is cheap **only while the launch seam
-stays single** (`jobs/launcher/launch.py::launch`, a head-to-head's
-`jobs/launcher/head_to_head.py::admit_head_to_head`, plus `application/embedded_run.py`).
-
----
-
-## The perimeter (every boundary that goes online)
-
-- **One public port behind Cloudflare Tunnel**, outbound-only. uvicorn binds `127.0.0.1` with
-  `--proxy-headers --forwarded-allow-ips=127.0.0.1`; TermNorm binds `127.0.0.1:8000`, never tunneled.
-- **AuthN:** OIDC, RS256 pinned, `iss`/`aud`/`exp`/`iat`/`sub` checked; an `email` only where the
-  issuer vouched for it (`identity/verifier.py` requires `email_verified`; `identity/github.py` reads
-  the verified list only). Missing session → 401 at `deps.py::resolve_identity`. The session cookie
-  is httponly / secure / samesite=lax, opaque — no JWT past the middleware.
-- **Every router is mounted behind its gate** (`main.py::API_ROUTERS`, which carries each mount's
-  prefix), so a route added under one inherits it. **Public is declared there, by `None`:**
-  `/health`, the sign-in flow (`auth.py::auth_flow_router`), and, outside `/api/v1`, `/docs` +
-  `/openapi.json` (`main.py::_contract`), the contract the repo already publishes. Beside them only
-  the static webapp answers a stranger.
-- **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
-  the host coupon, what the box's keys may pay for an account over its life (`Settings.HOST_COUPON`,
-  or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key
-  (`coupon.py::keyed_client`, [decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)).
-  A provider the account holds a key for (`/auth/api-keys`) sends on that key and draws none of
-  it; a backend's cells are paid by whom its connector declares (`Connector.cell_payer`).
-  **Both units, because the USD one can go blind** on an unpriced call
-  (`Settings.UNPRICED_GRACE_USD`). A launch is admitted at its campaign's declared ceiling or
-  refused, never clamped, and the coupon holds a reservation for it; a send on the box's key past
-  that reservation stops the run `host_allowance`. A delegate's grant is the one read-down. **Every path that sets a ceiling composes there**, `change-run-limits` included, or it
-  is the way around this section. `oidc.py::resolve_access_state` (served as
-  `MeResponse.access_state`) answers `blocked` only for a revoked email.
-- **How many strangers is bounded too: `Settings.MAX_ACCOUNTS`**, counted off disk
-  (`user_store.py::count_accounts`, the host's included) at the one place an account opens
-  (`promptpotter/application/account.py::arrive`), under one OS lock so two first sign-ins at the ceiling never both read
-  room. An existing account always signs in and the host always opens one; a refused sign-in keeps
-  no session, lands on `/?auth_error=accounts_full`, and is told to the operator-admin channel. With
-  the coupon above, it bounds what strangers together spend on the box's keys before any grant.
-- **Who is exempt from the coupon is one definition with two readings** —
-  `identity/default_claim.py::_is_host`, read off a live identity (`default_claim.py::is_host`)
-  or a directory walk (`default_claim.py::is_host_tenant_dir`). Merging the two detectors would let an
-  identity that omits an issuer resolve as the operator.
-- **Who may claim the box is DECLARED, never inferred** — `auth.py::_is_declared_host_admin` reads
-  `Settings.HOST_ADMIN_EMAIL`, and `HOST_ADMIN_ISSUER` where set, since two wired providers could
-  each assert an address. Unset, no browser identity claims the box; inferring would hand a fresh
-  public box to the first stranger.
-- **One route opens to a token instead of a session:** `/api/v1/site-records/{table}`
-  (`deps.py::require_site_records_token`, constant-time; unset → 404), touching `site_records/`
-  alone, outside every tenant.
-- **Blocklist edits never have an inbound door** — the on-box, outbound-only bot
-  ([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)).
-- **CORS answers `Settings.ALLOWED_ORIGINS` alone**, exact origins; a `*`, path or pattern refuses
-  to load (`settings.py::Settings._exact_origins`), since the app serves credentialed requests. For
-  the same reason it offers no `*` method or header: the methods are derived from the mounted
-  routes, the headers are the ones a client sends (`main.py`'s `CORSMiddleware`).
-- **Response headers** — one middleware, `presentation/api/middleware/headers.py::ResponseHeadersMiddleware`.
-- **PP↔TermNorm** — a shared bearer token plus TermNorm's IP allowlist
-  ([`backend-integration.md`](backend-integration.md) § Connection security).
-
----
-
-## What bounds resource use — and what does not
-
-**There is no load balancer and no machine-resource reading.** The scarce things — the provider's
-rate limit and the host's wallet — are external and singular, so cost is bounded by admission.
+The scarce things — the provider's rate limit and the host's wallet — are external, so cost is bounded by admission, not by any machine-resource reading.
 
 | Gate | Set by | Adapts? |
 |---|---|---|
-| Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | Yes — lowered under provider back-pressure, never raised past the ceiling |
-| Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | Yes — least-served tenant next |
-| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | No |
-| What the box's keys may ever pay for an account | the host coupon (`Settings.HOST_COUPON`, or its `grant.json`), both units; its own keys are not metered | No |
-| Accounts the box holds | `Settings.MAX_ACCOUNTS`, at `promptpotter/application/account.py::arrive` (`accounts_full`) | No |
-| Reads one principal may poll | `quota.py::refuse_read_rate`, a token bucket sized above the webapp's polls, at `deps.py::admit_session` (429 `rate_limited`) | No |
-| Writes one principal may send, a free verb's included | `quota.py::refuse_write_rate`, every non-read at the same seam, the host exempt (429 `rate_limited`) | No |
+| Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | lowered under provider back-pressure (`report_throttle_stall` → `resolve_run_capacity`), never raised past the ceiling |
+| Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | least-served tenant next |
+| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | no |
+| What the box's keys may ever pay for an account | the host coupon, both units; its own keys are not metered | no |
+| Accounts the box holds | `Settings.MAX_ACCOUNTS` (`accounts_full`) | no |
+| Reads one principal may poll | `quota.py::refuse_read_rate` at `deps.py::admit_session` (429 `rate_limited`) | no |
+| Writes one principal may send, a free verb's included | `quota.py::refuse_write_rate` at the same seam, the host exempt (429 `rate_limited`) | no |
 
-**A throttle is logged, never banked** (`quota.py::RateLimitedError`): every other refusal of a
-signed-in person's write lands on their trail, so a banked flood of 429s would be a flood of trail
-writes. A refusal logs at INFO under its `error_id`, a 5xx at ERROR (`main.py::_error_response`).
-
-**The first gate WAITS; the third refuses.** A full machine queues the launch
-(`JobRegistry.request_slot`), drained least-served-first — the provider window's rule, so one idea —
-and starvation-free because the third gate bounds one account's entries. Waiting is bounded by
-`Settings.QUEUE_MAX_WAIT_S`, and `cancel-queued-run` withdraws a launch — **only by the principal
-that launched it** (`shared/identity.py::acting_principal`), since a delegate acts in its delegator's
-account. A refusal after the wait is written on the job and served by `machine-status`.
-
-**Occupancy is everyone's; who holds a slot is not, by default.** `machine-status` counts every slot
-but names only the caller's; `MACHINE_STATUS_SCOPE=all` names every slot to every account.
-
-**The one automatic signal is throttle stall** (`report_throttle_stall`, plus
-`infrastructure/backend.py::MachineSlots` waits), a rolling 60 s total `resolve_run_capacity` reads
-per admission. It is lagging, which is why it may only ever LOWER the ceiling. **It reads no CPU,
-memory, load or disk** — a decision: those readings are platform-specific or a new dependency, and a
-number that silently reads zero on half the machines is worse than none. **So nothing in the
-application stops the box running out of memory**: that guard is `MemoryMax` (§ loop ↔ everything)
-and a `MACHINE_RUN_CAPACITY` sized against the provider tier first.
+A throttle is logged, never banked (`quota.py::RateLimitedError`). **The first gate WAITS; the third refuses.** A full machine queues the launch (`JobRegistry.request_slot`), drained least-served-first, bounded by `Settings.QUEUE_MAX_WAIT_S`; `cancel-queued-run` withdraws a launch, only by the principal that launched it (`shared/identity.py::acting_principal`). `machine-status` names only the caller's slots unless `MACHINE_STATUS_SCOPE=all`. The memory guard is the unit's `MemoryMax`.

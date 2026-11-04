@@ -1,12 +1,14 @@
 # Scoring and Memory
 
-**Traces are facts. Scores are policy. The persistent memory of every measurement ever taken is the measurement archive — the central data interface.**
-
-A trace records what the pipeline did (query, prediction, ground truth, node rankings, timeouts). A score judges *over* a trace; the answer changes with what you're optimizing for. Traces are written once and never edited; scores are a view produced by applying the active policy on demand.
+**Traces are facts. Scores are policy.** A trace records what the pipeline did; a score judges *over* a
+trace under the active formula, on demand. Traces are written once and never edited.
 
 ## The archive
 
-**Archive vs ledger** is [`../architecture.md`](../architecture.md) § Measurement archive's; its scopes and filing are [`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign. It is rooted per archive home (`build_stores`: `Stores.archive_home`), the tenant's own unless the host names one install-owned `settings.SHARED_ARCHIVE` ([`../decisions.md`](../decisions.md) § 0002 — Identity foundation).
+**Archive vs ledger** is [`../architecture.md`](../architecture.md) § Measurement archive's; scopes and filing
+are [`store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by
+campaign. It is rooted per archive home (`build_stores`: `Stores.archive_home`), the tenant's own unless the
+host names `settings.SHARED_ARCHIVE` ([`../decisions.md`](../decisions.md) § 0008).
 
 ```
 ON DISK (the database)                      DERIVED (folded from disk)
@@ -16,86 +18,165 @@ measurements/                               MeasurementArchive
   cells/{config_key}.jsonl  one line per answer
 ```
 
-**`MeasurementArchive` is the only gateway**; programmatic reads go through `infrastructure/store/archive_queries.py`. `SampleIndex` is folded by `refresh()` and its fold persisted (`measurements/sample_folds/{dataset_hash}.jsonl`) and replayed at start, revalidated against the active formula and each population's signature. Cache reuse and cross-run digests are **derived views over the archive**, never a second store. The format is human-readable — the operator can `cat` a row.
+**`MeasurementArchive` is the only gateway**; programmatic reads go through
+`infrastructure/store/archive_queries.py`. `SampleIndex` is folded by `refresh()`, its fold persisted
+(`measurements/sample_folds/{dataset_hash}.jsonl`) and revalidated against the active formula. Cache reuse and
+cross-run digests are derived views over the archive, never a second store.
 
-**A cell is one configuration measuring one sample, and it keeps every answer it was given.** An answer is one appended line, never rewritten, filed under the node-chain prefix that PRODUCED it (`terminal_node`), so every configuration sharing that prefix reads it. A configuration × bank's answers are its **population**; each reader declares its take over it, and the default is `infrastructure/store/measurement_archive.py::standing`. The archive knows no run, campaign or round: a walk records the answers it took (`ScoredWalk.cells`) and the ledger names them.
+**A cell is one configuration measuring one sample, and it keeps every answer it was given.** An answer is one
+appended line, filed under the node-chain prefix that PRODUCED it (`terminal_node`), so every configuration
+sharing that prefix reads it. A configuration × bank's answers are its **population**; each reader declares its
+take over it, default `infrastructure/store/measurement_archive.py::standing`. The archive knows no run, campaign or round: a walk
+records the answers it took (`ScoredWalk.cells`) and the ledger names them.
 
-**Every row is FACTS, never a grade** (§ Rescore-on-load). A filed answer is `domain/sample.py::FiledAnswer` — a `MeasuredCell` plus who filed it (`config_key`, `dataset_hash`, `role`, `source`, `provenance`, `created_at`); the index entry is `ArchiveEntry`. **`role` is WHY the scoring pass ran** — the vocabulary is `shared/measurement_context.py::MeasurementRole`; which roles a reading may see is its `RoleScope`, part of its identity, so readings in two scopes never pair.
+**Every row is FACTS, never a grade** (§ Rescore-on-load). A filed answer is `domain/sample.py::FiledAnswer` —
+a `MeasuredCell` plus `config_key`, `dataset_hash`, `role`, `source`, `provenance`, `created_at`; the index entry
+is `ArchiveEntry`. **`role` is WHY the scoring pass ran** (`shared/measurement_context.py::MeasurementRole`);
+which roles a reading may see is its `RoleScope`, part of its identity, so readings in two scopes never pair.
 
-**No key names an optimizer, a position or a dataset name** — an arm two optimizers both propose replays free, which makes an N-way head-to-head affordable — **nor a backend** — no read or write takes a `backend_id`. `node_configs` is canonical identity and must stay deterministic from pipeline params.
+**No key names an optimizer, a position, a dataset name or a backend** — an arm two optimizers both propose
+replays free. `node_configs` is canonical identity and stays deterministic from pipeline params.
 
-**Write path:** a taken cell → `application/datasets/loaders.py::archive_entry` names the configuration → `MeasurementArchive.file_answers` appends one line per answer the cell did not hold. **A replay files nothing.** **Read paths:** `archive_queries.py`'s `load_population` / `list_populations` (the evidence read, inside the scope `bind_memory_scope` gives the task) and `walked_answers` (the rows one walk took); `MeasurementArchive.measurements_for_config` (ungraded answers under matching configurations).
+**Write path:** `application/datasets/loaders.py::archive_entry` names the configuration →
+`MeasurementArchive.file_answers` appends one line per answer the cell did not hold; a replay files nothing.
+**Read paths:** `archive_queries.py`'s `load_population` / `list_populations` (inside the scope
+`bind_memory_scope` gives the task) and `walked_answers`; `MeasurementArchive.measurements_for_config`.
 
 **The content hashes are not interchangeable:**
 
 | Hash | Names | Carried on |
 |---|---|---|
 | `config_key(node_configs)` | where a configuration's cells are FILED — one per prefix of its node chain | `cells/{config_key}.jsonl` |
-| `PipelineSchema.sp_hash(params)` | the searchpoint over the same resolved node configs | every index entry's `prompt_fields_id`; a tenant ruler row (`domain/ruler.py::RulerRow`); `reading.sp_hash`, stamped on the `Measuring` arm state as its walk opens |
+| `PipelineSchema.sp_hash(params)` | the searchpoint over the same resolved node configs | every index entry's `prompt_fields_id`; a ruler row (`domain/ruler.py::RulerRow`); `reading.sp_hash`, stamped on the `Measuring` arm state |
 | `JobSearchPoint.content_hash(dataset)` | a campaign's root; files nothing | the root |
-| `OptSearchPoint.id` | the individual's own content, less the campaign's framing and the demo pool | `CandidateFacts.individual` — joined to an archive row it matches nothing |
+| `OptSearchPoint.id` | the individual's own content, less the campaign's framing and the demo pool | `CandidateFacts.individual` |
 
-**Never re-derive `sp_hash` downstream:** the config a measured arm carries forward (`resolved_params`) is `config_params`, the node configs with each rendered `prompt` stripped, and the hash covers that prompt — so a recompute yields a well-formed id addressing no cell, and nothing raises.
+**Never re-derive `sp_hash` downstream:** `resolved_params` is the node configs with each rendered `prompt`
+stripped, and the hash covers that prompt — a recompute addresses no cell, and nothing raises.
 
 ## The bench headline
 
-At run init the bank splits into a **search split** and a held-out **bench set**, plus a **demo pool** for an optimizer whose individuals carry shots (`CampaignConfig.dataset_split`, over DISTINCT samples, so no copy of a held-out row stays behind). **Every optimizer node sees the search split alone** — the demo pool only as shot material — and no node ever sees the bench set, the check-in model included. The bench scores each optimizer's result on the bench set with ONE evaluator, and that is the headline every surface serves and `export.json` reports.
+At run init the bank splits into a **search split**, a held-out **bench set** and a **demo pool**
+(`CampaignConfig.dataset_split`, over DISTINCT samples). Every optimizer node sees the search split alone —
+the demo pool only as shot material — and no node ever sees the bench set, the check-in model included. The
+bench scores each optimizer's result on the bench set with ONE evaluator; that is the headline every surface
+serves and `export.json` reports.
 
-**Every reading carries two columns, `accuracy` and `composite`, each with its own band and paired lift, and names which one is the headline** (`domain/bench.py::BENCH_HEADLINE`): a surface selects the named column and never picks one of its own. **The bench grades the pick the optimizer DECLARED** — its selector's last selection (`Election.selected`, `RoundResult.head`) — never one the bench makes by comparing rounds read on different rows. A line that closed no round declared none, so its headline carries no selection rather than the origin at a lift of 0.0; which stops end a line holding one is `domain/phases.py::STOP_REASON_INFO`'s `grades_selection`. Why the two must be different rows: [`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward.
+**Every reading carries two columns, `accuracy` and `composite`, each with its own band and paired lift, and
+names which is the headline** (`domain/bench.py::BENCH_HEADLINE`). **The bench grades the pick the optimizer
+DECLARED** — its selector's last selection (`Election.selected`, `RoundResult.head`) — never one the bench
+makes by comparing rounds read on different rows
+([`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward). A line
+that closed no round declared none; which stops end a line holding one is `domain/phases.py::STOP_REASON_INFO`'s
+`grades_selection`.
 
-**The graded result is the CAMPAIGN's, never a cycle's.** Each pass is a `bench:graded` record on the ledger of the cycle that sent it, and the campaign's passes are the fold of its LINE's ledgers (`infrastructure/store/campaign_store/ledger_scan.py::scan_bench_passes`) — so a killed launch keeps every pass it graded; launch clocks fold the same way (`application/runner/campaign_result.py::line_launches`). Only the cycle holding the line writes either; an offshoot grades nothing, and a resume or rebase reuses the origin's pass the line banked.
+**The graded result is the CAMPAIGN's, never a cycle's.** Each pass is a `bench:graded` record on the ledger
+of the cycle that sent it; the campaign's passes are the fold of its LINE's ledgers
+(`infrastructure/store/campaign_store/ledger_scan.py::scan_bench_passes`), launch clocks likewise
+(`application/runner/campaign_result.py::line_launches`). Only the cycle holding the line writes either.
 
-**When passes are sent is the campaign's `bench_trigger`, and the default (`manual`) sends none**: the `bench` verb (`application/runner/grade_bench.py::grade_line_bench`) sends both on demand, outside any run, reusing a pass the line already holds; `at_end` sends the origin's before round 1 and the selection's at the end; `each_round` adds every selecting round. **Where the bench stands is ONE served `BenchStatus`** (`domain/bench.py::bench_status`) — its state (`not_asked` until asked, `held_elsewhere` beside the line) and whether the verb is admitted now — which the browser, the terminal and the verb's own admission all read.
+**When passes are sent is the campaign's `bench_trigger`; the default (`manual`) sends none**: the `bench` verb
+(`application/runner/grade_bench.py::grade_line_bench`) sends both on demand; `at_end` sends the origin's before
+round 1 and the selection's at the end; `each_round` adds every selecting round. Where the bench stands is ONE
+served `BenchStatus` (`domain/bench.py::bench_status`), which the browser, the terminal and the verb's admission
+all read.
 
 ## Rescore-on-load
 
-A trace can be judged under many policies, so no score is stored as the trace's own truth — **the archive holds none at all.** Its write seam strips every grade a row carries (`fitness`, `objective`, `unscored`: `domain/scoring.py::GRADE_KEYS`), so a banked row is what was measured — the answer, tokens, latency, the backend's observations, a judge's banked verdict — and nothing a formula made of it. A row in MEMORY may carry grades for the round's own use; the seam, not the caller, keeps them off disk.
+**The archive holds no score at all.** Its write seam strips every grade a row carries
+(`domain/scoring.py::GRADE_KEYS`), so a banked row is what was measured — answer, tokens, latency, the backend's
+observations, a judge's banked verdict. A row in MEMORY may carry grades for the round's own use; the seam
+keeps them off disk.
 
-Every read grades under a scorer it names, through ONE derivation: facts → graded cells (`domain/scoring.py::Scorer.grade`, pure — a `CellSheet` carries the grades and the id of the scorer that made them) → the population (`CellSheet.scoreable`, § Which rows a reading counts) → folds → readings. Fresh samples, cache hits, trial reloads, the δ ruler, the indexes, cross-campaign reads and every mask all take that step, so the `fitness` / `objective` you read is always the reading formula's view, and rows banked under one formula read under another exactly as a fresh run under it would. **A lens is a scorer, not a formula over aggregates**: `score:F` is the campaign's scoring block with `per_cell` set to `F` — the override a fork applying it runs under — so "what would this campaign read under `F`" and "run it under `F`" are one number wherever `F` is nonlinear, which the length charge below is ([`../operations/mask-projection.md`](../operations/mask-projection.md)). **The bench headline is one more such reading.** A bench pass banks facts (`domain/bench.py::BenchPass`: which individual, the archive run, the rows it sent, whether it stopped, the grader it ran under), and `application/runner/bench.py::read_bench` is the one derivation from them to a `BenchScore` — for the run that graded the pass and every later reader alike. Every stored `BenchScore` is a cache of one such reading, stamped with its `scorer_id`; a reader under another grader reads the passes again. A formula that cannot be evaluated at all (`ScoringFormulaError`, a contract bug) halts the run; it is never written into a row. What a formula CHANGE does to a running cycle is owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Changing the composite formula — fork, never swap.
+Every read grades under a scorer it names, through ONE derivation: facts → graded cells
+(`domain/scoring.py::Scorer.grade`, pure; a `CellSheet` carries the grades and the scorer id) → the population
+(`CellSheet.scoreable`) → folds → readings. Fresh samples, cache hits, the δ ruler, cross-campaign reads and every
+mask take that step, so rows banked under one formula read under another exactly as a fresh run would. **A lens
+is a scorer, not a formula over aggregates**: `score:F` is the campaign's scoring block with `per_cell` set to
+`F` ([`../operations/mask-projection.md`](../operations/mask-projection.md)). **The bench headline is one more
+such reading**: a pass banks facts (`domain/bench.py::BenchPass`) and `application/runner/bench.py::read_bench` is
+the one derivation to a `BenchScore`, stamped with its `scorer_id`. A formula that cannot be evaluated
+(`ScoringFormulaError`) halts the run; it is never written into a row. A formula CHANGE on a running cycle is
+[`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Changing the composite
+formula — fork, never swap.
 
----
+**Two costs**, answering different questions:
 
-One of the downstream consequences is the system keeps **two costs**, and they answer different questions:
+- **The bill** — money that left the account; cache hits contribute nothing. The headline, and what the spend
+  budget caps; a published figure also carries the raw tokens and the price table's date and never omits the
+  optimization spend ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost reporting).
+- **The incurred cost** — what the search would cost against a cold cache, cache hits priced from the tokens
+  they recorded, each cell once per campaign. What a *measurement of a candidate* divides by; a bench lift
+  divides by the SEARCH's share alone (`domain/spend.py::SEARCH_KINDS`). **A controlled arm's ceiling caps this
+  one** (`CeilingMeter` `search_incurred`): arms of one head-to-head may replay each other's cells, so a
+  ceiling on the bill would hand whichever arrived second a larger search.
 
-- **The bill** — money that actually left the account. Cache hits contribute nothing to it. This is the headline, and it is what the spend budget caps; a published or head-to-head figure also carries the raw tokens and the price table's date and never omits the optimization spend, which the bill already meters ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost reporting). It has to stay this way: billing a replay would halt a run that cost nothing to make.
-- **The incurred cost** — what the search would cost to run against a cold cache, with cache hits priced from the tokens they recorded (the cached payloads carry them, so nothing is estimated) — each cell once per campaign, since a cold run re-reading its own cell (a parent re-scored each round, a resume, a fork) replays it free too. This is what a *measurement of a candidate* has to divide by — and a bench lift divides by the SEARCH's share alone (`domain/spend.py::SEARCH_KINDS`), never the bench pass that graded it, and by nothing where the search carries tokens no rate priced. **A controlled arm's ceiling caps this one instead** (`CeilingMeter` `search_incurred`): arms of one head-to-head may replay each other's cells, so a ceiling on the bill would hand whichever arrived second a larger search for the same money.
+**Either cost lands in a bucket named for who spent it** (`domain/spend.py::TokenUsageKind`: Connector /
+Optimizer / Judge / Diagnostic / Bench). A bucket is never an exemption: a `bill` ceiling counts all five, a
+`search_incurred` one counts `SEARCH_KINDS` alone.
 
-On a cold cache the two are equal; they part once the archive is deep enough for an arm to replay cells another paid for.
-
-**Either cost lands in a bucket named for who spent it** (`domain/spend.py::TokenUsageKind`, shown as Connector / Optimizer / Judge / Diagnostic / Bench). `judge` is grading, kept apart so it reads as neither the optimizer's cost nor the measured system's; `diagnostic` is what a `verify` / `ab` / `noise-floor` spends answering a question ABOUT the search rather than advancing it; `bench` is the held-out pass, the price of the headline. A bucket is never an exemption: a `bill` ceiling counts all five, and a `search_incurred` one counts `SEARCH_KINDS` alone, so a sibling arm's cache cannot stretch a controlled arm's budget and its bench pass cannot eat into it.
-
-### Two caches, and the word only belongs to one
-
-The costs above turn on OUR cache. A provider keeps its own, and the two are named apart everywhere:
-
-- **A replay** — our content-addressed archive answered, so the call never reached a provider and nothing was billed. It is a **boolean**: `TokenUsageRecord.cached`, the `📖` on a sample line, `replayed` on an optimizer line. This is the one the two costs above are about.
-- **A prefix-cache read** — a provider *did* serve the call and billed part of its input at a discount, because our prompt's leading bytes matched one it had already processed. It is a **token count**, a SUBSET of the input: `TokenUsageRecord.cache_read_tokens` / `cache_write_tokens`, `SpendBucket.cache_read_tokens`. Every surface renders it through one reading — `domain/spend.py::TokenAccount.cache_share`, whose required `replayed` kwarg is what stops a replay being shown a discount it never bought.
-
-The rule is that **one word cannot mean both**: `cached` is the replay, never the count. `account_spend` drops a record from the spend roll-up whenever `cached` is truthy, so a provider's count filed under that name hides paid calls from the budget ceiling.
-
-Two consequences worth knowing before reading any capture number. The provider cache is **per-replica and warms by repetition** — a prefix sent once warms one machine in a fleet, so capture climbs over a run rather than appearing on the second call. And it is **why the optimizer prompt orders its fields the way it does** ([`opt_search_point.py::OptimizerPromptTemplate.RENDER_ORDER`](../../promptpotter/domain/opt_search_point.py)): everything volatile renders last, because a single per-round value early in the prompt voids the discount on every byte behind it.
-
+**Two caches, and the word only belongs to one.** A **replay** — our archive answered, nothing billed — is a
+boolean: `TokenUsageRecord.cached`. A **prefix-cache read** — a provider served the call and discounted part of
+its input — is a token count, a SUBSET of the input: `TokenUsageRecord.cache_read_tokens`, rendered through
+`domain/spend.py::TokenAccount.cache_share`, whose required `replayed` kwarg stops a replay being shown a discount.
+`cached` is the replay, never the count: `account_spend` drops a record from the roll-up whenever `cached` is
+truthy. The provider cache is per-replica and warms by repetition, and it is why the optimizer prompt renders
+everything volatile last (`opt_search_point.py::OptimizerPromptTemplate.RENDER_ORDER`).
 
 ## Deprecated samples
 
-**Which advisories and response shapes derive a fatal or infra code** — owned by [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md), whose rule table is the only version of it; the word itself is [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md)'s. What belongs here is what a *score* over such a row means: a deprecated result is evicted from cache and re-measured, **but it still counts** — a refusal or a truncation is what the prompt produced, so it is the miss the formula grades (§ Which rows a reading counts). The trace itself stays in `measurements/` either way.
+**Which advisories derive a fatal or infra code** — owned by
+[`../developer/self-healing-internals.md`](../developer/self-healing-internals.md). A deprecated result is
+evicted from cache and re-measured, **but it still counts** — a refusal or a truncation is what the prompt
+produced, so it is the miss the formula grades. The trace stays in `measurements/` either way.
 
 ## Which rows a reading counts
 
-**A reading's population is the population that was sent.** One predicate decides it for every number an optimizer elects on and the bench headline alike — `domain/scoring.py::Scorer.grade` (it stamps `GradedCell.scored`), whose list form is `classification.py::scoreable_rows`. Three kinds of row leave: a **provider or machine fault** (`shared/errors.py::ERROR_IS_CHARGED` says which categories), a cell that ran to its end with **nothing to grade** (`UNSCOREABLE`), and a row the formula **cannot grade** (`unscored`). Everything the configuration caused stays: a refusal, a truncation or an empty answer is graded by the formula, and a charged error — a cut cell (`HALTED`), a rejected config, an unexplained failure — is a miss at 0.0 wherever a label defines one. On a labelless bank a formula alone defines a verdict, so a charged error carries none there. A denominator that drops the prompt's own failures pays it accuracy for failing on exactly the cells it could not answer — and **a bench pass that ends with more rows lacking a verdict than its split's `tolerance` reads nothing**, since a headline over a population other than the one sent is not the bench score.
+**A reading's population is the population that was sent.** One predicate decides it for every number an
+optimizer elects on and the bench headline alike — `domain/scoring.py::Scorer.grade` (stamping
+`GradedCell.scored`; list form `classification.py::scoreable_rows`). Three kinds of row leave: a provider or
+machine fault (`shared/errors.py::ERROR_IS_CHARGED`), a cell that ran to its end with nothing to grade
+(`UNSCOREABLE`), and a row the formula cannot grade (`unscored`). Everything the configuration caused stays: a
+refusal, a truncation or an empty answer is graded, and a charged error is a miss at 0.0 wherever a label
+defines one. A bench pass that ends with more rows lacking a verdict than its split's `tolerance` reads nothing.
 
-**A cell measured more than once is one piece of evidence.** Its standing row is its last row carrying a verdict, else its last row, and every statistic — a level, its band, a paired lift, a θ fit, an eliminator's history — reads one standing row per cell (`domain/scoring.py::CellSheet`). The rows themselves all stay on the sheet, in walk order: a log is not a statistic.
+**A cell measured more than once is one piece of evidence.** Its standing row is its last row carrying a
+verdict, else its last row; every statistic reads one standing row per cell (`domain/scoring.py::CellSheet`).
+The rows all stay on the sheet, in walk order.
 
 ## Decision replay + fork
 
-Optimizer choices derive from scored numbers, so they are replayable at all — that is this page's thesis paying out. On resume the optimizer rescores under the current scorer and re-runs each recorded decision against the rescored view: match → the round stands, mismatch → halt at the divergence point. What happens next is a fork, and its mechanics are [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Recovery: resume, rewind, fork.
-
-Decision records are two-tier, on the same facts-vs-policy line: **replayable** (which candidate won, the parameters that gated the choice) vs **archival** (full LLM outputs, diagnostic context — never read by replay).
+Optimizer choices derive from scored numbers, so they replay: on resume the optimizer rescores under the
+current scorer and re-runs each recorded decision — match → the round stands, mismatch → halt at the
+divergence point, then a fork ([`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)
+§ Recovery: resume, rewind, fork). Decision records are **replayable** (which candidate won, the parameters
+that gated it) vs **archival** (full LLM outputs, never read by replay).
 
 ## Composite — recorded, not gating
 
-Round-winner selection compares candidates on difficulty-adjusted ability (θ on the tenant's δ ruler once the round's own cells have joined it, less the parent line's rows — subset-invariant, so candidates scored on different adaptive subsets stay comparable). **θ is fit on the composite, not on accuracy**: each cell carries what it was WORTH (`objective`) beside whether it was RIGHT (`fitness`), so a campaign that prices latency, cost or a provider's flakiness elects on that price rather than merely displaying it. Two numbers rather than one, because a cost penalty folded into `fitness` renders a correct-but-slow answer a MISS and sends L1 to repair reasoning that was right. Declare one under `{dataset}/dataset.yaml::campaign.scoring.per_cell`; absent, the two are the same number and nothing changes. **A miss is charged its cost too.** A composite that scales correctness by a cost factor scores every miss 0.0 whatever it spent, so θ could not tell a runaway miss from a cheap one. Each cell's `objective` is therefore `(1 − s)·per_cell(row) + s·per_cell(row with fitness 1)`, with `s` = `formula/compiler.py::MISS_COST_SHARE`: a solved cell scores exactly its composite, and a miss keeps `s` of what the same cell would have scored solved. The share is part of the grading function, so it enters the scorer id — as do the campaign's judges, whose banked terms the formula reads. A charged error is a miss at the floor, since it recorded no cost to keep a share of, while an episode that ran out of turns or its own clock and was graded is a scored miss, so its cost counts (§ Which rows a reading counts). **A length charge is BOUNDED, so accuracy dominates it.** Every shipped token-charged template declares `fitness * ((1 − λ) + λ · B / max(B, tokens))` with `λ = 0.08` and `B` the origin's median tokens: 1.0 up to `B`, falling monotonically toward `1 − λ` and never below it. An unbounded factor lets a long enough hit score under a cheap miss, and lets length overturn any accuracy gap. The guarantee: **no miss beats a hit**, and **no accuracy gap above `λ / (1 − s)` can be overturned by length** — per arm the mean composite lies in `[(1 − λ)·E(a), E(a)]` with `E(a) = s + (1 − s)·a`; inside that gap length decides only against a much longer prompt, and at equal accuracy the shorter prompt always wins.
+Round-winner selection compares candidates on difficulty-adjusted ability — θ on the tenant's δ ruler, less
+the parent line's rows, so candidates scored on different adaptive subsets stay comparable
+([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The model — Rasch θ/δ). **θ is fit
+on the composite, not on accuracy**: each cell carries what it was WORTH (`objective`) beside whether it was
+RIGHT (`fitness`), so a campaign that prices latency or cost elects on that price; a cost penalty folded into
+`fitness` would render a correct-but-slow answer a MISS and send L1 to repair reasoning that was right.
+Declare one under `{dataset}/dataset.yaml::campaign.scoring.per_cell`; absent, the two are one number.
 
-**That shape is declared as DIALS, and the anchor is measured rather than typed.** `scoring.dials: tokens=0.08,latency=0.05` beside `per_sample` (and exclusive with `per_cell`) names a weight per term; once the origin is scored, `application/origin.py::lock_criterion` realizes it — `B` is the origin's median of that term over its measured cells, a 0/1 term takes `(1 − λ) + λ·term` or `1 − λ·term` by direction — and writes the resulting `per_cell` into the campaign manifest in place of the dials. It is locked there once: a resume, a fork and every served read take the plain formula, so later rounds are graded on the anchors the first ones were. The shape and its inverse are `domain/scoring.py::anchored_criterion` / `anchored_criterion_dials`; a formula that is not this shape has no dials, and is served as itself. **Accuracy** displays alongside as the subset-relative correctness rate, which is what makes a win that came with hidden costs visible as a gap between the two.
+**A miss is charged its cost too.** Each cell's `objective` is `(1 − s)·per_cell(row) + s·per_cell(row with
+fitness 1)`, `s` = `formula/compiler.py::MISS_COST_SHARE`: a solved cell scores its composite, a miss keeps
+`s` of what the same cell would have scored solved. The share enters the scorer id, as do the campaign's
+judges. A charged error is a miss at the floor; an episode that ran out of turns and was graded is a scored
+miss.
 
-θ is the standard IRT/CAT fix for per-round sample-set drift: raw accuracy over different adaptive subsets is not comparable, ability is — the model is [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The model — Rasch θ/δ. Why two forks share one archive without duplicating a measurement: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The primitive.
+**A length charge is BOUNDED, so accuracy dominates it.** Every shipped token-charged template declares
+`fitness * ((1 − λ) + λ · B / max(B, tokens))`, `λ = 0.08`, `B` the origin's median tokens: 1.0 up to `B`,
+never below `1 − λ`. The guarantee: **no miss beats a hit**, and **no accuracy gap above `λ / (1 − s)` can be
+overturned by length** — per arm the mean composite lies in `[(1 − λ)·E(a), E(a)]`, `E(a) = s + (1 − s)·a`.
+
+**That shape is declared as DIALS, and the anchor is measured.** `scoring.dials: tokens=0.08,latency=0.05`
+beside `per_sample` (exclusive with `per_cell`) names a weight per term; once the origin is scored,
+`application/origin.py::lock_criterion` realizes it — `B` is the origin's median of that term — and writes the
+resulting `per_cell` into the campaign manifest in place of the dials, once: a resume, a fork and every served
+read take the plain formula. The shape and its inverse are `domain/scoring.py::anchored_criterion` /
+`anchored_criterion_dials`. **Accuracy** displays alongside as the subset-relative correctness rate, so a win
+with hidden costs is visible as a gap between the two.

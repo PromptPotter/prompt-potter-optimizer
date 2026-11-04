@@ -37,7 +37,7 @@ _ASYNCAPI_DESCRIPTION = f"""\
 The outbound Server-Sent Events channel: every frame is a `ProjectionEnvelope`, and a
 record-derived frame's `payload` is the `CycleRecord` its `kind` names. The
 subscription contract (snapshot first, then the live tail; gap recovery; no replay)
-is `docs/developer/event-stream.md`.
+is `docs/developer/stable-api.md` § The event stream.
 """
 
 

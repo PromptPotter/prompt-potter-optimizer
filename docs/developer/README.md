@@ -16,7 +16,6 @@ python scripts/gate.py --changed       # while editing
 | [self-healing-internals](self-healing-internals.md) | Which failure reaches which layer |
 | [node-standard](node-standard.md) | The `pipeline.yaml` contract and the node types |
 | [adding-a-surface](adding-a-surface.md) | Every recipe: a record, an injection, a field, a verb, a command, a read |
-| [stable-api](stable-api.md) | What an outside program may rely on |
-| [event-stream](event-stream.md) | The SSE contract |
+| [stable-api](stable-api.md) | What an outside program may rely on, the SSE contract included |
 | [offline-run](offline-run.md) | Proving a change does not move what the loop decides |
 | [dspy-optimizer](dspy-optimizer.md) | PromptPotter as a DSPy optimizer |

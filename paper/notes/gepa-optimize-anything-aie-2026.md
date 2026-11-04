@@ -3,10 +3,10 @@
 Read 2026-10-19. An observation for the related-work and results sections, not a result of ours.
 
 **Why it matters here.** GEPA is the reference peer ([`../../docs/research/landscape.md`](../../docs/research/landscape.md)
-§ DSPy — GEPA, MIPROv2, BootstrapFewShot; shipped inside DSPy and MLflow). Its author presented
+§ Peers; shipped inside DSPy and MLflow). Its author presented
 `optimize_anything` on the main stage of the AI Engineer World's Fair, so these numbers are the ones a
 reviewer will have seen. Two consequences for M14: the **scope line** in
-[`../../docs/research/related-work.md`](../../docs/research/related-work.md) § Against GEPA and AlphaEvolve
+[`../../docs/research/landscape.md`](../../docs/research/landscape.md) § Against GEPA and AlphaEvolve
 is under pressure, and the **ARC-AGI headline** is the cleanest public example of the
 unoptimized-origin problem the citation filter already names (*Optimization before Evaluation*,
 [2604.27637](https://arxiv.org/abs/2604.27637), [`../README.md`](../README.md) § The citation filter).
@@ -35,13 +35,13 @@ errors, traces, **rendered images** — fed to the reflection LM. Three modes, f
 | Multi-task search | related problems, cross-transfer | pelican SVG and 3D unicorn: the "dataset" is the **rubric aspects**, one evaluator call per aspect, Pareto over aspects |
 | Generalization | `dataset` + held-out `valset` | ARC-AGI agent, prompt optimization |
 
-**Pressure on our scope line.** related-work.md says *"GEPA evolves the instruction text of a DSPy
+**Pressure on our scope line.** landscape.md says *"GEPA evolves the instruction text of a DSPy
 program … PromptPotter evolves prompt and pipeline jointly — that is scope."* `optimize_anything`
 evolves a whole agent file (code, sub-agents, control flow, prompts) and accepts a dict of named text
 parameters. The 🟡 on *Tunes the whole pipeline* must be re-read against it before the capability
 table is quoted in the manuscript. What still separates us is the statistical layer (PoBB, the
 subset-invariant ruler, priced measurements), not the reach of the search. Same conclusion the
-harness-evolution grouping reached ([`../../docs/research/related-work.md`](../../docs/research/related-work.md) § Agent-harness evolution).
+harness-evolution grouping reached ([`../../docs/research/landscape.md`](../../docs/research/landscape.md) § Agent-harness evolution).
 
 ## 2. The ARC-AGI headline: 32.5% → 89.5%
 

@@ -28,4 +28,4 @@ You've run a campaign. Here's where to look when you want to understand more.
 ## Research — benchmarks and peers
 
 - [Benchmarks](../research/benchmarks.md) — datasets, methodology, results
-- [Related work](../research/related-work.md) — where PromptPotter sits among other optimizers
+- [Landscape](../research/landscape.md) — where PromptPotter sits among other optimizers

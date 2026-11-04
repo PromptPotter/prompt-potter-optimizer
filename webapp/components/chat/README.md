@@ -27,7 +27,7 @@ The core imports nothing from an optimizer module; each file's import list is th
 - **The served current state** — `promptpotter/domain/activity.py::ActivityFeed`, on the
   server. The thread shows what the task is doing NOW, never its log: a record reads as at most
   one `ActivityItem`, every `ActivityKind` declares a lifetime in `LIFETIME`
-  ([`event-stream.md`](../../../docs/developer/event-stream.md) § Current state), and every SSE frame
+  ([`stable-api.md`](../../../docs/developer/stable-api.md) § The event stream), and every SSE frame
   carries the fold whole as `activity: {status, notices}`. A new kind is one row in that table,
   and any client — this one, an MCP tool, another agent's UI — renders the newest frame.
 - **The SSE client** — `lib/hooks/useCycleEvents.ts` (snapshot → tail →

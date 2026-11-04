@@ -4,7 +4,7 @@
     python scripts/complexity_ledger.py --check    # the gate's `surface-ledger` check
 
 Each ``BASELINE`` row is a CEILING: a row above it fails, and a raise owes a written reason in the
-COMMIT BODY (root ``CLAUDE.md`` § ``<surface-ledger>``). A fall needs no edit.
+COMMIT BODY (root ``CLAUDE.md`` § Working). A fall needs no edit.
 
 A script and not a module of the package: it counts every layer, the suite and the generated
 contract beside them, none of which an installed wheel carries.

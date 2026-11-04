@@ -9759,7 +9759,7 @@
     }
   },
   "info": {
-    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nThe outbound Server-Sent Events channel: every frame is a `ProjectionEnvelope`, and a\nrecord-derived frame's `payload` is the `CycleRecord` its `kind` names. The\nsubscription contract (snapshot first, then the live tail; gap recovery; no replay)\nis `docs/developer/event-stream.md`.\n",
+    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nThe outbound Server-Sent Events channel: every frame is a `ProjectionEnvelope`, and a\nrecord-derived frame's `payload` is the `CycleRecord` its `kind` names. The\nsubscription contract (snapshot first, then the live tail; gap recovery; no replay)\nis `docs/developer/stable-api.md` § The event stream.\n",
     "title": "Cycle event stream",
     "version": "generated"
   },

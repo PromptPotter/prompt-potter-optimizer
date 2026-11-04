@@ -190,7 +190,7 @@ RULES = (
     (
         "read-once",
         lambda s, _pipeline, root: paged(s, root, records=True),
-        "pages the record {} — Grep its key or Read a slice (root CLAUDE.md <read-once>)",
+        "pages the record {} — Grep its key or Read a slice",
     ),
     (
         "read",

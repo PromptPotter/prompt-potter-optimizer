@@ -132,5 +132,5 @@ promptpotter/assets/webapp/
 webapp/test-results/
 webapp/.last-run.json
 
-# per-machine autonomy mode (root CLAUDE.md § Working principles)
+# per-machine autonomy mode (root CLAUDE.md § Non-negotiables)
 CLAUDE.local.md

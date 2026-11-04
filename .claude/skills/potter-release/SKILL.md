@@ -9,50 +9,42 @@ description: >-
 
 # Cutting a release
 
-**The order is the protocol. The box comes before the tag.** PyPI cannot be taken back, so a
-version names a commit that already runs live, and whatever the box finds is fixed before the
-version exists.
+**The order is the protocol. The box comes before the tag.** PyPI cannot be taken back, so a version names
+a commit that already runs live.
 
 ## 1. Prepare
 
-- [ ] The notes are staged ahead of the cut as `CHANGELOG.md` `## [Unreleased]` lines. At the cut, write the release body from them into a file outside the repo (the session scratchpad), shaped like the last release's (`gh release view`), for `gh release create --notes-file`.
-- [ ] Check every capability phrase in the notes against what shipped (0.8.11 shipped "read-only API/webapp" after the control plane landed).
-- [ ] Bump the version in `pyproject.toml`, `uv.lock` (the version hunk only), `CITATION.cff`, the `README.md` badge and the `CHANGELOG.md` entry.
-- [ ] Count the commits since the last tag by type, and quote the same count everywhere it appears.
-- [ ] Delete each migration the last release landed on the box: its module and its `MIGRATIONS` row.
+- [ ] Write the release body from `CHANGELOG.md` `## [Unreleased]` into a scratchpad file, shaped like the
+      last release's (`gh release view`); check every capability phrase against what shipped.
+- [ ] Bump the version in `pyproject.toml`, `uv.lock` (the version hunk only), `CITATION.cff` and `CHANGELOG.md`.
+- [ ] Delete each migration the last release landed on the box: its module and its `MIGRATIONS` row
+      (`application/maintenance/migrate.py`).
 
 ## 2. Commit and gate the COMMITTED tree
 
-- [ ] Stage by path or by hunk; other sessions share this tree. Cut hunk patches **with context**:
-      a zero-context `git apply --cached --unidiff-zero` places a hunk by line number alone and can
-      land a block inside the wrong statement without any error.
-- [ ] Gate a worktree at the release commit, never the working tree, which holds other sessions' edits:
-      `CI=1 python scripts/gate.py` there, plus `python scripts/gate.py --release`.
-- [ ] A rewrite of an unpushed commit changes its hash, so re-check every hash `CHANGELOG.md` cites.
+- [ ] Stage by path or by hunk, with context (never `--unidiff-zero`); other sessions share this tree.
+- [ ] Gate a worktree at the release commit, never the working tree: `CI=1 python scripts/gate.py` there,
+      plus `python scripts/gate.py --release`.
+- [ ] A rewrite of an unpushed commit changes its hash: re-check every hash `CHANGELOG.md` cites.
 
-## 3. Push `main` and wait for CI
-
-- [ ] `git push origin main`, then wait for CI on that commit to go green.
+## 3. Push `main`, wait for CI green on that commit.
 
 ## 4. Deploy `main` to the box and verify there (`/potter-box`)
 
-- [ ] Back up the data root first: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
-- [ ] `git diff <last tag> -- docs/specs/data-root.generated.json` names every survivor whose shape
-      moved: survivors are migrated, so each ships a migration in
-      `application/maintenance/migrate.py::MIGRATIONS`, which `update.sh` stages and proves before it
-      writes. A BREAKING run-data shape deploys as `update.sh <tag> --reset`; survivors stay, and a
-      cache that no longer loads is dropped either way.
-- [ ] Deploy `main` as `/potter-box` says, which owns the commands, the sudo and the TermNorm restart.
-- [ ] Verify on the box: health on 127.0.0.1 and on the public host, both units active,
+- [ ] Back up the data root: `tar -C /var/lib -czf ~/backups/promptpotter-data-pre-vX.Y.Z-<stamp>.tar.gz promptpotter`.
+- [ ] `git diff <last tag> -- docs/specs/data-root.generated.json` names every survivor whose shape moved;
+      each ships a migration in `MIGRATIONS`, which `update.sh` stages and proves before it writes. A
+      BREAKING run-data shape deploys as `update.sh <tag> --reset`.
+- [ ] Deploy as `/potter-box` says. Verify: health on 127.0.0.1 and on the public host, both units active,
       `offer_faults()` empty for the unit's `DATASET_OFFER`, `update.sh`'s `landed: proven N file(s)` line.
-- [ ] Anything that fails here is fixed on `main`, and steps 2 to 4 run again.
+- [ ] Anything that fails here is fixed on `main`; steps 2 to 4 run again.
 
 ## 5. Tag, publish, confirm
 
 - [ ] `git tag -a vX.Y.Z -m "vX.Y.Z" <commit>` → `git push origin vX.Y.Z`.
-- [ ] `gh release create vX.Y.Z --title "…" --notes-file <the body file>` fires
-      `publish.yml`, which checks the tag against `pyproject.toml` and `CITATION.cff` before uploading.
-- [ ] Confirm that `https://pypi.org/pypi/promptpotter/X.Y.Z/json` serves the version.
+- [ ] `gh release create vX.Y.Z --title "…" --notes-file <the body file>` fires `publish.yml`, which checks
+      the tag against `pyproject.toml` and `CITATION.cff` before uploading.
+- [ ] Confirm `https://pypi.org/pypi/promptpotter/X.Y.Z/json` serves the version.
 
 ## 6. Close out
 
