@@ -91,15 +91,8 @@
             "title": "Ruler Span"
           },
           "se": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Se"
+            "title": "Se",
+            "type": "number"
           },
           "theta": {
             "title": "Theta",

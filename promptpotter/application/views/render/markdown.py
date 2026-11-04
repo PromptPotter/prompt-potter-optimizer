@@ -14,7 +14,7 @@ from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.spend import RATE_PRICED_LABEL, calls_rate_priced
+from promptpotter.domain.spend import RATE_PRICED_LABEL, calls_rate_priced, usd_text
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
 from promptpotter.shared.composite import render_composite_fitness_block
 
@@ -75,14 +75,14 @@ def _render_round_cost(rd: RoundDigestView) -> str:
     for kind, bucket in rd.spend.by_kind.items():
         if not bucket.sent:
             if bucket.incurred_usd > 0:
-                bits.append(f"{kind} $0.0000 (${bucket.incurred_usd:.4f} replayed)")
+                bits.append(f"{kind} {usd_text(0.0)} ({usd_text(bucket.incurred_usd)} replayed)")
             continue
         priced = (
-            f" + ${bucket.rate_priced_usd:.4f} {RATE_PRICED_LABEL}"
+            f" + {usd_text(bucket.rate_priced_usd)} {RATE_PRICED_LABEL}"
             if calls_rate_priced(bucket.rate_priced_usd)
             else ""
         )
-        bits.append(f"{kind} ${bucket.used_usd:.4f}{priced} {bucket.prefix.badge}")
+        bits.append(f"{kind} {usd_text(bucket.used_usd)}{priced} {bucket.prefix.badge}")
     by_bucket = f" ({' · '.join(bits)})" if bits else ""
     return f"- spend: {rd.spend.billed_beside_incurred()}{by_bucket}"
 
@@ -148,9 +148,9 @@ def _spent(spent: LedgerSpend) -> str:
     spend = spent.spend
     search = spend.search_incurred_usd
     return (
-        f"search {'unpriced' if search is None else f'${search:.4f}'} · "
-        f"billed ${spend.total_used_usd:.4f} · "
-        f"{RATE_PRICED_LABEL} ${spend.total_rate_priced_usd:.4f} · {spent.calls} calls · "
+        f"search {'unpriced' if search is None else usd_text(search)} · "
+        f"billed {usd_text(spend.total_used_usd)} · "
+        f"{RATE_PRICED_LABEL} {usd_text(spend.total_rate_priced_usd)} · {spent.calls} calls · "
         f"{spend.total_tokens_used} tokens · {spent.worked_s:.0f}s worked"
     )
 

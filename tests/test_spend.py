@@ -118,7 +118,7 @@ from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.campaign_result import line_run
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
@@ -456,6 +456,7 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             "anthropic.claude-haiku-4-5-v1:0": row(0.000001, 0.000005, "bedrock"),
             "openrouter/openrouter/auto": row(0.000002, 0.000004, "openrouter"),
             "orphan-model": {"input_cost_per_token": 0.000001},
+            "openai/half-listed": {"input_cost_per_token": 0.000001},
         }
     }
     (tmp_path / "rates.json").write_text(json.dumps(listed), encoding="utf-8")
@@ -473,6 +474,8 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             ("openai/gpt-oss-20b", "openrouter", Rate(0.00000004, 0.00000015)),
             ("openai/gpt-oss-120b", "groq", Rate(0.00000015, 0.0000006)),
             ("gpt-4o", "openai", Rate(0.0000025, 0.00001, 0.000003125, 0.00000025)),
+            # A row listing one side is unpriced, never zero on the other.
+            ("half-listed", "openai", None),
         ):
             assert lookup(model, provider) == rate, (
                 f"{provider}/{model}: a rate belongs to the provider-model pair, not the model alone"
@@ -582,7 +585,6 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         workspace(tmp_path / "ungraded"),
         pipeline_schema([]),
         [],
-        control=RunControl(book=unbounded),
         client=backend_client(
             tmp_path / "jobs", execution="in_process", in_process_run=ran_ungraded
         ),
@@ -798,7 +800,6 @@ async def _walk(
                 control=_control_pausing(
                     lambda: pause_after_call is not None and len(returned) >= pause_after_call,
                     held_lookahead=armed,
-                    book=book,
                 ),
                 client=backend_client(stores.jobs_dir, max_cells_in_flight=max_cells),
             )
@@ -1201,8 +1202,10 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     async def round_calls() -> None:
         await call_mod.llm_call(
             [{"role": "user", "content": "q"}],
-            config={"provider": "openai", "model": "m"},
+            node="checkin",
             context=call_mod.LLMCallContext(cache=loop_reuse),
+            provider="openai",
+            model="m",
         )
         with judge_call.bind_cache(judge_reuse):
             await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")
@@ -1234,7 +1237,6 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         reread,
         backend_id="reread",
         scorer=_HIT,
-        control=RunControl(book=arm),
         client=backend_client(built_stores.jobs_dir, max_cells_in_flight=1),
     )
     # The arm's individual and the one the bench grades, every cell of each already filed.
@@ -1498,16 +1500,16 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         hold_moved(built_stores, hop, budget.only(MONEY_AXES))
 
     CycleEventLog.open(CycleDir(cycle_dir)).append(billed_call(1.0, input_tokens=9_000))
-    control = RunControl(book=_armed(built_stores, hop, declared, jobs))
-    assert control.budget_tripped() is None, (
+    book = _armed(built_stores, hop, declared, jobs)
+    assert budget_stop(book) is None, (
         "a run that declared NOTHING still holds a book, which stays silent until a ceiling exists"
     )
     declare(Budget(usd=0.50))
-    assert control.budget_tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
+    assert budget_stop(book) == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
     CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
-    assert control.budget_tripped() == StopReason.SPEND_BUDGET, "a launch swept the ceiling"
+    assert budget_stop(book) == StopReason.SPEND_BUDGET, "a launch swept the ceiling"
     declare(Budget(tokens=5_000))
-    assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
+    assert budget_stop(book) == StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
     session = loop_session(built_stores, pipeline_schema([]), [], hop=hop)
     config = _budgeted(Budget(usd=0.025, rounds=50))
     declare(Budget(rounds=3))
@@ -1515,10 +1517,10 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     assert (bounded.optimization.budget.rounds, pause_at) == (3, None), (
         "a mid-run round cap reached no loop"
     )
-    assert control.budget_tripped() is None, "a lifted ceiling still governed the run"
+    assert budget_stop(book) is None, "a lifted ceiling still governed the run"
     # Another PROCESS's reshare lands on the cycle's ledger, behind this process's own write of it.
     CycleEventLog.open(CycleDir(cycle_dir)).append(CycleShareRecord(allotment=Budget(usd=0.50)))
-    assert control.budget_tripped() == StopReason.SPEND_BUDGET, (
+    assert budget_stop(book) == StopReason.SPEND_BUDGET, (
         "a share another process moved was hidden from the running book"
     )
     declare(Budget(rounds=None))
@@ -1551,14 +1553,13 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         step_rounds=None,
     )
     moved_book = _armed(built_stores, moved, caps, registry)
-    control = RunControl(book=moved_book)
-    assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
+    assert budget_stop(moved_book) == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
     dispatcher = CommandDispatcher(built_stores, registry)
     armed = _change_run_limits(dispatcher, moved, Budget(usd=0.50))
     assert armed.usd == pytest.approx(0.50), (
         "the trace holds no ceiling a replay could stop the run at"
     )
-    assert control.budget_tripped() == StopReason.TOKEN_BUDGET, (
+    assert budget_stop(moved_book) == StopReason.TOKEN_BUDGET, (
         "a USD raise lifted the token ceiling"
     )
     assert moved_book.allotment.usd == pytest.approx(0.50), (
@@ -1964,7 +1965,6 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         pipeline_schema([]),
         [],
         scorer=_HIT,
-        control=RunControl(book=clock),
         client=remote,
     )
 
@@ -1983,7 +1983,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         f"the cell ran {waited:.0f}s: its envelope, not the run's clock, bounded it"
     )
     clock.opened -= 31.0
-    assert cut_session.state.control.budget_tripped() == StopReason.WALL_CLOCK, (
+    assert budget_stop(clock) == StopReason.WALL_CLOCK, (
         "a run past its wall clock was not stopped on it"
     )
 

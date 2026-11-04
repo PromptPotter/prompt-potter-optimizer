@@ -66,7 +66,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     view = build_hard_samples(
         build_observations(cycle.rounds),
         ruler,
-        frontier=None if frontier is None or frontier.se is None else (frontier.theta, frontier.se),
+        frontier=None if frontier is None else (frontier.theta, frontier.se),
         arm_theta=arm_thetas(cycle.rounds),
         parent_grades=parent_grades(cells),
         slots=session.bank.slot_of,

@@ -69,13 +69,12 @@ class InjectionBreakdown:
     dropped: dict[str, int] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class LLMCallContext:
+    cache: LLMReuseCache
     ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
-    # Consulted only when non-``None``, so omitting it silently re-spends.
-    cache: LLMReuseCache | None = None
     injections: InjectionBreakdown = field(default_factory=InjectionBreakdown)
 
 
@@ -150,13 +149,9 @@ class _Call:
         return keyed_client(self.merged["provider"])
 
 
-def _merged_config(
-    node: str | None, config: dict[str, Any] | None, overrides: dict[str, Any]
-) -> dict[str, Any]:
-    if config is None:
-        config = dict(llm_node_manifest(node)[1]) if node else {}
-    merged = {**_LLM_DEFAULTS, **config, **overrides}
-    if node and (specimen := resolve_node_override(node)).model:
+def _merged_config(node: str, overrides: dict[str, Any]) -> dict[str, Any]:
+    merged = {**_LLM_DEFAULTS, **llm_node_manifest(node)[1], **overrides}
+    if (specimen := resolve_node_override(node)).model:
         merged["model"] = specimen.model
         if specimen.provider:
             merged["provider"] = specimen.provider
@@ -327,27 +322,19 @@ def _call_record(
 async def llm_call(
     messages: list[dict[str, str]],
     *,
-    node: str | None = None,
-    config: dict[str, Any] | None = None,
+    node: str,
+    context: LLMCallContext,
     trace_meta: dict[str, Any] | None = None,
     response_model: type[BaseModel] | None = None,
     response_schema: dict[str, Any] | None = None,
-    context: LLMCallContext | None = None,
     **overrides: Any,
 ) -> LLMResponse:
-    if context is None:
-        context = LLMCallContext()
-    label = node or "llm_call"
-    merged = _merged_config(node, config, overrides)
-
-    cache_key: str | None = None
-    replayed: LLMResponse | None = None
-    if context.cache is not None:
-        cache_key = _reuse_key(merged, messages, response_model, response_schema)
-        replayed = _replay(context.cache, cache_key, label=label)
+    merged = _merged_config(node, overrides)
+    cache_key = _reuse_key(merged, messages, response_model, response_schema)
+    replayed = _replay(context.cache, cache_key, label=node)
 
     call = _Call(
-        label=label,
+        label=node,
         merged=merged,
         messages=messages,
         response_model=response_model,
@@ -362,17 +349,17 @@ async def llm_call(
         if response_model is not None and isinstance(response.parsed, dict):
             response.parsed = response_model.model_validate(response.parsed)
         duration_s = call.elapsed_s()
-        logger.debug("optimizer_reuse hit for %s (%s)", label, cache_key)
+        logger.debug("optimizer_reuse hit for %s (%s)", node, cache_key)
     else:
         _announce(call)
         response = await _provider_reply(call)
         duration_s = call.elapsed_s()
 
     # A cache hit is metered too, once per campaign: incurred cost stays invariant to cache history.
-    first = cache_key is not None and claim_call_price(cache_key)
+    first = claim_call_price(cache_key)
     if replayed is not None and first:
         emit_token_usage(
-            node=label,
+            node=node,
             kind="optimizer",
             usage=response.usage,
             provider=merged["provider"],
@@ -386,7 +373,7 @@ async def llm_call(
 
     # Never cache an empty response: a TRANSIENT provider failure would replay forever, tenant-wide.
     usable = bool(response.content.strip()) or response.parsed is not None
-    if replayed is None and context.cache is not None and cache_key is not None and usable:
+    if replayed is None and usable:
         context.cache.save(cache_key, response)
 
     if context.ledger is not None:
@@ -408,7 +395,7 @@ async def run_optimizer_node(
     temperature: float | None = None,
     response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
-    context: LLMCallContext | None = None,
+    context: LLMCallContext,
 ) -> tuple[Any, str, int]:
     prompt = template.compile_prompt(**prompt_vars)
     if user_content is not None:

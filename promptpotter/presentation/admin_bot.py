@@ -31,7 +31,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.run_records import Device
-from promptpotter.domain.spend import RATE_PRICED_LABEL
+from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 from promptpotter.shared.tls import tls_context
@@ -122,8 +122,8 @@ def _render_install_spend() -> str:
     torn = sum(1 for r in rows if r.unreadable)
     lines = [
         f"{len(rows)} account{'' if len(rows) == 1 else 's'}, "
-        f"${sum(r.spent.total.used_usd for r in rows):.4f} billed + "
-        f"${sum(r.spent.total.rate_priced_usd for r in rows):.4f} {RATE_PRICED_LABEL} / "
+        f"{usd_text(sum(r.spent.total.used_usd for r in rows))} billed + "
+        f"{usd_text(sum(r.spent.total.rate_priced_usd for r in rows))} {RATE_PRICED_LABEL} / "
         f"{sum(r.spent.total.used_tokens for r in rows):,} tokens"
         + (f" (excludes {torn} unreadable)" if torn else "")
     ]
@@ -140,11 +140,11 @@ def _render_install_spend() -> str:
         if spent.unpriced_tokens:
             flags.append(f"{spent.unpriced_tokens:,} unpriced")
         if r.spent.user.used_tokens:
-            flags.append(f"${r.spent.user.sent_usd:.4f} on its own keys")
+            flags.append(f"{usd_text(r.spent.user.sent_usd)} on its own keys")
         if over.usd_amount or over.token_amount:
-            flags.append(f"⚠ ${over.usd_amount:.4f}/{over.token_amount:,} past its coupon")
+            flags.append(f"⚠ {usd_text(over.usd_amount)}/{over.token_amount:,} past its coupon")
         lines.append(
-            f"{who}: ${spent.used_usd:.4f} billed + ${spent.rate_priced_usd:.4f} "
+            f"{who}: {usd_text(spent.used_usd)} billed + {usd_text(spent.rate_priced_usd)} "
             f"{RATE_PRICED_LABEL} / {spent.used_tokens:,} tok · "
             f"{r.campaigns} campaigns / {r.cycles} cycles"
             + (f" · {'; '.join(flags)}" if flags else "")

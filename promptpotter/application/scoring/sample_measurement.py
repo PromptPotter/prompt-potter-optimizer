@@ -40,6 +40,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     Billed,
     Reported,
     SendBound,
+    require_spend_book,
 )
 from promptpotter.infrastructure.llm.telemetry import (
     current_round,
@@ -587,7 +588,7 @@ async def _send_cell(
     bound = await cell_bound(session, wire_params)
     # The run's wall clock bounds every cell, so one still open at its edge is cut.
     budget_s = client.cell_envelope_s(sample, wire_params)
-    if (left := session.state.control.book.clock_left()) is not None:
+    if (left := require_spend_book(f"cell {sample.id}").clock_left()) is not None:
         if left <= 0.0:
             raise SendRefusedError(
                 f"cell {sample.id}: the launch's wall clock is spent, so nothing was sent",

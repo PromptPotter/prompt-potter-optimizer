@@ -29,7 +29,7 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
     modal_answer_share,
 )
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import Budget, usd_text
 from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
@@ -358,7 +358,7 @@ async def _screen(
             f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
             f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
             f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
-            f"{'--' if reading.cost_per_pass is None else f'${reading.cost_per_pass:.4f}'}/pass"
+            f"{'--' if reading.cost_per_pass is None else usd_text(reading.cost_per_pass)}/pass"
             + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
         )
 

@@ -551,12 +551,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     # The determinism clamp outranks every other layer and keys the bank.
     reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
 
-    def ask(
-        content: str,
-        config: dict[str, Any],
-        clamp: DeterminismClamp | None = None,
-        **override: Any,
-    ) -> Any:
+    def ask(content: str, clamp: DeterminismClamp | None = None, **override: Any) -> Any:
         """One optimizer call as an entry sends it; the body that reached the provider."""
 
         async def entered() -> None:
@@ -570,7 +565,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             ):
                 await call_mod.llm_call(
                     [{"role": "user", "content": content}],
-                    config=config,
+                    node="checkin",
                     context=call_mod.LLMCallContext(cache=reuse),
                     **override,
                 )
@@ -579,13 +574,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         return offline.llm.sent[-1]
 
     pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
-    clamped = {"provider": "openrouter", "model": "m", "temperature": 0.9}
     for clamp, (temperature, seed, route) in (
         (pinned, (0.0, 7, ["Alibaba"])),
         (pinned.model_copy(update={"route_order": ["Baidu"]}), (0.0, 7, ["Baidu"])),
         (None, (0.7, None, None)),
     ):
-        sent = ask("q", clamped, clamp, temperature=0.7)
+        sent = ask("q", clamp, provider="openrouter", model="m", temperature=0.7)
         assert (sent["temperature"], sent.get("seed"), sent["provider"].get("order")) == (
             temperature,
             seed,
@@ -677,8 +671,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         assert filed_under(routing) != filed_under({**routing, "route_order": ["Elsewhere"]}), (
             f"{model}: two hosts answered under one key"
         )
-        for opted, route in (({}, pin), ({"route_order": []}, None)):
-            sent = ask(model, {"provider": gateway, "model": model, **opted})
+        opts: tuple[tuple[dict[str, Any], Any], ...] = (({}, pin), ({"route_order": []}, None))
+        for opted, route in opts:
+            sent = ask(model, provider=gateway, model=model, **opted)
             assert sent.get("provider", {}).get("order") == route, (
                 f"{model} {opted}: an optimizer call went to another host than the one it is "
                 "filed under"

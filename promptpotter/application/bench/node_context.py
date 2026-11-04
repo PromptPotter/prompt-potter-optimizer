@@ -47,6 +47,7 @@ from promptpotter.domain.run_standing import walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -285,10 +286,12 @@ class Bounds(CycleRead):
         return self._cycle.config.optimization.budget.rounds
 
     def spend_cap_usd(self) -> float | None:
-        return self._cycle.session.state.control.spend_cap_usd()
+        """This cycle's share of the campaign's ceiling, which ``spend_used_usd`` counts toward."""
+        return require_spend_book("the run's spend cap").allotment.usd
 
     def spend_used_usd(self) -> float:
-        return self._cycle.session.state.control.spend_used_usd()
+        """This cycle's, in the meter's units; a FLOOR while unpriced tokens are outstanding."""
+        return require_spend_book("the run's spend").usd_metered
 
 
 class Target(CycleRead):

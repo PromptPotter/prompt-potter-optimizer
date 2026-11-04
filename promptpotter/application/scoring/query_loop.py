@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.run_phase_control import Flight
+from promptpotter.application.run_phase_control import Flight, budget_stop
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
@@ -759,9 +759,11 @@ class _ScoringPhase[K: Hashable]:
         # A cancelled call is the pause's own doing: the throttle wait polls the same flag.
         skip = session.state.control.skip_requested()
         pause = cut or session.state.control.pause_requested()
-        tripped = session.state.control.budget_tripped()
-        if self.unbounded or walk.rereads_ahead(len(walk.results)):
-            tripped = None
+        tripped = (
+            None
+            if self.book is None or self.unbounded or walk.rereads_ahead(len(walk.results))
+            else budget_stop(self.book)
+        )
         return _TurnState(
             head=head,
             settle=settle,

@@ -628,6 +628,13 @@ def bound_spend_book() -> SpendBook | None:
     return _BOOK.get()
 
 
+def require_spend_book(what: str) -> SpendBook:
+    book = _BOOK.get()
+    if book is None:
+        raise RuntimeError(f"{what}: no spend book is bound, so no admitted ceiling bounds it")
+    return book
+
+
 @contextmanager
 def spending_under(book: SpendBook) -> Iterator[SpendBook]:
     token = _BOOK.set(book)
@@ -664,11 +671,7 @@ def filed(label: CallLabel) -> CallLabel:
 
 
 def _bound_book(what: str) -> SpendBook:
-    book = _BOOK.get()
-    if book is None:
-        raise RuntimeError(
-            f"{what}: no spend book is bound, and a paid call is never sent unadmitted"
-        )
+    book = require_spend_book(what)
     billing_ledger(what)
     return book
 

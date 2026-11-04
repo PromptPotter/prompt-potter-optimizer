@@ -29,6 +29,7 @@ from promptpotter.domain.phases import (
     stop_reason_outcome,
 )
 from promptpotter.domain.run_records import CycleRecord, RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
@@ -134,12 +135,14 @@ def declare_run_stop(
         Path(observers.cycle_dir), observers.dashboard.state.run_limits
     ).budget
     meter = ceiling_meter(session.purpose)
+    # The cycle's share record, which its book reads live; none lands before admission's.
+    held = session.store.campaigns.read_cycle_share(session.hop)
     spend = run_spend_view(
         observers.dashboard.spend_metered(meter),
         campaign_metered=session.store.campaigns.metered_spend(session.campaign_id, meter),
         usd_cap=budget.usd,
         token_cap=budget.tokens,
-        share=session.state.control.book.allotment,
+        share=Budget() if held is None else held.allotment.only(MONEY_AXES),
     )
     ledger = observers.callbacks.ledger
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:

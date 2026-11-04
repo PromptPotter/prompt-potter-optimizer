@@ -132,7 +132,7 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
         live=True,
     )
     observers.arm_spend_book(book)
-    session.state.control = replace(session.state.control, cycle_dir=book.cycle_dir, book=book)
+    session.state.control = replace(session.state.control, cycle_dir=book.cycle_dir)
     # The rate-limit countdown polls it too — the one blocking seam that otherwise ignores a pause.
     set_abort_check(session.state.control.pause_requested)
 
@@ -146,10 +146,10 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
 
 def rebase_held(session: Session, parent: CycleHop) -> None:
     """The job follows the fork, and its share stops counting *parent*'s metered spend, which the campaign's holds."""
-    book, held = session.state.control.book, session.state.held
+    held = session.state.held
     if held is None:
         raise RuntimeError("a run rebases only over what admission held for it")
-    spent = session.store.campaigns.cycle_metered(parent, book.meters)
+    spent = session.store.campaigns.cycle_metered(parent, ceiling_meter(session.purpose))
     job_registry = JobRegistry.attach(session.store.jobs_dir)
     with job_registry.admission_gate():
         job = job_registry.get(held.job_id)

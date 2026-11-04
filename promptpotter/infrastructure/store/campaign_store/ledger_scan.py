@@ -452,8 +452,6 @@ class StandingProposal(NamedTuple):
     # Where the generation landed, never where its phase opened: everything it read, a critique
     # restated late included, was on the ledger by then.
     at_offset: int
-    # Where its round was entered on the same ledger: the boundary a replay of the round is cut at.
-    entered_at: int | None = None
 
 
 _Pass = tuple[int, str, MeasurementRole]
@@ -572,7 +570,6 @@ class _Standing:
     def __init__(self) -> None:
         self.at_offset = -1
         self._held = StandingRounds.none()
-        self._entered_at: dict[int, int] = {}
         self._arms = AnnouncedArms()
         self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
 
@@ -583,7 +580,6 @@ class _Standing:
         held, offset = self._held, self.at_offset
         match record:
             case RoundEnteredRecord():
-                self._entered_at[rnd] = offset
                 rewound = rnd if record.rewound else None
                 self._held = held.displaced(rnd, rewound)._replace(
                     entered=_earliest(held.entered, rnd),
@@ -611,7 +607,7 @@ class _Standing:
             case RoundProposedRecord() if record.submitted:
                 held.submitted[rnd] = record
             case RoundProposedRecord():
-                held.proposals[rnd] = StandingProposal(record, offset, self._entered_at.get(rnd))
+                held.proposals[rnd] = StandingProposal(record, offset)
             case ArmRecord():
                 self._arms.announce(record)
                 self._cells.setdefault((rnd, record.arm), {})

@@ -19,7 +19,7 @@ from promptpotter.application.initialization.loop_start import (
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import own_level
 from promptpotter.application.scoring.closed_rounds import cycle_instrument, walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
@@ -45,6 +45,7 @@ from promptpotter.domain.verify_pass import (
     VerifyStrategy,
 )
 from promptpotter.infrastructure.ledger import ledger_chain
+from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, at_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,
@@ -397,13 +398,12 @@ async def verify_on_saturation(
     round_num: int,
     accuracy: float | None,
     winner_id: str | None,
-    control: RunControl,
     seed: int,
 ) -> VerifyOutcome | None:
     if accuracy is None or accuracy < 1.0 or not winner_id:
         return None
     # Asked here: the loop consults its own ceiling only at the next round boundary, after this.
-    if control.budget_tripped() is not None:
+    if budget_stop(require_spend_book("the saturation verify")) is not None:
         return None
     ledger_path = stores.campaigns.ledger(hop)
     mine = [banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]

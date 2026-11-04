@@ -89,7 +89,7 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
     for name, body in raw.items():
         if not isinstance(body, dict):
             continue
-        if "input_cost_per_token" not in body and "output_cost_per_token" not in body:
+        if "input_cost_per_token" not in body or "output_cost_per_token" not in body:
             continue
         out[name] = {k: body[k] for k in _KEEP_FIELDS if k in body}
     return out
@@ -161,11 +161,11 @@ def _models_to_rates(models: dict[str, Any]) -> RateTable:
             continue
         in_c = body.get("input_cost_per_token")
         out_c = body.get("output_cost_per_token")
-        if in_c is None and out_c is None:
+        if in_c is None or out_c is None:
             continue
         rate = Rate(
-            input=float(in_c or 0.0),
-            output=float(out_c or 0.0),
+            input=float(in_c),
+            output=float(out_c),
             cache_write=_optional_cost(body, "cache_creation_input_token_cost"),
             cache_read=_optional_cost(body, "cache_read_input_token_cost"),
             max_output=_as_tokens(body.get("max_output_tokens")),
@@ -400,8 +400,12 @@ def _fetch_route_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeil
 
 def _host_tiers(pricing: dict[str, Any]) -> tuple[list[PriceTier], float]:
     def tier(start: int, prices: dict[str, Any], base: dict[str, Any]) -> PriceTier:
-        def rate(*keys: str) -> float:
-            return max(float(prices.get(k, base.get(k)) or 0.0) for k in keys)
+        def rate(price: str, surcharge: str) -> float:
+            # An unlisted surcharge is none; an unlisted price leaves the host unpriced.
+            listed = [prices.get(k, base.get(k)) for k in (price, surcharge)]
+            if listed[0] is None:
+                raise ValueError(f"no {price} price is listed")
+            return max(float(v) for v in listed if v is not None)
 
         return PriceTier(
             start, rate("prompt", "input_cache_write"), rate("completion", "internal_reasoning")
@@ -414,7 +418,7 @@ def _host_tiers(pricing: dict[str, Any]) -> tuple[list[PriceTier], float]:
     for override in overrides:
         if _by_length(override):
             tiers.append(tier(int(override["min_prompt_tokens"]), override, pricing))
-    return tiers, float(pricing.get("request") or 0.0)
+    return tiers, float(pricing.get("request", 0.0))
 
 
 def _by_length(override: dict[str, Any]) -> bool:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.domain.phases import (
@@ -19,7 +19,6 @@ from promptpotter.domain.run_records import (
     PausedEffect,
     SkippedEffect,
 )
-from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import emit_command_ack
 from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import Controls
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.command_kinds import SubmitArmsPayload
+    from promptpotter.infrastructure.llm.spend_book import SpendBook
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,6 @@ class RunControl:
     # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
     # one arming would multiply concurrency at every nested level.
     enclosing: tuple[Path, ...] = ()
-    book: SpendBook = field(default_factory=unbounded_spend_book)
     # Held for the whole run and never spent (a screen has no round); ``None`` reads the inbox.
     held_lookahead: int | None = None
 
@@ -168,15 +167,8 @@ class RunControl:
                 effect=LookaheadTakenEffect(cells=asked.cells, auto=asked.auto),
             )
 
-    def budget_tripped(self) -> StopReason | None:
-        """Read between samples and at a round boundary; whether a call may be SENT is the book's."""
-        refused = self.book.exhausted()
-        return None if refused is None else REFUSAL_STOPS[refused]
 
-    def spend_used_usd(self) -> float:
-        """This cycle's, in the meter's units; a FLOOR while unpriced tokens are outstanding."""
-        return self.book.usd_metered
-
-    def spend_cap_usd(self) -> float | None:
-        """This cycle's share of the campaign's ceiling, which ``spend_used_usd`` counts toward."""
-        return self.book.allotment.usd
+def budget_stop(book: SpendBook) -> StopReason | None:
+    """Read between samples and at a round boundary; whether a call may be SENT is the book's."""
+    refused = book.exhausted()
+    return None if refused is None else REFUSAL_STOPS[refused]

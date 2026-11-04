@@ -11,6 +11,7 @@ from promptpotter.application.optimizer_manifest import SelectedOptimizer, check
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.spend import usd_text
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
@@ -136,7 +137,7 @@ class _RoundShort:
         priced = (
             f"a cell of this dataset has billed ${self.price:.5f} on these models"
             if self.billed
-            else f"the spend book admits a cell at up to ${self.price:.4f}"
+            else f"the spend book admits a cell at up to {usd_text(self.price)}"
         )
         return (
             f"One round of {optimizer} can measure {self.cells} cells off the {self.search} "
@@ -176,18 +177,21 @@ def check_cap_funds_round(
     if short.billed:
         return PreflightWarning(
             code="spend_cap_below_round",
-            title=f"spend cap ${short.cap:.2f} is under one round's expected cost (${short.need:.2f})",
+            title=(
+                f"spend cap {usd_text(short.cap)} is under one round's expected cost "
+                f"({usd_text(short.need)})"
+            ),
             detail=(
                 f"{short.costing(selected.name)}, so a full round is expected to cost "
-                f"${short.need:.2f} and this run to stop on `spend_budget` inside round 1 unless an "
+                f"{usd_text(short.need)} and this run to stop on `spend_budget` inside round 1 unless an "
                 f"eliminator cuts arms short. {advice}"
             ),
         )
     return PreflightWarning(
         code="spend_cap_below_round",
-        title=f"spend cap ${short.cap:.2f} is under one round's ceiling (${short.need:.2f})",
+        title=f"spend cap {usd_text(short.cap)} is under one round's ceiling ({usd_text(short.need)})",
         detail=(
-            f"{short.costing(selected.name)}, so only a cap of ${short.need:.2f} is certain to "
+            f"{short.costing(selected.name)}, so only a cap of {usd_text(short.need)} is certain to "
             "close a round. A cell usually bills well under its bound and an eliminator cuts arms "
             "short, so this run may still close rounds — or stop on `spend_budget` inside round 1 "
             f"with none closed. {advice}"
@@ -297,7 +301,7 @@ def refuse_arm_below_round(
             else "the backend bounds no cell"
         )
         raise PayloadInvalidError(
-            f"{where} cannot be shown to close one round under its ${cap:.2f}: no archived run "
+            f"{where} cannot be shown to close one round under its {usd_text(cap)}: no archived run "
             f"prices a cell on these models and {bound}. Nothing was minted. Measure the origin "
             "once with a plain `new` on this dataset, or bound the arms by tokens or rounds with "
             "no dollar cap.",
@@ -307,7 +311,7 @@ def refuse_arm_below_round(
     if short is None:
         return
     raise PayloadInvalidError(
-        f"{where} cannot close one round: its ${cap:.2f} is under the ${short.need:.2f} "
+        f"{where} cannot close one round: its {usd_text(cap)} is under the {usd_text(short.need)} "
         f"{'one round is expected to cost' if short.billed else 'certain to close one'}. "
         f"{short.costing(selected.name)}. Nothing was minted: raise the head-to-head's budget, "
         "which every arm runs, or size this arm's round down with its own knobs.",

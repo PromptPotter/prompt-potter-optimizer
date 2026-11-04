@@ -38,11 +38,7 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import (
-    bind_spend_book,
-    bound_spend_book,
-    unbounded_spend_book,
-)
+from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     filed_as,
@@ -147,8 +143,6 @@ def arm_diagnostic_scoring(
     # A run is refused at its mint (`jobs/mint.py::refuse_unrunnable`); a pass outside one, here.
     refuse_below_reasoning_floor(node_config_items(dict(session.pipeline_params)))
     scope_memory(session)
-    if bound_spend_book() is None:
-        bind_spend_book(unbounded_spend_book())
     populate_session_scoring(
         session,
         campaign_config,

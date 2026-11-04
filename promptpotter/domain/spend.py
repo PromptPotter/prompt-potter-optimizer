@@ -726,9 +726,9 @@ class SpendRollup(StrictModel):
         share = self.search_replay_share
         replayed = "" if share is None else f" · {share:.0%} of the search replayed"
         return (
-            f"billed ${self.total_used_usd:.4f} · "
-            f"{RATE_PRICED_LABEL} ${self.total_rate_priced_usd:.4f} · "
-            f"incurred ${self.total_incurred_usd:.4f}{replayed}"
+            f"billed {usd_text(self.total_used_usd)} · "
+            f"{RATE_PRICED_LABEL} {usd_text(self.total_rate_priced_usd)} · "
+            f"incurred {usd_text(self.total_incurred_usd)}{replayed}"
         )
 
     @property

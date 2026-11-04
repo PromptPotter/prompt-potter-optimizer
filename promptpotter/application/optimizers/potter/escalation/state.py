@@ -110,7 +110,7 @@ def _improved(
 ) -> tuple[bool, str]:
     """The scale is NOT fixed per cycle: a layer entered before the ruler warmed compares composites."""
     if current is not None and entry is not None and (lift := current.minus(entry)) is not None:
-        return lift > (current.se or 0.0), "theta"
+        return lift > current.se, "theta"
     scale = "theta_appeared" if current is not None and entry is None else "composite"
     return current_comp > entry_comp, scale
 

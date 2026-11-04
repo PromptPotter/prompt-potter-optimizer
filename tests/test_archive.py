@@ -138,7 +138,7 @@ from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import spending_under
+from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
@@ -1605,13 +1605,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 RoundProposedRecord(round=2, consumed="", proposals=[], submitted=False)
             )
         set_cycle(cycle, line=line)
-        before = round_packages(cycle, line, callbacks)
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             with (
                 mock.patch.object(query_loop, "measure_sample", _answered),
-                spending_under(cycle.session.state.control.book),
+                spending_under(unbounded_spend_book()),
             ):
+                before = round_packages(cycle, line, callbacks)
                 branch_id = asyncio.run(
                     apply_correction(cycle, line, before, repair_bank, callbacks)
                 )

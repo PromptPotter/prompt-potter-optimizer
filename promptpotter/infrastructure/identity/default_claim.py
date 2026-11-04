@@ -22,24 +22,19 @@ def maybe_claim_default(
     projects_root: Path,
     user_id: str,
     marker_path: Path,
-) -> bool:
+) -> None:
+    if marker_path.is_file():
+        return
     user_dir = projects_root / user_id
     default_dir = projects_root / "default"
-    renamed = False
-
-    if not marker_path.is_file():
-        if default_dir.is_dir() and not user_dir.exists():
-            try:
-                default_dir.rename(user_dir)
-                renamed = True
-                logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
-            except OSError as exc:
-                logger.warning("Failed to claim default tenant for %s: %s", user_id, exc)
-        claim = DefaultClaim(user_id=user_id, claimed_at=utcnow_iso(), renamed=renamed)
-        write_json(marker_path, claim.model_dump())
-        if user_dir.is_dir():
-            _rebind_campaigns(CampaignStore(WorkspaceDir(user_dir)), user_id)
-    return renamed
+    renamed = default_dir.is_dir() and not user_dir.exists()
+    if renamed:
+        default_dir.rename(user_dir)
+        logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
+    claim = DefaultClaim(user_id=user_id, claimed_at=utcnow_iso(), renamed=renamed)
+    write_json(marker_path, claim.model_dump())
+    if user_dir.is_dir():
+        _rebind_campaigns(CampaignStore(WorkspaceDir(user_dir)), user_id)
 
 
 def registered_user_id(marker_path: Path) -> str | None:

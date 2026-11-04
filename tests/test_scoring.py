@@ -275,7 +275,13 @@ from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
 from promptpotter.domain.wounds import fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
-from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
+from promptpotter.infrastructure.llm.spend_book import (
+    Hold,
+    SpendBook,
+    require_spend_book,
+    spending_under,
+    unbounded_spend_book,
+)
 from promptpotter.infrastructure.llm.telemetry import (
     at_round,
     reset_cycle_ledger,
@@ -901,6 +907,7 @@ def _peer_cycle(
     bench: int = 0,
     backend_id: str = "",
     control: RunControl | None = None,
+    book: SpendBook | None = None,
     **optimization: Any,
 ) -> Iterator[tuple[Cycle, RunCallbacks]]:
     """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
@@ -974,7 +981,7 @@ def _peer_cycle(
                 cycle.optimizer, determinism=cycle.config.optimization.determinism
             ):
                 run_init(cycle, callbacks)
-                with spending_under(cycle.session.state.control.book):
+                with spending_under(unbounded_spend_book() if book is None else book):
                     yield cycle, callbacks
         finally:
             reset_cycle_ledger(bound)
@@ -1251,7 +1258,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             even_cells,
             # A backend to file under, so the kept population replays and only offspring are bought.
             backend_id="capo-e2e",
-            control=RunControl(book=book),
+            book=book,
             panel_gate=panel_gate,
         ) as (cycle, callbacks):
             offline.llm.says = capo_says
@@ -1545,7 +1552,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             composed_nodes,
             paid_then_cut,
             backend_id="theta-cut-e2e",
-            control=RunControl(book=theta_book),
+            book=theta_book,
             panel_gate="off",
         ) as (cycle, callbacks),
     ):
@@ -1700,7 +1707,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         )
         # A spent budget stops the pass and names the bound; the held passes beside it stand.
         earlier = origin_pass.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
-        book = session.state.control.book
+        book = require_spend_book("the bench journey")
         unspent, book.hold_of = book.hold_of, Hold(Budget(usd=0.0), book.reserve)
         short = graded(earlier)
         book.hold_of = unspent
@@ -2374,7 +2381,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         (0.6248, 0.3498, 0.198),
     ]
 
-    def high_water(comp: float | None, thetas: list[float], se: float | None) -> HighWater:
+    def high_water(comp: float | None, thetas: list[float], se: float) -> HighWater:
         # Round i read thetas[i] on one series; the peak is the FIRST round at the max.
         origin = thetas[0] if thetas else None
         rest = thetas[1:]
@@ -2384,14 +2391,12 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             theta_round=max(range(len(thetas)), key=thetas.__getitem__) if thetas else None,
         )
 
-    def climb(*, with_se: bool) -> list[str]:
+    def climb() -> list[str]:
         ladder, actions = Ladder(), []
         for upto, (comp, _, se) in enumerate(stall_rounds):
             asked = ask_l2_escalation(
                 ladder,
-                best=high_water(
-                    comp, [t for _, t, _ in stall_rounds[: upto + 1]], se if with_se else None
-                ),
+                best=high_water(comp, [t for _, t, _ in stall_rounds[: upto + 1]], se),
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
@@ -2402,10 +2407,9 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             ladder = l2_fired(ladder, asked.l2)
         return actions
 
-    assert climb(with_se=True) == ["fire_l2", "fire_l2", "fire_l2", "fire_l3"], (
+    assert climb() == ["fire_l2", "fire_l2", "fire_l2", "fire_l3"], (
         "a θ step inside its own SE is a stall"
     )
-    assert NextAction.FIRE_L3 not in climb(with_se=False)
     # The SE bar applies on the θ scale only: a composite-scale verdict has no error term.
     series = level_series(0.34, [0.35, 0.60], ses=[0.20, 0.20])
 
@@ -2457,7 +2461,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     diag_asks = {
         ask_l2_escalation(
             ladder,
-            best=high_water(fitness, [], None),
+            best=high_water(fitness, [], 0.2),
             escalation_ladder=EscalationLadder.L1,
             l2_patience=l2_patience,
             l3_patience=l3_patience,
@@ -2525,7 +2529,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     def ask_at(fitness: float) -> LadderAsk:
         return ask_l2_escalation(
             landed,
-            best=high_water(fitness, [], None),
+            best=high_water(fitness, [], 0.2),
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=3,
             l3_patience=2,

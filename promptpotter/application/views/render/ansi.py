@@ -39,7 +39,7 @@ from promptpotter.domain.phase_views import (
     VerifyGradedView,
 )
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
-from promptpotter.domain.spend import CEILING_METER_LABELS, RATE_PRICED_LABEL
+from promptpotter.domain.spend import CEILING_METER_LABELS, RATE_PRICED_LABEL, usd_text
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
 
@@ -249,16 +249,16 @@ def to_text(view: PhaseView) -> str:
 
 def render_run_spend(v: RunSpendView) -> str:
     bits = [
-        f"billed ${v.billed_usd:.4f} (what the provider reported it charged)",
-        f"{RATE_PRICED_LABEL} ${v.rate_priced_usd:.4f} (calls no provider reported a charge for)",
-        f"incurred ${v.incurred_usd:.4f} (every cell priced, replays included)",
+        f"billed {usd_text(v.billed_usd)} (what the provider reported it charged)",
+        f"{RATE_PRICED_LABEL} {usd_text(v.rate_priced_usd)} (calls no provider reported a charge for)",
+        f"incurred {usd_text(v.incurred_usd)} (every cell priced, replays included)",
     ]
     counted = CEILING_METER_LABELS[v.meter]
     if v.usd_cap is not None:
-        share = "" if v.usd_share is None else f" of its ${v.usd_share:.2f} share"
+        share = "" if v.usd_share is None else f" of its {usd_text(v.usd_share)} share"
         bits.append(
-            f"campaign cap ${v.campaign_metered_usd:.4f} of ${v.usd_cap:.2f} {counted}, "
-            f"this cycle ${v.metered_usd:.4f}{share}"
+            f"campaign cap {usd_text(v.campaign_metered_usd)} of {usd_text(v.usd_cap)} "
+            f"{counted}, this cycle {usd_text(v.metered_usd)}{share}"
         )
     if v.token_cap is not None:
         share = "" if v.token_share is None else f" of its {v.token_share:,} share"

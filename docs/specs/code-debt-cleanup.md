@@ -41,6 +41,14 @@ acting.
   health sentence still reads `llm_only failed: llm_only: …`. Action: the message is the fault alone.
   **Rides with:** the next TermNorm change. **Re-test:** `git grep -n "failed: {" -- backend-api/api`
   in the TermNorm checkout.
+- **A skipped automatic verify is a log line**: `diagnostics/verify.py::verify_on_saturation` catches
+  `DiagnosticError` / `BankedSearchPointError` (no round scored the winner, its banked point does not
+  rebuild, no closed round 0, a pause before any cell, no scoreable fresh cell) into `logger.info`, and
+  `verify_candidate` re-opens the session from disk mid-loop. No verify record holds a skip: most raise
+  before `VerifyEnterView`, and propagating would stop a run over an optional pass. Action: the skip is
+  a refusal banked on the one pass that § One record shape for every scoring pass builds, served in its
+  can-run status. **Rides with:** that arc's first builder. **Re-test:**
+  `git grep -n "verify skipped" -- promptpotter/application/diagnostics/verify.py`.
 
 ## NEXT ARC
 
@@ -171,10 +179,6 @@ next run-data reshape.
   non-empty reply; the cache arrives by two carriers (`LLMCallContext.cache`, `bind_cache`). Action:
   `LLMReuseCache` owns replay, meter and save around the send, behind one carrier.
   **Re-test:** `git grep -n "def _replay(" -- promptpotter/application/bench/llm_call.py promptpotter/application/scoring/judges/call.py`.
-- **`llm_call` keeps defaults no caller uses**: `node=None` labels the call `"llm_call"`, `config=None`
-  makes the callee read `llm_node_manifest`, `LLMCallContext.cache=None` silently re-spends, while every
-  construction passes a cache. Action: `node`, `context`, `cache` required; `config` deleted.
-  **Re-test:** `git grep -n "LLMCallContext(" -- promptpotter`.
 - **`scoring/evaluators.py::Evaluator` is one class for two contracts** (`per_sample` async vs
   `per_round` sync, different kwargs) held apart by runtime guards (`_validate_evaluator`,
   `inspect.isawaitable`); its `Scope` collides with `campaign_config.Scope` and `data_root.Scope`.
@@ -183,28 +187,28 @@ next run-data reshape.
 
 **E. Absent is not zero.** **Rides with:** any pass in the files named; the first item moves what the
 loop decides, so it lands with an offline run.
-- **Two bars for "is this θ lift real"**: `potter/escalation/state.py::_improved` reads
-  `lift > (current.se or 0.0)` (one arm's se, absent as 0) while `potter/election.py::_lift` takes
-  `hypot` of both arms' and says never either alone. Action: one lift test on `AbilityReading`, read by
-  both. **Re-test:** `git grep -n "se or 0.0" -- promptpotter`.
-- **`llm/pricing.py::_models_to_rates` prices a missing side at zero** (`float(in_c or 0.0)`). Action: a
-  row missing either cost is unpriced. **Re-test:** read `_models_to_rates`.
-- **`domain/spend.py::usd_text` is "THE money wording" beside inline `${x:.Nf}` spellings at varying
-  precision** and a verbatim copy, `application/hierarchy.py::_usd`. `panels.py`'s spelling is
-  optimizer-prompt text, so moving it re-keys the digest. Action: money text through `usd_text`.
-  **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
+- **Three bars for "is this θ lift real"**: `potter/escalation/state.py::_improved` reads
+  `lift > current.se` (one arm's se), `potter/election.py::_lift` takes `hypot` of both arms', and
+  `potter/dispatch/injections/panels.py::detectable_rows` takes `a.se * sqrt(2)` (the frontier's se
+  for the parent's too). Both readings share cells, so none is the paired se. Action: one lift test on
+  `AbilityReading`, read by all three, its se decided in arc D (the election's bound). It moves what
+  the loop decides and shapes the optimizer prompt, so it lands with D's offline run and re-key.
+  **Re-test:** `git grep -n -E "lift > current.se|sqrt\(2" -- promptpotter/application/optimizers/potter`.
+- **Money text has no sub-cent rule, so two spellings stand beside `domain/spend.py::usd_text`**: a
+  cell's price at five places (`preflight.py::_RoundShort.costing`,
+  `cli/commands/head_to_head_price.py::_human`), which `usd_text`'s four would print as `$0.0000` for
+  a cheap model, and `panels.py`'s optimizer-prompt spelling, which re-keys the digest when moved.
+  `usd_text` and webapp `fmtUsd` are one rule and change together. **Open (operator):** the rule
+  itself — fixed places pad a round figure (`$0.50` reads `$0.5000` today), so significant digits
+  under a dollar is one candidate. Then both sites join `usd_text`; the panel rides the next accepted
+  re-key. **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
 
 **Singles.**
-- **`identity/default_claim.py::maybe_claim_default` writes the claim marker after a failed rename** of
-  `projects/default` (`renamed=False`, logged only), and never retries, so terminal and browser resolve
-  different tenants. Survivor data; rides with § On the box (one email, two accounts). Action: the
-  marker lands only with the rename. **Re-test:** `git grep -n -A3 "except OSError" -- promptpotter/infrastructure/identity/default_claim.py`.
-- **`initialization/loop_start.py::arm_diagnostic_scoring` binds `unbounded_spend_book()` where no book
-  is bound**: a scoring pass its caller forgot to admit runs with no ceiling instead of raising.
-  Action: every diagnostic entry binds its admitted book (`paid_pass`), and an unbound one raises as
-  a run's does (`telemetry.py::bound_ledger`). **Re-test:** `git grep -n "unbounded_spend_book()" -- promptpotter`.
-- **`ledger_scan.py::StandingProposal.entered_at` has no writer and no reader.** Action: delete.
-  **Re-test:** `git grep -n -w entered_at -- promptpotter`.
+- **`infrastructure/identity/paths.py::DefaultClaim.renamed` is written and never read**: the marker
+  `default_claim.py::maybe_claim_default` writes is read only for its `user_id`
+  (`registered_user_id`). It is survivor data (its `store/data_root.py` row), so the delete is a landing migration that rewrites each marker without the
+  field, run once and then deleted ([`../decisions.md`](../decisions.md) § 0011). **Rides with:** the
+  next survivor-row reshape. **Re-test:** `git grep -n "\.renamed" -- promptpotter` finds no reader.
 - **`held_out` (`InnerTask`, `domain/cells.py`) and `Sample.bench_only` name one concept**, translated in
   `ResolvedPanel.samples`. Rides with the "held-out" rename (§ One record shape for every scoring pass).
 
@@ -526,9 +530,7 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   `PassStop`; a failed verify is inferred from a bare exit), the served can-run answer (only
   `BenchStatus.can_grade`), where `paid_pass` is taken, the spend bucket and source stamp, where the
   reading is joined, the chat bracket, the embedded entry (bench only).
-- A skipped automatic verify is never reported: `diagnostics/verify.py::verify_on_saturation` logs its
-  `DiagnosticError` at info and drops it, and re-opens the session from disk mid-loop. The served
-  can-run status and a banked refusal on the one pass are where the skip lands.
+- A skipped automatic verify (§ URGENT) lands as a refusal banked on the one pass.
 - Target: one `VerificationPass` keyed by `VerificationKind`, one enter view and one graded view, one
   phase, one fold keyed `(kind, arm.key)`, a served can-run status for both. **Open (operator): one verb
   with a row choice, or two verbs over the one pass** — the comparator and subject differ, so the two

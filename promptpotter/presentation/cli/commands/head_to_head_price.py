@@ -10,6 +10,7 @@ from promptpotter.application.head_to_head_price import (
     read_head_to_head_plan,
 )
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.new import head_to_head_command
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
@@ -26,7 +27,7 @@ def _arm_line(arm: ArmPrice) -> str:
     refused = "" if arm.refused is None else f"  REFUSED: {arm.refused}"
     return (
         f"  {address:<34} {arm.optimizer:<8} {arm.rounds:>3} rounds"
-        f"  {arm.search_cells:>5} + {arm.bench_cells:<4} calls  ${arm.usd:>7.2f}"
+        f"  {arm.search_cells:>5} + {arm.bench_cells:<4} calls  {usd_text(arm.usd):>8}"
         f"  {_clock(arm.wall_clock_s):>7} ({_clock(arm.serial_s)} serial){refused}"
     )
 
@@ -43,7 +44,7 @@ def _human(price: HeadToHeadPrice) -> str:
         f"  {name:<8} unpriced: no campaign here called it in a round, so its arms leave its "
         "own calls out"
         if held is None
-        else f"  {name:<8} ${held.usd:.4f} and {held.seconds:.0f}s a round, over {held.rounds} "
+        else f"  {name:<8} {usd_text(held.usd)} and {held.seconds:.0f}s a round, over {held.rounds} "
         f"rounds of {held.campaigns} campaign(s)"
         for name, held in price.optimizers.items()
     ]
@@ -55,7 +56,7 @@ def _human(price: HeadToHeadPrice) -> str:
             *optimizers,
             "Arms (calls = search + held-out cells; a point's arms are held equal on search):",
             *map(_arm_line, price.arms),
-            f"Total ${price.usd:.2f} · {_clock(price.wall_clock_s)} "
+            f"Total {usd_text(price.usd)} · {_clock(price.wall_clock_s)} "
             f"({_clock(price.serial_s)} serial), every arm minted after the last.",
             "Mint them, one head-to-head per budget point:",
             f"  {mints}",

@@ -984,8 +984,8 @@ def level_series(
     origin: float | None,
     levels: Sequence[float | None],
     *,
-    origin_se: float | None = None,
-    ses: Sequence[float | None] | None = None,
+    origin_se: float = 0.2,
+    ses: Sequence[float] | None = None,
     cold: bool = False,
     caveat: ThetaCaveat | None = None,
 ) -> LevelSeries:
@@ -1000,7 +1000,7 @@ def level_series(
         excluded=(),
     )
 
-    def read(theta: float | None, se: float | None) -> AbilityReading | None:
+    def read(theta: float | None, se: float) -> AbilityReading | None:
         if theta is None:
             return None
         return AbilityReading(
@@ -1016,7 +1016,7 @@ def level_series(
             pinned_share=None,
         )
 
-    per_round = [None] * len(levels) if ses is None else ses
+    per_round = [origin_se] * len(levels) if ses is None else ses
     return LevelSeries(
         stamp=stamp,
         levels={0: read(origin, origin_se)}
@@ -1039,8 +1039,8 @@ def cycle_result(
     billed: float | None = None,
     bench_origin: float | None = 0.5,
     bench_levels: list[float | None] | None = None,
-    origin_se: float | None = None,
-    ses: list[float | None] | None = None,
+    origin_se: float = 0.2,
+    ses: list[float] | None = None,
     cold: bool = False,
     caveat: ThetaCaveat | None = None,
     **overrides: Any,

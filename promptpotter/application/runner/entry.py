@@ -56,7 +56,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import HeldBudget
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
-from promptpotter.infrastructure.llm.spend_book import SpendBook
+from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
 from promptpotter.infrastructure.producer_lock import release_cycle
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
@@ -121,7 +121,7 @@ async def _run_single_cycle(
         session = cycle.session
         finalize_loop_state(cycle, cb)
 
-        book = session.state.control.book
+        book = require_spend_book("the bench's set-aside")
         if (
             campaign_config.bench_trigger != "manual"
             and session.state.scoring.require_partition().bench

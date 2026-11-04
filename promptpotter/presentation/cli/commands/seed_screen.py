@@ -4,6 +4,7 @@ import argparse
 
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
@@ -37,7 +38,7 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         f"  floor {'--   ' if r.class_floor is None else f'{r.class_floor:.3f}'}"
         f"  {'--' if r.latency_median is None else f'{r.latency_median:.1f}s'} med"
         f"/{'--' if r.latency_mean is None else f'{r.latency_mean:.1f}s'} mean"
-        f"  {'--' if r.cost_per_pass is None else f'${r.cost_per_pass:.4f}'}/pass"
+        f"  {'--' if r.cost_per_pass is None else usd_text(r.cost_per_pass)}/pass"
         for r in rows
     )
     bad = [r.seed for r in rows if r.verdict == "reject"]

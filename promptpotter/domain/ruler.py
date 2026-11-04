@@ -350,7 +350,7 @@ class AbilityReading(FrozenModel):
     """A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing."""
 
     theta: float
-    se: float | None
+    se: float
     ruler: RulerStamp
     # The cells θ was READ on: a reading on none is no reading.
     cells: int = Field(ge=1)

@@ -1062,9 +1062,8 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
         return []
     theta = ""
     if (a := b.digest.ability) is not None:
-        se = f" ±{a.se:.3f}" if a.se is not None else ""
         theta = (
-            f"; frontier θ {a.theta:+.3f}{se} ({a.scale(named=False)} — each "
+            f"; frontier θ {a.theta:+.3f} ±{a.se:.3f} ({a.scale(named=False)} — each "
             f"{b.measured_unit}'s latest cell, whoever measured it)"
         )
     if not _theta_fit_on_formula(b):
@@ -1089,10 +1088,10 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
 
 
 def detectable_rows(b: InjectionBundle) -> int | None:
-    """How many more of the round's rows than the parent an edit must win to separate from it (95%/80%); ``None`` with no θ se."""
+    """How many more of the round's rows than the parent an edit must win to separate from it (95%/80%); ``None`` with no θ or a zero se."""
     a = b.digest.ability
     keys = b.digest.latest_sample_keys
-    if a is None or a.se is None or a.se <= 0.0 or not keys:
+    if a is None or a.se <= 0.0 or not keys:
         return None
     # A contrast against the parent, so both arms' error enters; equal precision is assumed.
     mde = min_detectable_effect(a.se * math.sqrt(2.0))

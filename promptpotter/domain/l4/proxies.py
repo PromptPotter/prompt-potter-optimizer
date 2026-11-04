@@ -135,8 +135,8 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
     """One arm's half of a paired difference (two add in quadrature). A PRECISION, never a penalty or rank key."""
     trajectory = _trajectory(result)
     rounds = [] if trajectory is None else trajectory[1]
-    ses = [level.se for level in rounds if level.se is not None]
-    if not ses or len(ses) < len(rounds):
+    ses = [level.se for level in rounds]
+    if not ses:
         return None
     # Mean of the SEs, never `σ/√n` (the levels NEST); the origin's cancels in `variant - origin`.
     return float(sum(ses) / len(ses))

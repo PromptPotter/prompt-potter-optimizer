@@ -9,6 +9,7 @@ from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import Controller, RoundContext
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     emit_origin_round,
@@ -26,6 +27,7 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phases import ErrorRecord, StopLoop, StopReason
 from promptpotter.domain.run_records import RebaseRequest
 from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round
 
 logger = logging.getLogger(__name__)
@@ -132,9 +134,9 @@ async def run_round_loop(
                 if target_stop is not None:
                     return LoopEnd(target_stop)
                 # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
-                budget_stop = cut or session.state.control.budget_tripped()
-                if budget_stop is not None:
-                    return LoopEnd(budget_stop)
+                tripped = cut or budget_stop(require_spend_book("a round boundary"))
+                if tripped is not None:
+                    return LoopEnd(tripped)
 
                 if diagnosing is not None:
                     diagnosed = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)

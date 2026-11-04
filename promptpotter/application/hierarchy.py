@@ -52,7 +52,7 @@ from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
 from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.said import Said
-from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
+from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import billed_spend, campaign_spend
@@ -75,10 +75,6 @@ _UNMINTED = "Its line course has no mint record, so its rounds and standing are 
 
 def _course_label(mint: CourseKind, cycle_id: str) -> str:
     return f"{_MINT_WORDS[mint]} ·{cycle_id.rpartition('_')[2][:6]}"
-
-
-def _usd(amount: float) -> str:
-    return f"${amount:.4f}" if amount < 1 else f"${amount:.2f}"
 
 
 def _figure(key: FigureKey, label: str, value: str, sub: str | None = None) -> Figure:
@@ -113,10 +109,10 @@ def _spend_row(
     return _figure(
         key,
         label,
-        f"{'≥' if spent.bill_is_floor else ''}{_usd(spent.billed_usd)}",
-        f"up to {_usd(unreported)} more unreported"
+        f"{'≥' if spent.bill_is_floor else ''}{usd_text(spent.billed_usd)}",
+        f"up to {usd_text(unreported)} more unreported"
         if unreported is not None
-        else f"{_usd(spent.rate_priced_usd)} {RATE_PRICED_LABEL}"
+        else f"{usd_text(spent.rate_priced_usd)} {RATE_PRICED_LABEL}"
         if spent.calls_rate_priced
         else None,
     )

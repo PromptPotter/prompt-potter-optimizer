@@ -652,8 +652,6 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         "nested frontier fits are correlated: never sigma/sqrt(n); and the origin's SE cancels "
         "inside `variant - origin` and stays out"
     )
-    for unsharp in (cyc([0.30]), cyc([0.30, 0.60], ses=[0.30, None])):
-        assert mean_parent_level_se(unsharp) is None, "a fabricated 0.0 SE reads infinitely sharp"
 
     # The scored term is the held-out lift, the bench levels held forward the same way less the
     # bench origin's 0.40: churn on the search split's θ scores ZERO.

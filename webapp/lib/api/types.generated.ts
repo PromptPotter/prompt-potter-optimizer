@@ -592,7 +592,7 @@ export interface SeriesReading {
 /** A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing. */
 export interface AbilityReading {
   theta: number;
-  se: number | null;
+  se: number;
   ruler: RulerStamp;
   cells: number;
   ruler_span: number | null;

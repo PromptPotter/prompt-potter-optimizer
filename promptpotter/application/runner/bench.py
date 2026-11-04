@@ -55,6 +55,7 @@ from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutc
 from promptpotter.domain.run_standing import declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.store.archive_queries import bench_reads
 from promptpotter.shared.measurement_context import (
     IndividualWalk,
@@ -570,7 +571,7 @@ def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
 
 def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     """The set-aside opens at the ORIGIN's price; a selection that writes more would end its pass short."""
-    book = session.state.control.book
+    book = require_spend_book("the selection's set-aside")
     if not book.set_aside_usd:
         return
     costs = [
