@@ -7,7 +7,13 @@ import type { NodeSchemaReading } from "@/lib/types";
 import { NOT_SEPARABLE, readPaired, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
 import { Term } from "@/components/ui";
-import { fmtInterval, fmtPct1, fmtThetaSe, fmtTokens, fmtUnit, PLACEHOLDER } from "@/lib/format";
+import {
+  fmtLiftBand,
+  fmtPct1,
+  fmtThetaSe,
+  fmtUnit,
+  PLACEHOLDER,
+} from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 
 export function SearchpointDrillIn({
@@ -39,7 +45,6 @@ export function SearchpointDrillIn({
   const bench = reading?.bench ?? null;
   const pair = reading?.vs_reference ? readPaired(reading.vs_reference) : null;
   const paired = pair?.read ? pair.lift : null;
-  const lift = paired?.estimate ?? null;
   return (
     <>
       {stats}
@@ -93,14 +98,14 @@ export function SearchpointDrillIn({
                 hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
             )}
-            {lift != null && (
+            {paired != null && (
               <Fact
                 k="lift vs parent"
                 hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                 v={
                   <>
-                    {fmtUnit("delta", lift.value)} {fmtInterval("delta", lift.ci_lo, lift.ci_hi)}
-                    {lift.side !== "spans" ? (
+                    {fmtLiftBand(paired.measurand.unit, paired.estimate)}
+                    {paired.estimate.side !== "spans" ? (
                       " clears 0"
                     ) : (
                       <span className="l4-eff-flat"> — {NOT_SEPARABLE}</span>
@@ -116,7 +121,7 @@ export function SearchpointDrillIn({
                 v={fmtThetaSe(reading.ability.theta, reading.ability.se)}
               />
             )}
-            {composite != null && <Fact k="composite" v={fmtUnit("composed", composite)} />}
+            {composite != null && <Fact k="composite" v={fmtUnit("score", composite)} />}
             <Fact
               k="winner"
               v={
@@ -133,7 +138,7 @@ export function SearchpointDrillIn({
             {reading.tokens != null && (
               <Fact
                 k="measured on"
-                v={`${fmtTokens(reading.tokens.input)} in · ${fmtTokens(reading.tokens.output)} out${
+                v={`${fmtUnit("tokens", reading.tokens.input)} in · ${fmtUnit("tokens", reading.tokens.output)} out${
                   reading.panel.cached ? ` · ${reading.panel.cached} replayed` : ""
                 }`}
                 hint={TERMS.cache_replayed}

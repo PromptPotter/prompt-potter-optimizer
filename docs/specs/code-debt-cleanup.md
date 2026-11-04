@@ -24,12 +24,6 @@ acting.
     404s, and no served answer names the campaign a draft's Start minted, so no poll can follow it
     there. Action: one read of a Start off its job (`CampaignLaunch.draft_id`, its stage, then
     `Job.hop`). **Re-test:** Start a queued check-in; the view lands on the minted campaign unreloaded.
-- **The phone draws the run's figures twice**: `shell/Views.tsx::ViewGlances` (any time more than one view
-  is open; the Dashboard preset opens six) repeats the masthead `RunMasthead::RunFacts` `FigureRow`,
-  both reading the same served `Said` figures. Action: delete the strip; a masthead figure some
-  `FAMILIES[f].glance` names becomes that view's door (`open(family)` already moves an open view to
-  newest and scrolls to it), lit while open; I12 and `components/CLAUDE.md` § "Where is this run" follow.
-  **Re-test:** `git grep -n "ViewGlances" -- webapp/components`.
 - **A backend wire skew is discovered as a 100% degraded origin, not refused at launch** — the box's
   TermNorm read `answer_field` while PromptPotter sent `answer_fields` (2026-10-31); the origin paid
   for every cell to learn it. Action: the connector's health/probe serves the wire contract it
@@ -249,7 +243,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
-- **The wide masthead wraps to about 110px** at 1280px (setup line plus seven figures).
 
 ### The phone pass (2026-10-31)
 
@@ -1010,9 +1003,6 @@ word's `git grep -c` for that sense is 0.
   - The bar and the sidebar lead with the 6-cell 0%; the 39% shows only as the overlap series.
   - Collapse must be judged against the truth labels the cells hold, and against the parent's answers on
     the same cells. An engine decision: prove it with an offline run.
-- **The Candidates card shows empty axes while its lineage read is pending**: `CandidatesCard` gates on
-  `dash` only. On a cold first page `viewedNode` is undefined, so the chart draws no bars and no
-  `ReadState`, and reads as broken. Gate on the lineage read's own state.
 - **The server's shutdown notice counts runs it does not host**: `main.py::_telegram_shutdown_notice`
   reads `JobRegistry.list_running()`, which holds the machine's CLI runs too. A server stopped beside a
   CLI campaign reports it "stopped … in flight" and says "Resume from the campaign once it is back up",
@@ -1048,8 +1038,8 @@ word's `git grep -c` for that sense is 0.
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
   - The "adds no arms ⇒ off" rule sits in `pipeline_resolve.py`, not on `SelectedOptimizer`.
-  - `HoverCard` opens on tap only through focus (fragile on iOS); the check-in picklist button's
-    accessible name runs slug and meta together; two open check-ins share one slug.
+  - The check-in picklist button's accessible name runs slug and meta together; two open check-ins
+    share one slug.
 - **Seen drawing the pools in place**:
   - A named pack that leaves the shelf makes `BlockPoolInitializer.held` raise `block_pack_not_found`,
     so the draft read itself fails instead of offering the pack to unname.
@@ -1066,7 +1056,7 @@ word's `git grep -c` for that sense is 0.
     shared node selection.
   - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
   - `LibrarySource` fakes "authored" as a cited work with no author or year.
-  - `ui/MenuCheck` takes a `title=` prop; filter buttons are ~28px, under the 44px touch target.
+  - `ui/MenuCheck` takes a `title=` prop, which `CandidatesToolbar` fills with teaching prose.
 - **Seen framing snippets in a prompt**:
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).

@@ -4,14 +4,13 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
+import type { SubtreeCampaign, SubtreeCourse, SubtreeEntry } from "@/lib/api/types";
 import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
 import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
-import { encodeCyclePath } from "@/lib/ids";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
 import { useDebounced } from "@/lib/hooks/useDebounced";
-import { shownData, useRead, type ReadFailure } from "@/lib/hooks/useRead";
+import { shownData, useRead, type ReadFailure, type ReadResult } from "@/lib/hooks/useRead";
 import { useRegistry } from "@/lib/state/registry";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
@@ -28,6 +27,7 @@ const EMPTY: CampaignTree = { root: null, loaded: false, failure: null };
 
 interface ViewedLineage {
   tree: SubtreeCampaign | null;
+  treeRead: ReadResult<SubtreeEntry>;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;
@@ -49,18 +49,29 @@ interface TreeAddressing {
 const TreeAddressingContext = createContext<TreeAddressing | null>(null);
 const ViewedLineageContext = createContext<ViewedLineage | null>(null);
 
+function useTreeRead(
+  address: string | null,
+  mask: SubtreeMask | null,
+  moment: SubtreeMoment | null,
+  resting: ReadonlySet<string>,
+): ReadResult<SubtreeEntry> {
+  const rests = address !== null && resting.has(address);
+  // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
+  // Kept by address: a mask or moment re-keys the read, and the campaign's last tree stands meanwhile.
+  return useRead(address ? subtreeRead(address, mask, moment) : null, {
+    auth: true,
+    intervalMs: rests ? undefined : LINEAGE_POLL_MS,
+    keep: address,
+  });
+}
+
 function useTree(
   address: string | null,
   mask: SubtreeMask | null,
   moment: SubtreeMoment | null,
   resting: ReadonlySet<string>,
 ): CampaignTree {
-  const rests = address !== null && resting.has(address);
-  // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
-  const read = useRead(address ? subtreeRead(address, mask, moment) : null, {
-    auth: true,
-    intervalMs: rests ? undefined : LINEAGE_POLL_MS,
-  });
+  const read = useTreeRead(address, mask, moment, resting);
   const served = shownData(read);
   const root = served?.level === "campaign" ? served : null;
   const failure = read.status === "failed" && root === null ? read.failure : null;
@@ -129,7 +140,9 @@ export function LineageProvider({
     [at, leafPath],
   );
 
-  const viewedTree = useTree(viewedAddress, viewedMask, viewedMoment, resting).root;
+  const treeRead = useTreeRead(viewedAddress, viewedMask, viewedMoment, resting);
+  const served = shownData(treeRead);
+  const viewedTree = served?.level === "campaign" ? served : null;
   const index = useMemo(() => indexLineage(viewedTree), [viewedTree]);
 
   const maskActive = useMemo(
@@ -140,6 +153,7 @@ export function LineageProvider({
   const viewed = useMemo<ViewedLineage>(
     () => ({
       tree: viewedTree,
+      treeRead,
       index,
       lens,
       setLens,
@@ -147,7 +161,7 @@ export function LineageProvider({
       maskLabel,
       scoringMaskActive: maskOpen,
     }),
-    [viewedTree, index, lens, maskActive, maskLabel, maskOpen],
+    [viewedTree, treeRead, index, lens, maskActive, maskLabel, maskOpen],
   );
 
   const addressing = useMemo<TreeAddressing>(
@@ -169,15 +183,10 @@ export function useViewedLineage(): ViewedLineage {
 }
 
 // The viewed leaf's course entry: its `state` is the one word and next step every surface reads.
-// That state is the head's under any mask or moment, so the last landing's stands across a re-key.
 export function useViewedCourse(): SubtreeCourse | null {
   const { index } = useViewedLineage();
   const { viewedPath } = useWorkspace();
-  const landed = useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);
-  const [kept, setKept] = useState(landed);
-  if (landed !== null && landed !== kept) setKept(landed);
-  const address = viewedPath ? encodeCyclePath(viewedPath) : null;
-  return landed ?? (kept?.address === address ? kept : null);
+  return useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);
 }
 
 // A sidebar row's campaign, by its address.

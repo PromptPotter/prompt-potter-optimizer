@@ -6,7 +6,7 @@ import {
   SPEND_KINDS,
   type SpendKind,
 } from "@/lib/api/types.generated";
-import { fmtTokens, fmtUnit, fmtUsd } from "@/lib/format";
+import { fmtUnit, fmtUsd } from "@/lib/format";
 
 export interface SpendLine {
   key: SpendKind;
@@ -42,7 +42,7 @@ export function allowanceCaveats(l: LifetimeSpend): string[] {
   const lines: string[] = [];
   if (l.bill_is_floor) {
     lines.push(
-      `${fmtTokens(l.unpriced_tokens)} billed by a model with no known price: the dollar figure undercounts, so the token unit binds.`,
+      `${fmtUnit("tokens", l.unpriced_tokens)} billed by a model with no known price: the dollar figure undercounts, so the token unit binds.`,
     );
   }
   const priced = ratePricedText(l.rate_priced_usd, l.calls_rate_priced);
@@ -99,10 +99,11 @@ export function capLines(v: SpendView): string[] {
     );
   }
   if (v.budgetTokens != null && v.campaignTokens != null) {
-    const share = v.shareTokens != null ? ` of its ${fmtTokens(v.shareTokens)} share` : "";
+    const tok = (n: number) => fmtUnit("tokens", n);
+    const share = v.shareTokens != null ? ` of its ${tok(v.shareTokens)} share` : "";
     lines.push(
-      `campaign cap ${fmtTokens(v.campaignTokens)} of ${fmtTokens(v.budgetTokens)} ${counted}, ` +
-        `this cycle ${fmtTokens(m.metered_tokens)}${share}`,
+      `campaign cap ${tok(v.campaignTokens)} of ${tok(v.budgetTokens)} ${counted}, ` +
+        `this cycle ${tok(m.metered_tokens)}${share}`,
     );
   }
   return lines;

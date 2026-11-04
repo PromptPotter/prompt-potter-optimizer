@@ -22,7 +22,6 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.phases import StopOutcome, StopReason, WalkEnd, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellGrade, WalkedCell
-from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
@@ -535,6 +534,13 @@ class CostAbsence(StrEnum):
     ZERO_SPEND = "zero_spend"
 
 
+COST_ABSENCE_WORDS: dict[CostAbsence, str] = {
+    CostAbsence.NO_LIFT: "no lift to price",
+    CostAbsence.UNPRICED_TOKENS: "search tokens unpriced",
+    CostAbsence.ZERO_SPEND: "no search spend",
+}
+
+
 class LiftCost(FrozenModel):
     """The headline lift per USD its SEARCH incurred, or why there is none."""
 
@@ -551,8 +557,8 @@ class LiftCost(FrozenModel):
         return self
 
     @classmethod
-    def of(cls, vs_origin: PairedReading, spend: SpendRollup | None) -> LiftCost:
-        usd = None if spend is None else spend.search_incurred_usd
+    def of(cls, vs_origin: PairedReading, usd: float | None) -> LiftCost:
+        """*usd* is what the search incurred, `None` on unpriced search tokens."""
         absent = (
             CostAbsence.NO_LIFT
             if vs_origin.headline is None

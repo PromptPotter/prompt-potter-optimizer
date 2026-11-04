@@ -658,7 +658,7 @@ def close_round(
         cycle.session.bank.slot_of,
         cycle.difficulty,
         lives=cycle.config.optimization.lives,
-        outlay=LineOutlay(search_usd=None, elapsed_s=None),
+        outlay=LineOutlay(search_usd=None, worked_s=None),
     )
 
 

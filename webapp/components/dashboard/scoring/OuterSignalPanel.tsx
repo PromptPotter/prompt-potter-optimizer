@@ -2,7 +2,7 @@
 
 import { memo, useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
-import type { RoundAdvance, ServedRound } from "@/lib/api/types";
+import type { MeasuredLift, RoundAdvance, ServedRound } from "@/lib/api/types";
 import { PRECISION_VERDICT_ADVICE, ROUND_ADVANCE_INFO } from "@/lib/api/types.generated";
 import {
   CardFrame,
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { liftOf, type LiftSide } from "@/lib/derivations";
-import { fmtInterval, fmtLogits, fmtUnit, sideTone } from "@/lib/format";
+import { fmtLiftBand, fmtLogits, sideTone } from "@/lib/format";
 
 type Lift = {
   round: number;
@@ -23,6 +23,7 @@ type Lift = {
   lo: number;
   hi: number;
   side: LiftSide;
+  unit: MeasuredLift["measurand"]["unit"];
   label: string;
   advance: RoundAdvance;
 };
@@ -36,18 +37,22 @@ function liftsOf(rounds: ServedRound[]): Lift[] {
     const lift = liftOf(lead);
     const label = lead.b?.address.arm?.label;
     if (!lift || !label) continue;
+    const { estimate } = lift;
     out.push({
       round: r.round,
-      lift: lift.value,
-      lo: lift.ci_lo,
-      hi: lift.ci_hi,
-      side: lift.side,
+      lift: estimate.value,
+      lo: estimate.ci_lo,
+      hi: estimate.ci_hi,
+      side: estimate.side,
+      unit: lift.measurand.unit,
       label,
       advance,
     });
   }
   return out;
 }
+
+const bandOf = (d: Lift) => fmtLiftBand(d.unit, { value: d.lift, ci_lo: d.lo, ci_hi: d.hi });
 
 function AdvanceBadge({ advance }: { advance: RoundAdvance }) {
   const { label, sentence } = ROUND_ADVANCE_INFO[advance];
@@ -59,7 +64,7 @@ function AdvanceBadge({ advance }: { advance: RoundAdvance }) {
 }
 
 function LiftRow({ d, domain, latest }: { d: Lift; domain: IntervalDomain; latest: boolean }) {
-  const value = `${fmtUnit("delta", d.lift)} ${fmtInterval("delta", d.lo, d.hi)}`;
+  const value = bandOf(d);
   return (
     <IntervalRow
       className={cx(sideTone(d.side), latest && "ov-latest")}
@@ -109,8 +114,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
         <>
           <p className="note-lede">
             <AdvanceBadge advance={latest.advance} /> Round {latest.round}&rsquo;s pick{" "}
-            {latest.label} lifts <strong>{fmtUnit("delta", latest.lift)}</strong>{" "}
-            {fmtInterval("delta", latest.lo, latest.hi)} over the origin, on the origin panel.
+            {latest.label} lifts <strong>{bandOf(latest)}</strong> over the origin, on the origin
+            panel.
           </p>
           <div className="ov-forest">
             {lifts.map((d) => (

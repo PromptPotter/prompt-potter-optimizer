@@ -20,6 +20,7 @@ from promptpotter.application.views.render.primitives import (
     overlap_series,
     render_pipeline_overlay,
 )
+from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
@@ -125,7 +126,7 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
             else "clears 0"
         )
         lines.append(
-            f"lift vs reference: {lift.value:+.3f} [{lift.ci_lo:+.3f}, {lift.ci_hi:+.3f}]"
+            f"lift vs reference: {lift_band_text(lift, reading.headline.measurand.unit)}"
             f" on {fmt_coverage(reading.coverage)}  |  {verdict}"
         )
 

@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 from typing import Any, assert_never
 
 from promptpotter.application.views.render.primitives import bench_readout, fmt_pct
+from promptpotter.domain.arm_reading import lift_band_text, lift_interval_text, lift_text
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
@@ -167,10 +168,6 @@ def chat_text(course: SubtreeCourse, unit: MeasuredUnit) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _signed(v: float | None) -> str:
-    return "—" if v is None else f"{v:+.3f}"
-
-
 def _band(lo: float | None, hi: float | None, fmt: Callable[[float], str]) -> str:
     return "" if lo is None or hi is None else f" [{fmt(lo)}, {fmt(hi)}]"
 
@@ -258,8 +255,7 @@ def _pair_line(pair: PairedReading, unit: MeasuredUnit) -> str:
     return " · ".join(
         [
             f"vs {against} {rate(lift.rate_a)} → {rate(lift.rate_b)}",
-            f"lift {_signed(estimate.value)} [{_signed(estimate.ci_lo)}, "
-            f"{_signed(estimate.ci_hi)}] {estimate.side}",
+            f"lift {lift_band_text(estimate, lift.measurand.unit)} {estimate.side}",
             *([f"flips +{flips.gained} -{flips.lost} ={flips.unchanged}"] if flips else []),
             f"on {unit_count(coverage.scored, unit)} both scored",
         ]
@@ -346,8 +342,8 @@ def _bench_readout(export: PromptExport) -> tuple[str, str]:
     lift = reading.headline
     if lift is None:
         return READING_STATE_INFO[reading.state].label, "—"
-    est = lift.estimate
-    return _signed(est.value), f"[{_signed(est.ci_lo)}, {_signed(est.ci_hi)}]"
+    est, unit = lift.estimate, lift.measurand.unit
+    return lift_text(est.value, unit), lift_interval_text(est.ci_lo, est.ci_hi, unit)
 
 
 def skill_md(export: PromptExport, p: Provenance) -> str:

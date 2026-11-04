@@ -69,14 +69,14 @@ export function HoverCard({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setAt(null);
     };
-    const onUp = (e: MouseEvent) => {
+    const onUp = (e: PointerEvent) => {
       if (!within(e.target as Node)) hide();
     };
     document.addEventListener("keydown", onKey);
-    document.addEventListener("mouseup", onUp);
+    document.addEventListener("pointerup", onUp);
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("pointerup", onUp);
     };
   }, [open, hide, within]);
 
@@ -90,6 +90,10 @@ export function HoverCard({
       tabIndex={focusable ? 0 : undefined}
       onMouseEnter={show}
       onMouseLeave={leave}
+      // A tap opens it itself: iOS focuses a tapped span only sometimes.
+      onPointerUp={(e) => {
+        if (e.pointerType !== "mouse") show();
+      }}
       onFocus={show}
       onBlur={(e) => {
         if (!within(e.relatedTarget)) hide();

@@ -22,7 +22,7 @@ import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { useLineageTree } from "@/lib/lineage";
-import { fmtInterval, fmtUnit, shortId, type MetricUnit } from "@/lib/format";
+import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
 import { type CyclePath, decodeCyclePath, encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { editsFor, pointKeyOf, useScenarioEdits } from "./config-edit";
 
@@ -81,7 +81,7 @@ function useChannelHead(
 export function useChannelModel(
   { channel, reading, headline }: CompareItem,
   run: HierarchyCampaign | null,
-  unit: MetricUnit,
+  metric: MetricFormat,
 ) {
   const { edits } = useScenarioEdits();
   const subject = channel.subject;
@@ -183,10 +183,10 @@ export function useChannelModel(
 
   const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
   const level = reading && {
-    value: withdrawn ? "?" : fmtUnit(unit, reading.value),
+    value: withdrawn ? "?" : fmtMetric(metric, reading.value),
     band: withdrawn
       ? "? · ? cells"
-      : `${fmtInterval(unit, reading.ci_lo, reading.ci_hi)} · ${reading.n_cells} cell${
+      : `${fmtMetricInterval(metric, reading.ci_lo, reading.ci_hi)} · ${reading.n_cells} cell${
           reading.n_cells === 1 ? "" : "s"
         }`,
   };

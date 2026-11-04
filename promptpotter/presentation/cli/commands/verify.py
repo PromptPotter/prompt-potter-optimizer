@@ -8,6 +8,7 @@ from promptpotter.application.diagnostics.verify import VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.command_kinds import PauseCyclePayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, command_address
@@ -74,8 +75,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         lines.append(f"  lift over C0: {READING_STATE_INFO[pair.state].sentence}")
     else:
         lifts = ", ".join(
-            f"{lift.measurand.key} {lift.estimate.value:+.3f} "
-            f"[{lift.estimate.ci_lo:+.3f}, {lift.estimate.ci_hi:+.3f}]"
+            f"{lift.measurand.key} {lift_band_text(lift.estimate, lift.measurand.unit)}"
             for lift in (pair.headline, *pair.beside)
         )
         lines.append(f"  lift over C0, paired on {pair.coverage.scored} shared cells: {lifts}")

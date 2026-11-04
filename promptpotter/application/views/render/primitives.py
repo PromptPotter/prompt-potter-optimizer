@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any, get_args
 
+from promptpotter.domain.arm_reading import lift_shown, lift_text
 from promptpotter.domain.bench import BENCH_STATE_INFO, BenchColumn
 from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.arm_reading import ArmReading
     from promptpotter.domain.bench import BenchReading, BenchScore
     from promptpotter.domain.origin_panel import OverlapReading
-    from promptpotter.domain.paired_reading import Coverage
+    from promptpotter.domain.paired_reading import Coverage, MeasuredLift
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
@@ -33,11 +34,11 @@ def bench_readout(bench: BenchScore) -> str:
 
     # `—` where the selection is the origin: one pass read twice compares nothing.
     read = bench.lift(bench.headline)
-    lift = "—" if read is None else f"{read.estimate.value:+.3f}"
+    lift = "—" if read is None else lift_text(read.estimate.value, read.measurand.unit)
     for column in get_args(BenchColumn):
         beside = bench.lift(column)
         if column != bench.headline and beside is not None:
-            lift += f" ({column} {beside.estimate.value:+.3f})"
+            lift += f" ({column} {lift_text(beside.estimate.value, beside.measurand.unit)})"
     return (
         f"{bench.headline} {level(graded.selected)} selected (round {graded.selected.round}) · "
         f"{level(graded.origin)} origin · lift {lift} · {bench.bench_size} held-out rows"
@@ -198,11 +199,11 @@ def _box_line(text: str, width: int = _W) -> str:
     return _h_text("│", "│", text, width=width)
 
 
-def _fmt_delta(val: float) -> str:
-    if abs(val) < 0.001:
-        return f"{YELLOW}+0.0%{RESET}"
-    color = GREEN if val > 0 else RED
-    return f"{color}{val:+.1%}{RESET}"
+def _fmt_delta(lift: MeasuredLift) -> str:
+    val, unit = lift.estimate.value, lift.measurand.unit
+    shown = lift_shown(val, unit)
+    color = YELLOW if shown == 0 else GREEN if shown > 0 else RED
+    return f"{color}{lift_text(val, unit)}{RESET}"
 
 
 def _node_top(label: str, label_right: str = "", width: int = _NW) -> str:
@@ -252,7 +253,7 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
 
     hdr = (
         f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Accuracy':>8s}   {'95% CI':>16s}   "
-        f"{'Composite':>9s}   {'Ability θ':>9s}   {'Delta':>7s}"
+        f"{'Composite':>9s}   {'Ability θ':>9s}   {'Delta':>12s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
@@ -266,8 +267,7 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
             spec="{:.1%}",
         )
         lift = s.vs_reference.on_whole_set if s.vs_reference else None
-        delta = None if lift is None else lift.estimate.value
-        delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
+        delta_str = "---" if lift is None else lift_text(lift.estimate.value, lift.measurand.unit)
         if s.state == "cut":
             winner_mark = f"  {YELLOW}({s.end}){RESET}"
         elif s.election.selected:
@@ -285,7 +285,7 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
         row = (
             f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
             f"{fmt_fitness(None if composite is None else composite.value):>9s}   "
-            f"{theta_str:>9s}   {delta_str:>7s}{winner_mark}"
+            f"{theta_str:>9s}   {delta_str:>12s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")
 

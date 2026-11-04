@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
-import type { LiftEstimate } from "@/lib/api/types";
+import type { MeasuredLift } from "@/lib/api/types";
 import { SCENARIO_WORDS } from "@/lib/api/types.generated";
 import {
   CardFrame,
@@ -25,7 +25,8 @@ import { useRegistry } from "@/lib/state/registry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import {
   sideTone,
-  fmtInterval,
+  fmtLift,
+  fmtLiftInterval,
   fmtSigned,
   fmtUnit,
   PLACEHOLDER,
@@ -528,14 +529,14 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
   const rows: RankedEdit[] = evidence.edits.map((row, i) => {
     const pair = readPaired(row.reading);
     return pair.read
-      ? { row, rank: i + 1, lift: pair.lift.estimate, cells: pair.cells }
+      ? { row, rank: i + 1, lift: pair.lift, cells: pair.cells }
       : { row, rank: null, lift: null, cells: null };
   });
   return (
     <>
       <DataTable
         ariaLabel="Edits ranked over their origin"
-        columns={rankColumns(m.spec.label, m.spec.unit)}
+        columns={rankColumns(m.spec.label)}
         rows={rows}
         getRowId={({ row }) => `${row.campaign_id}/${row.sp_hash}`}
       />
@@ -552,11 +553,11 @@ interface RankedEdit {
   row: Evidence["edits"][number];
   // Null where the pair was not read: an unread edit holds no rank.
   rank: number | null;
-  lift: LiftEstimate | null;
+  lift: MeasuredLift | null;
   cells: number | null;
 }
 
-function rankColumns(label: string, unit: Evidence["metric"]["spec"]["unit"]): Column<RankedEdit>[] {
+function rankColumns(label: string): Column<RankedEdit>[] {
   return [
     {
       id: "rank",
@@ -587,9 +588,13 @@ function rankColumns(label: string, unit: Evidence["metric"]["spec"]["unit"]): C
             <PairedLift reading={row.reading} unread="sentence" />
           </span>
         ) : (
-          <span className={cx("l4-effect", sideTone(lift.side))}>
-            <span className="l4-effect-mean">{fmtUnit(unit, lift.value)}</span>
-            <span className="l4-effect-ci">{fmtInterval(unit, lift.ci_lo, lift.ci_hi)}</span>
+          <span className={cx("l4-effect", sideTone(lift.estimate.side))}>
+            <span className="l4-effect-mean">
+              {fmtLift(lift.measurand.unit, lift.estimate.value)}
+            </span>
+            <span className="l4-effect-ci">
+              {fmtLiftInterval(lift.measurand.unit, lift.estimate.ci_lo, lift.estimate.ci_hi)}
+            </span>
           </span>
         ),
     },

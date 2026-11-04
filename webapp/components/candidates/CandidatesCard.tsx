@@ -6,13 +6,14 @@ import { DendrogramStrip } from "./DendrogramStrip";
 import { ThetaCaveats } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
-import { CardFrame, Chip, IconTree, Loading } from "@/components/ui";
+import { CardFrame, Chip, IconTree, Loading, ReadState } from "@/components/ui";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import { setScoringMask } from "@/lib/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
 import { SampleSetControl } from "./SampleSetControl";
 import { cx } from "@/lib/cx";
+import { useViewedLineage } from "@/lib/lineage";
 import { DASHBOARD_PENDING, useCycleStream } from "@/lib/poll";
 
 function ForestToggle({ model: m }: { model: CandidatesModel }) {
@@ -60,17 +61,30 @@ function FitnessLegend({ model: m }: { model: CandidatesModel }) {
   );
 }
 
+// The bars are the lineage tree's rows, so the card waits on that read as well as the dashboard.
 export function CandidatesCard() {
   const { dash } = useCycleStream();
-  if (!dash) {
-    return (
-      <CardFrame className="cand-card" title={<span className="cand-title">Candidates</span>}>
+  const { tree, treeRead } = useViewedLineage();
+  if (dash && tree !== null) return <ReadCandidatesCard dash={dash} />;
+  return (
+    <CardFrame className="cand-card" title={<span className="cand-title">Candidates</span>}>
+      {dash ? (
+        <ReadState
+          read={treeRead}
+          subject={CANDIDATES}
+          idle={<Loading className="lineage-empty">Reading {CANDIDATES}…</Loading>}
+          className="lineage-empty"
+        >
+          {() => null}
+        </ReadState>
+      ) : (
         <Loading className="lineage-empty">{DASHBOARD_PENDING}</Loading>
-      </CardFrame>
-    );
-  }
-  return <ReadCandidatesCard dash={dash} />;
+      )}
+    </CardFrame>
+  );
 }
+
+const CANDIDATES = "this run’s candidates";
 
 function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
   const m = useCandidatesModel(dash);

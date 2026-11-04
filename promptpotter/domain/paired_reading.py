@@ -271,9 +271,8 @@ class MeasurandKind(StrEnum):
     EXPR = "expr"
 
 
-class MeasurandUnit(StrEnum):
-    RATE = "rate"
-    SCORE = "score"
+# Every unit a read number is in: θ is a fit's logit, which a seed cell carries off its inner run.
+MeasurandUnit = Literal["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]
 
 
 class Measurand(FrozenModel):

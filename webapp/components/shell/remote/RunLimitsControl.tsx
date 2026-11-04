@@ -4,7 +4,7 @@ import { cycleAddress, postCommand, type Budget, type MeteredSpend } from "@/lib
 import { CAP_AXIS_INFO, CEILING_METER_LABELS } from "@/lib/api/types.generated";
 import { budgetAxis } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { fmtUsd, fmtTokens } from "@/lib/format";
+import { fmtUnit, fmtUsd } from "@/lib/format";
 import { capInput, capText, parseCapIn, type Cap, type CapAxis } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/workspace";
 import { Button, Dialog, FailureLine } from "@/components/ui";
@@ -35,7 +35,7 @@ function usedText(axis: CapAxis, metered: MeteredSpend | null, share: Budget | n
     return `${fmtUsd(metered.metered_usd)} this cycle${part}, ${CEILING_METER_LABELS[metered.meter]}`;
   }
   if (axis === "tokens") {
-    return `${fmtTokens(metered.metered_tokens)} this cycle${of != null ? ` of its ${fmtTokens(of)} share` : ""}`;
+    return `${fmtUnit("tokens", metered.metered_tokens)} this cycle${of != null ? ` of its ${fmtUnit("tokens", of)} share` : ""}`;
   }
   return null;
 }

@@ -1,6 +1,6 @@
 import { READING_STATE_INFO, type ReadingStateKind } from "@/lib/api/types.generated";
-import type { LiftEstimate, MeasuredLift, PairedReading } from "@/lib/api/types";
-import { fmtUnit } from "@/lib/format";
+import type { MeasuredLift, PairedReading } from "@/lib/api/types";
+import { fmtLift, fmtUnit } from "@/lib/format";
 
 type PairRead =
   | { read: true; lift: MeasuredLift; cells: number }
@@ -15,16 +15,16 @@ export function readPaired(reading: PairedReading): PairRead {
   return { read: false, kind, label, sentence };
 }
 
-export function liftOf(reading: PairedReading | null): LiftEstimate | null {
+export function liftOf(reading: PairedReading | null): MeasuredLift | null {
   if (reading === null) return null;
   const pair = readPaired(reading);
-  return pair.read ? pair.lift.estimate : null;
+  return pair.read ? pair.lift : null;
 }
 
 export type PairFacet = "rates" | "lift";
 
-export function fmtLift(lift: MeasuredLift, facet: PairFacet): string {
-  if (facet === "lift") return fmtUnit("delta", lift.estimate.value);
+export function pairText(lift: MeasuredLift, facet: PairFacet): string {
   const { unit } = lift.measurand;
+  if (facet === "lift") return fmtLift(unit, lift.estimate.value);
   return `${fmtUnit(unit, lift.rate_a)} → ${fmtUnit(unit, lift.rate_b)}`;
 }

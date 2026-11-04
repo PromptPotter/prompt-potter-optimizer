@@ -298,7 +298,7 @@ def read_bench(
         origin=None if graded is None else graded.origin.reading,
         selected=None if selected is None else selected.reading,
         vs_origin=vs_origin,
-        cost=LiftCost.of(vs_origin, line.spend),
+        cost=LiftCost.of(vs_origin, None if line.spend is None else line.spend.search_incurred_usd),
         scopes=[] if graded is None else _read_scopes(graded),
     )
 

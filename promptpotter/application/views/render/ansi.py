@@ -18,6 +18,7 @@ from promptpotter.application.views.render.primitives import (
     fmt_coverage,
     fmt_pct,
 )
+from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.bench import BENCH_STATE_INFO
 from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.phase_views import (
@@ -155,7 +156,7 @@ def render_round_verdict(
         # An arm that stopped short gets no reference rate: over a prefix it is a lift nobody measured.
         lift = selected.on_whole_set if selected else None
         detail.append(
-            f"vs reference {lift.rate_a:.1%}, {_fmt_delta(lift.estimate.value)}"
+            f"vs reference {lift.rate_a:.1%}, {_fmt_delta(lift)}"
             if lift is not None
             else "no matched reference — stopped before covering its reference's cells"
         )
@@ -297,11 +298,10 @@ def _render_verify_graded(v: VerifyGradedView) -> str:
     verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r.held]
     lift = ""
     pair = r.vs_origin
-    if pair.headline is not None and pair.coverage is not None:
-        paired = pair.headline.estimate
+    if (paired := pair.headline) is not None and pair.coverage is not None:
         lift = (
-            f", lift over C0 {paired.value:+.3f} "
-            f"[{paired.ci_lo:+.3f}, {paired.ci_hi:+.3f}] on {fmt_coverage(pair.coverage)}"
+            f", lift over C0 {lift_band_text(paired.estimate, paired.measurand.unit)} "
+            f"on {fmt_coverage(pair.coverage)}"
         )
     return (
         f"  {DIM}verify {r.label}: accuracy {levels} on {r.fresh.n} unseen cells"
@@ -323,8 +323,7 @@ def _render_bench_scored(v: BenchScoredView) -> str:
     )
     band = ""
     if (lift := bench.lift(column)) is not None:
-        est = lift.estimate
-        band = f", lift {est.value:+.3f} [{est.ci_lo:+.3f}, {est.ci_hi:+.3f}]"
+        band = f", lift {lift_band_text(lift.estimate, lift.measurand.unit)}"
     return (
         f"  bench: {column} {levels} (origin → R{selected.round} selection, "
         f"{selected.n} held-out rows{band})"

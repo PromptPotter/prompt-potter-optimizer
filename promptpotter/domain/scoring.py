@@ -722,12 +722,10 @@ def _stamped(cell: GradedCell, grade: CellGrade) -> float:
 
 
 ROW_GRADES: Annotated[dict[str, GradeColumn], shapes_optimizer_prompt] = {
-    "fitness": GradeColumn(False, MeasurandUnit.RATE, lambda cell: _stamped(cell, "fitness")),
-    "objective": GradeColumn(False, MeasurandUnit.SCORE, lambda cell: _stamped(cell, "objective")),
+    "fitness": GradeColumn(False, "rate", lambda cell: _stamped(cell, "fitness")),
+    "objective": GradeColumn(False, "score", lambda cell: _stamped(cell, "objective")),
     # The one column every scorer's rows carry two-valued, by construction of `is_hit`.
-    "hit": GradeColumn(
-        True, MeasurandUnit.RATE, lambda cell: float(is_hit(_stamped(cell, "fitness")))
-    ),
+    "hit": GradeColumn(True, "rate", lambda cell: float(is_hit(_stamped(cell, "fitness")))),
 }
 
 assert set(ROW_GRADES) - {"hit"} == set(get_args(CellGrade))

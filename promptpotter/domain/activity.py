@@ -343,7 +343,7 @@ class ActivityFeed:
                 return None
             case RoundClosedRecord():
                 standing = record.run_standing
-                climb = standing.climb_line
+                climb = standing.climb
                 return ActivityItem(
                     id=item_id,
                     kind="round",
@@ -351,7 +351,7 @@ class ActivityFeed:
                     label=f"Round {record.round}",
                     detail=standing.selection_line
                     if climb is None
-                    else f"{standing.selection_line} · {climb}",
+                    else f"{standing.selection_line} · {climb.line}",
                     tone="success",
                     round=record.round,
                 )

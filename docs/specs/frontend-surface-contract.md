@@ -93,10 +93,13 @@ invariants:
                       What an optimizer says in its own words — the manifest''s `phases`, its
                       proposer''s `opening`, its members'' `round_facts`, its eliminator''s
                       `Elimination.reason`, its node `description`s — renders as served.'
-  I12_progressive_reveal: 'A view reads at a GLANCE, its PANE and its DETAIL. The glance is a served
-                      `Said` row named by `shell/families.tsx::FAMILIES[f].glance`; a missing row is
-                      composed in `application/hierarchy.py`, never the browser. Open views are
-                      columns, newest first.'
+  I12_progressive_reveal: 'A view reads at a GLANCE, its PANE and its DETAIL. The glance is the viewed
+                      course''s served figure named by `shell/families.tsx::FAMILIES[f].glance`,
+                      drawn once, by the masthead, as that view''s door; a missing row is composed in
+                      `application/hierarchy.py`, never the browser, and an open view no figure names
+                      gets a bare door. Open views are columns, newest first. The stage view
+                      (`lib/prefs/stage.ts`) draws the served `lift` figure and the served `climb`
+                      under it, nothing else.'
 ```
 
 ## The served hierarchy
@@ -109,8 +112,9 @@ and a step are bare nodes. A `facts` field no reader names is deleted
 (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). The address grammar is
 [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address.
 
-- **Facts for code, said rows for people** (`domain/said.py::Said`): `figures` and `lines` are composed
-  once in `application/hierarchy.py` and rendered as served, keyed by `key`; deriving a state survives
+- **Facts for code, said rows for people** (`domain/said.py::Said`): `figures`, `lines` and a course's
+  `climb` (the lift's cost per search dollar, per candidate tested, per worked unit) are composed once
+  in `application/hierarchy.py` and rendered as served, keyed by `key`; deriving a state survives
   nowhere in `webapp/lib/derivations`.
   <!-- probe: git grep -cE "entryFigures|mastheadFigures|runWord|livesLabel" -- webapp == 0 -->
   <!-- probe: git grep -cE "HierarchyStat\b|BenchStat\b|StatKey|stats: list" -- promptpotter == 0 -->

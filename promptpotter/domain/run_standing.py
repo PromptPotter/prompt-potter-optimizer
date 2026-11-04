@@ -5,7 +5,9 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.domain.arm_reading import UNIT_FORMATS, lift_text
 from promptpotter.domain.arms import ArmSlot, Concluded, arm_name
+from promptpotter.domain.bench import COST_ABSENCE_WORDS, LiftCost
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import (
@@ -18,6 +20,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.clock import duration_words
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -199,21 +202,79 @@ class LineOutlay(NamedTuple):
     """What the campaign's line had paid when a round closed: the denominators of its climb."""
 
     search_usd: float | None
-    elapsed_s: float | None
+    worked_s: float | None
 
 
-def _climb_line(pair: PairedReading, candidates: int, outlay: LineOutlay) -> str | None:
-    if pair.headline is None:
+type ClimbKey = Literal["lift_per_usd", "lift_per_candidate", "time_per_lift"]
+
+
+class ClimbRate(NamedTuple):
+    """``value`` is ``None`` where its denominator is absent or zero; ``sub`` says which."""
+
+    key: ClimbKey
+    label: str
+    per: str
+    value: str | None
+    sub: str
+
+
+class Climb(NamedTuple):
+    lift: str
+    measurand: str
+    rates: list[ClimbRate]
+
+    @property
+    def line(self) -> str:
+        """Every rate, an absent one as `—` with its reason, as the cycles listing prints it."""
+        return f"{self.lift}: " + " · ".join(
+            f"— {rate.per} ({rate.sub})" if rate.value is None else f"{rate.value} {rate.per}"
+            for rate in self.rates
+        )
+
+
+def _per_unit_time(seconds: float) -> str:
+    return f"{seconds:.1f}s" if seconds < 10 else duration_words(seconds)
+
+
+def _climb(pair: PairedReading, candidates: int, outlay: LineOutlay) -> Climb | None:
+    if (headline := pair.headline) is None:
         return None
-    points = 100 * pair.headline.estimate.value
-    usd, elapsed = outlay.search_usd, outlay.elapsed_s
-    rates = [
-        f"{points / (elapsed / 60):+.2f}/min" if elapsed else None,
-        f"{points / candidates:+.2f}/candidate" if candidates else None,
-        "$ unpriced" if usd is None else f"{points / usd:+.1f}/$" if usd > 0 else None,
-    ]
-    shown = " · ".join(rate for rate in rates if rate is not None)
-    return f"{points:+.1f} pts: {shown}" if shown else f"{points:+.1f} pts"
+    lift, unit = headline.estimate.value, headline.measurand.unit
+    fmt = UNIT_FORMATS[unit]
+    gained = fmt.scale * lift
+    cost = LiftCost.of(pair, outlay.search_usd)
+    usd, worked = outlay.search_usd, outlay.worked_s
+    return Climb(
+        lift=lift_text(lift, unit),
+        measurand=headline.measurand.key,
+        rates=[
+            ClimbRate(
+                "lift_per_usd",
+                "Lift per search $",
+                "per $",
+                None if cost.lift_per_usd is None else lift_text(cost.lift_per_usd, unit),
+                f"${usd:.2f} of search" if cost.absent is None else COST_ABSENCE_WORDS[cost.absent],
+            ),
+            ClimbRate(
+                "lift_per_candidate",
+                "Lift per candidate",
+                "per candidate",
+                lift_text(lift / candidates, unit) if candidates else None,
+                f"{candidates} tested",
+            ),
+            ClimbRate(
+                "time_per_lift",
+                f"Time per {fmt.lift_name}",
+                f"per {fmt.lift_name}",
+                _per_unit_time(worked / gained) if worked and gained > 0 else None,
+                "no lift to time"
+                if gained <= 0
+                else "no launch's clock parsed"
+                if worked is None
+                else f"{duration_words(worked)} worked",
+            ),
+        ],
+    )
 
 
 class RunStanding(FrozenModel):
@@ -259,14 +320,15 @@ class RunStanding(FrozenModel):
         description="USD the SEARCH had incurred at this close, every cycle of the line read "
         "whole (`SpendRollup.search_incurred_usd`); null on unpriced search tokens."
     )
-    elapsed_s: float | None = Field(
-        description="Wall clock of the line's launches to this close: each ended launch's own, "
-        "then the closing one's; null where an ended launch's endpoints did not parse."
+    worked_s: float | None = Field(
+        description="Worked seconds of the line's launches to this close "
+        "(`domain/campaign.py::worked_seconds`), the closing launch's to now; null where no "
+        "launch's endpoints parsed."
     )
 
     @property
     def outlay(self) -> LineOutlay:
-        return LineOutlay(search_usd=self.search_usd, elapsed_s=self.elapsed_s)
+        return LineOutlay(search_usd=self.search_usd, worked_s=self.worked_s)
 
     @property
     def selection_name(self) -> str:
@@ -280,10 +342,10 @@ class RunStanding(FrozenModel):
         return _selection_line(self.selection, self.vs_origin)
 
     @property
-    def climb_line(self) -> str | None:
-        """`vs_origin`'s lift in points — a bare point estimate — per minute, per candidate and
-        per search dollar the line paid for it; ``None`` where there is no pair."""
-        return _climb_line(self.vs_origin, self.candidates, self.outlay)
+    def climb(self) -> Climb | None:
+        """`vs_origin`'s lift — a bare point estimate — per search dollar, per candidate tested
+        and in worked time per unit; ``None`` where there is no pair."""
+        return _climb(self.vs_origin, self.candidates, self.outlay)
 
     @classmethod
     def after(
@@ -327,7 +389,7 @@ class RunStanding(FrozenModel):
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),
             candidates=sum(rr.candidates_scored for rr in after_origin),
             search_usd=outlay.search_usd,
-            elapsed_s=outlay.elapsed_s,
+            worked_s=outlay.worked_s,
         )
 
 

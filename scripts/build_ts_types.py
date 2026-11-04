@@ -215,6 +215,8 @@ _WORD_TABLES: tuple[tuple[str, str], ...] = (
     ("promptpotter.domain.origin_panel", "ROUND_ADVANCE_INFO"),
     ("promptpotter.domain.ruler", "THETA_CAVEAT_INFO"),
     ("promptpotter.domain.arm_reading", "ARM_VERDICT_LABELS"),
+    ("promptpotter.domain.arm_reading", "UNIT_FORMATS"),
+    ("promptpotter.domain.bench", "COST_ABSENCE_WORDS"),
     ("promptpotter.domain.campaign", "LIFECYCLE_STATUS_LABELS"),
     ("promptpotter.domain.dashboard_rows", "SAMPLE_MOVEMENT_LABELS"),
     ("promptpotter.domain.dashboard_rows", "PRECISION_VERDICT_ADVICE"),
@@ -351,10 +353,11 @@ def _emit_spend_tables() -> str:
 
 
 def _emit_display_metrics() -> str:
-    from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO, LevelUnit
+    from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO
+    from promptpotter.domain.paired_reading import MeasurandUnit
 
     members = " | ".join(repr(m) for m in DISPLAY_METRIC_INFO)
-    level_units = " | ".join(repr(u) for u in typing.get_args(LevelUnit))
+    measurand_units = " | ".join(repr(u) for u in typing.get_args(MeasurandUnit))
     rows = "\n".join(
         f"  {{ id: {metric!r}, label: {info.label!r}, glyph: {info.glyph!r},"
         f" title: {info.title!r} }},"
@@ -378,9 +381,9 @@ def _emit_display_metrics() -> str:
         "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
         f"{labels}\n"
         "};\n\n"
-        "// A displayed level's unit (domain/arm_reading.py::LevelUnit).\n"
-        f"export type LevelUnit = {level_units};\n\n"
-        "export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {\n"
+        "// Every unit a read number is in (domain/paired_reading.py::MeasurandUnit).\n"
+        f"export type MeasurandUnit = {measurand_units};\n\n"
+        "export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, MeasurandUnit> = {\n"
         f"{units}\n"
         "};"
     )

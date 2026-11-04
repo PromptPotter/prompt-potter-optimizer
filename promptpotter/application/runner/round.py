@@ -536,7 +536,7 @@ async def close_round(
         session.bank.slot_of,
         cycle.difficulty,
         lives=cycle.config.optimization.lives,
-        outlay=line_outlay(session),
+        outlay=line_outlay(session, cycle.optimizer.phases),
     )
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
     write_hard_samples_artifacts(session, cycle)

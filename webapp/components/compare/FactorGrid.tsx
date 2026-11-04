@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { CardFrame, DataTable, Empty, Said, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
-import { fmtInterval, fmtUnit } from "@/lib/format";
+import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
 
 function clip(value: string, width: number): string {
   return value.length <= width ? value : `${value.slice(0, width - 1)}…`;
@@ -55,7 +55,7 @@ export function FactorGrid({
   const [colKey, setColKey] = useState<string>(() => factors[1]?.key ?? "");
 
   const served = evidence.grid;
-  const unit = evidence.metric.spec.unit;
+  const metric = evidence.metric.spec;
   const cross = (row: string, col: string) => {
     setRowKey(row);
     setColKey(col);
@@ -137,7 +137,7 @@ export function FactorGrid({
           <DataTable
             ariaLabel={`${served.row_key} by ${served.col_key}`}
             className="l4-factor-grid"
-            columns={gridColumns(served.row_key, served.col_key, col?.levels ?? [], at, unit)}
+            columns={gridColumns(served.row_key, served.col_key, col?.levels ?? [], at, metric)}
             rows={[
               ...(row?.levels ?? []).map((level): GridRow => ({ kind: "level", level })),
               { kind: "margin" },
@@ -160,7 +160,6 @@ export function FactorGrid({
 
 type Level = FactorReading["levels"][number];
 type Cell = NonNullable<Evidence["grid"]>["cells"][number];
-type Unit = Evidence["metric"]["spec"]["unit"];
 // The last row is the column marginals.
 type GridRow = { kind: "level"; level: Level } | { kind: "margin" };
 
@@ -169,11 +168,11 @@ function gridColumns(
   colKey: string,
   colLevels: readonly Level[],
   at: ReadonlyMap<string, Cell>,
-  unit: Unit,
+  metric: MetricFormat,
 ): Column<GridRow>[] {
   const margin = (lv: Level) => (
-    <span className="l4-margin" title={fmtInterval(unit, lv.ci_lo, lv.ci_hi)}>
-      {fmtUnit(unit, lv.value)}
+    <span className="l4-margin" title={fmtMetricInterval(metric, lv.ci_lo, lv.ci_hi)}>
+      {fmtMetric(metric, lv.value)}
     </span>
   );
   return [
@@ -203,8 +202,8 @@ function gridColumns(
               —
             </span>
           ) : (
-            <span title={fmtInterval(unit, cell.ci_lo, cell.ci_hi)}>
-              {fmtUnit(unit, cell.value)}
+            <span title={fmtMetricInterval(metric, cell.ci_lo, cell.ci_hi)}>
+              {fmtMetric(metric, cell.value)}
               <span className="l4-cell-n">
                 {" "}
                 · {cell.n_cells} cells, {cell.subjects.length} subj

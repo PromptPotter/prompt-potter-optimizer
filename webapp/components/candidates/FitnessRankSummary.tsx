@@ -56,7 +56,7 @@ export function FitnessRankSummary({
           return (
             <span key={b.key}>
               {i > 0 && " · "}
-              {b.label} {fmtUnit("composed", b.reading?.own?.composite?.value)}→{fmtUnit("composed", b.reading ? b.node.facts.lens_value : null)}{" "}
+              {b.label} {fmtUnit("score", b.reading?.own?.composite?.value)}→{fmtUnit("score", b.reading ? b.node.facts.lens_value : null)}{" "}
               <span className={mark.cls}>{mark.glyph}</span>
             </span>
           );

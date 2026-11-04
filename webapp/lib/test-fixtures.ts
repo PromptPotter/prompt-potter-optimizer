@@ -225,7 +225,7 @@ export function runStanding(
     advanced: 0,
     candidates: 0,
     search_usd: null,
-    elapsed_s: null,
+    worked_s: null,
     ...over,
   };
 }
@@ -404,6 +404,7 @@ export function subtreeCourse(
       from_candidate: null,
       ...facts,
     },
+    climb: null,
     said: null,
     ...over,
   };

@@ -1,10 +1,11 @@
 import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
-import type { LiftEstimate } from "@/lib/api/types";
+import type { MeasuredLift } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
 import {
   BENCH_STATE_INFO,
   CEILING_METER_LABELS,
+  COST_ABSENCE_WORDS,
   STOP_REASON_INFO,
 } from "@/lib/api/types.generated";
 import {
@@ -20,6 +21,8 @@ import {
   sideTone,
   fmtDuration,
   fmtInterval,
+  fmtLift,
+  fmtLiftInterval,
   fmtSigned,
   fmtUnit,
   fmtUsd,
@@ -33,9 +36,10 @@ interface MetricFigure {
   tone?: string;
 }
 
-function StepLift({ lift }: { lift: LiftEstimate | null }) {
+function StepLift({ lift }: { lift: MeasuredLift | null }) {
   if (lift === null) return null;
-  return <span className={sideTone(lift.side)}> {fmtSigned(lift.value, 2)}</span>;
+  const { estimate, measurand } = lift;
+  return <span className={sideTone(estimate.side)}> {fmtLift(measurand.unit, estimate.value)}</span>;
 }
 
 export function MainLine({ steps }: { steps: readonly LineStep[] }) {
@@ -102,17 +106,17 @@ export function benchLead(row: HeadToHeadRow | null): {
             band: bench === null ? "" : (BENCH_STATE_INFO[bench.status.state]?.sentence ?? ""),
           }
         : {
-            value: fmtUnit("level", level?.value),
-            band: `${s.headline} ${fmtInterval("level", level?.ci_lo, level?.ci_hi)} · ${s.n}/${bench.bench_size} rows`,
+            value: fmtUnit("score", level?.value),
+            band: `${s.headline} ${fmtInterval("score", level?.ci_lo, level?.ci_hi)} · ${s.n}/${bench.bench_size} rows`,
           },
     lift:
       lift === null
         ? { value: PLACEHOLDER, band: "" }
         : lift.read
           ? {
-              value: fmtUnit("delta", lift.lift.estimate.value),
-              band: fmtInterval(
-                "delta",
+              value: fmtLift(lift.lift.measurand.unit, lift.lift.estimate.value),
+              band: fmtLiftInterval(
+                lift.lift.measurand.unit,
                 lift.lift.estimate.ci_lo,
                 lift.lift.estimate.ci_hi,
               ),
@@ -167,6 +171,13 @@ function ElectedOn({ election }: { election: HeadToHeadRow["election"] }) {
   return `${election.reads_on} · θ ${ability?.caveat ?? "unread"}`;
 }
 
+function LiftPerUsd({ bench }: { bench: HeadToHeadRow["bench"] }) {
+  const { lift_per_usd: per, absent } = bench.cost;
+  const lift = liftOf(bench.vs_origin);
+  if (absent !== null) return COST_ABSENCE_WORDS[absent];
+  return per === null || lift === null ? PLACEHOLDER : `${fmtLift(lift.measurand.unit, per)} per $`;
+}
+
 export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
   return (
     <dl className="cmp-channel-facts cmp-channel-headline">
@@ -196,7 +207,9 @@ export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
       )}
       <div>
         <dt>lift / USD</dt>
-        <dd>{fmtSigned(row.bench.cost.lift_per_usd, 2)}</dd>
+        <dd>
+          <LiftPerUsd bench={row.bench} />
+        </dd>
       </div>
       <div>
         <dt>spent</dt>

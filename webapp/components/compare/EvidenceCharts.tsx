@@ -13,7 +13,7 @@ import {
   type IntervalDomain,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtInterval, fmtUnit, shortId, type MetricUnit } from "@/lib/format";
+import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
 import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
@@ -182,7 +182,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
             label={seriesLabel(r)}
             title={r.key}
             row={r}
-            unit={evidence.metric.spec.unit}
+            metric={evidence.metric.spec}
             domain={domain}
             ink={seriesVar(i)}
             className={cx(r.comparable === false && "cmp-row-muted")}
@@ -193,7 +193,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
               label={`r${p.round} ${p.label}`}
               title={p.candidate_id}
               row={p}
-              unit={evidence.metric.spec.unit}
+              metric={evidence.metric.spec}
               domain={domain}
               ink={seriesVar(i)}
               className="cmp-row-nested"
@@ -209,7 +209,7 @@ function MergedRow({
   label,
   title,
   row,
-  unit,
+  metric,
   domain,
   ink,
   className,
@@ -217,13 +217,13 @@ function MergedRow({
   label: string;
   title: string;
   row: { value: number | null; ci_lo: number | null; ci_hi: number | null; n_cells: number };
-  unit: MetricUnit;
+  metric: MetricFormat;
   domain: IntervalDomain;
   ink: string;
   className: string;
 }) {
-  const value = fmtUnit(unit, row.value);
-  const interval = fmtInterval(unit, row.ci_lo, row.ci_hi);
+  const value = fmtMetric(metric, row.value);
+  const interval = fmtMetricInterval(metric, row.ci_lo, row.ci_hi);
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <IntervalRow

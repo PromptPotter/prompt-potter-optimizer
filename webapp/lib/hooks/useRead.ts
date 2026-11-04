@@ -33,6 +33,8 @@ interface ReadOptions {
   expects?: "gone";
   intervalMs?: number | undefined;
   onGone?: () => void;
+  // While this stays the same, a re-keyed read shows the last body it landed as `kept`.
+  keep?: string | null;
 }
 
 export const GONE_CONFIRM_LIMIT = 3;
@@ -41,7 +43,7 @@ type Settled<T> = { stamp: number } & ({ ok: true; data: T } | { ok: false; fail
 
 interface Held<T> {
   outcome: Settled<T> | null;
-  last: { stamp: number; data: T } | null;
+  last: { stamp: number; data: T; keep: string | null } | null;
 }
 
 const IDLE = { status: "idle" } as const;
@@ -55,31 +57,32 @@ export function shownData<T>(read: ReadResult<T>): T | null {
   return read.status === "idle" ? null : read.kept;
 }
 
-function landed<T>(stamp: number, data: T): Held<T> {
-  return { outcome: { stamp, ok: true, data }, last: { stamp, data } };
+function landed<T>(stamp: number, data: T, keep: string | null): Held<T> {
+  return { outcome: { stamp, ok: true, data }, last: { stamp, data, keep } };
 }
 
 export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {}): ReadResult<T> {
-  const { auth = false, survive, expects, intervalMs, onGone } = opts;
+  const { auth = false, survive, expects, intervalMs, onGone, keep = null } = opts;
   const { authed, onAuthError } = useAuthGate();
   const readId = read !== null && (!auth || authed) ? read.id : null;
 
   const [generation, setGeneration] = useState({ id: readId, n: 0 });
   const [held, setHeld] = useState<Held<T>>(() => {
     const hit = readId === null ? null : cachedRead<T>(readId);
-    return hit ? landed(0, hit.data) : { outcome: null, last: null };
+    return hit ? landed(0, hit.data, keep) : { outcome: null, last: null };
   });
   const [goneAt, setGoneAt] = useState<number | null>(null);
   if (generation.id !== readId) {
     const n = generation.n + 1;
     setGeneration({ id: readId, n });
     const hit = readId === null ? null : cachedRead<T>(readId);
-    if (hit) setHeld(landed(n, hit.data));
+    if (hit) setHeld(landed(n, hit.data, keep));
   }
   const gen = generation.n;
 
   const issueRef = useRef<ReadDescriptor<T> | null>(null);
   const genRef = useRef(gen);
+  const keepRef = useRef(keep);
   const onGoneRef = useRef(onGone);
   const missesRef = useRef({ stamp: gen, n: 0 });
   // Only the newest ask lands: an older answer still in the air describes a superseded moment.
@@ -87,6 +90,7 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
   useEffect(() => {
     issueRef.current = readId !== null ? read : null;
     genRef.current = gen;
+    keepRef.current = keep;
     onGoneRef.current = onGone;
   });
 
@@ -105,7 +109,7 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
         setHeld((prev) =>
           prev.outcome?.ok && prev.outcome.stamp === stamp && prev.outcome.data === data
             ? prev
-            : landed(stamp, data),
+            : landed(stamp, data, keepRef.current),
         );
       } catch (e) {
         if (stale()) return;
@@ -156,10 +160,11 @@ export function useRead<T>(read: ReadDescriptor<T> | null, opts: ReadOptions = {
   return useMemo((): ReadResult<T> => {
     if (!active) return IDLE;
     const own = held.last?.stamp === gen ? held.last.data : null;
+    const kept = keep !== null && held.last?.keep === keep ? held.last.data : null;
     const outcome = held.outcome?.stamp === gen ? held.outcome : null;
-    if (outcome === null) return { status: "loading", kept: own };
+    if (outcome === null) return { status: "loading", kept: own ?? kept };
     if (outcome.ok) return { status: "ready", data: outcome.data };
     const carried = outcome.failure.kind === survive ? (held.last?.data ?? null) : null;
-    return { status: "failed", failure: outcome.failure, kept: own ?? carried };
-  }, [active, gen, held, survive]);
+    return { status: "failed", failure: outcome.failure, kept: own ?? carried ?? kept };
+  }, [active, gen, held, survive, keep]);
 }

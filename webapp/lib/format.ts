@@ -1,5 +1,10 @@
 import type { LiftEstimate, MeasuredUnit, MetricSpec } from "@/lib/api/types";
-import { RECENT_STEP_S, type LevelUnit } from "@/lib/api/types.generated";
+import {
+  RECENT_STEP_S,
+  UNIT_FORMATS,
+  type MeasurandUnit,
+  type UnitFormat,
+} from "@/lib/api/types.generated";
 
 type LiftSide = LiftEstimate["side"];
 
@@ -70,13 +75,6 @@ export function fmtBytes(n: number | null | undefined): string {
   return `${(n / 1_073_741_824).toFixed(2)} GB`;
 }
 
-export function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
-  // Rounded: a mean over cells is fractional, and a fraction of a token is noise.
-  return `${Math.round(n)} tok`;
-}
-
 // Mirrors `views/render/primitives.py::fmt_pvalue`; `null` means nothing was tested.
 export function fmtPValue(p: number | null): string {
   if (p == null) return PLACEHOLDER;
@@ -86,39 +84,80 @@ export function fmtPValue(p: number | null): string {
   return `p=${p.toFixed(2)} (ns)`;
 }
 
-export type MetricUnit = MetricSpec["unit"];
+const finite = (v: number | null | undefined): v is number =>
+  typeof v === "number" && Number.isFinite(v);
 
-type FormatUnit = MetricUnit | LevelUnit;
+const COMPACT_STEPS: [number, string][] = [
+  [1_000_000, "M"],
+  [1_000, "k"],
+];
 
-// A score printed as a percent reads as a rate; θ is in logits, so it never renders as a percent.
-const UNIT_FORMAT: Record<FormatUnit, (v: number) => string> = {
-  rate: (v) => `${(v * 100).toFixed(0)}%`,
-  score: (v) => v.toFixed(2),
-  theta: (v) => `θ ${v.toFixed(2)}`,
-  level: (v) => v.toFixed(3),
-  delta: (v) => fmtSigned(v, 3),
-  // Not fmtDuration: a sub-second reply would round to "1s" where the terminal prints 0.8.
-  seconds: fmtSecs,
-  usd: fmtUsd,
-  tokens: fmtTokens,
-  rank: (v) => v.toFixed(1),
-  rounds: (v) => v.toFixed(1),
-  composed: (v) => v.toFixed(3),
-};
+// `arm_reading.py::_number`: a compact unit steps a thousand or more to one digit of k or M.
+function numberIn(f: UnitFormat, v: number, digits: number, signed: boolean): string {
+  const scaled = f.scale * v;
+  const step = f.compact ? COMPACT_STEPS.find(([size]) => Math.abs(scaled) >= size) : undefined;
+  const text = step ? `${(scaled / step[0]).toFixed(1)}${step[1]}` : scaled.toFixed(digits);
+  return signed && scaled >= 0 ? `+${text}` : text;
+}
 
-export function fmtUnit(unit: FormatUnit, v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? UNIT_FORMAT[unit](v) : PLACEHOLDER;
+// A level in its unit, as `arm_reading.py::level_text` prints it.
+export function fmtUnit(unit: MeasurandUnit, v: number | null | undefined): string {
+  if (!finite(v)) return PLACEHOLDER;
+  const f = UNIT_FORMATS[unit];
+  return `${f.prefix}${numberIn(f, v, f.digits, false)}${f.suffix}`;
 }
 
 export function fmtInterval(
-  unit: FormatUnit,
+  unit: MeasurandUnit,
   lo: number | null | undefined,
   hi: number | null | undefined,
 ): string {
-  if (typeof lo !== "number" || !Number.isFinite(lo) || typeof hi !== "number" || !Number.isFinite(hi)) {
-    return PLACEHOLDER;
-  }
-  return `[${UNIT_FORMAT[unit](lo)}, ${UNIT_FORMAT[unit](hi)}]`;
+  if (!finite(lo) || !finite(hi)) return PLACEHOLDER;
+  return `[${fmtUnit(unit, lo)}, ${fmtUnit(unit, hi)}]`;
+}
+
+// Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.
+const NBSP = String.fromCharCode(0xa0);
+
+function signedIn(unit: MeasurandUnit, v: number): string {
+  const f = UNIT_FORMATS[unit];
+  return numberIn(f, v, f.lift_digits, true);
+}
+
+// A lift in its measurand's unit, as `arm_reading.py::lift_text` prints it on every other surface.
+export function fmtLift(unit: MeasurandUnit, v: number | null | undefined): string {
+  if (!finite(v)) return PLACEHOLDER;
+  return `${signedIn(unit, v)}${NBSP}${UNIT_FORMATS[unit].lift_word}`;
+}
+
+export function fmtLiftInterval(
+  unit: MeasurandUnit,
+  lo: number | null | undefined,
+  hi: number | null | undefined,
+): string {
+  if (!finite(lo) || !finite(hi)) return PLACEHOLDER;
+  return `[${signedIn(unit, lo)},${NBSP}${signedIn(unit, hi)}]`;
+}
+
+type Banded = { value: number; ci_lo: number; ci_hi: number };
+
+export function fmtLiftBand(unit: MeasurandUnit, lift: Banded): string {
+  return `${fmtLift(unit, lift.value)} ${fmtLiftInterval(unit, lift.ci_lo, lift.ci_hi)}`;
+}
+
+export type MetricFormat = Pick<MetricSpec, "unit" | "lift">;
+
+// A value of a read metric: only a lift earns a sign.
+export function fmtMetric(metric: MetricFormat, v: number | null | undefined): string {
+  return metric.lift ? fmtLift(metric.unit, v) : fmtUnit(metric.unit, v);
+}
+
+export function fmtMetricInterval(
+  metric: MetricFormat,
+  lo: number | null | undefined,
+  hi: number | null | undefined,
+): string {
+  return metric.lift ? fmtLiftInterval(metric.unit, lo, hi) : fmtInterval(metric.unit, lo, hi);
 }
 
 // Campaign ids are `{dataset}__{rand6}`; the suffix is what tells two runs of one origin apart.

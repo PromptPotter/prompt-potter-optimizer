@@ -25,7 +25,6 @@ from promptpotter.domain.paired_reading import (
     CellSetName,
     Measurand,
     MeasurandKind,
-    MeasurandUnit,
     PairedReading,
 )
 from promptpotter.domain.strict_model import StrictModel
@@ -69,7 +68,7 @@ def metric_measurand(spec: MetricSpec, scorer_id: str) -> Measurand:
         key=spec.expression,
         scorer_id=scorer_id,
         binary=False,
-        unit=MeasurandUnit.SCORE,
+        unit=spec.unit,
     )
 
 

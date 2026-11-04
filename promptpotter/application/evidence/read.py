@@ -510,7 +510,7 @@ def subject_evidence(
         order_confound=order_confound(rows),
         environments=environments(scored, held_out, decomposition, higher_is_better=direction),
         rank_agreement=rank_agreement(scored, higher_is_better=direction),
-        lift_profiles=lift_profiles(scored) if spec_metric.unit == "delta" else [],
+        lift_profiles=lift_profiles(scored) if spec_metric.lift else [],
         ranking_computed=include_ranking,
         edits=edits,
         spread=_edit_spread(edits),

@@ -10,7 +10,12 @@ from promptpotter.application.pipeline_resolve import LineConfig, campaign_runs_
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
-from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO, ArmReading, level_text
+from promptpotter.domain.arm_reading import (
+    DISPLAY_METRIC_INFO,
+    ArmReading,
+    level_text,
+    lift_band_text,
+)
 from promptpotter.domain.bench import BENCH_STATE_INFO, BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
@@ -32,6 +37,7 @@ from promptpotter.domain.hierarchy import (
     CANDIDATE_STANDING_INFO,
     CampaignFacts,
     CandidateStanding,
+    CourseClimb,
     CourseFacts,
     CourseKind,
     CourseSpawn,
@@ -125,19 +131,33 @@ def _lifetime_row(spent: LifetimeSpend) -> Figure:
     )
 
 
-def _lift_row(
-    key: FigureKey, label: str, pair: PairedReading, against: str, notes: list[str]
-) -> Figure:
+def _lift_row(key: FigureKey, label: str, pair: PairedReading, against: str) -> Figure:
     lift = pair.headline
     if lift is None or pair.coverage is None:
-        return _figure(key, label, READING_STATE_INFO[pair.state].label, " · ".join(notes) or None)
-    est, unit = lift.estimate, lift.measurand.unit
+        info = READING_STATE_INFO[pair.state]
+        return _figure(key, label, info.label, info.sentence)
+    unit = lift.measurand.unit
     return _figure(
         key,
         label,
-        f"{est.value:+.3f} [{est.ci_lo:+.3f}, {est.ci_hi:+.3f}]",
-        " · ".join(
-            [f"{against} {level_text(lift.rate_a, unit)} → {level_text(lift.rate_b, unit)}", *notes]
+        lift_band_text(lift.estimate, unit),
+        f"{1 - pair.spec.alpha:.0%} band · "
+        f"{against} {level_text(lift.rate_a, unit)} → {level_text(lift.rate_b, unit)}",
+    )
+
+
+def _course_climb(facts: CourseFacts) -> CourseClimb | None:
+    climb = None if facts.standing is None else facts.standing.climb
+    if climb is None:
+        return None
+    theta = ["rounds are won on θ"] if facts.elects_on == "ability" else []
+    return CourseClimb(
+        rates=[
+            _figure(rate.key, rate.label, "—" if rate.value is None else rate.value, rate.sub)
+            for rate in climb.rates
+        ],
+        note=Said(
+            key="climb_note", tone="quiet", label=" · ".join([f"lift in {climb.measurand}", *theta])
         ),
     )
 
@@ -183,11 +203,11 @@ def _course_figures(
         rows.append(_bench_row(bench.status.state, bench))
     rows.append(_rounds_row(facts.rounds_closed, cap))
     if (standing := facts.standing) is None:
-        return rows
+        unread = PairedReading.unread(ReadingState.PENDING)
+        return [*rows, _lift_row("lift", "Lift vs origin", unread, "origin")]
     rows.append(_figure("candidates", "Candidates", str(standing.candidates)))
     rows.append(_figure("selection", "Leader", standing.selection_name))
-    on_theta = ["rounds are won on θ"] if facts.elects_on == "ability" else []
-    rows.append(_lift_row("lift", "Lift vs origin", standing.vs_origin, "origin", on_theta))
+    rows.append(_lift_row("lift", "Lift vs origin", standing.vs_origin, "origin"))
     if (lives := standing.lives) is not None:
         rows.append(_figure("lives", "Lives", lives.bar, lives.label))
     return rows
@@ -235,7 +255,7 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
             )
         )
     if reading.vs_reference is not None:
-        rows.append(_lift_row("lift", "Lift vs parent", reading.vs_reference, "parent", []))
+        rows.append(_lift_row("lift", "Lift vs parent", reading.vs_reference, "parent"))
     return rows
 
 
@@ -319,6 +339,7 @@ def course_entry(
         label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
         tags=tags,
         figures=_course_figures(state.status, facts, cap, runs_with, on_line=hop == holder),
+        climb=_course_climb(facts),
         lines=_course_lines(runs_with, line),
         state=state,
         span=HierarchySpan(

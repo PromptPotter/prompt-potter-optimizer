@@ -180,8 +180,10 @@ from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, arm_end, is_leader_eligible
 from promptpotter.domain.bench import (
+    COST_ABSENCE_WORDS,
     BenchPass,
     BenchPasses,
+    CostAbsence,
     DatasetSplit,
     PassStop,
     partition_bank,
@@ -218,7 +220,6 @@ from promptpotter.domain.paired_reading import (
     EstimatorSpec,
     Measurand,
     MeasurandKind,
-    MeasurandUnit,
     MemberAddress,
     PairedReading,
     ReadingState,
@@ -313,9 +314,7 @@ def _objective(cell: GradedCell) -> float:
 
 
 def _read_pair(a: MemberRows, b: MemberRows, panel: list[Sample], **asked: Any) -> PairedReading:
-    hit = Measurand(
-        kind=MeasurandKind.GRADE, key="hit", scorer_id="s", binary=True, unit=MeasurandUnit.RATE
-    )
+    hit = Measurand(kind=MeasurandKind.GRADE, key="hit", scorer_id="s", binary=True, unit="rate")
     read_under: dict[str, Any] = {
         "a": a,
         "b": b,
@@ -2706,7 +2705,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                     for n, (improved, electable) in enumerate(closes, 1)
                 ),
             ]
-            paid = LineOutlay(search_usd=None, elapsed_s=None)
+            paid = LineOutlay(search_usd=None, worked_s=None)
             set_cycle(
                 cycle, line=line, standing=RunStanding.after(line, lives=lives.bank, outlay=paid)
             )
@@ -2743,7 +2742,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                 cycle,
                 line=line,
                 standing=RunStanding.after(
-                    line, lives=None, outlay=LineOutlay(search_usd=None, elapsed_s=None)
+                    line, lives=None, outlay=LineOutlay(search_usd=None, worked_s=None)
                 ),
             )
             return standing_tripped(cycle)
@@ -3274,7 +3273,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         key="objective",
         scorer_id="s",
         binary=False,
-        unit=MeasurandUnit.SCORE,
+        unit="score",
     )
     (beside,) = _read_pair(a, b, bank, measurands=[lift.measurand, composite]).beside
     assert beside.flips is None
@@ -3653,9 +3652,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         )
 
     def stands(run: list[Any]) -> RunStanding:
-        return RunStanding.after(
-            run, lives=None, outlay=LineOutlay(search_usd=None, elapsed_s=None)
-        )
+        return RunStanding.after(run, lives=None, outlay=LineOutlay(search_usd=None, worked_s=None))
 
     # C0 is re-read between the lines: the panel cell it took in round 1 it misses by round 3.
     first_line = _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL, ids=ids)
@@ -3721,6 +3718,26 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "round 3 advanced, and an unread pick is no stall"
     )
     assert held_on.rounds_without_advance == 1
+
+    # The climb prices C0's +100-point lift by what the line paid; an absent denominator says why.
+    def climb(usd: float | None, worked: float | None) -> dict[str, tuple[str | None, str]]:
+        paid = RunStanding.after(
+            run, lives=None, outlay=LineOutlay(search_usd=usd, worked_s=worked)
+        )
+        assert paid.climb is not None
+        return {rate.key: (rate.value, rate.sub) for rate in paid.climb.rates}
+
+    unpriced, unspent = climb(None, None), climb(0.0, 50.0)
+    assert unpriced["lift_per_usd"] == (None, COST_ABSENCE_WORDS[CostAbsence.UNPRICED_TOKENS])
+    assert unspent["lift_per_usd"] == (None, COST_ABSENCE_WORDS[CostAbsence.ZERO_SPEND])
+    assert unpriced["time_per_lift"] == (None, "no launch's clock parsed"), (
+        "no clock is an absent time, never an instant climb"
+    )
+    priced = climb(2.0, 50.0)
+    assert [value for value, _ in priced.values()] == ["+50.0\xa0pts", "+20.0\xa0pts", "0.5s"], (
+        "a rate's lift is priced in points per dollar, per candidate tested and in worked "
+        "seconds per point"
+    )
 
     # A head-to-head pairs two optimizers only on one bench under one grader.
     h2h_stores = workspace(tmp_path / "h2h")

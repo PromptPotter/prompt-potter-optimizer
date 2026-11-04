@@ -11,6 +11,7 @@ from promptpotter.application.views.render.primitives import (
     fmt_pct,
     overlap_series,
 )
+from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.bench import (
     BENCH_STATE_INFO,
     BandedValue,
@@ -18,7 +19,7 @@ from promptpotter.domain.bench import (
     BenchReading,
     BenchScore,
 )
-from promptpotter.domain.paired_reading import ArmKey, LiftEstimate
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import health_reading
@@ -175,7 +176,7 @@ def _bench_line(name: str, reading: BenchReading, bench: BenchScore) -> str:
 
 
 def _bench_columns(
-    of: Callable[[BenchColumn], BandedValue | LiftEstimate | None],
+    of: Callable[[BenchColumn], BandedValue | None],
     headline: BenchColumn,
     spec: str,
 ) -> str:
@@ -198,10 +199,13 @@ def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[st
         sentence = BENCH_STATE_INFO[bench.status.state].sentence
         return ["## Bench score — the headline", "", f"Not graded. {sentence}", ""]
 
-    def lift(column: BenchColumn) -> LiftEstimate | None:
-        measured = bench.lift(column)
-        return None if measured is None else measured.estimate
+    def lift(column: BenchColumn) -> str:
+        if (measured := bench.lift(column)) is None:
+            return f"{column} —"
+        text = lift_band_text(measured.estimate, measured.measurand.unit)
+        return f"{column} {f'**{text}**' if column == bench.headline else text}"
 
+    columns = sorted(get_args(BenchColumn), key=lambda c: c != bench.headline)
     return [
         "## Bench score — the headline",
         "",
@@ -211,7 +215,7 @@ def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[st
         "",
         _bench_line("selected", graded.selected, bench),
         _bench_line("origin", graded.origin, bench),
-        f"- lift, paired per row: {_bench_columns(lift, bench.headline, '{:+.3f}')}",
+        f"- lift, paired per row: {' · '.join(lift(c) for c in columns)}",
         "",
     ]
 
@@ -474,11 +478,7 @@ def _score_cells(round_data: RoundResult, key: ArmKey) -> str:
     fit = round_data.fit(key)
     theta = "—" if fit is None or fit.theta is None else f"{fit.theta:+.3f}"
     read = fit.vs_reference.headline if fit is not None and fit.vs_reference else None
-    lift = (
-        "—"
-        if read is None
-        else f"{read.estimate.value:+.3f} [{read.estimate.ci_lo:+.3f}, {read.estimate.ci_hi:+.3f}]"
-    )
+    lift = "—" if read is None else lift_band_text(read.estimate, read.measurand.unit)
     election = round_data.election
     won = "✓" if election is not None and key == election.selected else "·"
     fitness = fmt_fitness(fold.composite_fitness)

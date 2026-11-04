@@ -4680,7 +4680,18 @@
             "type": "string"
           },
           "unit": {
-            "$ref": "#/components/schemas/MeasurandUnit"
+            "enum": [
+              "rate",
+              "score",
+              "theta",
+              "seconds",
+              "usd",
+              "tokens",
+              "rank",
+              "rounds"
+            ],
+            "title": "Unit",
+            "type": "string"
           }
         },
         "required": [
@@ -4700,14 +4711,6 @@
           "expr"
         ],
         "title": "MeasurandKind",
-        "type": "string"
-      },
-      "MeasurandUnit": {
-        "enum": [
-          "rate",
-          "score"
-        ],
-        "title": "MeasurandUnit",
         "type": "string"
       },
       "MeasureEnterView": {
@@ -7813,18 +7816,6 @@
             "title": "Changes",
             "type": "string"
           },
-          "elapsed_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Wall clock of the line's launches to this close: each ended launch's own, then the closing one's; null where an ended launch's endpoints did not parse.",
-            "title": "Elapsed S"
-          },
           "improved": {
             "description": "Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no interval), so it is the promotion clock and never a result; read `advanced`.",
             "title": "Improved",
@@ -7887,6 +7878,18 @@
           "vs_origin": {
             "$ref": "#/components/schemas/PairedReading",
             "description": "`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap reading of that pair. The state says why where there is none: `same_individual` while the selection is the origin."
+          },
+          "worked_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worked seconds of the line's launches to this close (`domain/campaign.py::worked_seconds`), the closing launch's to now; null where no launch's endpoints parsed.",
+            "title": "Worked S"
           }
         },
         "required": [
@@ -7901,7 +7904,7 @@
           "advanced",
           "candidates",
           "search_usd",
-          "elapsed_s"
+          "worked_s"
         ],
         "title": "RunStanding",
         "type": "object"

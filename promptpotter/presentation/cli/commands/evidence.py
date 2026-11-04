@@ -13,11 +13,17 @@ from promptpotter.application.evidence.head_to_head import (
     GuardState,
     HeadToHeadRow,
 )
-from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
+from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricSpec
 from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.evidence.subjects import SCENARIO_WORDS, parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.arm_reading import (
+    level_text,
+    lift_band_text,
+    lift_interval_text,
+    lift_text,
+)
 from promptpotter.domain.bench import (
     BENCH_STATE_INFO,
     BandedValue,
@@ -29,35 +35,28 @@ from promptpotter.domain.campaign import BenchSet
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     CellSet,
-    LiftEstimate,
     PairedReading,
 )
 from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
-# Only a `delta` earns a leading `+`: on a level or a ratio it dresses the value as a lift.
-_UNIT_SPEC: dict[MetricUnit, str] = {
-    "level": "{:.3f}",
-    "delta": "{:+.3f}",
-    "seconds": "{:.1f}",
-    "usd": "{:.4f}",
-    "tokens": "{:.0f}",
-    "rank": "{:.2f}",
-    "rounds": "{:.1f}",
-    "composed": "{:.3f}",
-}
 
-# Fails at import: a `MetricUnit` with no format is otherwise a KeyError mid-table on the operator's terminal.
-_unformatted = sorted(set(get_args(MetricUnit)) - set(_UNIT_SPEC))
-if _unformatted:
-    raise RuntimeError(f"MetricUnit members with no terminal format: {_unformatted}")
-del _unformatted
+def _metric_text(value: float, metric: MetricSpec) -> str:
+    """A value of the read metric; only a lift earns a sign."""
+    return lift_text(value, metric.unit) if metric.lift else level_text(value, metric.unit)
+
+
+def _metric_ci(lo: float | None, hi: float | None, metric: MetricSpec) -> str:
+    if lo is None or hi is None:
+        return "—"
+    if metric.lift:
+        return lift_interval_text(lo, hi, metric.unit)
+    return f"[{level_text(lo, metric.unit)}, {level_text(hi, metric.unit)}]"
 
 
 def _roster_lines(ev: Evidence) -> list[str]:
     m = ev.metric
-    spec = _UNIT_SPEC[m.spec.unit]
     lines = [
         f"{len(ev.subjects)} subject(s), oldest first, read under {m.spec.axis_label}.",
         m.spec.description,
@@ -72,7 +71,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
         f"{'rounds':>6}",
     ]
     for r in ev.subjects:
-        value = "         ." if r.value is None else f"{spec.format(r.value):>10}"
+        value = "         ." if r.value is None else f"{_metric_text(r.value, m.spec):>10}"
         ruler = r.ability.ruler.id if r.ability is not None else "-"
         mark = {True: " ", False: "x", None: "?"}[r.comparable]
         # `~` on the kind: a masked channel shares its label with the record it masks, and two rows must not read alike.
@@ -81,7 +80,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
             f"{r.created_at[:10]:<10}  {kind:<9}  {mark}{r.label[:25]:<25}  "
             f"{r.dataset_name[:18]:<18}  {(r.authorship or '-')[:18]:<18}  "
             f"{(r.arm_id or '-')[:8]:<8}  {ruler[:8]:<8}  {value}  "
-            f"{fmt_ci(r.ci_lo, r.ci_hi, spec=spec):>20}  {r.n_cells:>5}  "
+            f"{_metric_ci(r.ci_lo, r.ci_hi, m.spec):>20}  {r.n_cells:>5}  "
             f"{len(r.unscorable_cells):>6}  {r.cycle_rounds_scored:>6}"
         )
     lines += _scenario_lines(ev)
@@ -218,9 +217,9 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         "rows before this selection: each one chosen off a headline spends the holdout. ended is how the cycle holding "
         "the row's line reads now — one that failed ended on no result.",
         f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
-        f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {beside[:4] + ' lift':>9}  {'billed $':>8}  "
+        f"{'origin':>7}  {'95% CI':>16}  {'lift [95% CI]':>24}  {beside[:4] + ' lift':>13}  {'billed $':>8}  "
         f"{'our rate $':>10}  {'incurred $':>10}{'replay':>6}  {'cap $':>8}  {'tokens':>8}  {'calls':>6}  {'work s':>7}  {'rounds':>6}  "
-        f"{'inc/ref':>8}  {'opt/ref':>8}  {'work/ref':>8}  {'lift/$':>7}  {'reads':>5}  ended",
+        f"{'inc/ref':>8}  {'opt/ref':>8}  {'work/ref':>8}  {'lift/$':>11}  {'reads':>5}  ended",
     ]
     for r in h2h.rows:
         mark = "x" if r.guard.state is GuardState.DIFFERS else " "
@@ -228,7 +227,10 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         graded = b.graded
         reads = b.status.reads_before
         spend = r.spend
-        per_usd = b.cost.lift_per_usd
+        per, headline = b.cost.lift_per_usd, b.vs_origin.headline
+        per_usd = (
+            "—" if per is None or headline is None else lift_text(per, headline.measurand.unit)
+        )
         metered = r.spend_metered
         cap = "—" if metered is None else f"{metered.metered_usd:.4f}"
         replay = (
@@ -241,10 +243,10 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             + (
                 f"{graded.selected.round:>3}  {_banded(graded.selected.level, '{:.3f}', 8, 16)}  "
                 f"{_banded(graded.origin.level, '{:.3f}', 7, 16)}  "
-                f"{_banded(_lift(b, h2h.headline), '{:+.3f}', 7, 18)}  "
-                f"{_value(_lift(b, beside), '{:+.3f}'):>9}  "
+                f"{_lift_text(b, h2h.headline, banded=True):>24}  "
+                f"{_lift_text(b, beside, banded=False):>13}  "
                 if graded is not None
-                else f"{BENCH_STATE_INFO[b.status.state].sentence:<106.106}  "
+                else f"{BENCH_STATE_INFO[b.status.state].sentence:<107.107}  "
             )
             + (
                 f"{spend.total_used_usd:>8.4f}  {spend.total_rate_priced_usd:>10.4f}  "
@@ -259,7 +261,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 f"{'—' if x is None else f'{x:.2f}':>8}"
                 for x in (r.incurred_usd_ratio, r.optimizer_incurred_usd_ratio, r.worked_ratio)
             )
-            + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
+            + f"  {per_usd:>11}"
             + f"  {'—' if reads is None else reads:>5}"
             + f"  {r.status.label[:60]}"
         )
@@ -293,7 +295,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             "se iid is the same mean's SE were every replicate pairing independent, deff the "
             "squared ratio. Holm gates a claim; BH q is the false-discovery reading. `x` marks a "
             "contrast whose guard differs: read, labelled, and outside the correction:",
-            f"  {'contrast (b - a)':<50}  {'shift':>7}  {'95% CI':>18}  {'rows':>4}  "
+            f"  {'contrast (b - a)':<50}  {'shift [95% CI]':>27}  {'rows':>4}  "
             f"{'se row':>7}  {'se iid':>7}  {'deff':>5}  {'p':>12}  {'p (Holm)':>12}  "
             f"{'q (BH)':>12}",
         ]
@@ -320,7 +322,7 @@ def _contrast_text(c: ArmContrast) -> str:
         return "—" if value is None else f"{value:.4f}"
 
     return (
-        f"{est.value:>+7.3f}  {fmt_ci(est.ci_lo, est.ci_hi, spec='{:+.3f}'):>18}  "
+        f"{lift_band_text(est, lift.measurand.unit):>27}  "
         f"{len(c.differences):>4}  {se(c.se_clustered):>7}  {se(c.se_naive):>7}  "
         f"{'—' if c.design_effect is None else f'{c.design_effect:.2f}':>5}  "
         f"{fmt_pvalue(est.p_value):>12}{floored} "
@@ -353,32 +355,33 @@ def _election_lines(rows: list[HeadToHeadRow]) -> list[str]:
     return lines
 
 
-def _pair_text(
-    pair: PairedReading, spec: str, width: int, ci_width: int, n_width: int, p_width: int
-) -> str:
+def _pair_text(pair: PairedReading, width: int, n_width: int, p_width: int) -> str:
     lift = pair.headline
     if lift is None or pair.coverage is None:
         return READING_STATE_INFO[pair.state].sentence
     est = lift.estimate
     floored = "*" if est.p_value <= est.p_floor else " "
     return (
-        f"{spec.format(est.value):>{width}}  "
-        f"{fmt_ci(est.ci_lo, est.ci_hi, spec=spec):>{ci_width}}  "
+        f"{lift_band_text(est, lift.measurand.unit):>{width}}  "
         f"{pair.coverage.scored:>{n_width}}  {fmt_pvalue(est.p_value):>{p_width}}{floored} "
         f"{fmt_pvalue(None if lift.family is None else lift.family.p_adjusted):>{p_width}}"
     )
 
 
-def _lift(bench: BenchScore, column: BenchColumn) -> LiftEstimate | None:
-    measured = bench.lift(column)
-    return None if measured is None else measured.estimate
+def _lift_text(bench: BenchScore, column: BenchColumn, *, banded: bool) -> str:
+    if (measured := bench.lift(column)) is None:
+        return "—"
+    unit = measured.measurand.unit
+    if banded:
+        return lift_band_text(measured.estimate, unit)
+    return lift_text(measured.estimate.value, unit)
 
 
-def _value(banded: BandedValue | LiftEstimate | None, spec: str) -> str:
+def _value(banded: BandedValue | None, spec: str) -> str:
     return "—" if banded is None else spec.format(banded.value)
 
 
-def _banded(banded: BandedValue | LiftEstimate | None, spec: str, width: int, ci_width: int) -> str:
+def _banded(banded: BandedValue | None, spec: str, width: int, ci_width: int) -> str:
     ci = "—" if banded is None else fmt_ci(banded.ci_lo, banded.ci_hi, spec=spec)
     return f"{_value(banded, spec):>{width}}  {ci:>{ci_width}}"
 
@@ -412,7 +415,6 @@ def _config_lines(ev: Evidence) -> list[str]:
 def _factor_lines(ev: Evidence) -> list[str]:
     if not ev.factors:
         return []
-    unit = ev.metric.spec.unit
     free = [f for f in ev.factors if not f.confounded_with]
     aliased = [f for f in ev.factors if f.confounded_with]
     lines = [
@@ -428,7 +430,7 @@ def _factor_lines(ev: Evidence) -> list[str]:
         lines.append("")
         lines.append(head)
         for level in factor.levels:
-            value = "—" if level.value is None else f"{level.value:,.2f} {unit}"
+            value = "—" if level.value is None else _metric_text(level.value, ev.metric.spec)
             lines.append(
                 f"      {_clip(level.level, 38):<40}{value:>18}"
                 f"   {level.n_cells} cell(s), {len(level.subjects)} subject(s)"
@@ -461,7 +463,11 @@ def _grid_lines(ev: Evidence) -> list[str]:
         painted = []
         for col in cols:
             cell = at.get((row, col))
-            value = "—" if cell is None or cell.value is None else f"{cell.value:,.2f}"
+            value = (
+                "—"
+                if cell is None or cell.value is None
+                else _metric_text(cell.value, ev.metric.spec)
+            )
             painted.append(value.rjust(width))
         lines.append("  " + _clip(row, 20).ljust(22) + "".join(painted))
     return lines
@@ -516,17 +522,19 @@ def _scenario_lines(ev: Evidence) -> list[str]:
 
 
 def _winner_chain_lines(ev: Evidence) -> list[str]:
-    spec = _UNIT_SPEC[ev.metric.spec.unit]
+    metric = ev.metric.spec
     lines: list[str] = []
     for r in ev.subjects:
         if not r.winner_chain:
             continue
         lines.append(f"\n{r.label} — the branch behind it, origin first:")
         for point in r.winner_chain:
-            value = "         ." if point.value is None else f"{spec.format(point.value):>10}"
+            value = (
+                "         ." if point.value is None else f"{_metric_text(point.value, metric):>10}"
+            )
             lines.append(
                 f"  r{point.round:<3} {point.label[:20]:<20}  {value}  "
-                f"{fmt_ci(point.ci_lo, point.ci_hi, spec=spec):>20}  {point.n_cells:>3} cells"
+                f"{_metric_ci(point.ci_lo, point.ci_hi, metric):>20}  {point.n_cells:>3} cells"
             )
     return lines
 
@@ -535,15 +543,13 @@ def _pairwise_lines(ev: Evidence) -> list[str]:
     m = ev.metric
     if not m.pairwise:
         return ["", "A pairwise comparison needs two subjects."]
-    spec = _UNIT_SPEC[m.spec.unit]
     lines = [
         "",
-        f"{'pair (b - a)':<40}  {'lift':>11}  {'95% CI':>20}  {'n':>3}  "
-        f"{'p':>16}  {'p (Holm)':>16}",
+        f"{'pair (b - a)':<40}  {'lift [95% CI]':>33}  {'n':>3}  {'p':>16}  {'p (Holm)':>16}",
     ]
     for pair in m.pairwise:
         label = f"{pair.subject_a[-8:]} -> {pair.subject_b[-8:]}"
-        lines.append(f"{label:<40}  {_pair_text(pair.reading, spec, 11, 20, 3, 16)}")
+        lines.append(f"{label:<40}  {_pair_text(pair.reading, 33, 3, 16)}")
     return [
         *lines,
         "",
@@ -569,14 +575,18 @@ def _variance_lines(ev: Evidence) -> list[str]:
         if v.subject_sd_below_noise
         else "so the subjects differ by more than noise alone would produce"
     )
-    spec = _UNIT_SPEC[ev.metric.spec.unit]
+    unit = ev.metric.spec.unit
+
+    def sd(value: float) -> str:
+        return level_text(value, unit)
+
     lines = [
         "",
         f"Variance over the {v.n_cells} cell(s) all {v.n_subjects} subjects measured:",
-        f"  cell effect {spec.format(v.cell_effect_sd)} | "
-        f"subject effect {spec.format(v.subject_effect_sd)} | residual {spec.format(v.residual_sd)}",
+        f"  cell effect {sd(v.cell_effect_sd)} | "
+        f"subject effect {sd(v.subject_effect_sd)} | residual {sd(v.residual_sd)}",
         f"  under the null a subject mean still scatters by "
-        f"{spec.format(v.null_subject_scatter)} — {verdict}.",
+        f"{sd(v.null_subject_scatter)} — {verdict}.",
     ]
     if ev.power is not None:
         p = ev.power
@@ -584,9 +594,9 @@ def _variance_lines(ev: Evidence) -> list[str]:
         lines += [
             "",
             f"Resolving power at {p.cells_per_subject} cells/subject: paired SE "
-            f"{spec.format(p.paired_se)}, smallest detectable effect "
-            f"{spec.format(p.min_detectable_effect)}.",
-            f"  the widest gap on the roster is {spec.format(p.largest_subject_gap)}; resolving it "
+            f"{sd(p.paired_se)}, smallest detectable effect "
+            f"{sd(p.min_detectable_effect)}.",
+            f"  the widest gap on the roster is {sd(p.largest_subject_gap)}; resolving it "
             f"would take ~{needed} cells per subject.",
         ]
     oc = ev.order_confound
@@ -607,7 +617,7 @@ def _variance_lines(ev: Evidence) -> list[str]:
 def _environment_lines(ev: Evidence) -> list[str]:
     if not ev.environments:
         return []
-    spec = _UNIT_SPEC[ev.metric.spec.unit]
+    unit = ev.metric.spec.unit
     held = sum(1 for e in ev.environments if e.held_out)
     lines = [
         "",
@@ -620,8 +630,8 @@ def _environment_lines(ev: Evidence) -> list[str]:
     for e in ev.environments:
         lines.append(
             f"  {_clip(e.cell, 44):<44}  {'yes' if e.held_out else '':>4}  {e.n_subjects:>3}  "
-            f"{'—' if e.spread is None else spec.format(e.spread):>8}  "
-            f"{'—' if e.signal_sd is None else spec.format(e.signal_sd):>9}  "
+            f"{level_text(e.spread, unit):>8}  "
+            f"{level_text(e.signal_sd, unit):>9}  "
             f"{'—' if e.snr is None else f'{e.snr:.2f}':>6}  "
             f"{'—' if e.best_subject is None else e.best_subject[-28:]}"
         )
@@ -663,26 +673,27 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
             "No scored edits: one needs its campaign's round-0 origin plus a second searchpoint "
             "measured on cells that origin also scored.",
         ]
-    spec = _UNIT_SPEC[m.spec.unit]
+    unit = m.spec.unit
     lines = [
         "",
         f"{len(ev.edits)} searchpoint(s) ranked by how much each beat its OWN campaign's origin "
         f"on the same cells, in {m.spec.label}. Identity is `sp_hash`, so a prompt-only edit "
         "ranks like any other; nothing pools across campaigns, which share no anchor to pool on.",
         "",
-        f"{'lift':>11}  {'95% CI':>20}  {'cells':>5}    {'campaign':<10}  edit",
+        f"{'lift':>14}  {'95% CI':>20}  {'cells':>5}    {'campaign':<10}  edit",
     ]
     for c in ev.edits[:top]:
         lift, coverage = c.reading.headline, c.reading.coverage
         if lift is None or coverage is None:
             lines.append(
-                f"{'unranked':>11}  {READING_STATE_INFO[c.reading.state].sentence}  "
+                f"{'unranked':>14}  {READING_STATE_INFO[c.reading.state].sentence}  "
                 f"{c.campaign_id[:10]:<10}  {c.label}"
             )
             continue
         est = lift.estimate
         lines.append(
-            f"{spec.format(est.value):>11}  {fmt_ci(est.ci_lo, est.ci_hi, spec=spec):>20}  "
+            f"{lift_text(est.value, unit):>14}  "
+            f"{lift_interval_text(est.ci_lo, est.ci_hi, unit):>20}  "
             f"{coverage.scored:>5}  {' ' if est.side == 'spans' else '*'} "
             f"{c.campaign_id[:10]:<10}  {c.label}"
         )
@@ -691,7 +702,7 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
         *lines,
         "",
         f"Spread across the {spread.n_edits} ranked edit(s): SD "
-        f"{spec.format(spread.edit_effect_sd)}"
+        f"{level_text(spread.edit_effect_sd, unit)}"
         if spread.edit_effect_sd is not None
         else f"Spread across the {spread.n_edits} ranked edit(s): one reading has none.",
         "",

@@ -55,6 +55,8 @@ interface WorkspaceState {
   navigate: (subject: ViewedSubject, opts?: { resume?: boolean }) => void;
   // Opened again it moves to the end, never shows twice; an omitted key keeps the one it had.
   open: (family: FamilyId, key?: string | null) => void;
+  // The view the last `open` asked to see: a fresh object per ask, so an open view is scrolled to again.
+  reveal: { family: FamilyId } | null;
   close: (family: FamilyId) => void;
   reportAddressGone: (address: string) => void;
   goneAddress: string | null;
@@ -110,6 +112,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Address>(FOLLOWING);
   const [initialized, setInitialized] = useState(false);
   const [goneAddress, setGoneAddress] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<{ family: FamilyId } | null>(null);
 
   const { byAddress } = useRegistry();
   const active = useActivePointer();
@@ -229,13 +232,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const open = useCallback(
     (family: FamilyId, key?: string | null) =>
-      startTransition(() =>
+      startTransition(() => {
         setScreen((s) => {
           const was = s.views.find((v) => v.family === family);
           const view = { family, key: key === undefined ? (was ? was.key : null) : key };
           return { ...s, views: [...s.views.filter((v) => v.family !== family), view] };
-        }),
-      ),
+        });
+        setReveal({ family });
+      }),
     [],
   );
 
@@ -284,6 +288,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pinned: pinned !== null,
       navigate,
       open,
+      reveal,
       close,
       reportAddressGone,
       goneAddress,
@@ -301,6 +306,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pinned,
       navigate,
       open,
+      reveal,
       close,
       reportAddressGone,
       goneAddress,

@@ -3,11 +3,10 @@
 .content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--remote-dock-h) + var(--safe-bottom))}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .view-tabs{display:flex;flex:0 0 auto;padding:var(--space-6) var(--space-18);border-bottom:0.5px solid var(--color-border);overflow-x:auto;scrollbar-width:thin}
-.view-glances{flex:0 0 auto;display:flex;overflow-x:auto;padding:0 var(--space-12);background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border)}
-.view-glance{flex:0 0 auto;display:flex;align-items:center;white-space:nowrap}
 .views{flex:1;display:flex;min-height:0;overflow-x:auto;scroll-snap-type:x mandatory}
 .view{flex:1 0 var(--box-min);min-width:0;min-height:0;display:flex;flex-direction:column;scroll-snap-align:start}
 .view + .view{border-left:0.5px solid var(--color-border)}
+.view-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);padding-inline:var(--space-14) var(--space-6);border-bottom:0.5px solid var(--color-border);font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary)}
 .skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:var(--space-8) var(--space-14);background:var(--color-accent);color:var(--color-text-on-accent);border-radius:var(--border-radius-md);font-size:var(--text-base);text-decoration:none;transition:top .15s ease}
 .skip-link:focus{top:8px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
@@ -144,6 +143,8 @@
 .figure dd{margin:0}
 .figure-value{font-size:var(--text-lg);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--color-text-primary)}
 .figure-value .phase-dot{display:inline-block;margin-inline-end:var(--space-6);vertical-align:middle}
+/* A value whose Term opens on a tap is a touch target like any button. */
+@media (pointer:coarse){.figure-value [tabindex]{display:inline-flex;align-items:center;min-block-size:var(--touch-target-min);min-inline-size:var(--touch-target-min)}}
 .figure .figure-sub{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:var(--text-xs);line-height:1.35;color:var(--color-text-secondary);overflow-wrap:anywhere}
 .summary-block.is-dense{gap:var(--space-6)}
 .summary-block.is-dense .figure-row{grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:var(--space-6) var(--space-10);padding-block:var(--space-6);border-bottom:0}

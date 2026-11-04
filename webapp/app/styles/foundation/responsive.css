@@ -60,7 +60,8 @@
   a[role="button"],
   input[type="submit"],
   input[type="button"]{
-    min-height:var(--touch-floor,var(--touch-target-min));
+    min-block-size:var(--touch-floor,var(--touch-target-min));
+    min-inline-size:var(--touch-floor,var(--touch-target-min));
   }
   input:not([type]),
   input[type="text"],

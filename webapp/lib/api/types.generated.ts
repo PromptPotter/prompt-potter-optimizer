@@ -407,7 +407,7 @@ export interface Measurand {
   /** DECLARED, never inferred from the values: every cell is 0 or 1, so a cell can
    * flip. */
   binary: boolean;
-  unit: 'rate' | 'score';
+  unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
 }
 
 /** A mean paired difference with its interval and test. */
@@ -1855,7 +1855,9 @@ export interface MetricSpec {
   key: string;
   label: string;
   expression: string;
-  unit: 'level' | 'delta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds' | 'composed';
+  unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
+  /** Each value is a difference off an origin, so it reads signed, as a lift does */
+  lift: boolean;
   higher_is_better: boolean | null;
   description: string;
   /** What to CALL this metric's axis: the label, plus the unit only where the unit
@@ -3027,7 +3029,7 @@ export interface HierarchyTag {
 /** An entry's figure: a `Said` row keyed by the closed set code looks a figure up by. */
 export interface Figure {
   /** Which figure, for code to look up; never shown. */
-  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lives' | 'accuracy' | 'ability';
+  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'accuracy' | 'ability';
   tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
   label: string;
   value: string | null;
@@ -3153,6 +3155,8 @@ export interface HierarchyCourse {
   span: HierarchySpan;
   level: 'course';
   facts: CourseFacts;
+  /** Null until the lift vs origin is read. */
+  climb: CourseClimb | null;
   /** The run's pinned line from what no clock reads (`run_said`): a producer's row
    * is its dashboard's alone. Null where nothing needs the operator. */
   said: Said | null;
@@ -3229,9 +3233,10 @@ export interface RunStanding {
   /** USD the SEARCH had incurred at this close, every cycle of the line read whole
    * (`SpendRollup.search_incurred_usd`); null on unpriced search tokens. */
   search_usd: number | null;
-  /** Wall clock of the line's launches to this close: each ended launch's own, then
-   * the closing one's; null where an ended launch's endpoints did not parse. */
-  elapsed_s: number | null;
+  /** Worked seconds of the line's launches to this close
+   * (`domain/campaign.py::worked_seconds`), the closing launch's to now; null
+   * where no launch's endpoints parsed. */
+  worked_s: number | null;
 }
 
 /** A run's life bank: what is left of it, and its cap. */
@@ -3239,6 +3244,16 @@ export interface LivesReading {
   left: number;
   /** Null where the bank has no cap. */
   cap: number | null;
+}
+
+/** What the lift vs origin cost, and the one caveat it and its rates share. */
+export interface CourseClimb {
+  /** Per search dollar, per candidate tested and in worked time per unit of lift,
+   * in that order; each sub names only its own denominator. */
+  rates: Figure[];
+  /** What the lift and every rate read in: the measurand and, under an ability
+   * election, that rounds are won on θ. Said once, under the rates. */
+  note: Said;
 }
 
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
@@ -3372,6 +3387,8 @@ export interface SubtreeCourse {
   span: HierarchySpan;
   level: 'course';
   facts: SubtreeCourseFacts;
+  /** Null until the lift vs origin is read. */
+  climb: CourseClimb | null;
   /** The run's pinned line from what no clock reads (`run_said`): a producer's row
    * is its dashboard's alone. Null where nothing needs the operator. */
   said: Said | null;
@@ -4689,6 +4706,9 @@ export type StallEffect = 'starts' | 'resets' | 'counts' | 'skips';
 // promptpotter.domain.ruler::ThetaCaveat
 export type ThetaCaveat = 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
 
+// promptpotter.domain.bench::CostAbsence
+export type CostAbsence = 'no_lift' | 'unpriced_tokens' | 'zero_spend';
+
 // promptpotter.application.evidence.head_to_head::GuardState
 export type GuardState = 'controlled' | 'uncontrolled' | 'differs';
 
@@ -4755,6 +4775,17 @@ export interface ThetaCaveatInfo {
   label: string;
   detail: string;
   tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+}
+
+export interface UnitFormat {
+  scale: number;
+  digits: number;
+  prefix: string;
+  suffix: string;
+  lift_digits: number;
+  lift_word: string;
+  lift_name: string;
+  compact: boolean;
 }
 
 export interface VerificationKindInfo {
@@ -4984,6 +5015,25 @@ export const ARM_VERDICT_LABELS: Record<"retired" | "invalid" | "origin" | "elec
   "not_elected": "not elected",
   "unmeasured": "not measured yet",
   "awaiting": "awaiting election",
+};
+
+// Mirror of domain/arm_reading.py::UNIT_FORMATS.
+export const UNIT_FORMATS: Record<"rate" | "score" | "theta" | "seconds" | "usd" | "tokens" | "rank" | "rounds", UnitFormat> = {
+  "rate": { scale: 100.0, digits: 0, prefix: "", suffix: "%", lift_digits: 1, lift_word: "pts", lift_name: "point", compact: false },
+  "score": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 3, lift_word: "score", lift_name: "unit of score", compact: false },
+  "theta": { scale: 1.0, digits: 2, prefix: "θ ", suffix: "", lift_digits: 3, lift_word: "logits", lift_name: "logit", compact: false },
+  "seconds": { scale: 1.0, digits: 2, prefix: "", suffix: "s", lift_digits: 2, lift_word: "s", lift_name: "second", compact: false },
+  "usd": { scale: 1.0, digits: 4, prefix: "$", suffix: "", lift_digits: 4, lift_word: "USD", lift_name: "dollar", compact: false },
+  "tokens": { scale: 1.0, digits: 0, prefix: "", suffix: " tok", lift_digits: 0, lift_word: "tok", lift_name: "token", compact: true },
+  "rank": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 2, lift_word: "ranks", lift_name: "rank", compact: false },
+  "rounds": { scale: 1.0, digits: 1, prefix: "", suffix: "", lift_digits: 1, lift_word: "rounds", lift_name: "round", compact: false },
+};
+
+// Mirror of domain/bench.py::COST_ABSENCE_WORDS.
+export const COST_ABSENCE_WORDS: Record<CostAbsence, string> = {
+  "no_lift": "no lift to price",
+  "unpriced_tokens": "search tokens unpriced",
+  "zero_spend": "no search spend",
 };
 
 // Mirror of domain/campaign.py::LIFECYCLE_STATUS_LABELS.
@@ -5297,10 +5347,10 @@ export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {
   'composite': 'composite',
 };
 
-// A displayed level's unit (domain/arm_reading.py::LevelUnit).
-export type LevelUnit = 'rate' | 'score' | 'theta';
+// Every unit a read number is in (domain/paired_reading.py::MeasurandUnit).
+export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
 
-export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {
+export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, MeasurandUnit> = {
   'accuracy': 'rate',
   'ability': 'theta',
   'composite': 'score',

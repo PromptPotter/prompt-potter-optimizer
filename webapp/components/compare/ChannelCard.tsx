@@ -10,7 +10,7 @@ import { cx } from "@/lib/cx";
 import { Said } from "@/components/ui";
 import { ChannelDetail } from "./ChannelDetail";
 import { HeadlineBadges, HeadlineFacts, Metric, Swatch, benchLead } from "./channel-parts";
-import type { MetricUnit } from "@/lib/format";
+import type { MetricFormat } from "@/lib/format";
 import { useChannelModel, type ChannelModel } from "./useChannelModel";
 
 export function ChannelCard({
@@ -23,11 +23,11 @@ export function ChannelCard({
   item: CompareItem;
   ownNote: boolean;
   points: readonly CladogramChannel[];
-  spec: { unit: MetricUnit; axis_label: string };
+  spec: MetricFormat & { axis_label: string };
   run: HierarchyCampaign | null;
 }) {
   const { reading, headline, slot } = item;
-  const model = useChannelModel(item, run, spec.unit);
+  const model = useChannelModel(item, run, spec);
   // Null for an unread channel: it plots no series, so any ink here would be another channel's.
   const own = slot === null ? null : (points[slot] ?? null);
   const rulerNote = ownNote && reading?.comparable === false;

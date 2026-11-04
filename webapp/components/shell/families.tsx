@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { FAMILY_IDS, nodeOfKey, type FamilyId } from "@/lib/address";
+import { FAMILY_IDS, nodeOfKey, type FamilyId, type View } from "@/lib/address";
 import type { FigureKey } from "@/lib/derivations";
 import { Empty } from "@/components/ui";
 import { AccountView } from "@/components/account/AccountView";
@@ -19,7 +19,7 @@ import { ChatPane, FilesPane } from "./lazy-panes";
 
 // The label is the view's command word (WCAG 2.5.3), so its pane's visible title contains it. A null
 // pane is mounted by chrome: the campaign list is the sidebar, which a phone shows while it is the last view.
-// `glance` keys the viewed course's figure the view reads at a glance.
+// `glance` keys the viewed course's figure the view reads at a glance: the masthead draws it as the view's door.
 type Family = { label: string; pane: ((key: string | null) => ReactNode) | null; glance?: FigureKey };
 
 export const FAMILIES: Record<FamilyId, Family> = {
@@ -37,6 +37,15 @@ export const FAMILIES: Record<FamilyId, Family> = {
   account: { label: "Account", pane: (key) => <AccountView section={key} /> },
   campaigns: { label: "Campaigns", pane: null },
 };
+
+export function familyOfGlance(key: FigureKey): FamilyId | null {
+  return FAMILY_IDS.find((f) => FAMILIES[f].glance === key) ?? null;
+}
+
+// The open views drawn as columns, oldest first; a chrome family draws none.
+export function openColumns(views: readonly View[]): View[] {
+  return views.filter((v) => FAMILIES[v.family].pane !== null);
+}
 
 function NodePane({ nodeKey }: { nodeKey: string | null }) {
   const node = nodeKey === null ? null : nodeOfKey(nodeKey);

@@ -4,7 +4,7 @@ import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, getCss, lineLook, lineMotion, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { liftOf } from "@/lib/derivations";
-import { fmtSigned } from "@/lib/format";
+import { fmtLift } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 import {
   activeSeries,
@@ -397,7 +397,9 @@ export const FitnessChart = memo(function FitnessChart({
 
   const crown = useMemo(() => {
     const lift = parentIdx == null ? null : liftOf(views[parentIdx]?.reading?.vs_reference ?? null);
-    return lift == null || lift.side === "spans" ? "" : ` ${fmtSigned(lift.value, 2)}`;
+    return lift == null || lift.estimate.side === "spans"
+      ? ""
+      : ` ${fmtLift(lift.measurand.unit, lift.estimate.value)}`;
   }, [views, parentIdx]);
 
   const cutCounts = useMemo(

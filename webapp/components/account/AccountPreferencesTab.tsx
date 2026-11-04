@@ -7,6 +7,7 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
 import { invalidateReads } from "@/lib/read-cache";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
+import { useStageView } from "@/lib/prefs/stage";
 import { useShowCandidates } from "@/lib/prefs/tree";
 
 export function AccountPreferencesTab() {
@@ -45,8 +46,20 @@ export function AccountPreferencesTab() {
         <FailureLine failure={cmd.failure} />
       </AccountSection>
       <CampaignTreeSection />
+      <StageViewSection />
       <ThemeSection />
     </>
+  );
+}
+
+function StageViewSection() {
+  const [on, setOn] = useStageView();
+  return (
+    <AccountSection
+      title="Stage view"
+      lede="For showing a run across a room: the header grows to half the screen and leads with the lift over the origin, then what that lift cost per search dollar, per candidate tested and in worked time per unit of lift. Kept on this device only."
+      aside={<Switch label="Show the stage view" checked={on} onChange={() => setOn(!on)} />}
+    />
   );
 }
 

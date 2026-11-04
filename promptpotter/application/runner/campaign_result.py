@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
@@ -17,7 +16,7 @@ from promptpotter.application.runner.bench import (
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.arms import candidate_label
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LaunchClockRecord
@@ -33,6 +32,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_wall_clock,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import LaunchClock, Session
@@ -66,14 +66,26 @@ def bank_campaign_result(
     line = _line(stores, hop)
     if line is None:
         return
-    wall_clock = scan_ledger_wall_clock(
-        [stores.campaigns.ledger(h) for h in line],
+    ledger.append(launch_clock_record(stores, line, clock, finished_at, optimizer_phases))
+
+
+def launch_clock_record(
+    stores: Stores,
+    line: list[CycleHop],
+    clock: LaunchClock,
+    finished_at: str,
+    phases: frozenset[str],
+) -> LaunchClockRecord:
+    """This launch's clock over the line's ledgers, from its start to *finished_at*."""
+    return LaunchClockRecord(
         started_at=clock.started_at,
         finished_at=finished_at,
-        optimizer_phases=optimizer_phases,
-    )
-    ledger.append(
-        LaunchClockRecord(started_at=clock.started_at, finished_at=finished_at, clock=wall_clock)
+        clock=scan_ledger_wall_clock(
+            [stores.campaigns.ledger(h) for h in line],
+            started_at=clock.started_at,
+            finished_at=finished_at,
+            optimizer_phases=phases,
+        ),
     )
 
 
@@ -84,18 +96,17 @@ def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]
     )
 
 
-def line_outlay(session: Session) -> LineOutlay:
-    """What the line has paid by now: every cycle's spend read whole, each ended launch's wall
-    clock, then this one's."""
+def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
+    """What the line has paid by now: every cycle's spend read whole, and the worked seconds of
+    each ended launch and of this one to now."""
     stores, clock = session.store, session.state.clock
     campaign = stores.campaigns.load_campaign(session.hop.campaign_id)
     assert campaign is not None and clock is not None, "a closing round's launch is on a line"
-    ended = [launch.clock.elapsed_s for launch in line_launches(stores, campaign)]
+    line = stores.campaigns.line(campaign.root_hop)
+    closing = launch_clock_record(stores, line, clock, utcnow_iso(), phases)
     return LineOutlay(
         search_usd=read_line_spend(stores, campaign).spend.search_incurred_usd,
-        elapsed_s=None
-        if None in ended
-        else sum(s for s in ended if s is not None) + time.monotonic() - clock.monotonic,
+        worked_s=worked_seconds([*line_launches(stores, campaign), closing]),
     )
 
 

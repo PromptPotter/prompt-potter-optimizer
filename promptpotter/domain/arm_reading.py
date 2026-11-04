@@ -21,7 +21,13 @@ from promptpotter.domain.arms import (
 from promptpotter.domain.bench import BandedValue, BenchReading, OwnLevel
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.origin_panel import LineRate
-from promptpotter.domain.paired_reading import ArmKey, ArmName, MeasurandUnit, PairedReading
+from promptpotter.domain.paired_reading import (
+    ArmKey,
+    ArmName,
+    LiftEstimate,
+    MeasurandUnit,
+    PairedReading,
+)
 from promptpotter.domain.ruler import ThetaCaveat, theta_band
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
@@ -65,23 +71,91 @@ class ScoreboardRow(FrozenModel):
 
 
 DisplayMetric = Literal["accuracy", "composite", "ability"]
-# A displayed level's unit: a measurand's, or θ — a fit over cells, never read off one.
-LevelUnit = Literal["rate", "score", "theta"]
-if not set(MeasurandUnit) < set(get_args(LevelUnit)):
-    raise RuntimeError("LevelUnit must hold every MeasurandUnit (domain/arm_reading.py)")
-LEVEL_FORMATS: dict[str, str] = {"rate": "{:.0%}", "score": "{:.2f}", "theta": "θ {:.2f}"}
 
 
-def level_text(value: float | None, unit: LevelUnit | MeasurandUnit) -> str:
+class UnitFormat(NamedTuple):
+    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then
+    ``suffix``; a lift is signed, times ``scale`` at ``lift_digits``, then ``lift_word``, and
+    ``lift_name`` is one of what it counts. A ``compact`` unit steps a thousand or more to one
+    digit of k or M, in both."""
+
+    scale: float
+    digits: int
+    prefix: str
+    suffix: str
+    lift_digits: int
+    lift_word: str
+    lift_name: str
+    compact: bool
+
+
+# A rate's lift reads in percentage points, never in percent.
+UNIT_FORMATS: dict[MeasurandUnit, UnitFormat] = {
+    "rate": UnitFormat(100.0, 0, "", "%", 1, "pts", "point", False),
+    "score": UnitFormat(1.0, 2, "", "", 3, "score", "unit of score", False),
+    "theta": UnitFormat(1.0, 2, "θ ", "", 3, "logits", "logit", False),
+    "seconds": UnitFormat(1.0, 2, "", "s", 2, "s", "second", False),
+    "usd": UnitFormat(1.0, 4, "$", "", 4, "USD", "dollar", False),
+    "tokens": UnitFormat(1.0, 0, "", " tok", 0, "tok", "token", True),
+    "rank": UnitFormat(1.0, 2, "", "", 2, "ranks", "rank", False),
+    "rounds": UnitFormat(1.0, 1, "", "", 1, "rounds", "round", False),
+}
+
+_COMPACT_STEPS = ((1_000_000.0, "M"), (1_000.0, "k"))
+
+
+def _number(value: float, fmt: UnitFormat, digits: int, sign: str) -> str:
+    scaled = fmt.scale * value
+    for step, mark in _COMPACT_STEPS if fmt.compact else ():
+        if abs(scaled) >= step:
+            return f"{scaled / step:{sign}.1f}{mark}"
+    return f"{scaled:{sign}.{digits}f}"
+
+
+def level_text(value: float | None, unit: MeasurandUnit) -> str:
     """A level as a person reads it in its unit; `—` where it is absent."""
-    return "—" if value is None else LEVEL_FORMATS[unit].format(value)
+    if value is None:
+        return "—"
+    fmt = UNIT_FORMATS[unit]
+    return f"{fmt.prefix}{_number(value, fmt, fmt.digits, '')}{fmt.suffix}"
+
+
+def _signed(value: float, fmt: UnitFormat) -> str:
+    return _number(value, fmt, fmt.lift_digits, "+")
+
+
+def lift_shown(value: float, unit: MeasurandUnit) -> float:
+    """The lift as `lift_text` prints it, so a colour or a sign reads what the reader sees."""
+    fmt = UNIT_FORMATS[unit]
+    return round(fmt.scale * value, fmt.lift_digits)
+
+
+# Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.
+_NBSP = "\N{NO-BREAK SPACE}"
+
+
+def lift_text(value: float, unit: MeasurandUnit) -> str:
+    """A lift as a person reads it in its unit: every surface that prints one prints this."""
+    fmt = UNIT_FORMATS[unit]
+    return f"{_signed(value, fmt)}{_NBSP}{fmt.lift_word}"
+
+
+def lift_interval_text(lo: float, hi: float, unit: MeasurandUnit) -> str:
+    """A lift's interval, its bounds signed in the unit `lift_text` names."""
+    fmt = UNIT_FORMATS[unit]
+    return f"[{_signed(lo, fmt)},{_NBSP}{_signed(hi, fmt)}]"
+
+
+def lift_band_text(estimate: LiftEstimate, unit: MeasurandUnit) -> str:
+    interval = lift_interval_text(estimate.ci_lo, estimate.ci_hi, unit)
+    return f"{lift_text(estimate.value, unit)} {interval}"
 
 
 class DisplayMetricInfo(NamedTuple):
     label: str
     glyph: str
     title: str
-    unit: LevelUnit
+    unit: MeasurandUnit
 
 
 #: IN PICK ORDER — the tiebreak where the elected column is not among those shown.

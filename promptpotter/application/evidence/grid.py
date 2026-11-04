@@ -5,14 +5,15 @@ from typing import Literal
 
 from promptpotter.application.evidence.metric_catalogue import MetricSpec, merge_cells
 from promptpotter.application.evidence.subjects import SubjectReading
+from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import BadRequestError
 
-_POOLABLE_UNITS: frozenset[str] = frozenset({"seconds", "usd", "tokens", "rounds"})
+_POOLABLE_UNITS: frozenset[MeasurandUnit] = frozenset({"seconds", "usd", "tokens", "rounds"})
 """Metric units whose meaning does not depend on WHICH dataset produced the number.
 
 A second is a second on any bank, so a marginal that pools an agent episode on one dataset with a
-call on another still answers "how long did this level take". A ``level`` or a ``delta`` is not:
+call on another still answers "how long did this level take". A rate, a score or a θ is not:
 accuracy on two banks answers two different questions, and averaging them reports a number about
 no exam anyone sat. This is the same distinction ``Comparability`` draws for the roster — *"the
 roster and spend still compare, the numbers do not"* — applied to the one place a factorial read

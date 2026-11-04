@@ -8,7 +8,7 @@ import {
   type PrefixReading,
 } from "@/lib/api/types.generated";
 import { replayShareLine, type SpendView } from "@/lib/derivations";
-import { fmtTokens, fmtUsd } from "@/lib/format";
+import { fmtUnit, fmtUsd } from "@/lib/format";
 
 interface BucketRow {
   key: string;
@@ -58,6 +58,7 @@ const COLUMNS: readonly Column<BucketRow>[] = [
 // " of <cap>" where the axis is capped; nothing where it is not.
 const against = (cap: number | null, fmt: (n: number) => string, share = false) =>
   cap === null ? "" : share ? ` of its ${fmt(cap)} share` : ` of ${fmt(cap)}`;
+const tokenText = (n: number) => fmtUnit("tokens", n);
 
 function Fact({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
@@ -111,13 +112,13 @@ export function SpendBuckets({ view }: { view: SpendView }) {
           <Fact
             className={TOTAL}
             label="Campaign tokens against the campaign cap, every cycle"
-            value={fmtTokens(view.campaignTokens) + against(view.budgetTokens, fmtTokens)}
+            value={tokenText(view.campaignTokens) + against(view.budgetTokens, tokenText)}
           />
         )}
         {tokens && (
           <Fact
             label="This cycle’s tokens"
-            value={fmtTokens(metered.metered_tokens) + against(view.shareTokens, fmtTokens, true)}
+            value={tokenText(metered.metered_tokens) + against(view.shareTokens, tokenText, true)}
           />
         )}
         {lines

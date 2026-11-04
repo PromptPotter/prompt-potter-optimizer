@@ -1,16 +1,18 @@
 "use client";
 
 import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
-import type {
-  MeasuredLift,
-  MetricReading,
-  MetricSpec,
-  PairwiseComparison,
-} from "@/lib/api/types";
+import type { MeasuredLift, MetricReading, PairwiseComparison } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { readPaired } from "@/lib/derivations";
 import { PairedLift } from "@/components/shell/PairedLift";
-import { PLACEHOLDER, fmtInterval, fmtPValue, fmtUnit, shortId, sideTone } from "@/lib/format";
+import {
+  PLACEHOLDER,
+  fmtLift,
+  fmtLiftInterval,
+  fmtPValue,
+  shortId,
+  sideTone,
+} from "@/lib/format";
 
 export function PairwisePanel({
   reading,
@@ -34,7 +36,7 @@ export function PairwisePanel({
         <>
           <DataTable
             ariaLabel="Pairwise comparisons"
-            columns={pairColumns(reading.spec.unit, names)}
+            columns={pairColumns(names)}
             rows={rows.map(pairRow)}
             getRowId={({ row }) => `${row.subject_a}|${row.subject_b}`}
           />
@@ -72,10 +74,7 @@ function pairRow(row: PairwiseComparison): PairRow {
     : { row, lift: null, cells: null };
 }
 
-function pairColumns(
-  unit: MetricSpec["unit"],
-  names: ReadonlyMap<string, string>,
-): Column<PairRow>[] {
+function pairColumns(names: ReadonlyMap<string, string>): Column<PairRow>[] {
   const subject = (key: string) => <code title={key}>{names.get(key) ?? shortId(key)}</code>;
   const num = (
     id: string,
@@ -107,9 +106,11 @@ function pairColumns(
       cell: ({ row, lift }) =>
         lift ? (
           <span className={cx("l4-effect", sideTone(lift.estimate.side))}>
-            <span className="l4-effect-mean">{fmtUnit(unit, lift.estimate.value)}</span>
+            <span className="l4-effect-mean">
+              {fmtLift(lift.measurand.unit, lift.estimate.value)}
+            </span>
             <span className="l4-effect-ci">
-              {fmtInterval(unit, lift.estimate.ci_lo, lift.estimate.ci_hi)}
+              {fmtLiftInterval(lift.measurand.unit, lift.estimate.ci_lo, lift.estimate.ci_hi)}
             </span>
           </span>
         ) : (
