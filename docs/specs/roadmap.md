@@ -6,54 +6,146 @@ Any new endpoint is multi-tenant by default.
 
 ## Sequence
 
-**Waves, auto-dev runs them top to bottom** (each arc its own branch, closed on the operator's word).
-Every wave pairs $0 code arcs (up to three agents at once) with paid runs supervised beside them, so
-neither waits on the other. A wave's paid runs need only what an earlier wave landed.
+### The crunch (operator, 2026-11-04)
 
-0. **Wave 0: urgent, from Wednesday 2026-11-04 morning, in parallel** (operator, 2026-11-02).
-   **First, alone:** merge `checkin-upload-gate` to main and run one full gate on the merge. Every arc branches from that.
+The code debt, worked as arcs in four waves, in order and as far as it gets: a sequence, not a
+schedule. Sections named in a row are
+[`code-debt-cleanup.md`](code-debt-cleanup.md)'s; "host step N" is [`host-assistant.md`](host-assistant.md) § Build order.
 
-   Then the arcs, each on its own branch with its own closing check. Arcs on the same line touch disjoint files and run at once; an arrow waits on what it names.
+- **Order is `<next-change>`'s.** The unifications come first, seams before their readers: U1, then
+  U2, then U3, then U4 beside U5. File moves and renames come last, each at a sync point with no open
+  PR in its tree. A batch that reshapes run data wipes at its landing (the box's wipe waits for the
+  operator's word). The optimizer-prompt re-keys (P, L, C, U1b, W2, LC) land before the next paid run.
+- **Where.** An arc that needs no box, no TermNorm checkout, no paid call and no phone shot runs in the
+  cloud: one `RemoteTrigger` session pushing one `arc/*` branch of one squashed commit, no PR. The
+  rest run locally, heavy proofs serialized by the orchestrator. Arcs are dispatched a batch at a
+  time; the next batch starts once the last one has landed. **Arcs land in
+  batches**: one PR per batch, one commit per arc, CI running the full gate on the PR.
+- **Model.** Sonnet for a mechanical sweep, Opus for judgement. Fable plans; it executes no arc.
+- **Landing.** An arc owns its files: arcs in one wave touch disjoint files or name the one they share.
+  A PR is ready once an independent review's findings are fixed on its own branch and CI is green on
+  its tip, rebased on main. It merges on the operator's word: he reviews every merge. Main is
+  landable after every merge, so a checkpoint means: stop dispatching, land what is ready, deploy.
+- **Checkpoint: Thu 11-05 15:00, for the video.**
+  - Main is green and the box runs main.
+  - On the box: a CSV upload, its check-in, Start, and a round climbing in the webapp.
+  - The three phone checks pass:
+    - a CSV headed `invoice_text,expected_account` opens a draft and its composer, never a 422;
+    - an empty context's "Propose it from the rows" runs the resolver;
+    - Play past the ceiling is refused `campaign_ceiling_held`, never a 500.
+- **The end:** the code debt is rewritten, then the operator is asked about a release.
+- **An item ships when its code-debt entry is deleted.** A shape noticed in passing is fixed at its root
+  in the same arc, unless it is a fork.
 
-   | Arc | What | Files it owns | Waits on |
-   |---|---|---|---|
-   | **A1** | `ChatRequest` gains tools and multi-turn messages | `infrastructure/llm/` | — |
-   | **A2** | the read catalogue, and the out-of-dispatcher writes as kinds | `domain/command_kinds.py`, `presentation/api/routers/` | — |
-   | **B** | Turns (§ Turns — the unsupervised limit) | `application/jobs/`, `domain/spend.py`, `webapp/components/shell/remote/`, CLI `resume` | — |
-   | **C** | L2 re-election (§ The right winner, mechanism 1) | `optimizers/potter/dispatch/`, `escalation/`, the layer-control channel | — |
-   | **E** | the phone's doubled figure row | `webapp/components/shell/` (masthead, `Views.tsx`) | — |
-   | **F** | the upload check-in leftovers | `application/datasets/` | — |
-   | **A3** | the registry, served in-process and over MCP stdio | `presentation/mcp/`, an extra | A2 |
-   | **A4** | the host endpoint plus the webapp composer, steps and proposal shape | `application/` host loop, `webapp/components/chat/`, `webapp/components/ingest/` | A1, A2 |
-   | **D** | the election root (§ The right winner, mechanism 2); wipes run data | `optimizers/potter/pobb/`, `race.py`, `runner/measurement.py`, `domain/arms.py` | C |
-   | **A5** | the check-in as a prompt template, and the host spec's delete list | the `checkin` node, `useIngestFlow`, CLI `new` | A3, A4, F |
+**Batch 1 lands as two PRs.** 1a, before the video: K1, T, TRIM, E+, on main as it builds today, so
+the box deploy changes nothing in how it builds. 1b, after the video: VITE, then W1, W6, A1, A2, H, C,
+L, K3a, with #63 and #65.
 
-   - A1–A5 are [`host-assistant.md`](host-assistant.md) § Build order, closed by the line under it.
-   - E and F are [`code-debt-cleanup.md`](code-debt-cleanup.md) § URGENT.
-   - Each arc runs its targeted checks; the full gate runs once, on main, after each merge.
-1. **Trust the instrument.** Code: crossover main/donor; per-account snippet packs; the check-in
-   address leftovers; then the inputs that change a run but leave no event, and the three probed
-   invariants ([`code-debt-cleanup.md`](code-debt-cleanup.md) § URGENT — shapes that hide the backbone
-   from a reshape). Paid: the CAPO head-to-head
-   on `hotpotqa-closedbook`, closing M13 (§ The bench (M13)); L4 validation (~$1).
-2. **Recombination at $0** (C9): the member backbone (code-debt § The member backbone). Paid: the
-   mode head-to-head (§ Variation and pools, item 1).
-3. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
+| Arc | What | Owns | Where | Waits on |
+|---|---|---|---|---|
+| **K1** | one `ParamLayers` fold, `CycleSeed` folded in whole (§ Config resolution and run scope, items 1–3, 8, 9) | `application/pipeline_resolve.py`, `domain/campaign_config.py`, `domain/pipeline_overlay.py`, `bench/mint.py`, `runner/run_prep.py` | local · Opus | — |
+| **T** | the dev loop: § Tooling seen while landing #59–#62; § The member backbone, the dev loop; from § Open — from the structure pass: `p_served`, npm drift, `offline_run.py` importing the gate, a killed push's links, `--controlled` on main, the offline legs' draws, `MAX_PATH` | `scripts/`, `.githooks/`, `config/paths.py` | local · Opus | — |
+| **TRIM** | the docs and governance reset (operator, 2026-11-04). The docs grew too large and piecemeal, and the rules over-govern. Any rule may shrink or go where the code, the gate or today's repo makes it redundant, stale or inadequate; no rule against trimming binds this arc. This § Sequence and `code-debt-cleanup.md` stay: they are the crunch's live ledger | `docs/`, every `CLAUDE.md`, `.claude/`, `README.md`, the gate's doc checks | cloud · Fable | — |
+| **A1** | host step 1; § Config resolution item 12 (harbor); `get_llm_client`'s cached keys; LiteLLM out of core: what still pulls it (the pricing table's source, harbor) | `infrastructure/llm/`, `connectors/harbor.py`, `pyproject.toml` extras | cloud · Opus | — |
+| **A2** | host step 2; § Seen bounding the perimeter; the `cold` tier's 429 (§ URGENT); the two `ValidationError` formatters | `domain/command_kinds.py`, `presentation/api/`, `jobs/quota.py` read rate, `shared/errors.py` | cloud · Opus | — |
+| **H** | § Open — from the head-to-head arc, minus the INVESTIGATE rows the paid twins read and the forks below; § Config resolution item 11 (`evidence`); the origin's absolute path (filed twice) | `application/evidence/`, `head_to_head_price.py`, `jobs/mint.py::arm_plans`, `runner/bench.py` depth, `origin.py` | cloud · Opus | — |
+| **W1** | webapp read discipline: § The webapp swept by shape E; § The webapp's vanilla pass "Failures dropped to booleans"; `CycleStreamState`; `CommitInput`; `AccountSpend`'s double refresh | `webapp/lib/hooks/`, `webapp/lib/poll.tsx`, `webapp/lib/state/auth.tsx` | cloud · Opus | — |
+| **W6** | webapp dead code and ratchets: § swept G; size literals and the latch; CSS moves; `vitest.config.ts`; the onboarding buttons | webapp deletions, `app/styles/` | cloud · Sonnet | — |
+| **VITE** | build with Vite (§ Open — multi-arc, "Next.js only as a build tool"), so a side worktree passes the full gate; the gate walks the offline world (§ vanilla, "The `walk` tier rots unseen") | `webapp/package.json` + lock, build config, `scripts/gate.py` web checks | cloud · Opus | — |
+
+Also in batch 1, filed in later waves:
+
+| Arc | What | Owns | Where | Waits on |
+|---|---|---|---|---|
+| **E+** | the phone: § URGENT, "The phone draws the run's figures twice"; § The phone pass; the masthead wrap; a view family that is chrome; the Candidates card's pending read; HoverCard and touch targets; the Lighthouse run. For the checkpoint: a stage view for a display read from across a room, off by default behind a settings toggle; the lift over the origin as the headline figure; the efficiency figures | `webapp/components/shell/`, the masthead, settings, the served figures | local · Opus, `/design`, phone shots | — |
+| **K3a** | the store refuses what it cannot read. From § Typed state, its store rows: file identity, run files read as dicts, `iter_jsonl`, the torn tail, `feed_fold`, `CampaignOwner`, the root found two ways, `_Billed`. Also the ray tail | `infrastructure/store/`, `infrastructure/ledger.py` | cloud · Opus | — |
+| **C** | L2 re-election (§ The right winner, mechanism 1); a fork naming one change only | `potter/dispatch/` except `l1_wire_schema.py`, `escalation/`, the layer-control channel | cloud · Opus | — |
+| **L** | library, packs, variation, re-key batch 2: the library, cross and pack rows of § Open — from the head-to-head arc; one text in two packs; the pool, pack and snippet rows of § Open — from the structure pass; one node's knob gating four pools; `Scope` on members; the manifest-hash marks | `application/library.py`, `config/prompt_blocks.py`, `variation/`, `store/account_packs.py`, `potter/dispatch/facade.py` | cloud · Opus | — |
+
+**The unifications.** Each folds a family of debt into one mechanism and deletes the code-debt
+entries it names. Each lands as its own batch, beside the disjoint arcs of the table after it.
+
+| Arc | One what | Absorbs | Closes when | Owns | Waits on |
+|---|---|---|---|---|---|
+| **U1a** | one layered fold over typed rows: which values a cycle runs is built once, by `ParamLayers`, from a typed `NodeConfig` per node, inside one frozen `RunScope` | § The engine swept by shape A (a typed `PipelineParams`); § Config resolution items 4, 5, 7; § The engine swept by shape D; § The member backbone: `LaunchState.ledger`, `Lineage.rounds`; the overlay's delete; a changed knob's source; the check-in graph's overlay; "adds no arms ⇒ off"; the measurement node derived twice; a moved capability passing a resume; the selection made in three places; `embedded_run`'s two flags; the free tier's layer, which joins the fold; the served `*Response` models moved out of the resolver | a member knob reads its node's `NodeConfig`, never a `pipeline_params` dict; a new config layer is one entry in the fold | `pipeline_resolve.py`, `campaign_config.py`, `pipeline_overlay.py`, `connectors/protocol.py`, `application/initialization/`, `free_tier.py`, `telemetry.py`, `optimizer_manifest.py`, `bench/llm_call.py`, `bench/node_context.py`, `scoring/judges/call.py`, `scoring/evaluators.py` | batch 1a |
+| **U1b** | one declared prompt-field roster, served; the optimizer prompt template is a prompt node of potter's `pipeline.yaml`, tuned like any node (re-keys every optimizer-prompt digest) | § swept F (the node editor reads row facts); `ConfigKnob.source`; the roster spelled in `PROMPT_FIELDS`, `OptimizerPromptTemplate` and `webapp/lib/prompt-fields.ts` | adding a prompt-node field touches its roster row and its reader only | the roster, `OptimizerPromptTemplate`, potter's `pipeline.yaml`, the node editor, `config_map.py`, `webapp/lib/prompt-fields.ts` | U1a |
+| **U2** | one cycle transition: mint, resume, step, fork, arm, inner and embedded each build one `RunStart` (parent or none, seed delta, declaration, purpose) that yields one `CyclePlan`. A resume that meets drift forks with the drift as its seed when the run OPTIMIZES and refuses when it COMPARES (§ 0009). One rate holder gives each purpose its share | the launch door: § Config resolution item 6; the launch, adopt and rate rows of § Open — from the head-to-head arc; `close_for_landing`; the shutdown notice; an unparseable job; the jobs logs; a Start followed into its campaign. Also: `require_scorer` / `require_partition` at each site; slot release by hand; the three `LaunchRequest` dataclasses; Turns' admission; CLI `new`; § URGENT's promoted Start left unserved and the resolver run three times | a launch option touches `RunStart` and its one reader; `embedded_run` calls `launch()` | `application/jobs/` except `coupon.py`, `launching.py`, `embedded_run.py`, the resume command, `run_prep.py`, the `main.py` notice | U1a |
+| **U3** | one reader of the ledger: every derived surface is a `Projection` over typed records, and `scope.ledger.append` is the one producer door (`RunCallbacks` and the telemetry `emit_*` go) | records: § The engine swept by shape B and C; § Config resolution item 10; § What a cycle writes to disk; § Typed state's record rows; `rewound`; § Seen removing the migrations; `cached` / `key_source`; the cell beat; `CommandAckRecord.effect`; spend in the export. Also: the cold server's fold; one append rebuilding every entry; `ActivityFeed`; the table in `phases.py`; the two meanings of `round_cells`; the sidecars read back as state | a record kind touches its model and its one handler; a gate check fails a kind no projection reads | `domain/run_records.py`, `infrastructure/projections/`, `ledger_scan.py`, `domain/activity.py`, `tracing/`, `runner/output.py`, `scoring/measurement_log.py`, `store/read_model.py`, `hierarchy.py` | U2 |
+| **U4** | one scoring pass: kind, subject, rows and comparator are fields of one record, read by one fold keyed `(kind, arm.key)`; one verb with a row choice at every entry point (operator, 2026-11-04). Noise-floor, seed-screen, probe-reasoning and ab write the ledger like every paid pass | § One record shape for every scoring pass; the race's catch-up cells; the re-read arm's two names; the bench's depth; `held_out` / `bench_only` | a scoring command kind touches one declaration; no paid pass is missing from the ledger | `diagnostics/verify.py`, `runner/bench.py`, `runner/measurement.py`, the scoring verbs and their views | U3 |
+| **U5** | one served arm row and one viewed subject: the live round's candidates are `ArmState` rows with `filed: false`; the subject is the hash's address, and view memory only seeds it | § swept A (one arm shape), C (lineage reads the served tree) and D; § The candidates surface; § vanilla's adapters and "Several doors"; the doors of the setup screen and the prompt workspace; `LiveCandidate` and its `live*` twins; `ArmRow.source`; "is round N filed" asked three ways; the hidden columns | an arm-row field touches its model and its renderer; selection has one store | `application/views/` arm rows, `webapp/components/candidates/`, `webapp/lib/derivations/`, `webapp/lib/state/`, `webapp/lib/workspace.tsx`, `shell/Views.tsx` | U3; shares `application/views/` with U4 and names the files |
+
+**Beside the unifications**, in the batches their dependencies allow: batch 2 is U1a with P, W2 and
+A3; batch 3 is U1b, U2 and G; batch 4 is U3 with S, B and A4; batch 5 is U4, U5 and A5; then D.
+The paid run beside batch 2: the host-pin twins (§ Open — multi-arc, "the default host pin"), also
+read for the L2/L3 repair rate and the errored-cell INVESTIGATE; then L4 validation.
+
+| Arc | What | Owns | Where | Waits on |
+|---|---|---|---|---|
+| **G** | an upload runs without a backend: the in-process `llm_only` connector, one node implementation shared with TermNorm's `_step_llm_only`, the default upload connector. Also: § On the box, "Left by the payer rule"; the connectors' `cell_payer`; § URGENT's wire skew and TermNorm's warning wording; the free tier's model axis; § Bypasses | `connectors/`, `jobs/coupon.py`, `jobs/quota.py` sends, `free_tier.py`, TermNorm | local · Opus | U1a |
+| **P** | potter internals, re-key batch 1. From § Open — optimizer tuning, its code rows: the no-op batch, every campaign's ledger, the resumed walk, the held prompt field, splice framing, the estimator's line series, `AxisIndex.digest`, the critique cluster, the strict-portable wire schema. Also `paper_templates.marked`, the origin-boundary resume, `_peer_cycle`. The origin gate HALTS an origin that scored no cell, and a plain `resume` overrides (operator, 2026-11-04) | `optimizers/potter/l1/`, `potter/dispatch/l1_wire_schema.py`, `runner/round.py`, `intelligence/`, `paper_templates.py` | cloud · Opus | batch 1b |
+| **W2** | served words own the wording: § swept B; § vanilla, "Wording authored in the browser"; § Typed state's word tables (`BENCH_STATE_INFO`, `DISPLAY_METRIC_INFO`, `RunStatus.of`, `POOL_NOUN`, `SIDE_TONE`); activity rows as `Said`; the two waiting predicates; refusals that name a pane; `readSpend`; the word tables become one `Worded` base the exporter discovers by type, so a new table is one declaration | `domain/said.py` and the word tables, `scripts/build_ts_types.py`, the webapp's word sites | cloud · Opus | W1 |
+| **A3** | host step 3 | `presentation/mcp/`, an extra | cloud · Opus | A2 |
+| **D** | the election root (§ The right winner, mechanism 2); PoBB's high-accuracy lock-in; the collapse gate. Also:<br>• a round ends once a challenger is clearly past the parent, and its unfinished siblings stop there.<br>• the bound comes from adaptive testing: sequential likelihood-ratio tests, Fluid Benchmarking, and their always-valid variants. Pick the most powerful one that stays valid under the hard-first order. | `potter/pobb/`, `race.py`, `domain/arms.py`, `scoring/selection.py` | cloud · Opus | C, U4 |
+| **S** | the spend book: a lost mirror; a subscriber that raises; a reserved cell's hold; `keyed_client`'s fold; a resumed own-key reserve; the restamp; `LifetimeSpend`'s tokens; a grant verb; a pass with no cycle | `infrastructure/llm/spend_book.py`, `jobs/coupon.py`, `wallet_store.py` | cloud · Opus | U2, G |
+| **B** | Turns (§ Turns — the unsupervised limit), on U2's admission | `domain/spend.py`, `webapp/components/shell/remote/`, CLI `resume` | cloud · Opus | U2 |
+| **A4** | host steps 4 and 5 | `application/` host loop, `webapp/components/chat/`, `webapp/components/ingest/` | cloud · Opus | A1, A2, host-assistant § Open (operator) |
+
+**The sync points, last, then paid evidence.**
+
+| Arc | What | Owns | Where | Waits on |
+|---|---|---|---|---|
+| **LA** | § The file layout, Wave A | `presentation/`, `infrastructure/` | cloud · Opus | no open PR in those trees |
+| **LB** | Wave B | `application/runner/`, `optimizers/__init__.py`, `knobs.py` | cloud · Opus | U3 |
+| **LC** | Wave C, as one re-key batch | `optimizers/` | cloud · Opus | P, U1b, D |
+| **LW** | the webapp modules that break `lib/CLAUDE.md` § Where a module lives; the barrel cycle | moves in `webapp/lib/` and `webapp/components/` | cloud · Sonnet | W2, U5 |
+| **A5** | host step 6, with the "Run the resolver now" row | the `checkin` node, `useIngestFlow` | cloud · Opus | A3, A4, U2 |
+| **TS** | the test suite consolidated after the deletions; tests go through each module's interface | `tests/` | cloud · Opus | LB |
+| **R** | § Open — renames the operator picked | tree-wide | cloud · Sonnet | every other arc (it runs last) |
+
+**Every arc's review asks** whether each module it touches is shallow: what its callers must know, which
+call order, errors and configuration it could handle itself, and whether the code would get simpler if
+it were deleted. A new seam needs something that actually varies.
+
+The paid run comes after D, H and the re-key batch: the M13 CAPO head-to-head on `hotpotqa-closedbook`
+(§ The bench (M13)), priced first. Then the board (§ Optimizer tuning — the standing board).
+
+**Forks left to the operator.** Until he decides, an arc leaves each one as it stands:
+- what "calls held equal" holds equal;
+- a bench's total (the box's definition is read first);
+- the sub-cent money rule;
+- whether an upload's bytes are kept before the parse;
+- whether a swiped-in hidden column may stay blank until its reads land (U5);
+- what `hit_spread` means;
+- how API keys are stored at rest;
+- one env file on the box;
+- one email holding two accounts;
+- an archived answer's per-node outputs;
+- the crowning bar (paper stage 3);
+- everything under § Blocked.
+
+### After the crunch
+
+1. **Recombination at $0** (C9). Paid: the mode head-to-head (§ Variation and pools, item 1).
+2. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
    (1)–(4).
-4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
-   partition; anytime-valid confidence sequences as the default stopping rule, with today's PoBB a
-   selectable rule and a replay over banked rounds that reports where the two disagree
-   ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2). Paid, priced in dollars and wall clock first:
-   the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
-5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A3
-   anonymous preview.
-6. **Capability (Lane C), by dependency:** C2 composite fitness → C4 cross-user panel; C2b judged
-   scoring; C3 L4 closure; SIFT S1; the PUCT selector (§ Selector members — parent choice as one acquisition); C6, C7, C8, C10.
-7. **Embedding (§ Embedding (M15)):** headlined by the Langflow setup; R1 first (C5 and R2 wait on
-   it), then C5 and R2; the rest independent of each other.
-
-**Rides whenever it unblocks:** the webapp vanilla pass (code-debt § NEXT ARC), once the run-card
-session's files land; the operator's picked renames.
+3. **The preprint's evidence (M14).**
+   - Code: the N-arm mint verb, and `bbeh` re-ingested with a wider bench partition.
+   - Code: anytime-valid confidence sequences become the default stopping rule. Today's PoBB stays a
+     selectable rule, and a replay over banked rounds reports where the two disagree
+     ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2).
+   - Paid, priced in dollars and wall clock first: the comparability run, then the budget dimension
+     (§ Order, items 5 and 6), then the ablation rows.
+4. **The hosted beta (Lane A):** A1, the first-run exhibit, built on a campaign that climbed; then A3,
+   the anonymous preview.
+5. **Capability (Lane C), by dependency:**
+   - C2 composite fitness, then C4 cross-user panel;
+   - C2b judged scoring;
+   - C3 L4 closure;
+   - SIFT S1;
+   - the PUCT selector (§ Selector members — parent choice as one acquisition);
+   - C6, C7, C8, C10.
+6. **Embedding (§ Embedding (M15)):** headlined by the Langflow setup. R1 comes first, because C5 and R2
+   wait on it; the rest are independent of each other.
 
 Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
 the rest of Lane C.
