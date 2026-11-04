@@ -515,7 +515,7 @@ def observations_from_results(sheets_by_id: Mapping[str, CellSheet]) -> list[Obs
     ]
 
 
-def build_observations(rounds: list[RoundResult]) -> list[Observation]:
+def build_observations(rounds: Sequence[RoundResult]) -> list[Observation]:
     return [
         o
         for rr in rounds

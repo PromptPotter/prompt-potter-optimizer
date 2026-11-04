@@ -55,7 +55,6 @@ export type {
   NodeReach,
   OptimizerFact,
   OptimizerLimit,
-  OptimizerPipelineResponse,
   OptimizerNodePrompt,
   PipelineView,
   PipelineViewEdge,

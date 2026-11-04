@@ -12,7 +12,6 @@ import type {
   ConfigMapResponse,
   CouponStatus,
   DatasetPipelineResponse,
-  OptimizerPipelineResponse,
   DatasetIndexResponse,
   DraftReopenResponse,
   Cell,
@@ -107,10 +106,6 @@ export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
 
 export function originsRead(): ReadDescriptor<OriginListResponse> {
   return once("origins", `${API}/origins`);
-}
-
-export function optimizerPipelineRead(optimizer: string): ReadDescriptor<OptimizerPipelineResponse> {
-  return once("optimizer-pipeline", `${API}/optimizer-pipeline?optimizer=${enc(optimizer)}`);
 }
 
 export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {

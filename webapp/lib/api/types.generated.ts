@@ -2089,22 +2089,6 @@ export interface ArmRequest {
 
 /** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
 export interface OptimizationOverrides {
-  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
-   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
-   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
-  budget: Budget;
-  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
-   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
-   * only on its record's rule. */
-  halt_at_accuracy: number | null;
   /** The optimizer manifest this campaign runs — a directory under
    * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
    * nothing selects it install-wide. */
@@ -2125,6 +2109,22 @@ export interface OptimizationOverrides {
    * deadline; a pause ends it resumably, and a resume holds again unless an
    * answer was already banked. */
   arm_gate: 'off' | 'review' | 'author';
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
 }
 
 /** One optimizer node's delta over its manifest's ``config``. */
@@ -2289,8 +2289,18 @@ export interface DraftCampaignWire {
   setup_schema: Record<string, unknown>;
 }
 
-/** What the selected optimizer runs under a config, derived once for check-in and campaign. */
+/** What the selected optimizer runs under a config, derived once for check-in and campaign: */
 export interface OptimizerSetup {
+  /** The graph topology — the same shape a campaign pipeline serves */
+  view: PipelineView | null;
+  /** The node of `view` that runs the measurement — where a campaign's pipeline
+   * nests under this graph, as each `nests[].node` names it per campaign */
+  measurement_node: string;
+  node_output_schema: Record<string, NodeOutputSchema | null>;
+  /** Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs
+   * it accepts and what a round costs are the facts every other node's rows
+   * need too */
+  model_capabilities: Record<string, Record<string, ModelCapability>>;
   /** The knobs a setup surface leads with, in order */
   main: KnobRef[];
   /** Every member taking a knob, in declared order, but a pool initializer: its
@@ -2313,6 +2323,54 @@ export interface OptimizerSetup {
   /** Where the search reaches per optimizer node at this config, summed off
    * `node_config_schema` */
   reach: Record<string, NodeReach>;
+}
+
+/** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
+export interface PipelineView {
+  nodes: PipelineViewNode[];
+  edges: PipelineViewEdge[];
+  cycle: string[];
+}
+
+/** One node's place in the flow, as a tier and a rank rather than as pixels. */
+export interface PipelineViewNode {
+  id: string;
+  description: string;
+  kind: 'io' | 'llm' | 'tool' | 'retriever' | 'cache' | 'measurement' | 'member';
+  tier: number;
+  rank: number;
+}
+
+export interface PipelineViewEdge {
+  from: string;
+  to: string;
+  kind: 'forward' | 'loop' | 'directive' | 'alternative';
+}
+
+/** The structured output a target pipeline node produces, parsed from ``GET /pipeline``. */
+export interface NodeOutputSchema {
+  fields: string[];
+  field_descriptions: Record<string, string>;
+  json_schema: Record<string, unknown>;
+}
+
+/** What one model accepts and what it costs on one provider, resolved server-side. */
+export interface ModelCapability {
+  model: string;
+  provider: string;
+  reasoning_efforts: string[] | null;
+  reasoning_note: string;
+  unsupported_params: string[] | null;
+  indistinct_efforts: string[] | null;
+  refused_efforts: string[];
+  source: string;
+  display_name: string;
+  context_length: number | null;
+  max_output_tokens: number | null;
+  input_usd_per_mtok: number | null;
+  output_usd_per_mtok: number | null;
+  modality: string;
+  fetched_at: string;
 }
 
 /** One knob of one optimizer node, written to `optimization.nodes.{node}.config.{knob}`. */
@@ -2483,54 +2541,6 @@ export interface NodeReach {
   agents: ('proposer' | 'optimizer')[];
   held: boolean;
   state: 'open' | 'partial' | 'locked' | 'nothing';
-}
-
-/** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
-export interface PipelineView {
-  nodes: PipelineViewNode[];
-  edges: PipelineViewEdge[];
-  cycle: string[];
-}
-
-/** One node's place in the flow, as a tier and a rank rather than as pixels. */
-export interface PipelineViewNode {
-  id: string;
-  description: string;
-  kind: 'io' | 'llm' | 'tool' | 'retriever' | 'cache' | 'measurement' | 'member';
-  tier: number;
-  rank: number;
-}
-
-export interface PipelineViewEdge {
-  from: string;
-  to: string;
-  kind: 'forward' | 'loop' | 'directive' | 'alternative';
-}
-
-/** The structured output a target pipeline node produces, parsed from ``GET /pipeline``. */
-export interface NodeOutputSchema {
-  fields: string[];
-  field_descriptions: Record<string, string>;
-  json_schema: Record<string, unknown>;
-}
-
-/** What one model accepts and what it costs on one provider, resolved server-side. */
-export interface ModelCapability {
-  model: string;
-  provider: string;
-  reasoning_efforts: string[] | null;
-  reasoning_note: string;
-  unsupported_params: string[] | null;
-  indistinct_efforts: string[] | null;
-  refused_efforts: string[];
-  source: string;
-  display_name: string;
-  context_length: number | null;
-  max_output_tokens: number | null;
-  input_usd_per_mtok: number | null;
-  output_usd_per_mtok: number | null;
-  modality: string;
-  fetched_at: string;
 }
 
 /** One input the draft's active pipeline needs. Soft: unfulfilled, it does not block mint. */
@@ -2902,21 +2912,6 @@ export interface MachineRefusal {
   released_at: string;
   /** The refusal, in the words the launch's own error carried */
   reason: string;
-}
-
-/** An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs, prompts and node rows included, is `OptimizerSetup`. */
-export interface OptimizerPipelineResponse {
-  /** The graph topology — the same shape a campaign pipeline serves */
-  view: PipelineView | null;
-  /** The node of `view` that runs the measurement — where a campaign's pipeline
-   * nests under this graph, as each `nests[].node` names it per campaign.
-   * Null where the manifest declares no measurement node. */
-  measurement_node: string | null;
-  node_output_schema: Record<string, NodeOutputSchema | null>;
-  /** Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs
-   * it accepts and what a round costs are the facts every other node's rows
-   * need too */
-  model_capabilities: Record<string, Record<string, ModelCapability>>;
 }
 
 /** The optimizers this install can run, the default first: one per manifest the registry holds. */
@@ -4354,6 +4349,16 @@ export interface OptimizationConfig {
    * ``config.model`` all ride here; each node validates its own knobs when
    * the optimizer is selected. */
   nodes: Record<string, ManifestNodeOverlay>;
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
   /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
    * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
    * cycles and checked at the next boundary; ``rounds`` caps one cycle's
@@ -4423,16 +4428,6 @@ export interface OptimizationConfig {
    * plain ``resume`` — round 0 is already on disk, so the loop skips the gate
    * and goes straight to L1. */
   origin_gate: 'strict' | 'critical_only' | 'off';
-  /** Hold every round, before any arm is measured, until the operator answers with
-   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
-   * ``review``: the proposers run, their proposals are drafts, and the
-   * operator keeps any of them by index, adds arms of their own, or both.
-   * ``author``: no proposer runs and every arm is the operator's. An arm of
-   * theirs is an edit of the round's parent — prompt fields, a pipeline
-   * overlay — and is measured and elected like any other. The hold has no
-   * deadline; a pause ends it resumably, and a resume holds again unless an
-   * answer was already banked. */
-  arm_gate: 'off' | 'review' | 'author';
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
    * discriminating dataset wins held-out cross-validation. The switch is

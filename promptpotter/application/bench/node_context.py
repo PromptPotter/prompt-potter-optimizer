@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.runner.inner.tasks import InnerCells
     from promptpotter.domain.connector import MeasuredUnit
-    from promptpotter.domain.opt_search_point import EvidenceGrounding
+    from promptpotter.domain.opt_search_point import EvidenceGrounding, OptimizerPromptTemplate
     from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
     from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -196,7 +196,7 @@ class Lineage(CycleRead):
     @property
     def rounds(self) -> Sequence[RoundResult]:
         """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what the node declares."""
-        return [rr.model_copy(update={"optimizer_state": None}) for rr in self._cycle.rounds]
+        return self._cycle.sealed_rounds
 
     def reelected(self, at: RoundArm, reelection: Reelection) -> RoundStatement:
         """Round *at* restated as electing its arm *by* a layer, on the round's own anchors and
@@ -423,23 +423,23 @@ class Calls(CycleRead):
     def model(self) -> str:
         return self._cycle.optimizer.model(self._member.name)
 
-    @property
-    def node_config(self) -> dict[str, Any]:
-        """Its own node's config as the manifest and overlay resolve it."""
-        return self._cycle.optimizer.node_config(self._member.name)
+    def prompt(self, node: str | None = None) -> OptimizerPromptTemplate:
+        """The one text *node* (its own, unnamed) runs under the cycle's selection."""
+        node, selected = node or self._member.name, self._cycle.optimizer
+        return running_prompt(node, selected.node_config(node), selected.manifest)
 
-    def fill(self, **values: str) -> str:
-        node, selected = self._member.name, self._cycle.optimizer
-        template = running_prompt(node, selected.node_config(node), selected.manifest)
-        return template.compile_prompt(**values)
-
-    def call_context(self, injections: InjectionBreakdown) -> LLMCallContext:
+    def call_context(
+        self, injections: InjectionBreakdown | None = None, *, idx: int | None = None
+    ) -> LLMCallContext:
         session = self._cycle.session
         return LLMCallContext(
+            node=self._member.name,
+            config=self._cycle.optimizer.node_config(self._member.name),
             ledger=session.state.ledger,
             round_num=self._round.round_num,
+            candidate_idx=idx,
             cache=session.store.optimizer_reuse,
-            injections=injections,
+            injections=injections or InjectionBreakdown(),
         )
 
     def note_synthesized_call(self, payload: dict[str, Any]) -> None:
@@ -455,20 +455,11 @@ class Calls(CycleRead):
             )
 
     async def ask(self, prompt: str, idx: int | None = None) -> str:
-        session = self._cycle.session
         node = self._member.name
         # The seed keys the reuse cache: a resume replays its reply, a repeat anywhere else samples.
         seed = self._cycle.rng(self._round.round_num, f"{node}:{idx}:request").getrandbits(31)
         response = await llm_call(
-            [{"role": "user", "content": prompt}],
-            node=node,
-            context=LLMCallContext(
-                ledger=session.state.ledger,
-                round_num=self._round.round_num,
-                candidate_idx=idx,
-                cache=session.store.optimizer_reuse,
-            ),
-            seed=seed,
+            [{"role": "user", "content": prompt}], context=self.call_context(idx=idx), seed=seed
         )
         return response.content
 

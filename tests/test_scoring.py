@@ -80,7 +80,10 @@ from promptpotter.application.intelligence.rasch import (
     theta_lift_over_parent,
 )
 from promptpotter.application.jobs.launcher.admission import PassStoppedError, paid_pass
-from promptpotter.application.optimizer_manifest import binding_optimizer, resolve_optimizer
+from promptpotter.application.optimizer_manifest import (
+    binding_optimizer,
+    select_optimizer,
+)
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchGate
@@ -197,7 +200,7 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
@@ -1442,8 +1445,11 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             yield
 
     with composed(["adaptive_queue", *walk[1:]]):
-        queued = resolve_optimizer(
-            name, {"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})}, gate="off"
+        queued = select_optimizer(
+            OptimizerChoice(
+                optimizer=name,
+                nodes={"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})},
+            )
         )
     assert queued.round_cells(40) == 7, (
         "potter's queue, the one potter member in a peer's roster, sized its panel off another's knobs"
@@ -1850,9 +1856,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 ]
             )
             line_passes = bench_passes(line_origin, *held, tolerance=banked.get("tolerance", 0))
-        selection = "origin" if banked and banked.get("pick") == "origin" else pick.id
+        chosen = "origin" if banked and banked.get("pick") == "origin" else pick.id
         line = bench_line(
-            ArmName(key=ArmKey(selection), round=1, label="C1.1"),
+            ArmName(key=ArmKey(chosen), round=1, label="C1.1"),
             on_line="held_by" not in run,
             **run,
         )
@@ -2911,7 +2917,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     cycle_dir = CycleDir(tmp_path / "fired")
     fired_ledger = CycleEventLog.open(cycle_dir)
     # Appended here, as the store appends a restate.
-    carried = resolve_optimizer("potter", {}, gate="off").slices
+    carried = select_optimizer(OptimizerChoice(optimizer="potter")).slices
     live = node_contract.SliceMap(carried)
     closed = round_result(1, optimizer_state=optimizer_state(), cells={})
     line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]

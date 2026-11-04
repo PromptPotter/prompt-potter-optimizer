@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass, fields
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
@@ -17,23 +18,70 @@ if TYPE_CHECKING:
 SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
 
 
-# WHO ANSWERS the call: a steer touching only these inherits its done C0.
-WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    {"model", "provider", "route_order"}
+class _Roster(Enum):
+    """Which roster an engine call key joins; a key carries its rosters on its `NodeConfig` field."""
+
+    # WHO ANSWERS the call: a steer touching only these inherits its done C0.
+    WHO_ANSWERS = "who_answers"
+    # Never a search axis: hosts of one model disagree, so an arm moving one measures the plumbing.
+    FORBIDDEN = "forbidden"
+    # A sampling scope the provider request carries.
+    SCOPE = "scope"
+
+
+@shapes_optimizer_prompt
+class NodeConfig(FrozenModel):
+    """An llm node's resolved config: the engine's call keys typed, as laid (strict: a value of
+    the wrong type refuses, never coerces), each field the one spelling of its key, and the
+    prompt fields it sets over its template. Its member's knobs are the member's
+    (`optimizer_manifest.py::_knobs`)."""
+
+    model_config = ConfigDict(strict=True)
+
+    provider: Annotated[str, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN]
+    model: Annotated[str, _Roster.WHO_ANSWERS]
+    route_order: Annotated[list[str] | None, _Roster.WHO_ANSWERS, _Roster.FORBIDDEN] = None
+    # A float as every route keys and sends it: an int laid here is the same call.
+    temperature: Annotated[float | None, _Roster.SCOPE] = None
+    max_tokens: Annotated[int | None, _Roster.SCOPE] = None
+    reasoning_effort: Annotated[str | None, _Roster.SCOPE] = None
+    top_p: Annotated[float | None, _Roster.SCOPE] = None
+    seed: int | None = None
+    prompt_family: str | None = None
+    prompt_version: int | None = None
+    schema_family: str | None = None
+    schema_version: int | None = None
+    # Rendered into the template, never sent: no call key.
+    prompt_edits: dict[str, str] = Field(default_factory=dict)
+
+    def call_settings(self) -> dict[str, str | int | float | list[str] | None]:
+        """Its engine call keys as laid, each to its value: what a call is keyed and sent by."""
+        return self.model_dump(include=set(CALL_CONFIG_KEYS), exclude_unset=True)
+
+    def laid(self, update: Mapping[str, object]) -> NodeConfig:
+        """*update* laid over it, typed as a config is: a value of the wrong type refuses."""
+        return NodeConfig.model_validate({**self.model_dump(exclude_unset=True), **update})
+
+
+def _call_keys_in(roster: _Roster) -> frozenset[str]:
+    return frozenset(
+        name for name, info in NodeConfig.model_fields.items() if roster in info.metadata
+    )
+
+
+WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
+    _Roster.WHO_ANSWERS
 )
-
-
-# Never a search axis: hosts of one model disagree, so an arm moving either measures the plumbing.
-PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    {"provider", "route_order"}
+PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
+    _Roster.FORBIDDEN
 )
-
-assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS
-
-
-PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    {"temperature", "max_tokens", "reasoning_effort", "top_p"}
-)
+# A forbidden key changes who answers: else a steer of one inherits a C0 measured by another host.
+assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS, PARAM_FORBIDDEN_KEYS - WHO_ANSWERS_KEYS
+PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(_Roster.SCOPE)
+# Every key an llm node's config may set beside its knobs and prompt fields.
+CALL_CONFIG_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    NodeConfig.model_fields
+) - {"prompt_edits"}
 
 
 def missing_template_vars(

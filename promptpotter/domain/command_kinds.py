@@ -857,7 +857,6 @@ class ReadKind(StrEnum):
     ACTIVE_SESSION = "active-session", "cycle_addressing:active_session"
     MACHINE_STATUS = "machine-status", "jobs.machine_status:machine_status"
     OPTIMIZERS = "optimizers", "pipeline_responses:optimizer_roster"
-    OPTIMIZER_PIPELINE = "optimizer-pipeline", "pipeline_responses:resolve_pipeline_for_optimizer"
     LIBRARY = "library", "library:library"
     BACKENDS = "backends", "backend_listing:list_backends"
     BACKEND_HEALTH = "backend-health", "backend_listing:backend_health"

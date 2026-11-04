@@ -36,9 +36,13 @@ def paradigm_shift_prompt(
         + f"\n{_prompt(ctx, individual)}"
         for n, (individual, score) in enumerate(shown, start=1)
     ]
-    return ctx.read(Calls).fill(
-        problem_description=task_description(ctx, ctx.read(Target).prompt_node),
-        representatives="\n\n".join(blocks),
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            problem_description=task_description(ctx, ctx.read(Target).prompt_node),
+            representatives="\n\n".join(blocks),
+        )
     )
 
 
@@ -75,11 +79,15 @@ def refine_prompt(
     """E.6; meta-advice stays empty: the paper publishes no template for it (App. B)."""
     individual, score = parent
     node = ctx.read(Target).prompt_node
-    return ctx.read(Calls).fill(
-        problem_description=task_description(ctx, node),
-        parent_score=_score(score),
-        parent_prompt=shown(ctx, individual, node),
-        feedback_section=_failures(parent_rows, n_failures, rng),
-        inspirations_section=_inspirations(ctx, inspirations),
-        meta_advice_section="",
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            problem_description=task_description(ctx, node),
+            parent_score=_score(score),
+            parent_prompt=shown(ctx, individual, node),
+            feedback_section=_failures(parent_rows, n_failures, rng),
+            inspirations_section=_inspirations(ctx, inspirations),
+            meta_advice_section="",
+        )
     )

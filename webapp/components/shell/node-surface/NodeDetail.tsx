@@ -13,7 +13,6 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { useCycleStream } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchpointRead";
-import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { interiorNodes, type ObserveState, type ObserveSubject } from "@/lib/derivations";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
@@ -49,26 +48,24 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
 
   const cv = useConnector();
   const { dash, isLive } = useCycleStream();
-  const { doc: optimizer, status: optimizerStatus } = useOptimizerPipeline(isOptimizer);
+  const optimizer = cv.optimizerSetup;
   const subject = useObserveSubject();
   const observed = useSearchpointRead(!isOptimizer && !authoring ? subject.point : null, id);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
   const servedKind = node?.kind ?? null;
-  // The rows at the viewed config ride `OptimizerSetup`; the manifest read holds only the graph.
-  const optimizerRows = cv.optimizerSetup?.node_config_schema ?? null;
   const schema = useMemo<NodeSchemaReading>(
     () =>
       isOptimizer
         ? {
-            status: optimizerStatus,
-            config: optimizerRows,
+            status: cv.schema.status,
+            config: optimizer?.node_config_schema ?? null,
             output: optimizer?.node_output_schema ?? null,
             isSingleNode: false,
           }
         : cv.schema,
-    [isOptimizer, optimizerStatus, optimizerRows, optimizer, cv.schema],
+    [isOptimizer, optimizer, cv.schema],
   );
   const modelCapabilities = isOptimizer
     ? (optimizer?.model_capabilities ?? {})
@@ -175,7 +172,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             block={block}
             round={viewedRound}
             loading={nodesLoading}
-            kindLoading={optimizerStatus === "loading"}
+            kindLoading={cv.schema.status === "loading"}
             inFlight={isLiveNow}
           />
         )}

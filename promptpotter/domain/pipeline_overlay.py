@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.domain.pipeline_schema import (
@@ -16,7 +16,7 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_K
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, MutableMapping, Sequence
+    from collections.abc import MutableMapping, Sequence
 
     from promptpotter.domain.pipeline_schema import (
         NodeSearchNarrowing,
@@ -148,13 +148,13 @@ def normalize_model_id(model: str) -> str:
 
 
 def pinned_route(
-    cfg: Mapping[str, object],
+    model: object,
+    route_order: object,
     provider: str | None,
     routes: Mapping[str, Mapping[str, list[str]]],
 ) -> list[str] | None:
     """The host a node left to the gateway gets; an explicit ``route_order``, ``[]`` included, opts out."""
-    model = cfg.get("model")
-    if cfg.get("route_order") is not None or not isinstance(model, str):
+    if route_order is not None or not isinstance(model, str):
         return None
     route = routes.get(str(provider), {}).get(normalize_model_id(model))
     return None if route is None else list(route)
@@ -166,7 +166,9 @@ def pin_default_routes(pp: dict[str, Any], schema: PipelineSchema) -> dict[str, 
     for node, cfg in node_config_items(pp):
         declared = schema.get_node(node)
         provider = cfg.get("provider") or (declared.provider if declared else None)
-        if route := pinned_route(cfg, provider, schema.default_routes):
+        if route := pinned_route(
+            cfg.get("model"), cfg.get("route_order"), provider, schema.default_routes
+        ):
             out[node] = {**cfg, "route_order": route}
     return out
 

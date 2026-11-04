@@ -368,7 +368,7 @@ class L1Critique(LayoutNode, nodes.Adapter):
 
     def round_packages(self, ctx: NodeContext) -> dict[str, str]:
         """Every layout node's: one bundle feeds them all, and it carries the trajectory up to *ctx*'s round."""
-        return node_packages(build_bundle(ctx, ctx.slice(Ladder)))
+        return node_packages(ctx, build_bundle(ctx, ctx.slice(Ladder)))
 
     async def rederive(self, ctx: NodeContext) -> tuple[StatePart, ...]:
         if ctx.recall(Critique, ctx.round_num).readout is None:

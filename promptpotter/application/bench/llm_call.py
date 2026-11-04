@@ -13,8 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.application.optimizer_manifest import (
-    get_optimizer_config_overrides,
-    llm_node_manifest,
+    bound_determinism,
     resolve_node_override,
 )
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
@@ -23,6 +22,7 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
 )
+from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
@@ -40,7 +40,6 @@ from promptpotter.infrastructure.llm.send_pacing import (
     under_budget,
 )
 from promptpotter.infrastructure.llm.spend_book import CallLabel
-from promptpotter.infrastructure.llm.telemetry import claim_call_price, emit_token_usage
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -71,6 +70,9 @@ class InjectionBreakdown:
 
 @dataclass(frozen=True, kw_only=True)
 class LLMCallContext:
+    # The calling node and its config as its selection resolved it: the one source a call lays over.
+    node: str
+    config: NodeConfig
     cache: LLMReuseCache
     ledger: CycleEventLog | None = None
     round_num: int | None = None
@@ -78,7 +80,8 @@ class LLMCallContext:
     injections: InjectionBreakdown = field(default_factory=InjectionBreakdown)
 
 
-_LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
+# What a node declaring no temperature samples at.
+_DEFAULT_TEMPERATURE = 0.0
 
 # Per round trip: the client's own httpx timeout is per-read-gap, so a slow stream never trips it.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
@@ -113,14 +116,6 @@ async def _chat_under_deadline(
         ) from exc
 
 
-def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None:
-    try:
-        return cache.load(key)
-    except (OSError, ValueError) as exc:
-        logger.warning("optimizer_reuse entry for %s unusable, re-sampling — %s", label, exc)
-        return None
-
-
 def _ledger_response_payload(response: LLMResponse) -> Any:
     if response.parsed is None:
         return response.content
@@ -132,7 +127,7 @@ def _ledger_response_payload(response: LLMResponse) -> Any:
 @dataclass(frozen=True)
 class _Call:
     label: str
-    merged: dict[str, Any]
+    merged: NodeConfig
     messages: list[ChatMessage]
     response_model: type[BaseModel] | None
     response_schema: dict[str, Any] | None
@@ -146,45 +141,53 @@ class _Call:
     @functools.cached_property
     def client(self) -> LLMClientBase:
         """Resolved only for a send: a replay goes out on no key, so no coupon refuses it."""
-        return keyed_client(self.merged["provider"])
+        return keyed_client(self.merged.provider)
 
 
-def _merged_config(node: str, overrides: dict[str, Any]) -> dict[str, Any]:
-    merged = {**_LLM_DEFAULTS, **llm_node_manifest(node)[1], **overrides}
-    if (specimen := resolve_node_override(node)).model:
-        merged["model"] = specimen.model
-        if specimen.provider:
-            merged["provider"] = specimen.provider
-    # The determinism clamp goes LAST: it must beat every per-call override, steered temperature included.
-    if config_overrides := get_optimizer_config_overrides():
-        merged = {**merged, **config_overrides}
+def _merged_config(
+    node: str, config: NodeConfig, *, temperature: float | None, seed: int | None
+) -> NodeConfig:
+    config = resolve_node_override(node).laid_on(config)
+    laid: dict[str, object] = {}
+    if temperature is not None:
+        laid["temperature"] = temperature
+    if seed is not None:
+        laid["seed"] = seed
+    # The determinism clamp goes LAST: it must beat every per-call setting, steered temperature included.
+    if (clamp := bound_determinism()) is not None:
+        laid |= clamp.model_dump(exclude_none=True)
         # Except the seed a call brings: `Calls.ask` draws it FROM the clamp's, one per call.
-        if "seed" in overrides:
-            merged["seed"] = overrides["seed"]
+        if seed is not None:
+            laid["seed"] = seed
+    merged = config.laid(laid)
     # Keyed and sent as the host it gets, as a target node is (`pin_default_routes`).
-    if route := pinned_route(merged, merged["provider"], default_routes()):
-        merged["route_order"] = route
+    if route := pinned_route(merged.model, merged.route_order, merged.provider, default_routes()):
+        merged = merged.laid({"route_order": route})
     return merged
 
 
+def _sampled_at(merged: NodeConfig) -> float:
+    return _DEFAULT_TEMPERATURE if merged.temperature is None else merged.temperature
+
+
 def _reuse_key(
-    merged: dict[str, Any],
+    merged: NodeConfig,
     messages: list[ChatMessage],
     response_model: type[BaseModel] | None,
     response_schema: dict[str, Any] | None,
 ) -> str:
     return hash_call(
         messages=messages,
-        model=merged.get("model"),
-        provider=merged["provider"],
-        temperature=merged["temperature"],
+        model=merged.model,
+        provider=merged.provider,
+        temperature=_sampled_at(merged),
         json_schema=response_schema,
         response_model=response_model.__name__ if response_model else None,
-        seed=merged.get("seed"),
-        max_tokens=merged.get("max_tokens"),
-        reasoning_effort=merged.get("reasoning_effort"),
-        top_p=merged.get("top_p"),
-        route_order=merged.get("route_order"),
+        seed=merged.seed,
+        max_tokens=merged.max_tokens,
+        reasoning_effort=merged.reasoning_effort,
+        top_p=merged.top_p,
+        route_order=merged.route_order,
     )
 
 
@@ -197,7 +200,7 @@ def _announce(call: _Call) -> None:
         node=label,
         round=context.round_num,
         candidate_idx=context.candidate_idx,
-        model=call.merged.get("model"),
+        model=call.merged.model,
         started_at_ms=int(time.time() * 1000),
         prompt_chars=prompt_chars,
         injection_chars=dict(injections.chars),
@@ -228,7 +231,7 @@ def _announce(call: _Call) -> None:
     log(
         "→ optimizer call: %s · %s · %d-char prompt%s%s",
         label,
-        call.merged["model"],
+        call.merged.model,
         prompt_chars,
         heaviest,
         dropped,
@@ -245,7 +248,7 @@ async def _provider_reply(call: _Call) -> LLMResponse:
             node=label,
             round_num=context.round_num,
             start_monotonic=call.started,
-            detail_fn=lambda: waiting_on(call.client, merged.get("model"), role="provider"),
+            detail_fn=lambda: waiting_on(call.client, merged.model, role="provider"),
         )
     )
     try:
@@ -253,16 +256,16 @@ async def _provider_reply(call: _Call) -> LLMResponse:
             call.client,
             ChatRequest(
                 messages=call.messages,
-                model=merged["model"],
-                temperature=merged["temperature"],
-                max_tokens=merged.get("max_tokens"),
+                model=merged.model,
+                temperature=_sampled_at(merged),
+                max_tokens=merged.max_tokens,
                 response_model=call.response_model,
                 response_schema=call.response_schema,
-                reasoning_effort=merged.get("reasoning_effort"),
-                top_p=merged.get("top_p"),
-                seed=merged.get("seed"),
+                reasoning_effort=merged.reasoning_effort,
+                top_p=merged.top_p,
+                seed=merged.seed,
                 # An empty route pins nothing, so it is no request for one.
-                route_order=merged.get("route_order") or None,
+                route_order=merged.route_order or None,
             ),
             node_label=label,
         )
@@ -290,9 +293,9 @@ def _call_record(
     payload: dict[str, Any] = {
         "type": call.label,
         "config": {
-            "model": call.merged.get("model"),
-            "temperature": call.merged["temperature"],
-            "max_tokens": call.merged.get("max_tokens"),
+            "model": call.merged.model,
+            "temperature": _sampled_at(call.merged),
+            "max_tokens": call.merged.max_tokens,
         },
         "response": _ledger_response_payload(response),
         "model": response.model,
@@ -322,17 +325,15 @@ def _call_record(
 async def llm_call(
     messages: list[ChatMessage],
     *,
-    node: str,
     context: LLMCallContext,
     trace_meta: dict[str, Any] | None = None,
     response_model: type[BaseModel] | None = None,
     response_schema: dict[str, Any] | None = None,
-    **overrides: Any,
+    temperature: float | None = None,
+    seed: int | None = None,
 ) -> LLMResponse:
-    merged = _merged_config(node, overrides)
-    cache_key = _reuse_key(merged, messages, response_model, response_schema)
-    replayed = _replay(context.cache, cache_key, label=node)
-
+    node = context.node
+    merged = _merged_config(node, context.config, temperature=temperature, seed=seed)
     call = _Call(
         label=node,
         merged=merged,
@@ -343,43 +344,32 @@ async def llm_call(
         started=time.monotonic(),
         call_id=uuid.uuid4().hex if context.ledger is not None else "",
     )
-    if replayed is not None:
-        response = replayed
-        # ``parsed`` is typed ``Any``, so `model_validate` leaves the saved dict a dict.
-        if response_model is not None and isinstance(response.parsed, dict):
-            response.parsed = response_model.model_validate(response.parsed)
-        duration_s = call.elapsed_s()
-        logger.debug("optimizer_reuse hit for %s (%s)", node, cache_key)
-    else:
+
+    async def send() -> LLMResponse:
         _announce(call)
-        response = await _provider_reply(call)
-        duration_s = call.elapsed_s()
+        return await _provider_reply(call)
 
-    # A cache hit is metered too, once per campaign: incurred cost stays invariant to cache history.
-    first = claim_call_price(cache_key)
-    if replayed is not None and first:
-        emit_token_usage(
-            node=node,
-            kind="optimizer",
-            usage=response.usage,
-            provider=merged["provider"],
-            served_by=response.served_by,
-            duration_s=duration_s,
-            model=response.model,
-            cost_usd=response.cost_usd,
-            key_source=None,
-            cached=True,
-        )
-
-    # Never cache an empty response: a TRANSIENT provider failure would replay forever, tenant-wide.
-    usable = bool(response.content.strip()) or response.parsed is not None
-    if replayed is None and usable:
-        context.cache.save(cache_key, response)
+    answered = await context.cache.answer(
+        _reuse_key(merged, messages, response_model, response_schema),
+        send,
+        node=node,
+        kind="optimizer",
+        provider=merged.provider,
+        model=merged.model,
+    )
+    response = answered.response
+    # ``parsed`` is typed ``Any``, so a banked reply's `model_validate` leaves the saved dict a dict.
+    if response_model is not None and isinstance(response.parsed, dict):
+        response.parsed = response_model.model_validate(response.parsed)
 
     if context.ledger is not None:
         context.ledger.append(
             _call_record(
-                call, response, duration_s, cached=replayed is not None, trace_meta=trace_meta
+                call,
+                response,
+                answered.duration_s,
+                cached=answered.replayed,
+                trace_meta=trace_meta,
             )
         )
 
@@ -388,7 +378,6 @@ async def llm_call(
 
 async def run_optimizer_node(
     *,
-    template_name: str,
     template: OptimizerPromptTemplate,
     prompt_vars: dict[str, Any],
     response_model: type[BaseModel] | None,
@@ -405,20 +394,16 @@ async def run_optimizer_node(
         ]
     else:
         messages = [{"role": "user", "content": prompt}]
-    overrides: dict[str, Any] = {}
-    if temperature is not None:
-        overrides["temperature"] = temperature
     response = await llm_call(
         messages=messages,
-        node=template_name,
         response_model=response_model,
         response_schema=response_schema,
         context=context,
         trace_meta={
-            "template_name": template_name,
+            "template_name": context.node,
             "template_fields": template.prompt_fields(),
             "variables": prompt_vars,
         },
-        **overrides,
+        temperature=temperature,
     )
     return extract_parsed_json(response), prompt, len(response.schema_repair_errors)

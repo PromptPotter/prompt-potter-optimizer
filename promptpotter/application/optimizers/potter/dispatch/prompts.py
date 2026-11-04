@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     checkin_manifest,
-    llm_node_manifest,
     node_prompt,
-    running_prompt,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     validate_template,
@@ -17,11 +15,11 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
 from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
 from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
-from promptpotter.domain.pipeline_manifest import PipelineManifest
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.runner.inner.tasks import InnerCells
 
 shapes_optimizer_prompt(__name__)
@@ -32,8 +30,8 @@ logger = logging.getLogger(__name__)
 def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
     """L4-override-free: the bench's check-in where it declares *name*, else *inner*'s under its overlay's edits."""
     checkin = checkin_manifest()
-    if (held := checkin.schema.get_node(name)) is not None:
-        return node_prompt(name, held.current_config, checkin.manifest)
+    if checkin.schema.get_node(name) is not None:
+        return node_prompt(name, checkin.config, checkin.manifest)
     return node_prompt(name, inner.node_config(name), inner.manifest)
 
 
@@ -41,14 +39,6 @@ def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | No
     """*name*'s base prompt in the manifest whose lever it is; ``None`` where no cell runs it."""
     owner = cells.owners.get(name)
     return None if owner is None else base_optimizer_template(owner, name)
-
-
-def _running_template(
-    name: str, config: Mapping[str, Any], manifest: PipelineManifest
-) -> OptimizerPromptTemplate:
-    template = running_prompt(name, config, manifest)
-    validate_template(name, template)
-    return template
 
 
 def effective_optimizer_prompts(
@@ -78,9 +68,11 @@ def effective_optimizer_prompts(
     return out
 
 
-def load_optimizer_prompt(name: str) -> OptimizerPromptTemplate:
-    _node, config, manifest = llm_node_manifest(name)
-    return _running_template(name, config, manifest)
+def load_optimizer_prompt(ctx: NodeContext, name: str) -> OptimizerPromptTemplate:
+    """*name*'s running prompt under the cycle's selection, through the asking member's `Calls`."""
+    template = ctx.read(Calls).prompt(name)
+    validate_template(name, template)
+    return template
 
 
 def node_layout(node: str, l2: L2Memory) -> L1Layout:

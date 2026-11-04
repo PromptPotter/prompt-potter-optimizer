@@ -135,8 +135,9 @@ async def _generate_or_load(ctx: NodeContext, kept: list[Proposal]) -> L1Generat
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
     l2 = ctx.slice(L2Memory)
+    # Unsteered, the call runs at the node's own temperature; `NodeConfig` types a steered one.
     return await l1_generate(
         ctx,
         n_variants=variants_this_round(ctx.knobs(L1GenerateKnobs).n_variants, l2),
-        temperature=float({**calls.node_config, **l2.steered("l1_generate")}["temperature"]),
+        temperature=l2.steered("l1_generate").get("temperature"),
     )

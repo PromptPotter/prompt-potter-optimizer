@@ -398,6 +398,14 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "current_config": dict(nc),
             "spend_bound": node.get("spend_bound"),
         }
+        if "nested_datasets" in node:
+            if kind is not NodeKind.GATEWAY:
+                _refuse(
+                    f"node {name!r} names `nested_datasets`, which only a gateway runs.", node=name
+                )
+            step_kwargs["nested_datasets"] = _names(
+                node["nested_datasets"], f"{where}.nested_datasets"
+            )
 
         obs_name = opt.get("observation_name")
         if obs_name:

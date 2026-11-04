@@ -124,14 +124,9 @@ def named_over_the_default(budget: Budget) -> Budget:
     )
 
 
-class OptimizationConfig(StrictModel):
-    """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
-    are its nodes' ``config`` in its manifest, never fields here."""
-
-    @field_validator("budget", mode="before")
-    @classmethod
-    def _over_the_default(cls, given: object) -> Budget:
-        return over_the_default(Budget.model_validate(given))
+class OptimizerChoice(StrictModel):
+    """What `optimizer_manifest.py::select_optimizer` reads: which optimizer, its overlay, and
+    the gate its roster closes under. Bare, it is the manifest as declared."""
 
     optimizer: Annotated[str, Knob(Estimand.SEARCH)] = Field(
         "potter",
@@ -151,6 +146,30 @@ class OptimizationConfig(StrictModel):
             "all ride here; each node validates its own knobs when the optimizer is selected."
         ),
     )
+    arm_gate: Annotated[ArmGateMode, Knob(Estimand.GATE)] = Field(
+        "off",
+        description=(
+            "Hold every round, before any arm is measured, until the operator answers with "
+            "the arms it measures (`submit-arms`). ``off`` (default) never holds. "
+            "``review``: the proposers run, their proposals are drafts, and the operator "
+            "keeps any of them by index, adds arms of their own, or both. ``author``: no "
+            "proposer runs and every arm is the operator's. An arm of theirs is an edit of "
+            "the round's parent — prompt fields, a pipeline overlay — and is measured and "
+            "elected like any other. The hold has no deadline; a pause ends it resumably, "
+            "and a resume holds again unless an answer was already banked."
+        ),
+    )
+
+
+class OptimizationConfig(OptimizerChoice):
+    """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
+    are its nodes' ``config`` in its manifest, never fields here."""
+
+    @field_validator("budget", mode="before")
+    @classmethod
+    def _over_the_default(cls, given: object) -> Budget:
+        return over_the_default(Budget.model_validate(given))
+
     budget: Annotated[Budget, Knob(Estimand.SPEND)] = Field(
         _DEFAULT_BUDGET,
         description=(
@@ -258,20 +277,6 @@ class OptimizationConfig(StrictModel):
             "gate. The operator overrides knowingly with a plain ``resume`` — "
             "round 0 is already on disk, so the loop skips the gate and goes "
             "straight to L1."
-        ),
-    )
-
-    arm_gate: Annotated[ArmGateMode, Knob(Estimand.GATE)] = Field(
-        "off",
-        description=(
-            "Hold every round, before any arm is measured, until the operator answers with "
-            "the arms it measures (`submit-arms`). ``off`` (default) never holds. "
-            "``review``: the proposers run, their proposals are drafts, and the operator "
-            "keeps any of them by index, adds arms of their own, or both. ``author``: no "
-            "proposer runs and every arm is the operator's. An arm of theirs is an edit of "
-            "the round's parent — prompt fields, a pipeline overlay — and is measured and "
-            "elected like any other. The hold has no deadline; a pause ends it resumably, "
-            "and a resume holds again unless an answer was already banked."
         ),
     )
 

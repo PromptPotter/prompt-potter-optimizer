@@ -18,19 +18,16 @@ import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { KnobClashes, useKnobClashes } from "./KnobClashes";
 import { RaceCatchUp } from "./RaceCatchUp";
 import { RoundAxis } from "./RoundAxis";
-import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 
 export function OptimizerCard() {
-  const { doc: pipeline, status: pipelineStatus } = useOptimizerPipeline();
   const [knobsOpen, setKnobsOpen] = useState(false);
   const clashes = useKnobClashes();
   const clashCount = clashes.active?.length ?? 0;
   const { dash, isLive } = useCycleStream();
   const runState = figureOf(useViewedCourse(), "state");
-  const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
   const { nodes: roundNodes, showsCurrent: viewingLive } = useRoundNodes();
-  const { optimizerSetup } = useConnector();
+  const { optimizerSetup, schema } = useConnector();
 
   const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
   // What the round axis beside it does not already say: the node firing, else the SERVER's phase
@@ -83,12 +80,12 @@ export function OptimizerCard() {
         <PipelineFlow
           bare
           layer={{
-            view,
-            status: pipelineStatus,
+            view: optimizerSetup?.view ?? null,
+            status: schema.status,
             connector: null,
             reach: optimizerSetup?.reach ?? null,
             scope: "optimizer",
-            nestsNode: pipeline?.measurement_node ?? null,
+            nestsNode: optimizerSetup?.measurement_node ?? null,
             activeNode: isLive && viewingLive ? activeId : null,
             isLive,
           }}

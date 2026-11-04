@@ -113,7 +113,7 @@ from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.pipeline_resolve import cycle_config
@@ -206,7 +206,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
-from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
 from promptpotter.domain.spend import (
     CYCLE_AXES,
     MONEY_AXES,
@@ -1200,10 +1200,14 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     async def round_calls() -> None:
         await call_mod.llm_call(
             [{"role": "user", "content": "q"}],
-            node="checkin",
-            context=call_mod.LLMCallContext(cache=loop_reuse),
-            provider="openai",
-            model="m",
+            context=call_mod.LLMCallContext(
+                node="checkin",
+                config=NodeConfig.model_validate(
+                    checkin_manifest().config.model_dump(exclude_unset=True)
+                    | {"provider": "openai", "model": "m"}
+                ),
+                cache=loop_reuse,
+            ),
         )
         with judge_call.bind_cache(judge_reuse):
             await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")

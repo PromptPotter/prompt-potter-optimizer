@@ -17,7 +17,7 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.knobs import bench_defaults_pin
-from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
@@ -72,6 +72,7 @@ from promptpotter.domain.campaign import Campaign, Optimize, Purpose
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
+    OptimizerChoice,
     declare_run,
 )
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -90,7 +91,11 @@ from promptpotter.domain.paired_reading import (
     RoundArm,
 )
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
+from promptpotter.domain.pipeline_schema import (
+    NodePromptInfo,
+    PipelineNode,
+    PipelineSchema,
+)
 from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.results import CycleResult, Election, RoundResult
@@ -535,7 +540,7 @@ def set_cycle(
     standing: RunStanding | None = None,
 ) -> None:
     if line is not None:
-        cycle.rounds = list(line)
+        cycle.restate_rounds(list(line))
     if standing is not None:
         cycle.standing = standing
     if population is not None:
@@ -689,7 +694,7 @@ def inner_cells(*optimizers: str) -> InnerCells:
     by_dataset: dict[str, InnerCell] = {}
     specs: dict[str, InnerTaskSpec] = {}
     for name in optimizers:
-        selected = resolve_optimizer(name, {}, gate="off")
+        selected = select_optimizer(OptimizerChoice(optimizer=name))
         treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
         by_dataset[f"{name}ds"] = InnerCell({}, None, selected, treatment)
         specs[name] = InnerTaskSpec(
@@ -705,13 +710,14 @@ def inner_cells(*optimizers: str) -> InnerCells:
 
 
 def pobb_knobs(**bend: Any) -> PoBBKnobs:
-    shipped = cast("PoBBKnobs", resolve_optimizer("potter", {}, gate="off").knobs("pobb"))
+    shipped = cast("PoBBKnobs", select_optimizer(OptimizerChoice(optimizer="potter")).knobs("pobb"))
     return shipped.model_copy(update=bend)
 
 
 def election_knobs() -> ElectionKnobs:
     return cast(
-        "ElectionKnobs", resolve_optimizer("potter", {}, gate="off").knobs("theta_election")
+        "ElectionKnobs",
+        select_optimizer(OptimizerChoice(optimizer="potter")).knobs("theta_election"),
     )
 
 

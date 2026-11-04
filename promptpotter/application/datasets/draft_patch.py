@@ -12,7 +12,6 @@ from promptpotter.application.free_tier import (
     outside_free_tier,
     refuse_outside_free_tier,
 )
-from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
     ServedPipeline,
@@ -144,7 +143,6 @@ async def plan_draft_patch(
             merged["optimization"],
             under=("patch", "optimization_overrides"),
         )
-        resolve_optimizer(overrides.optimizer, overrides.nodes, gate=overrides.arm_gate)
         changes["optimization_overrides"] = overrides.model_dump(mode="json")
 
     if patch.raw_task_description is not None:
@@ -191,8 +189,12 @@ def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:
 
 
 def _refusals(pipeline: DraftPipeline, *, fence: FreeFence | None) -> tuple[list[str], list[str]]:
-    config, params, schema = pipeline.config, pipeline.params, pipeline.chain
-    selected = select_optimizer(config.optimization)
+    config, params, schema, selected = (
+        pipeline.config,
+        pipeline.params,
+        pipeline.chain,
+        pipeline.optimizer,
+    )
     outside = [] if fence is None else outside_free_tier(config, selected, params, schema, fence)
     return unpriced_routes(config, selected, params, schema), outside
 

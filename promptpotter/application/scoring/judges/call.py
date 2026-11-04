@@ -20,9 +20,7 @@ from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudge
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
-    claim_call_price,
     current_round,
-    emit_token_usage,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import (
@@ -51,55 +49,56 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
 
     The REPLY is cached, never the verdict — keyed by ``hash_call`` over the rendered prompt and
     model / provider / temperature / max_tokens, so a changed ``_parse`` or ``to_score`` re-derives.
-    A hit is metered (``cached``); an empty reply is never stored.
+    The cache replays, meters and keeps it (`LLMReuseCache.answer`).
     """
     started = time.monotonic()
     cache = _CACHE.get()
-    key: str | None = None
-    cached: LLMResponse | None = None
-    if cache is not None:
-        key = hash_call(
-            messages=[{"role": "user", "content": prompt}],
-            model=stage.model,
-            provider=stage.provider,
-            temperature=stage.temperature,
-            json_schema=None,
-            max_tokens=stage.max_tokens,
-        )
-        cached = _replay(cache, key, judge=judge, role=stage.role)
 
-    if cached is not None:
-        response = cached
-    else:
+    async def send() -> LLMResponse:
+        # The catch covers the provider's reply alone: the cache's own replay, meter and keep raise.
         try:
-            response = await _sample(stage, prompt, judge=judge, started=started)
+            return await _sample(stage, prompt, judge=judge, started=started)
         except SendRefusedError as exc:
             # `spent` is empty: `measure_sample` bills the backend spend before any judge runs.
             raise CellSendRefusedError(str(exc), category=exc.category, spent={}) from exc
         except (httpx.HTTPError, UngeneratedRequestError, ValueError) as exc:
-            logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
-            return "", f"{type(exc).__name__}: {exc}"
+            raise _ProviderFailedError(exc) from exc
 
-    # Once per campaign: a grading its ledger already priced is not metered on a later replay.
-    first = key is not None and claim_call_price(key)
-    if cached is not None and first:
-        emit_token_usage(
-            node=f"{judge}:{stage.role}",
-            kind="judge",
-            model=response.model or stage.model,
-            provider=stage.provider,
-            served_by=response.served_by,
-            usage=response.usage,
-            cost_usd=response.cost_usd,
-            duration_s=time.monotonic() - started,
-            key_source=None,
-            cached=True,
-        )
-
-    if cached is None and cache is not None and key is not None and response.content.strip():
-        cache.save(key, response)
+    try:
+        if cache is None:
+            response = await send()
+        else:
+            response = (
+                await cache.answer(
+                    hash_call(
+                        messages=[{"role": "user", "content": prompt}],
+                        model=stage.model,
+                        provider=stage.provider,
+                        temperature=stage.temperature,
+                        json_schema=None,
+                        max_tokens=stage.max_tokens,
+                    ),
+                    send,
+                    node=f"{judge}:{stage.role}",
+                    kind="judge",
+                    provider=stage.provider,
+                    model=stage.model,
+                )
+            ).response
+    except _ProviderFailedError as failed:
+        exc = failed.cause
+        logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
+        return "", f"{type(exc).__name__}: {exc}"
 
     return response.content or "", ""
+
+
+class _ProviderFailedError(Exception):
+    """The provider's reply failed: the one failure `ask` turns into an absent grade."""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
 
 
 def absent(judge: str, reason: str) -> JudgeVerdict:
@@ -135,18 +134,6 @@ async def graded(
         label=label,
         explanation=f"graded {label} by {stage.model}",
     )
-
-
-def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResponse | None:
-    try:
-        response = cache.load(key)
-    except (OSError, ValueError) as exc:
-        logger.warning("judge_reuse entry for %s:%s unusable, re-sampling — %s", judge, role, exc)
-        return None
-    if response is None:
-        return None
-    logger.debug("judge_reuse hit for %s:%s (%s)", judge, role, key)
-    return response
 
 
 async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float) -> LLMResponse:

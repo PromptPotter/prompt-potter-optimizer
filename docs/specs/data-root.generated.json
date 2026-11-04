@@ -889,7 +889,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "A `pipeline.yaml` typed at load — an optimizer's, or the bench's check-in.",
+        "description": "The bench's check-in `pipeline.yaml`: one llm node, `checkin`, whose config holds no knob.",
         "properties": {
           "available_models": {
             "items": {
@@ -974,7 +974,7 @@
           "pipelines",
           "main"
         ],
-        "title": "PipelineManifest",
+        "title": "CheckinPipelineManifest",
         "type": "object"
       }
     },

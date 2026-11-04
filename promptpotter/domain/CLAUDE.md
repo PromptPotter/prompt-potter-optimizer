@@ -9,7 +9,7 @@ No I/O, no async; the import ban is `scripts/gate.py::_LAYERING`.
 - **`ForkSpec.keep_rounds` names the act**: unset is `operator_steered`, set is `operator_rewind`; `mint_fork` is its one writer. <!-- probe: git grep -cE "ForkSpec\(" -- promptpotter/*.py <= 2 -->
 - **`AbilityReading.comparable_to` is the only test for differencing two θ**, `AbilityReading.minus` the one difference <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py <= 1 -->; a cell the `DeltaRuler` does not carry enters no θ (`ThetaCaveat.UNMEASURED_DELTA`).
 - **`CycleHop` is the `(campaign, cycle)` address**, exposed as a property (`Campaign.root_hop`, `Session.hop`, `Job.hop`), never re-paired from two `str`s.
-- **`pipeline_overlay.py` is the one walk and merge of `pipeline_params`.** <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
+- **`pipeline_overlay.py` is the one walk and merge of `pipeline_params`**; an llm node's config is read as its typed `search_point.py::NodeConfig`, whose fields are the one spelling of the call-key rosters. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
 - **The estimator digest hashes `l4/proxies`**, so only what decides a cell's number lives there.
 - **`spend.py::TokenAccount` IS the carrier** — never hand-convert it at a call site.
 - **`deprecated` is domain language for the fatal-warning sample lifecycle only** (`is_deprecated`, `deprecated_samples`, `CellFold.deprecated`, `retry_of_deprecated_cache`) — never a back-compat shim.

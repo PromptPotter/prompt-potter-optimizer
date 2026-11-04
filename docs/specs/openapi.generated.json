@@ -11680,68 +11680,6 @@
         "title": "OptimizerNodePrompt",
         "type": "object"
       },
-      "OptimizerPipelineResponse": {
-        "additionalProperties": false,
-        "description": "An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs, prompts and node rows included, is `OptimizerSetup`.",
-        "properties": {
-          "measurement_node": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The node of `view` that runs the measurement — where a campaign's pipeline nests under this graph, as each `nests[].node` names it per campaign. Null where the manifest declares no measurement node.",
-            "title": "Measurement Node"
-          },
-          "model_capabilities": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "$ref": "#/components/schemas/ModelCapability"
-              },
-              "type": "object"
-            },
-            "description": "Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs it accepts and what a round costs are the facts every other node's rows need too",
-            "title": "Model Capabilities",
-            "type": "object"
-          },
-          "node_output_schema": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/NodeOutputSchema"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Node Output Schema",
-            "type": "object"
-          },
-          "view": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PipelineView"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The graph topology — the same shape a campaign pipeline serves"
-          }
-        },
-        "required": [
-          "view",
-          "measurement_node",
-          "node_output_schema",
-          "model_capabilities"
-        ],
-        "title": "OptimizerPipelineResponse",
-        "type": "object"
-      },
       "OptimizerRoster": {
         "additionalProperties": false,
         "description": "The optimizers this install can run, the default first: one per manifest the registry holds.",
@@ -11803,7 +11741,7 @@
       },
       "OptimizerSetup": {
         "additionalProperties": false,
-        "description": "What the selected optimizer runs under a config, derived once for check-in and campaign.",
+        "description": "What the selected optimizer runs under a config, derived once for check-in and campaign:\nits graph, knobs, prompts and pools as that config selects them.",
         "properties": {
           "arms_per_round": {
             "description": "Arms each round tests",
@@ -11826,6 +11764,22 @@
             "title": "Main",
             "type": "array"
           },
+          "measurement_node": {
+            "description": "The node of `view` that runs the measurement — where a campaign's pipeline nests under this graph, as each `nests[].node` names it per campaign",
+            "title": "Measurement Node",
+            "type": "string"
+          },
+          "model_capabilities": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/ModelCapability"
+              },
+              "type": "object"
+            },
+            "description": "Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs it accepts and what a round costs are the facts every other node's rows need too",
+            "title": "Model Capabilities",
+            "type": "object"
+          },
           "node_config_schema": {
             "additionalProperties": {
               "items": {
@@ -11835,6 +11789,20 @@
             },
             "description": "Per optimizer node, its typed config rows at this config — an llm node's call config and prompt fields, a member's knobs: what its pipeline graph and node detail draw",
             "title": "Node Config Schema",
+            "type": "object"
+          },
+          "node_output_schema": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NodeOutputSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Node Output Schema",
             "type": "object"
           },
           "pools": {
@@ -11868,9 +11836,24 @@
             "description": "Where the search reaches per optimizer node at this config, summed off `node_config_schema`",
             "title": "Reach",
             "type": "object"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineView"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The graph topology — the same shape a campaign pipeline serves"
           }
         },
         "required": [
+          "view",
+          "measurement_node",
+          "node_output_schema",
+          "model_capabilities",
           "main",
           "knobs",
           "prompts",
@@ -22322,52 +22305,6 @@
         "summary": "Machine-Status",
         "tags": [
           "Sessions"
-        ]
-      }
-    },
-    "/api/v1/optimizer-pipeline": {
-      "get": {
-        "description": "One optimizer manifest: its ``view`` topology plus the per-node typed config surface, read-only.",
-        "operationId": "optimizer_pipeline_api_v1_optimizer_pipeline_get",
-        "parameters": [
-          {
-            "description": "The registered optimizer whose manifest to read",
-            "in": "query",
-            "name": "optimizer",
-            "required": false,
-            "schema": {
-              "default": "potter",
-              "description": "The registered optimizer whose manifest to read",
-              "title": "Optimizer",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OptimizerPipelineResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Optimizer-Pipeline",
-        "tags": [
-          "Optimizer"
         ]
       }
     },

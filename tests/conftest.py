@@ -21,7 +21,7 @@ from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.coupon import bind_account
 from promptpotter.application.optimizer_manifest import binding_optimizer, select_optimizer
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign_config import OptimizationConfig
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.base import wire_client
 from promptpotter.infrastructure.llm.registry import send_pacing
@@ -36,9 +36,7 @@ def completed_registries() -> None:
 @pytest.fixture(autouse=True)
 def bound_potter() -> Iterator[None]:
     """What every run seam binds (`runner/entry.py`), for a test driving a node without one."""
-    with binding_optimizer(
-        select_optimizer(OptimizationConfig(degradation_threshold=0.0)), determinism=None
-    ):
+    with binding_optimizer(select_optimizer(OptimizerChoice()), determinism=None):
         yield
 
 

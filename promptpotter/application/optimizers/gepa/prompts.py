@@ -36,7 +36,11 @@ def _example(n: int, cell: GradedCell) -> str:
 
 def reflection_prompt(ctx: NodeContext, *, instruction: str, rows: Iterable[GradedCell]) -> str:
     examples = "\n\n".join(_example(n, row) for n, row in enumerate(rows, start=1))
-    return ctx.read(Calls).fill(current_instruction=instruction, examples=fence_untrusted(examples))
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(current_instruction=instruction, examples=fence_untrusted(examples))
+    )
 
 
 def fenced(text: str) -> str | None:

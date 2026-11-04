@@ -13,7 +13,7 @@ from promptpotter.application.bench.llm_call import (
     OptimizerResponseModel,
     run_optimizer_node,
 )
-from promptpotter.application.optimizer_manifest import llm_node_manifest, running_prompt
+from promptpotter.application.optimizer_manifest import checkin_manifest, running_prompt
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import (
@@ -21,6 +21,7 @@ from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
     OptimizerPromptTemplate,
 )
+from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
@@ -191,13 +192,13 @@ def committed_task_context(stores: Stores, dataset: ResolvedDataset | None) -> T
 
 def checkin_provider() -> str:
     """What a check-in call sends on, which its `quota.py::paid_call` is admitted against."""
-    return str(llm_node_manifest("checkin")[1]["provider"])
+    return checkin_manifest().config.provider
 
 
 def _checkin_template() -> OptimizerPromptTemplate:
     """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
-    _node, config, manifest = llm_node_manifest("checkin")
-    template = running_prompt("checkin", config, manifest)
+    checkin = checkin_manifest()
+    template = running_prompt(CHECKIN_NODE, checkin.config, checkin.manifest)
     if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
         raise KeyError(f"Template 'checkin' references unknown slot(s): {sorted(unknown)}.")
     return template
@@ -211,7 +212,6 @@ async def run_checkin(
     context: LLMCallContext,
 ) -> tuple[CheckinOutput, int]:
     raw, _prompt, repair_attempts = await run_optimizer_node(
-        template_name="checkin",
         template=_checkin_template(),
         prompt_vars={"consultation_instruction": consultation_instruction},
         response_model=response_model,
@@ -232,7 +232,13 @@ def draft_call_context(stores: Stores, draft_id: str) -> LLMCallContext:
 
 
 def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContext:
-    return LLMCallContext(ledger=ledger, round_num=0, cache=stores.optimizer_reuse)
+    return LLMCallContext(
+        node=CHECKIN_NODE,
+        config=checkin_manifest().config,
+        ledger=ledger,
+        round_num=0,
+        cache=stores.optimizer_reuse,
+    )
 
 
 async def commit_task_framing(

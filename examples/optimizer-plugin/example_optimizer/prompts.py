@@ -15,6 +15,8 @@ __all__ = ["rephrase_prompt"]
 
 def rephrase_prompt(ctx: NodeContext, *, instruction: str) -> str:
     node = ctx.read(Target).prompt_node
-    return ctx.read(Calls).fill(
-        task_description=task_description(ctx, node), instruction=instruction
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(task_description=task_description(ctx, node), instruction=instruction)
     )

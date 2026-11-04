@@ -323,7 +323,7 @@ def sends_on(stores: Stores, config: CampaignConfig, connector: str) -> tuple[Se
     Raises ``NoApiKeyError`` for a provider no key pays."""
     keys = stores.api_keys.load()
     selected = select_optimizer(config.optimization)
-    named = [str(selected.node_config(node)["provider"]) for node in selected.llm_nodes]
+    named = [selected.node_config(node).provider for node in selected.llm_nodes]
     named += [stage.provider for spec in config.judges.values() for stage in spec.stages]
     return (
         BackendCells(connector, connectors.CONNECTORS.get(connector).cell_payer),

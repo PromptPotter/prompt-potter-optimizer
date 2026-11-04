@@ -231,12 +231,12 @@ def _silent_l1_panels(bundle: InjectionBundle) -> frozenset[str]:
         )
 
 
-def node_packages(bundle: InjectionBundle) -> dict[str, str]:
+def node_packages(ctx: NodeContext, bundle: InjectionBundle) -> dict[str, str]:
     """Compare two of these, never one against a stored value: an absolute fingerprint cannot be reproduced later."""
     out: dict[str, str] = {}
     with _no_round_warnings():
         for node in NODE_LAYOUTS:
-            filled = DispatchHub.fill(load_optimizer_prompt(node), bundle, node=node)
+            filled = DispatchHub.fill(load_optimizer_prompt(ctx, node), bundle, node=node)
             out[node] = stable_hash(
                 [filled.template.render(), sorted(filled.injection_vars.items())]
             )

@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from promptpotter.application.cycle_addressing import ActiveSessionResponse, active_session
 from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
 from promptpotter.application.library import LibraryResponse, library
-from promptpotter.application.pipeline_responses import (
-    OptimizerPipelineResponse,
-    OptimizerRoster,
-    optimizer_roster,
-    resolve_pipeline_for_optimizer,
-)
-from promptpotter.domain.campaign_config import OptimizationConfig
+from promptpotter.application.pipeline_responses import OptimizerRoster, optimizer_roster
 from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.presentation.api.deps import (
     IdentityDep,
@@ -46,23 +40,6 @@ def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineSt
     """Machine occupancy: how many campaigns may run here and how many do, and the slots the caller may see."""
     # Sync, so the blocking read stays off the event loop.
     return machine_status(jobs, identity=identity)
-
-
-@active_router.get(
-    "/optimizer-pipeline",
-    tags=["Optimizer"],
-    response_model=OptimizerPipelineResponse,
-    name=ReadKind.OPTIMIZER_PIPELINE,
-)
-def get_optimizer_pipeline(
-    stores: StoresDep,
-    optimizer: str = Query(
-        default=OptimizationConfig.model_fields["optimizer"].default,
-        description="The registered optimizer whose manifest to read",
-    ),
-) -> OptimizerPipelineResponse:
-    """One optimizer manifest: its ``view`` topology plus the per-node typed config surface, read-only."""
-    return resolve_pipeline_for_optimizer(stores, optimizer)
 
 
 @active_router.get(

@@ -13,7 +13,7 @@ from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import dataset_campaign_block
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.campaign_config import (
@@ -160,15 +160,19 @@ class InnerTasks(FrozenModel):
             dataset_dir = resolve_dataset(stores, name).directory
             campaign = dataset_campaign_block(dataset_dir)
             opt = CampaignConfig.model_validate(campaign).optimization
-            identity = _select_inner_optimizer(opt, cfg.inner_nodes, {}, n_samples=None)
+            identity = select_optimizer(
+                _inner_optimization(opt, cfg.inner_nodes, {}, n_samples=None)
+            )
             by_dataset[name] = InnerCell(
                 campaign_config=campaign,
                 pipeline=read_dataset_pipeline(dataset_dir),
-                optimizer=_select_inner_optimizer(
-                    opt,
-                    cfg.inner_nodes,
-                    cfg.inner_depth_nodes,
-                    n_samples=cfg.n_samples_per_inner_round,
+                optimizer=select_optimizer(
+                    _inner_optimization(
+                        opt,
+                        cfg.inner_nodes,
+                        cfg.inner_depth_nodes,
+                        n_samples=cfg.n_samples_per_inner_round,
+                    )
                 ),
                 # Keyed before the cell's chain resolves: every admission, so no drawable edit hides.
                 treatment=identity.treatment(frozenset(Presumption), stores.block_packs).digest,
@@ -310,35 +314,22 @@ def is_self_optimization(backend_type: str) -> bool:
 INNER_ARM_GATE: ArmGateMode = "off"
 
 
-def _inner_manifest_nodes(
-    optimizer: str,
-    own: Mapping[str, ManifestNodeOverlay],
-    nodes: Mapping[str, ManifestNodeOverlay],
-    depth_nodes: Mapping[str, ManifestNodeOverlay],
-    *,
-    n_samples: int | None,
-) -> dict[str, ManifestNodeOverlay]:
-    """``n_samples=None`` leaves the sampler's size out, which is what the identity hashes."""
-    merged = merge_node_overlays(merge_node_overlays(own, nodes), depth_nodes)
-    sampler = resolve_optimizer(optimizer, merged, gate=INNER_ARM_GATE).sampler
-    if n_samples is None or sampler.size_knob is None:
-        return merged
-    size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
-    return merge_node_overlays(merged, size)
-
-
-def _select_inner_optimizer(
+def _inner_optimization(
     opt: OptimizationConfig,
     nodes: Mapping[str, ManifestNodeOverlay],
     depth_nodes: Mapping[str, ManifestNodeOverlay],
     *,
     n_samples: int | None,
-) -> SelectedOptimizer:
-    return resolve_optimizer(
-        opt.optimizer,
-        _inner_manifest_nodes(opt.optimizer, opt.nodes, nodes, depth_nodes, n_samples=n_samples),
-        gate=INNER_ARM_GATE,
-    )
+) -> OptimizationConfig:
+    """An inner cycle's selection key: its nodes under the inner gate. ``n_samples=None`` leaves
+    the sampler's size out, which is what the identity hashes."""
+    merged = merge_node_overlays(merge_node_overlays(opt.nodes, nodes), depth_nodes)
+    inner = opt.model_copy(update={"nodes": merged, "arm_gate": INNER_ARM_GATE})
+    sampler = select_optimizer(inner).sampler
+    if n_samples is None or sampler.size_knob is None:
+        return inner
+    size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
+    return inner.model_copy(update={"nodes": merge_node_overlays(merged, size)})
 
 
 # `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.
@@ -368,7 +359,7 @@ def _lever(inner: SelectedOptimizer, node: str) -> dict[str, Any]:
     declared = inner.manifest.nodes[node].model_dump(
         mode="json", exclude_unset=True, exclude={"config"}
     )
-    return {**declared, "config": inner.call_config(node)}
+    return {**declared, "config": inner.call_settings(node)}
 
 
 def _terminal(inner: SelectedOptimizer) -> str:
@@ -436,6 +427,9 @@ class InnerCells:
         observed = [{"pipeline_key": key} for key in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS)]
         terminals = {_terminal(inner) for inner in self.optimizers}
         owners = self.owners
+        nests: dict[str, list[str]] = {}
+        for name, cell in sorted(self.by_dataset.items()):
+            nests.setdefault(cell.optimizer.plan.measurement, []).append(name)
         nodes: dict[str, dict[str, Any]] = {}
         walks: dict[str, list[str]] = {}
         for inner in self.optimizers:
@@ -443,7 +437,11 @@ class InnerCells:
                 if owners[node.name] is not inner:
                     continue
                 if node.kind is NodeKind.GATEWAY:
-                    declared: dict[str, Any] = {"type": node.kind.value, "config": {}}
+                    declared: dict[str, Any] = {
+                        "type": node.kind.value,
+                        "config": {},
+                        "nested_datasets": nests.get(node.name, []),
+                    }
                 elif node.kind is NodeKind.LLM:
                     levers = inner.outer_levers(node.name)
                     terminal = node.name in terminals
@@ -484,18 +482,14 @@ def inner_instrument_config(
         "lives": spec.lives,
         # Each gate's await is unbounded, and an instrument cannot ask a human anything.
         "origin_gate": "off",
-        "arm_gate": INNER_ARM_GATE,
         # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.
         "enable_2pl_graduation": False,
-        # The nodes and gate `_select_inner_optimizer` resolves: the manifest a cell holds is the one it runs.
-        "nodes": _inner_manifest_nodes(
-            base.optimization.optimizer,
-            base.optimization.nodes,
-            spec.nodes,
-            spec.depth_nodes,
-            n_samples=spec.n_samples,
-        ),
     }
+    # The nodes and gate a cell's selection keys on: the manifest a cell holds is the one it runs.
+    inner = _inner_optimization(
+        base.optimization, spec.nodes, spec.depth_nodes, n_samples=spec.n_samples
+    )
+    opt_update |= {"nodes": inner.nodes, "arm_gate": inner.arm_gate}
     if spec.inner_optimizer_temperature is not None:
         # The clamp's seed is the CELL's, so every candidate measured on a cell draws one random stream (CRN).
         opt_update["determinism"] = (

@@ -9,14 +9,12 @@ from promptpotter.application import optimizers
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     node_prompt,
-    prompt_edits,
-    prompt_key,
-    resolve_optimizer,
     select_optimizer,
 )
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
-from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
+from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
     NestedPipelineRef,
@@ -35,10 +33,11 @@ from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.optimizers.nodes import Initializer
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Pool, PoolEntry
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 class NodeKnobs(StrictModel):
@@ -139,8 +138,21 @@ class ProposerRow(StrictModel):
 
 
 class OptimizerSetup(StrictModel):
-    """What the selected optimizer runs under a config, derived once for check-in and campaign."""
+    """What the selected optimizer runs under a config, derived once for check-in and campaign:
+    its graph, knobs, prompts and pools as that config selects them."""
 
+    view: PipelineView | None = Field(
+        description="The graph topology — the same shape a campaign pipeline serves"
+    )
+    measurement_node: str = Field(
+        description="The node of `view` that runs the measurement — where a campaign's pipeline "
+        "nests under this graph, as each `nests[].node` names it per campaign"
+    )
+    node_output_schema: dict[str, NodeOutputSchema | None]
+    model_capabilities: CapabilityMenu = Field(
+        description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
+        "it accepts and what a round costs are the facts every other node's rows need too"
+    )
     main: list[KnobRef] = Field(description="The knobs a setup surface leads with, in order")
     knobs: list[NodeKnobs] = Field(
         description="Every member taking a knob, in declared order, but a pool initializer: its "
@@ -271,24 +283,6 @@ class DatasetPipelineResponse(StrictModel):
     )
 
 
-class OptimizerPipelineResponse(StrictModel):
-    """An optimizer's graph as its manifest declares it, under no config: what a config runs, its knobs, prompts and node rows included, is `OptimizerSetup`."""
-
-    view: PipelineView | None = Field(
-        description="The graph topology — the same shape a campaign pipeline serves"
-    )
-    measurement_node: str | None = Field(
-        description="The node of `view` that runs the measurement — where a campaign's pipeline "
-        "nests under this graph, as each `nests[].node` names it per campaign. Null where the manifest "
-        "declares no measurement node."
-    )
-    node_output_schema: dict[str, NodeOutputSchema | None]
-    model_capabilities: CapabilityMenu = Field(
-        description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
-        "it accepts and what a round costs are the facts every other node's rows need too"
-    )
-
-
 class OptimizerEntry(StrictModel):
     """One optimizer this install can run, as a picker offers it."""
 
@@ -309,10 +303,6 @@ class OptimizerRoster(StrictModel):
 
     default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
     optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
-
-
-def measurement_node(view: PipelineView | None) -> str | None:
-    return next((n.id for n in (view.nodes if view else []) if n.kind == "measurement"), None)
 
 
 def _pool_draws(selected: SelectedOptimizer, pool: type[Pool]) -> list[PoolDraw]:
@@ -384,15 +374,15 @@ def _node_knobs(selected: SelectedOptimizer) -> list[NodeKnobs]:
 def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]:
     out: dict[str, OptimizerNodePrompt] = {}
     declared = list(selected.manifest.resolved_prompts)
-    for node in selected.schema.declared_nodes:
-        config = selected.node_config(node.name)
+    for node in selected.llm_nodes:
+        config = selected.node_config(node)
         if prompt_key(config) is None:
             continue
-        family = str(config["prompt_family"])
-        out[node.name] = OptimizerNodePrompt(
-            fields=node_prompt(node.name, config, selected.manifest).model_dump(),
-            edited=list(prompt_edits(config)),
-            version=str(config.get("prompt_version") or ""),
+        family = config.prompt_family
+        out[node] = OptimizerNodePrompt(
+            fields=node_prompt(node, config, selected.manifest).model_dump(),
+            edited=list(config.prompt_edits),
+            version=str(config.prompt_version or ""),
             versions_declared=sum(k.partition("/")[0] == family for k in declared),
         )
     return out
@@ -421,12 +411,17 @@ def _pool_row(
 
 
 def optimizer_setup(
-    cfg: CampaignConfig, mint: MintFacts | None, target: PipelineSchema
+    selected: SelectedOptimizer, mint: MintFacts | None, target: PipelineSchema, workspace: Path
 ) -> OptimizerSetup:
-    selected = select_optimizer(cfg.optimization)
     opened = _opened_parts(target)
-    rows = selected.schema.node_config_schema(selected.steered_axes)
+    schema = selected.schema
+    rows = schema.node_config_schema(selected.steered_axes)
     return OptimizerSetup(
+        view=schema.view,
+        measurement_node=selected.plan.measurement,
+        node_output_schema=schema.node_output_schemas(),
+        # Per tenant: a hand-authored catalogue override lives in their workspace.
+        model_capabilities=resolve_schema_menu(schema, workspace=workspace),
         main=[
             KnobRef(node=node, knob=knob)
             for node, _, knob in (ref.partition(".") for ref in selected.manifest.main)
@@ -434,25 +429,10 @@ def optimizer_setup(
         knobs=_node_knobs(selected),
         prompts=_node_prompts(selected),
         arms_per_round=selected.arms_per_round,
-        proposers=[
-            ProposerRow(node=p.name, makes=selected.makes(p))
-            for p in selected.plan.proposers
-            if p.proposes == "edits" or p.arms(selected) > 0
-        ],
+        proposers=[ProposerRow(node=p.name, makes=selected.makes(p)) for p in selected.proposing],
         pools=[_pool_row(selected, i, mint, opened) for i in selected.plan.initializers],
         node_config_schema=rows,
         reach=reach_map(rows),
-    )
-
-
-def resolve_pipeline_for_optimizer(stores: Stores, optimizer: str) -> OptimizerPipelineResponse:
-    schema = resolve_optimizer(optimizer, {}, gate="off").schema
-    return OptimizerPipelineResponse(
-        view=schema.view,
-        measurement_node=measurement_node(schema.view),
-        node_output_schema=schema.node_output_schemas(),
-        # Per tenant: a hand-authored catalogue override lives in their workspace.
-        model_capabilities=resolve_schema_menu(schema, workspace=stores.base_dir),
     )
 
 
@@ -462,7 +442,7 @@ def optimizer_roster() -> OptimizerRoster:
     origins = optimizers.MANIFESTS.origins
     entries = []
     for name in names:
-        selected = resolve_optimizer(name, {}, gate="off")
+        selected = select_optimizer(OptimizerChoice(optimizer=name))
         origin = None if origins[name] == BUILT_IN else origins[name]
         entries.append(
             OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)

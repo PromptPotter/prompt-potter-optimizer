@@ -4,8 +4,8 @@ from typing import Any
 
 from pydantic import Field, field_validator
 
-from promptpotter.domain.campaign_config import ArmGateMode, OptimizationConfig
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, ParamIntent
+from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
+from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 
@@ -15,7 +15,7 @@ DEFAULT_BUDGET_ROUNDS = 5
 MAX_EDITED_ROUNDS = 100
 
 
-class OptimizationOverrides(StrictModel):
+class OptimizationOverrides(OptimizerChoice):
     """The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal
     ``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it."""
 
@@ -28,19 +28,6 @@ class OptimizationOverrides(StrictModel):
         ge=0.0,
         le=1.0,
         description=OptimizationConfig.model_fields["halt_at_accuracy"].description,
-    )
-    optimizer: str = Field(
-        OptimizationConfig.model_fields["optimizer"].default,
-        min_length=1,
-        description=OptimizationConfig.model_fields["optimizer"].description,
-    )
-    nodes: dict[str, ManifestNodeOverlay] = Field(
-        default_factory=dict,
-        description=OptimizationConfig.model_fields["nodes"].description,
-    )
-    arm_gate: ArmGateMode = Field(
-        OptimizationConfig.model_fields["arm_gate"].default,
-        description=OptimizationConfig.model_fields["arm_gate"].description,
     )
 
     @field_validator("budget")

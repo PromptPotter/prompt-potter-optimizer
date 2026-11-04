@@ -83,7 +83,7 @@ async def l1_generate(
     ctx: NodeContext,
     *,
     n_variants: int,
-    temperature: float,
+    temperature: float | None,
 ) -> L1Generation:
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
@@ -94,7 +94,7 @@ async def l1_generate(
 
     bundle = build_bundle(ctx, ctx.slice(Ladder))
     pipeline_schema = bundle.pipeline_schema
-    filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
+    filled = DispatchHub.fill(load_optimizer_prompt(ctx, "l1_generate"), bundle, node="l1_generate")
     breakdown = filled.breakdown
     budget = bundle.cycle_slice.exploration_budget
     citable = citable_fields(
@@ -126,7 +126,6 @@ async def l1_generate(
     response_model = build_l1_response_model(effective_l1_field_names())
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
-            template_name="l1_generate",
             prompt_vars=prompt_vars,
             temperature=temperature,
             response_model=response_model,

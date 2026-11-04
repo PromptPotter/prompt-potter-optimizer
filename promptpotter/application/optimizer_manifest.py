@@ -26,28 +26,32 @@ from promptpotter.config.paths import (
     optimizer_manifest_path,
 )
 from promptpotter.domain.campaign import DeterminismClamp
-from promptpotter.domain.campaign_config import OptimizationConfig
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.l4 import proxies
-from promptpotter.domain.opt_search_point import PROMPT_FIELDS, OptimizerPromptTemplate
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.pipeline_manifest import (
     AUTHORED_MANIFEST,
     CHECKIN_MANIFEST,
+    CHECKIN_NODE,
+    CheckinPipelineManifest,
     ManifestNode,
     ManifestSwitch,
     PipelineManifest,
+    laid_config,
+    prompt_key,
+    resolved_key,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     MEMBER_KINDS,
-    ManifestNodeOverlay,
     NodeKind,
     PipelineNode,
     PipelineSchema,
 )
 from promptpotter.domain.pool import DemoPool, Pool
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
+from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.io import read_json, read_yaml
@@ -275,6 +279,9 @@ class SelectedOptimizer:
     plan: RoundPlan
     # The members `plan` walks, closed under what each consults or fires, in declared order.
     member_nodes: tuple[str, ...]
+    # Validated once, at selection: each llm node's config, and each member's knobs.
+    node_configs: Mapping[str, NodeConfig]
+    node_knobs: Mapping[str, StrictModel]
 
     @property
     def version(self) -> str:
@@ -351,25 +358,27 @@ class SelectedOptimizer:
         # The selector's and proposers' parent reads are a union inside one panel, not a sum.
         return self.walk_arms(walk) * panel.cells + min(read, panel.cells)
 
-    def node_config(self, name: str) -> dict[str, Any]:
-        return dict(self.node(name).current_config)
+    def node_config(self, name: str) -> NodeConfig:
+        """An llm node's config; any other node runs no call."""
+        if (config := self.node_configs.get(name)) is None:
+            raise KeyError(f"optimizer {self.name!r} declares no llm node {name!r}")
+        return config
 
-    def call_config(self, name: str) -> dict[str, Any]:
-        """Less the member's knobs and its prompt-field edits: a knob is the diff classifier's to scope, an edit ``running_prompt``'s."""
-        table = optimizers.NODE_MEMBERS.table
-        knobs = table[name].knobs.model_fields if name in table else {}
-        return {
-            k: v
-            for k, v in self.node_config(name).items()
-            if k not in knobs and k not in PROMPT_FIELDS
-        }
+    def call_settings(self, name: str) -> dict[str, Any]:
+        """*name*'s `NodeConfig.call_settings`, its engine call keys alone; a node running no call
+        lays none."""
+        self.node(name)
+        config = self.node_configs.get(name)
+        return {} if config is None else config.call_settings()
 
     def file_config(self, name: str) -> dict[str, Any]:
         self.node(name)
         return dict(self.manifest.nodes[name].config)
 
     def knobs(self, name: str) -> StrictModel:
-        return _knobs(name, self.node(name).kind, self.node_config(name))
+        if (knobs := self.node_knobs.get(name)) is None:
+            raise KeyError(f"optimizer {self.name!r} declares no member {name!r}")
+        return knobs
 
     def knobs_of[T: StrictModel](self, name: str, kind: type[T]) -> T:
         knobs = self.knobs(name)
@@ -471,6 +480,11 @@ class SelectedOptimizer:
     def members(self) -> tuple[NodeMember, ...]:
         return tuple(map(optimizers.NODE_MEMBERS.get, self.member_nodes))
 
+    @property
+    def proposing(self) -> tuple[Proposer, ...]:
+        """The proposers making each round's arms, in walk order: one that opens or adds arms and adds none here is off."""
+        return tuple(p for p in self.plan.proposers if p.proposes == "edits" or p.arms(self) > 0)
+
     def walk_arms(self, walk: Sequence[Proposer]) -> int:
         return sum(proposer.arms(self) for proposer in walk)
 
@@ -538,29 +552,21 @@ class SelectedOptimizer:
         return next(n.name for n in self.schema.nodes if n.kind is NodeKind.LLM)
 
     def model(self, node: str | None = None) -> str:
-        return str(self.node_config(node or self.proposer)["model"])
+        return self.node_config(node or self.proposer).model
 
     def _node_digest(self, node: str) -> str:
-        cfg = self.call_config(node)
+        config = self.node_config(node)
         override = resolve_node_override(node)
-        if override.model:
-            # Laid over as `bench/llm_call.py::_merged_config` sends it.
-            cfg = {**cfg, "model": override.model}
-            if override.provider:
-                cfg["provider"] = override.provider
-        prompt = (
-            None
-            if prompt_key(cfg) is None
-            else running_prompt(node, self.node_config(node), self.manifest)
-        )
-        schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
+        prompt = None if prompt_key(config) is None else running_prompt(node, config, self.manifest)
+        schema_key = resolved_key(config.schema_family, config.schema_version)
         return stable_hash(
             [
                 None if prompt is None else prompt.model_dump(exclude_unset=True),
                 override.schema_field_names,
                 _resolved_levers(node, declared_node_override(node)),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
-                cfg,
+                # Laid as `bench/llm_call.py::_merged_config` sends it.
+                override.laid_on(config).call_settings(),
             ]
         )
 
@@ -605,27 +611,8 @@ def _resolved_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
 
 
 @shapes_optimizer_prompt
-def _resolved_key(family: object, version: object) -> str | None:
-    if not family:
-        return None
-    return f"{family}/{version}" if version is not None else str(family)
-
-
-@shapes_optimizer_prompt
-def prompt_key(config: Mapping[str, Any]) -> str | None:
-    """The `resolved_prompts` key a node's config names; ``None`` where it runs no prompt."""
-    return _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
-
-
-@shapes_optimizer_prompt
-def prompt_edits(config: Mapping[str, Any]) -> dict[str, Any]:
-    """The prompt fields a config sets over its template, `optimization.nodes.{node}.config.{field}`."""
-    return {f: config[f] for f in PROMPT_FIELDS if f in config}
-
-
-@shapes_optimizer_prompt
 def node_prompt(
-    node: str, config: Mapping[str, Any], manifest: PipelineManifest
+    node: str, config: NodeConfig, manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
     """The template under the config's field edits, before any L4 override; fields set only where authored or edited."""
     key = prompt_key(config)
@@ -634,25 +621,18 @@ def node_prompt(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
             f"(check nodes.{node}.config.prompt_family/version)."
         )
-    return manifest.resolved_prompts[key].model_copy(update=prompt_edits(config))
+    return manifest.resolved_prompts[key].model_copy(update=config.prompt_edits)
 
 
 @shapes_optimizer_prompt
 def running_prompt(
-    node: str, config: Mapping[str, Any], manifest: PipelineManifest
+    node: str, config: NodeConfig, manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
     """The one text *node* runs, which its prompt hash reads: template, then config edits, then L4's bound override, which wins over both."""
     template = node_prompt(node, config, manifest)
     if fields := resolve_node_override(node).prompt_fields:
         template = template.model_copy(update=fields)
     return template
-
-
-_CALL_CONFIG_KEYS: frozenset[str] = (
-    WHO_ANSWERS_KEYS
-    | PARAM_SCOPE_KEYS
-    | {"seed", "prompt_family", "prompt_version", "schema_family", "schema_version"}
-)
 
 
 def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
@@ -685,22 +665,12 @@ def _refuse_unnamed_arms(selected: SelectedOptimizer) -> None:
         )
 
 
-def _refuse_unknown_llm_keys(selected: SelectedOptimizer) -> None:
-    table = optimizers.NODE_MEMBERS.table
-    for node in selected.llm_nodes:
-        config = selected.node_config(node)
-        knobs = table[node].knobs.model_fields if node in table else {}
-        prompt = set(PROMPT_FIELDS) if prompt_key(config) is not None else set()
-        if unknown := sorted(set(config) - _CALL_CONFIG_KEYS - set(knobs) - prompt):
-            raise ValueError(
-                f"optimizer {selected.name!r} node {node!r} names {unknown} in its config, which "
-                f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}), one of its knobs "
-                f"({sorted(knobs)}) nor, on a node running a prompt, a prompt field "
-                f"({list(PROMPT_FIELDS)})."
-            )
-        OptimizerPromptTemplate.model_validate(prompt_edits(config))
+def _refuse_unheld_steers(selected: SelectedOptimizer) -> None:
     for target, keys in selected.steered_axes.items():
-        if unheld := sorted(keys - set(selected.node_config(target))):
+        held = selected.node_config(target).model_fields_set
+        if (knobs := selected.node_knobs.get(target)) is not None:
+            held = held | knobs.model_fields_set
+        if unheld := sorted(keys - held):
             raise ValueError(
                 f"optimizer {selected.name!r} steers {unheld} on node {target!r}, whose config "
                 "holds no such key."
@@ -785,9 +755,9 @@ def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
         if node.type is not base.nodes[old].type:
             raise _walk_refused(name, f"swaps {node.type} {swap.node!r} into {old!r}'s role.")
         cfg = node.config
-        if key := _resolved_key(cfg.get("prompt_family"), cfg.get("prompt_version")):
+        if key := resolved_key(cfg.get("prompt_family"), cfg.get("prompt_version")):
             prompts[key] = source.resolved_prompts[key]
-        if key := _resolved_key(cfg.get("schema_family"), cfg.get("schema_version")):
+        if key := resolved_key(cfg.get("schema_family"), cfg.get("schema_version")):
             schemas[key] = source_schemas[key]
         swapped[old] = (swap.node, node)
     nodes = dict(swapped.get(n, (n, node)) for n, node in base.nodes.items())
@@ -820,10 +790,28 @@ def _select(
             f"optimization.nodes names {unknown}, which optimizer {name!r} does not declare "
             f"(it has {sorted(manifest.nodes)})."
         )
-    checkin = {n.name for n in checkin_manifest().schema.declared_nodes}
-    if taken := sorted(set(manifest.nodes) & checkin):
-        raise ValueError(f"optimizer {name!r} declares {taken}, which the bench's check-in owns.")
+    if CHECKIN_NODE in manifest.nodes:
+        raise ValueError(
+            f"optimizer {name!r} declares {CHECKIN_NODE!r}, which the bench's check-in owns."
+        )
     schema = _carrying_knobs(_parse(manifest.laid_over(overlay), schemas), manifest)
+    table = optimizers.NODE_MEMBERS.table
+    # NOW, never mid-round: a bad overlay or an llm node naming no model stops the run before it spends.
+    node_configs = {
+        n.name: laid_config(
+            f"optimizer {name!r}",
+            n.name,
+            n.current_config,
+            knobs=table[n.name].knobs.model_fields if n.name in table else (),
+        )
+        for n in schema.declared_nodes
+        if n.kind is NodeKind.LLM
+    }
+    node_knobs = {
+        n.name: _knobs(n.name, n.kind, n.current_config)
+        for n in schema.declared_nodes
+        if n.kind in MEMBER_KINDS or n.name in table
+    }
     selected = SelectedOptimizer(
         name=name,
         manifest=manifest,
@@ -832,6 +820,8 @@ def _select(
         resolved_schemas=schemas,
         plan=_round_plan(name, schema, manifest.initial_population_walks, gate),
         member_nodes=_roster(schema),
+        node_configs=node_configs,
+        node_knobs=node_knobs,
     )
     # At load, never mid-round: an edge no roster member closes would raise inside round 1.
     if open_ := _open_edges(selected):
@@ -839,16 +829,9 @@ def _select(
             f"optimizer {name!r} names a roster whose edges do not close: " + "; ".join(open_),
             code="optimizer_roster_open",
         )
-    # Every member's knobs validate NOW, so a bad overlay stops the run before it spends.
-    for declared_node in selected.schema.declared_nodes:
-        if (
-            declared_node.kind in MEMBER_KINDS
-            or declared_node.name in optimizers.NODE_MEMBERS.table
-        ):
-            selected.knobs(declared_node.name)
     _refuse_unknown_main(selected)
     _refuse_unnamed_arms(selected)
-    _refuse_unknown_llm_keys(selected)
+    _refuse_unheld_steers(selected)
     if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))
     return selected
@@ -937,27 +920,28 @@ def _open_edges(selected: SelectedOptimizer) -> list[str]:
     return open_
 
 
-def resolve_optimizer(
-    name: str, nodes: Mapping[str, ManifestNodeOverlay], *, gate: ArmGateMode
-) -> SelectedOptimizer:
-    """The roster must close as *gate* walks it: under ``author``, the seat in its proposers' place."""
-    overlay = {node: dict(o.config) for node, o in sorted(nodes.items())}
+def select_optimizer(choice: OptimizerChoice) -> SelectedOptimizer:
+    """The ONE selection: the roster must close as ``arm_gate`` walks it, under ``author`` the
+    seat in its proposers' place."""
+    name = choice.optimizer
+    overlay = {node: dict(o.config) for node, o in sorted(choice.nodes.items())}
     try:
-        return _select(name, _stamps(name), json.dumps(overlay, sort_keys=True), gate)
+        return _select(name, _stamps(name), json.dumps(overlay, sort_keys=True), choice.arm_gate)
     except ValueError as exc:
         raise PayloadInvalidError(
             f"optimization.nodes refused by optimizer {name!r}: {exc}", code="optimizer_overlay"
         ) from exc
 
 
-def select_optimizer(opt: OptimizationConfig) -> SelectedOptimizer:
-    return resolve_optimizer(opt.optimizer, opt.nodes, gate=opt.arm_gate)
-
-
 @dataclass(frozen=True)
 class CheckinManifest:
-    manifest: PipelineManifest
+    manifest: CheckinPipelineManifest
     schema: PipelineSchema
+
+    @property
+    def config(self) -> NodeConfig:
+        """The bench's one llm node's config, typed as the manifest loads."""
+        return self.manifest.config
 
 
 @shapes_optimizer_prompt
@@ -1006,15 +990,6 @@ def bound_optimizer() -> SelectedOptimizer:
     return selected
 
 
-@shapes_optimizer_prompt
-def llm_node_manifest(node: str) -> tuple[PipelineNode, Mapping[str, Any], PipelineManifest]:
-    checkin = checkin_manifest()
-    if (held := checkin.schema.get_node(node)) is not None:
-        return held, held.current_config, checkin.manifest
-    selected = bound_optimizer()
-    return selected.node(node), selected.node_config(node), selected.manifest
-
-
 # The OUTER's per-node mutations, bound inside the inner task so each recursion level carries its own.
 _OPTIMIZER_PROMPT_OVERRIDES: Annotated[
     contextvars.ContextVar[dict[str, dict[str, Any]] | None], shapes_optimizer_prompt
@@ -1030,12 +1005,8 @@ def binding_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> Ite
         _OPTIMIZER_PROMPT_OVERRIDES.reset(token)
 
 
-def get_optimizer_config_overrides() -> dict[str, Any] | None:
-    """An unpinned field is ABSENT, never a ``None`` that would erase the value it is laid over."""
-    clamp = _DETERMINISM.get()
-    if clamp is None:
-        return None
-    return clamp.model_dump(exclude_none=True) or None
+def bound_determinism() -> DeterminismClamp | None:
+    return _DETERMINISM.get()
 
 
 @dataclass(frozen=True)
@@ -1046,6 +1017,13 @@ class ResolvedNodeOverride:
     schema_field_names: dict[str, str]
     model: str | None
     provider: str | None
+
+    def laid_on(self, config: NodeConfig) -> NodeConfig:
+        """*config* answered by the specimen's model, on its provider where it names one."""
+        if not self.model:
+            return config
+        laid = {"model": self.model} | ({"provider": self.provider} if self.provider else {})
+        return config.laid(laid)
 
 
 @shapes_optimizer_prompt

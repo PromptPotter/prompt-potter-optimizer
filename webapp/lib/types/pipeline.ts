@@ -1,5 +1,4 @@
 export type {
-  OptimizerPipelineResponse as PipelineDoc,
   PipelineView,
   PipelineViewEdge,
   PipelineViewNode,

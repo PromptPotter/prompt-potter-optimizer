@@ -1,5 +1,4 @@
 import { optimizerRosterRead, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
-import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
 import { ReadState, SegmentedControl } from "@/components/ui";
@@ -14,7 +13,6 @@ export function OptimizerSetupSection({
   onApply: (patch: DraftPatch) => void;
 }) {
   const { optimizer } = draft.optimization_overrides;
-  const { doc, status } = useOptimizerPipeline();
   const rosterRead = useRead(optimizerRosterRead());
   const { close } = useWorkspace();
 
@@ -61,12 +59,12 @@ export function OptimizerSetupSection({
 
       <PipelineFlow
         layer={{
-          view: doc?.view ?? null,
-          status,
+          view: draft.optimizer_setup.view,
+          status: "ok",
           connector: "PromptPotter",
           reach: draft.optimizer_setup.reach,
           scope: "optimizer",
-          nestsNode: doc?.measurement_node ?? null,
+          nestsNode: draft.optimizer_setup.measurement_node,
           activeNode: null,
           isLive: false,
         }}

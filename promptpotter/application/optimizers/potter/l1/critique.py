@@ -50,10 +50,9 @@ def spanning_clusters(
 async def distil_critique(ctx: NodeContext) -> Critique:
     """Of the round *ctx* stands on, whether the round adapts or a later walk re-runs it; the readout a dict so persistence does not drag Pydantic into the domain serialization path."""
     bundle = build_bundle(ctx, ctx.slice(Ladder))
-    filled = DispatchHub.fill(load_optimizer_prompt("l1_critique"), bundle, node="l1_critique")
+    filled = DispatchHub.fill(load_optimizer_prompt(ctx, "l1_critique"), bundle, node="l1_critique")
 
     result, _prompt, _repairs = await run_optimizer_node(
-        template_name="l1_critique",
         prompt_vars=filled.injection_vars,
         template=filled.template,
         response_model=L1CritiqueOutput,

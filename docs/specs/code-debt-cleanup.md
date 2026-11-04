@@ -61,10 +61,11 @@ acting.
 6. **Slot lifetime is a hand-rolled `except BaseException: release…` at ~20 sites** (admission,
    `run_job`, head-to-head, mint-and-start, check-in, embedded run). Action: the registry hands out a held
    slot as a context manager. **Re-test:** `git grep -c "release_slot(\|job_registry.release(" -- promptpotter`.
-7. **Optimizer selection is ambient plus a fallback chain** — `optimizer_manifest.py` `_BOUND`,
-   `_DETERMINISM`, `_OPTIMIZER_PROMPT_OVERRIDES`; `llm_node_manifest` tries the check-in manifest then
-   `bound_optimizer()`; `resolve_optimizer(..., gate="off")` ×3; `_single_model` depends on node order.
-   Action: selection rides `RunScope` (4), keyed by node, no fallback. **Re-test:** `git grep -n 'gate="off"' -- promptpotter`.
+7. **Optimizer selection is ambient** — `optimizer_manifest.py` `_BOUND` (`bound_optimizer`, read by
+   `loop_start.py`, `run_prep.py`, `run_observers.py`, `cycle_close.py`, `views/ingress.py`),
+   `_DETERMINISM` and `_OPTIMIZER_PROMPT_OVERRIDES`, read by `bench/llm_call.py::_merged_config`,
+   `potter/dispatch/layout.py` and `l1_wire_schema.py`; `_single_model` depends on node order. Action:
+   selection rides `RunScope` (4), keyed by node. **Re-test:** `git grep -n "_BOUND.get()" -- promptpotter`.
 8. **A root's typed refusal is served as one generic caveat** — `pipeline_resolve.py::campaign_runs_with`
    and `line_config` answer `None` for any `_ROOT_UNRESOLVED`, and `application/hierarchy.py::_UNRESOLVED`
    serves the same sentence whichever refusal it was. Action: the refusal rides the row, its message
@@ -89,14 +90,28 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
   spelled again across connectors and domain, past `domain/CLAUDE.md`'s probe); the prompt is split
   off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Three merges
   (`campaign_config.py::merge_config_layers` / `merge_node_overlays`, `pipeline_overlay.py::apply_node_overlay`)
-  fold one thing. Action: `PipelineParams(steps, nodes: {name: NodeConfig})` parsed once at the
-  overlay seam, engine keys as fields, the backend's params one dict.
+  fold one thing. An optimizer's llm nodes already read `search_point.py::NodeConfig`; the
+  free tier's per-node bounds still land in `CampaignConfig.pipeline_overlay`
+  (`application/free_tier.py::with_free_tier_layer`), read there by ~40 files, so they join `ParamLayers` as a
+  layer of their own only with this sweep. Action: `PipelineParams(steps, nodes: {name: NodeConfig})`
+  parsed once at the overlay seam, engine keys as fields, the backend's params one dict.
   **Re-test:** `git grep -c -E 'pipeline_params: (dict|Mapping)\[str, Any\]' -- promptpotter`;
   `git grep -n '"steps"\|k != "prompt"' -- promptpotter`.
 - **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with
   `.get("questions") or []`). Action: each connector declares its experiment model; the workload
   carries it parsed. **Re-test:** `git grep -n "parse_resolved(" -- promptpotter`.
+- **`search_point.py::NodeConfig.prompt_edits` is a `dict[str, str]`** beside the
+  `OptimizerPromptTemplate` that `pipeline_manifest.py::typed_config` validates the same edits as and
+  drops; `node_prompt` lays the dict back with `model_copy`. The typed field cannot land in place:
+  `opt_search_point.py` imports `search_point.py`, which holds the call-key rosters. And the template
+  rides beside its config: `llm_call.py::run_optimizer_node` takes a filled `template` and an
+  `LLMCallContext` whose `config` named it (`critique.py::distil_critique`,
+  `firing.py::_run_transition`, `task_context.py::run_checkin`), so the two can disagree. Action:
+  `PROMPT_FIELDS` and `OptimizerPromptTemplate` move to a leaf module both import, `prompt_edits`
+  becomes a partial template, and the call context carries the running template its fill reads.
+  **Re-test:** `git grep -n "prompt_edits: dict" -- promptpotter`; `git grep -n "template=filled" --
+  promptpotter`.
 
 **B. Run-data payloads are models.** **Rides with:** § Typed state "Run files read as dicts" and the
 next run-data reshape.
@@ -130,12 +145,10 @@ next run-data reshape.
   once, from ledger plus producer lock. **Re-test:** `git grep -n 'm.state == "running"' -- promptpotter`.
 
 **D. One LLM-call seam.** **Rides with:** § Config resolution and run scope #4 (`RunScope`) and #7.
-- **The reuse-cache protocol is spelled twice**: `bench/llm_call.py::llm_call` + `_replay` and
-  `scoring/judges/call.py::ask` + `_replay` each key by `hash_call`, read a load's `(OSError,
-  ValueError)` as a re-sample (which re-spends), claim the price, emit `cached=True` usage, and save a
-  non-empty reply; the cache arrives by two carriers (`LLMCallContext.cache`, `bind_cache`). Action:
-  `LLMReuseCache` owns replay, meter and save around the send, behind one carrier.
-  **Re-test:** `git grep -n "def _replay(" -- promptpotter/application/bench/llm_call.py promptpotter/application/scoring/judges/call.py`.
+- **The reuse cache arrives by two carriers**: `LLMCallContext.cache` for an optimizer call and
+  `scoring/judges/call.py::bind_cache` (a `ContextVar`) for a grader; the protocol is
+  `LLMReuseCache.answer`. Action: the cache rides `RunScope` (§ Config resolution 4).
+  **Re-test:** `git grep -n "def bind_cache" -- promptpotter`.
 - **`scoring/evaluators.py::Evaluator` is one class for two contracts** (`per_sample` async vs
   `per_round` sync, different kwargs) held apart by runtime guards (`_validate_evaluator`,
   `inspect.isawaitable`); its `Scope` collides with `campaign_config.Scope` and `data_root.Scope`.
@@ -421,6 +434,14 @@ fixtures.
   appends through `store/io.py::append_jsonl`, which sets no mode. On the box the admin bot wrote
   `app_visit_digests.jsonl` 0644 beside the API's 0600 tables. The store must create its files private
   itself, whichever service writes first.
+- **A landing proves an install-shadowed manifest by its shape, not its reader**: `data_root.py`'s
+  "optimizer manifest" and "check-in manifest" rows type the YAML (call keys included), but a knob or
+  roster fault in an optimizer shadow, or a parse fault in the check-in (`optimizer_manifest.py::_parse`),
+  passes `land-data --dry-run` and stops only the API boot (`wiring.py::complete_registries`), after the
+  data root has landed: `update.sh` then reports the services down and rolls nothing back. The readers
+  live in `application/`, which `infrastructure/store/` cannot import. Action: the landing proves each
+  shadow present through its own reader, refused with its path as a survivor that does not load.
+  **Re-test:** a shadow `checkin/pipeline.yaml` with `optimizer.param_keys: 5` under `land-data --dry-run`.
 - **The first visits digest told a window nothing recorded**: `app_visits.py::due_digest` reads the last
   24 h whenever no digest is kept for today, so the deploy that began recording sent "last 24 h … Nobody"
   at 22:53. The window must start where recording did, which no record holds yet.
@@ -549,9 +570,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
   asserts presence and five other readers branch on `None`. Action: the run's state is built with its
   ledger. **Re-test:** `git grep -n "state.ledger" -- promptpotter/application`.
-- **`node_context.py::Lineage.rounds` copies every round on each access** (`model_copy` to seal
-  `optimizer_state`), and a member reads it per step. Action: seal once at a round's close, or serve
-  a sealed view. **Re-test:** read `Lineage.rounds`.
 - **`run_records.py::RoundEnteredRecord.rewound` is a flag keeping two acts apart** — entering a round
   and displacing what stood past it — that `ledger_scan.py::_Standing.feed` splits again. Action:
   two records, or one whose displacement is its own field. **Rides with:** the `arc/records` arc.
@@ -606,11 +624,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   `CurrentRound.inner` names the latest-beating cell. Action: a cell beat carries its `position`
   and no node. **Rides with:** the next change to the heartbeat record. **Re-test:**
   `git grep -n '"backend_scoring"' promptpotter`.
-- **An optimizer's measurement node is derived twice**: `optimizer_manifest.py::RoundPlan.measurement`
-  (the gateway `default` walks) and `pipeline_responses.py::measurement_node(view)` (the first
-  `measurement` node of the view), which serves `OptimizerPipelineResponse.measurement_node` as
-  nullable though no admitted manifest lacks one. **Rides with:** the next change to that response.
-  **Re-test:** `git grep -n "measurement_node(schema.view)" promptpotter`.
 - **`domain/export.py` carries no optimization spend or tokens**, so a reader cannot compute amortized lifetime cost ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost reporting — binds every run from now, not only the preprint). **Rides with:** the next export shape change. **Re-test:** `grep -n "spend\|token" promptpotter/domain/export.py`.
 
 ## Open — optimizer tuning
@@ -777,11 +790,12 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   over `round_cells_ceiling`: 4,230 cells on 310 search rows), which its race rarely spends, so a
   budget point must fund the worst case to mint CAPO at all. **Re-test:** a finished CAPO round's
   cells against its ceiling.
-- **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
-  `checkin` each call `select_optimizer` themselves; `checkin.py::_land_draft` refuses each overlay
-  before landing, then `resolve_cycle_plan` selects and refuses again. Action: `DraftPipeline`
-  (`pipeline_resolve.py::draft_pipeline`) carries its `SelectedOptimizer`, and a check-in plans its
-  cycles off the draft before landing. **Rides with:** K1's `pipeline_resolve.py` reshape.
+- **A selection is still made beside the one a read already holds.** `checkin.py::_land_draft`
+  refuses each overlay before landing, then `resolve_cycle_plan` selects and refuses again;
+  `config_map.py::config_map` selects off the campaign's cycle config for itself, beside
+  `pipeline_resolve.py::_Merge`'s. Action: a check-in plans its cycles off the draft before landing,
+  and a campaign's cycle config carries its selection. **Rides with:** U2's `RunStart`.
+  **Re-test:** `git grep -n "select_optimizer(" -- promptpotter/application/config_map.py`.
 - **A moved capability or backend revision alone passes a resume.** It is named as a drift cause only
   when the origin hash also mismatches (`jobs/mint.py::resolve_resume` → `ConfigDriftError`).
   **Fork:** refusing contradicts "a drift is served, never refused" (`RunWiringRecord.backend_revision`);
@@ -907,8 +921,6 @@ word's `git grep -c` for that sense is 0.
   but the run continues. The notice must name only the jobs this process owns. Seen 2026-10-30 against
   `promptpotter-self.panel__606cc9`; the same stop logged `ASGI callable returned without completing
   response` for its open `events:subscribe` stream.
-- **The check-in's optimizer graph ignores the draft's overlay**: `resolve_pipeline_for_optimizer`
-  resolves the manifest with `{}`.
 - **Rename candidates, not yet picked** (one word, two senses each):
   `evidence/head_to_head.py::HeadToHeadRow.swapped_in` beside the manifest `swap`;
   `application/library.py::library` beside `candidate_library` (rides the `candidate_library` →
@@ -929,7 +941,6 @@ word's `git grep -c` for that sense is 0.
     (dataset block, draft override, cycle seed), so the row says only "Changed from default".
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
-  - The "adds no arms ⇒ off" rule sits in `pipeline_resolve.py`, not on `SelectedOptimizer`.
   - The check-in picklist button's accessible name runs slug and meta together; two open check-ins
     share one slug.
 - **Potter's `dispatch/` modules still hash whole** (`shapes_optimizer_prompt(__name__)`): a member

@@ -155,10 +155,9 @@ async def _run_transition(
     ladder = ctx.slice(Ladder)
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
     bundle = build_bundle(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
-    filled = DispatchHub.fill(load_optimizer_prompt(layer.name), bundle, node=layer.name)
+    filled = DispatchHub.fill(load_optimizer_prompt(ctx, layer.name), bundle, node=layer.name)
     try:
         raw, _, _ = await run_optimizer_node(
-            template_name=layer.name,
             prompt_vars=filled.injection_vars,
             template=filled.template,
             response_model=layer.reply_model(bundle),

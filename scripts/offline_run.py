@@ -66,7 +66,6 @@ from promptpotter.application.maintenance.landing import plan_landing
 from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
     manifest_directories,
-    resolve_optimizer,
     running_prompt,
     select_optimizer,
 )
@@ -79,6 +78,7 @@ from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
+    OptimizerChoice,
 )
 from promptpotter.domain.command_kinds import ArmRequest, ForkCyclePayload, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
@@ -508,7 +508,7 @@ def campaign_config(
         determinism={"seed": 0},
     )
     if optimizer != templated:
-        roster = resolve_optimizer(optimizer, {}, gate="off").manifest.nodes
+        roster = select_optimizer(OptimizerChoice(optimizer=optimizer)).manifest.nodes
         opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
     knobs = ({"escalation": SCRIPTED_L2} if optimizer == "potter" else {}) | (knobs or {})
     # The draw's host and the LLM host *crossover* names at once, drawing on one measured pool; an
@@ -1221,7 +1221,7 @@ def digests() -> dict[str, str]:
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
     for name in sorted(optimizers.MANIFESTS.table):
-        selected = resolve_optimizer(name, {}, gate="off")
+        selected = select_optimizer(OptimizerChoice(optimizer=name))
         out[f"treatment:{name}"] = selected.treatment(
             frozenset(Presumption), PackShelf(account=None)
         ).digest
@@ -1264,7 +1264,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
     shared = imports(Path(optimizers.__file__).parent.glob("*.py"))
     out = {}
     for name in names:
-        roster = resolve_optimizer(name, {}, gate="off").member_nodes
+        roster = select_optimizer(OptimizerChoice(optimizer=name)).member_nodes
         named = [packages[n] for n in roster] + [owned(d) for d in manifest_directories(name)]
         reached = shared | {d for d in named if d}
         todo = list(reached)

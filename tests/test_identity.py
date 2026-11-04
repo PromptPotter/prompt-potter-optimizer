@@ -74,7 +74,7 @@ from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     binding_optimizer,
     binding_prompt_overrides,
-    resolve_optimizer,
+    checkin_manifest,
     running_prompt,
     select_optimizer,
 )
@@ -95,7 +95,6 @@ from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     base_optimizer_template,
-    load_optimizer_prompt,
 )
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
@@ -134,6 +133,7 @@ from promptpotter.domain.campaign_config import (
     CycleConfig,
     LaidSpan,
     OptimizationConfig,
+    OptimizerChoice,
     declare_run,
     effective_config,
 )
@@ -194,7 +194,7 @@ from promptpotter.domain.run_records import (
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import default_routes
@@ -331,26 +331,28 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ), "declaration order must not re-cut the measurement key"
 
     # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
-    capo = resolve_optimizer("capo", {}, gate="off")
+    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
     calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
-    potter = resolve_optimizer("potter", {}, gate="off")
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
     every = frozenset(Presumption)
     sent, capo_hashes, treated = (
-        calls.fill(**values),
+        calls.prompt().compile_prompt(**values),
         capo.prompt_hashes(),
         capo.treatment(every, built_stores.block_packs).digest,
     )
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
     with binding_prompt_overrides(mutated):
-        assert calls.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
-            "the mutated CAPO prompt never reached the request it sends"
-        )
+        assert (
+            calls.prompt().compile_prompt(**values)
+            == "Rephrase [Sort it.] to sort the list."
+            != sent
+        ), "the mutated CAPO prompt never reached the request it sends"
         assert capo.treatment(every, built_stores.block_packs).digest != treated, (
             "two inner cells under two arms stamp ONE treatment — a bank reads them as one arm"
         )
@@ -370,10 +372,13 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         }, f"{edited_node}: an edit on one node moved other nodes' hashes"
     assert capo.prompt_hashes() == capo_hashes, "an override outlived the run that bound it"
     # A drafted prompt edit rides the overlay: the node runs it, its hash reads it, L4's still wins.
-    drafted = resolve_optimizer(
-        "capo",
-        {"capo_mutate": ManifestNodeOverlay(config={"instruction": "Reword {{instruction}}"})},
-        gate="off",
+    drafted = select_optimizer(
+        OptimizerChoice(
+            optimizer="capo",
+            nodes={
+                "capo_mutate": ManifestNodeOverlay(config={"instruction": "Reword {{instruction}}"})
+            },
+        )
     )
     drafted_hashes = drafted.prompt_hashes()
 
@@ -407,7 +412,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ), "two seeds share one inner campaign"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
-        resolve_optimizer("potter", n, gate="off").treatment(every, built_stores.block_packs).digest
+        select_optimizer(OptimizerChoice(optimizer="potter", nodes=n))
+        .treatment(every, built_stores.block_packs)
+        .digest
         for n in ({}, cut)
     )
     assert inner_campaign_id(
@@ -441,11 +448,15 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     # A pool its readers could draw nothing from never runs: the silent outcome is a pool-less search.
     earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
-    resolve_optimizer("potter", {"block_pool": earned_only}, gate="off")
+    select_optimizer(OptimizerChoice(optimizer="potter", nodes={"block_pool": earned_only}))
     with pytest.raises(PayloadInvalidError):
-        resolve_optimizer("potter", {"block_pool": earned_only, "l1_generate": closed}, gate="off")
+        select_optimizer(
+            OptimizerChoice(
+                optimizer="potter", nodes={"block_pool": earned_only, "l1_generate": closed}
+            )
+        )
     stray_shot = ManifestNodeOverlay(config={"active": ["not-a-sample-key"]})
-    named = resolve_optimizer("capo", {"demo_pool": stray_shot}, gate="off")
+    named = select_optimizer(OptimizerChoice(optimizer="capo", nodes={"demo_pool": stray_shot}))
     unranked = pipeline_schema(
         [
             PipelineNode(
@@ -497,7 +508,9 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
         def drawing(names: list[str], active: list[str]) -> SelectedOptimizer:
             overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
-            return resolve_optimizer("potter", {"block_pool": overlay}, gate="off")
+            return select_optimizer(
+                OptimizerChoice(optimizer="potter", nodes={"block_pool": overlay})
+            )
 
         assert drawing(["one"], ["*"]).treatment(every, built_stores.block_packs).source != (
             drawing(["two"], ["*"]).treatment(every, built_stores.block_packs).source
@@ -566,23 +579,31 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     # The determinism clamp outranks every other layer and keys the bank.
     reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
 
-    def ask(content: str, clamp: DeterminismClamp | None = None, **override: Any) -> Any:
+    def ask(
+        content: str,
+        clamp: DeterminismClamp | None = None,
+        *,
+        temperature: float | None = None,
+        **laid: Any,
+    ) -> Any:
         """One optimizer call as an entry sends it; the body that reached the provider."""
 
         async def entered() -> None:
             set_cycle_ledger(CycleEventLog(tmp_path / "asked.jsonl"))
             with (
-                binding_optimizer(
-                    select_optimizer(OptimizationConfig(degradation_threshold=0.0)),
-                    determinism=clamp,
-                ),
+                binding_optimizer(select_optimizer(OptimizerChoice()), determinism=clamp),
                 spending_under(unbounded_spend_book()),
             ):
                 await call_mod.llm_call(
                     [{"role": "user", "content": content}],
-                    node="checkin",
-                    context=call_mod.LLMCallContext(cache=reuse),
-                    **override,
+                    context=call_mod.LLMCallContext(
+                        node="checkin",
+                        config=NodeConfig.model_validate(
+                            checkin_manifest().config.model_dump(exclude_unset=True) | laid
+                        ),
+                        cache=reuse,
+                    ),
+                    temperature=temperature,
                 )
 
         asyncio.run(entered())
@@ -1642,7 +1663,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "review": NodePrompt(fields={"instruction": "Review it.", "rubric": "Correctness."}),
         }
     )
-    gepa = resolve_optimizer("gepa", {}, gate="off")
+    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
     reflected_on = seat(
         built_stores,
         schema=two,
@@ -1674,7 +1695,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     off_roster = author_arm(reflected_on, origin, stray)
     assert len(off_roster.validation_failures) == 2, "an arm writing off the roster was measured"
-    capo = resolve_optimizer("capo", {}, gate="off")
+    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     assert optimizers.unfit_pipeline(capo, two) is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
     )
@@ -2172,15 +2193,16 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         f"vacuous — the inner optimizer prompts ({subject_chars}c) fit inside the "
         f"discretionary allowance ({allowance}c), so nothing is being kept against a budget"
     )
-    filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), inner, node="l1_generate")
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
+    filled = DispatchHub.fill(generator, inner, node="l1_generate")
     assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )
     refused_panels = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
     # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
-    capo = resolve_optimizer("capo", {}, gate="off")
-    potter = resolve_optimizer("potter", {}, gate="off")
+    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
     mixed = inner_cells("potter", "capo")
     mixed_schema = outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
     mixed_bundle = replace(inner, pipeline_schema=mixed_schema, inner_cells=mixed)
@@ -2243,6 +2265,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         sent = (
             NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))
             .read(Calls)
-            .fill(task_description="sort the list", instruction="Sort it.")
+            .prompt()
+            .compile_prompt(task_description="sort the list", instruction="Sort it.")
         )
     assert sent.endswith("Keep the rewrite under 80 words."), "the inner cell ran the parent"

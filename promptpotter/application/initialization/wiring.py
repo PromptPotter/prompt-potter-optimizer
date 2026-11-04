@@ -23,13 +23,14 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.run_observers import check_every_record_reported
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
@@ -177,11 +178,14 @@ def complete_registries(*, every_treatment: bool = True) -> None:
     optimizers.MANIFESTS.complete()
     for member in optimizers.NODE_MEMBERS.table.values():
         member.complete()
-    # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
-    for name in optimizers.MANIFESTS.table if every_treatment else ():
-        resolve_optimizer(name, {}, gate="off").treatment(
-            frozenset(Presumption), PackShelf(account=None)
-        )
+    if every_treatment:
+        # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
+        for name in optimizers.MANIFESTS.table:
+            select_optimizer(OptimizerChoice(optimizer=name)).treatment(
+                frozenset(Presumption), PackShelf(account=None)
+            )
+        # The check-in as every check-in and mint reads it, an install shadow included.
+        checkin_manifest()
     replayers()
     check_every_record_reported()
     for connector in connectors.CONNECTORS.table.values():

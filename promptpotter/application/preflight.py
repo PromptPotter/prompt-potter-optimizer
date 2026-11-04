@@ -9,6 +9,7 @@ from promptpotter.application import optimizers
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import usd_text
@@ -329,8 +330,8 @@ def optimizer_node_configs(selected: SelectedOptimizer) -> list[tuple[str, Mappi
     """Every llm node a run DECLARES beside its pipeline, off the `default` chain too, or an
     escalation node escapes."""
     return [
-        *((n, selected.node_config(n)) for n in selected.llm_nodes),
-        *((n.name, n.current_config) for n in checkin_manifest().schema.declared_nodes),
+        *((n, selected.call_settings(n)) for n in selected.llm_nodes),
+        (CHECKIN_NODE, checkin_manifest().config.call_settings()),
     ]
 
 
@@ -404,9 +405,8 @@ def unpriced_routes(
         return []
     routes = dict.fromkeys(task_routes(pipeline_params, schema))
     for cfg in (selected.node_config(n) for n in selected.llm_nodes):
-        model, provider, hosts = cfg.get("model"), cfg.get("provider"), cfg.get("route_order")
-        if model and provider:
-            routes[str(model), str(provider), tuple(hosts) if hosts else None] = None
+        hosts = cfg.route_order
+        routes[cfg.model, cfg.provider, tuple(hosts) if hosts else None] = None
     return [
         f"{model} ({provider})"
         for model, provider, hosts in routes

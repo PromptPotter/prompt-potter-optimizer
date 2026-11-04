@@ -19,6 +19,10 @@ const SETUP: OptimizerSetup = {
   pools: [],
   node_config_schema: { blocks: [knob("max_blocks", 8)] },
   reach: {},
+  view: null,
+  measurement_node: "measure",
+  node_output_schema: {},
+  model_capabilities: {},
 };
 
 function Harness({ onStart }: { onStart: (sent: StartCheckinOptions) => void }) {

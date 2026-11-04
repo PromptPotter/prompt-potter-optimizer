@@ -358,6 +358,8 @@ class PipelineNode(FrozenModel):
     output_schema: NodeOutputSchema | None = None
     prompt_info: NodePromptInfo | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
+    # A gateway's: the pipelines (dataset slugs) its measurement runs, as its declaration names them.
+    nested_datasets: list[str] = Field(default_factory=list)
     # Decided at parse, before `narrow`: no campaign's closing moves which node carries the model rows.
     tunes_llm: bool
     # `None`: its backend bounds nothing. Rides the schema, never the identity.

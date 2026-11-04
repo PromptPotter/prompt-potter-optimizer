@@ -145,7 +145,7 @@ class Cycle:
     _sibling_failures: list[RuntimeFailure] | None = None
 
     # ``rounds[0]`` IS the origin's measurement, built by ``start``, so it is never absent.
-    rounds: list[RoundResult] = field(default_factory=list)
+    _rounds: list[RoundResult] = field(default_factory=list)
     population: list[OptSearchPoint] = field(default_factory=list)
     framing: TaskDecomposition = field(default_factory=TaskDecomposition)
     sample_index: SampleIndex | None = None
@@ -153,9 +153,13 @@ class Cycle:
     bench_passes: BenchPasses | None = None
     # The last close's, set by the close and by a resume's replay; ``None`` until a close states one.
     standing: RunStanding | None = None
-    # `measured_pool`'s fold, held while the closed rounds it read are the cycle's, and its θ by scale.
-    _pool: tuple[tuple[int, ...], dict[str, tuple[OptSearchPoint, list[GradedCell]]]] | None = None
-    _pool_theta: dict[tuple[int, str], float | None] = field(default_factory=dict)
+    # Bumped by every write to `_rounds`: the memos below key on it, never on a round's address.
+    _rounds_version: int = 0
+    # `measured_pool`'s fold at a version, and its θ by scale.
+    _pool: tuple[int, dict[str, tuple[OptSearchPoint, list[GradedCell]]]] | None = None
+    _pool_theta: dict[tuple[RulerStamp, str], float | None] = field(default_factory=dict)
+    # `sealed_rounds`' copies at a version.
+    _sealed: tuple[int, tuple[RoundResult, ...]] | None = None
 
     @classmethod
     def start(
@@ -196,7 +200,7 @@ class Cycle:
             optimizer=optimizer,
             slices=slices,
             difficulty=difficulty,
-            rounds=[origin_round],
+            _rounds=[origin_round],
             framing=framing,
         )
 
@@ -231,11 +235,9 @@ class Cycle:
     def measured_pool(self) -> dict[str, tuple[OptSearchPoint, list[GradedCell]]]:
         """Every individual a CLOSED round concluded, by id in the order first measured, with its
         cells across those rounds merged — folded once per close, never banked."""
-        closed = self.closed_rounds
-        # Keyed on the closed rounds' objects: `seat` swaps in a new copy, never edits one.
-        read_from = tuple(id(rr) for rr in closed)
-        if self._pool is not None and self._pool[0] == read_from:
+        if self._pool is not None and self._pool[0] == self._rounds_version:
             return self._pool[1]
+        closed = self.closed_rounds
         held: dict[str, tuple[OptSearchPoint, list[GradedCell]]] = {}
         for rr in closed:
             for key, arm in rr.arms.items():
@@ -244,7 +246,7 @@ class Cycle:
                     individual = arm.individual
                     _, rows = held.get(individual.id, (individual, []))
                     held[individual.id] = (individual, merge_known_outcomes(rows, rr.rows(key)))
-        self._pool = (read_from, held)
+        self._pool = (self._rounds_version, held)
         self._pool_theta.clear()
         return held
 
@@ -252,7 +254,7 @@ class Cycle:
         """θ on the round's one judging fit over every cell the pool holds of it, read once per scale;
         ``None`` where it is unread or a caveat says it is not ability."""
         held = self.measured_pool().get(individual_id)
-        memo = (id(self.difficulty.judging), individual_id)
+        memo = (self.difficulty.stamp, individual_id)
         if memo not in self._pool_theta:
             read = None if held is None else self.difficulty.scale.frontier(held[1])
             self._pool_theta[memo] = None if read is None or read.caveat else read.theta
@@ -262,13 +264,18 @@ class Cycle:
         """The origin's θ is carried, not re-fit: round 0 closes on the scale it opened on."""
         election = self.origin_round.election
         assert election is not None, "round 0 elects the origin it adopted"
-        self.rounds[0] = _origin_round(
-            parent,
-            fit=election.fit,
-            ruler=election.ruler,
-            optimizer_state=optimizer_state,
-            elects_on=election.elects_on,
-            schema=self.session.pipeline_schema,
+        self.restate_rounds(
+            [
+                _origin_round(
+                    parent,
+                    fit=election.fit,
+                    ruler=election.ruler,
+                    optimizer_state=optimizer_state,
+                    elects_on=election.elects_on,
+                    schema=self.session.pipeline_schema,
+                ),
+                *self._rounds[1:],
+            ]
         )
 
     def restamp_origin_round(self, parent: ReadArm) -> None:
@@ -277,8 +284,9 @@ class Cycle:
     def replay_priors(self, priors: list[RoundResult]) -> None:
         assert priors, "a cut at round 0 reopens the origin; a replay seats a closed round"
         from_round = min(rr.round for rr in priors)
-        self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
-            priors, key=lambda rr: rr.round
+        self.restate_rounds(
+            [rr for rr in self._rounds if rr.round < from_round]
+            + sorted(priors, key=lambda rr: rr.round)
         )
         closed = self.rounds[-1].closed_state
         self.population = list(closed.population)
@@ -290,7 +298,7 @@ class Cycle:
         round: this cycle stands as it is."""
         view = replace(
             self,
-            rounds=list(self.rounds),
+            _rounds=list(self._rounds),
             slices=SliceMap(self.optimizer.slices),
             difficulty=replace(self.difficulty),
             outputs={},
@@ -298,6 +306,7 @@ class Cycle:
             _axes=None,
             _pool=None,
             _pool_theta={},
+            _sealed=None,
         )
         view.replay_priors(priors)
         return view
@@ -307,16 +316,33 @@ class Cycle:
         origin, head = self.origin_round, self.origin_round.head
         assert origin.election is not None and head is not None, "round 0 ends on its origin"
         key = origin.election.ended_on
-        self.rounds = [origin]
+        self.restate_rounds([origin])
         self._seat_origin(ReadArm(key, head, origin.rows(key)), None)
         self.population = []
         self.slices = SliceMap(self.optimizer.slices)
         self.difficulty.seat(origin.election.ruler)
 
+    @property
+    def rounds(self) -> Sequence[RoundResult]:
+        return self._rounds
+
+    def restate_rounds(self, rounds: list[RoundResult]) -> None:
+        """The ONE writer of the rounds, so a memo keyed on the version reads no stale round."""
+        self._rounds = rounds
+        self._rounds_version += 1
+
     def seat(self, rr: RoundResult) -> RoundResult:
-        slot = next(i for i, held in enumerate(self.rounds) if held.round == rr.round)
-        self.rounds[slot] = rr
+        slot = next(i for i, held in enumerate(self._rounds) if held.round == rr.round)
+        self.restate_rounds([*self._rounds[:slot], rr, *self._rounds[slot + 1 :]])
         return rr
+
+    @property
+    def sealed_rounds(self) -> tuple[RoundResult, ...]:
+        """Every round less its optimizer state, copied once per version of the rounds."""
+        if self._sealed is None or self._sealed[0] != self._rounds_version:
+            sealed = tuple(rr.model_copy(update={"optimizer_state": None}) for rr in self._rounds)
+            self._sealed = (self._rounds_version, sealed)
+        return self._sealed[1]
 
     @property
     def closed_rounds(self) -> list[RoundResult]:
@@ -324,10 +350,10 @@ class Cycle:
         return [rr for rr in self.rounds if rr.round == 0 or rr.at_offset is not None]
 
     def unwind_unclosed(self) -> None:
-        self.rounds = self.closed_rounds
+        self.restate_rounds(self.closed_rounds)
 
     def absorb_round(self, rr: RoundResult) -> None:
-        self.rounds.append(rr)
+        self.restate_rounds([*self._rounds, rr])
 
     @property
     def elected(self) -> tuple[RoundResult, Election]:

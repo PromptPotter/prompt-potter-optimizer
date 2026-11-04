@@ -66,9 +66,10 @@ def main() -> int:
         f"rates cache = {CACHE_PATH}, expected under {home_path}"
     )
 
-    from promptpotter.application.optimizer_manifest import checkin_manifest, resolve_optimizer
+    from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+    from promptpotter.domain.campaign_config import OptimizerChoice
 
-    potter = resolve_optimizer("potter", {}, gate="off")
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
     assert potter.llm_nodes, "the potter manifest declares no llm node"
     assert potter.resolved_schemas, "the potter schema registry is empty"
     assert checkin_manifest().schema.get_node("checkin"), "the check-in manifest has no checkin"

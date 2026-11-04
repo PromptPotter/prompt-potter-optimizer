@@ -62,6 +62,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
 from promptpotter.application.maintenance.landing import apply_landing, plan_landing
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
+from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -72,7 +73,6 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     unplaceable_edit,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import load_optimizer_prompt
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
@@ -80,6 +80,7 @@ from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
@@ -340,9 +341,9 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
             )
         ],
     )
-    l1_request = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
-    ).template.render()
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
+    l1_request = DispatchHub.fill(generator, bundle, node="l1_generate").template.render()
     assert poisoned_value in l1_request, "an arm's reject never reached the next generation"
     diagnostics = DispatchHub.render("diagnostics", bundle)
     assert (

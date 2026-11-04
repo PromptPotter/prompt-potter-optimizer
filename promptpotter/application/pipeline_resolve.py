@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -33,16 +34,16 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import Send
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.knobs import bench_defaults_pin
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import MintFacts, admits
 from promptpotter.application.pipeline_responses import (
     CampaignPipelineResponse,
     DatasetPipelineResponse,
     ForkPreviewResponse,
     SteerVerdict,
-    measurement_node,
     optimizer_setup,
 )
-from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
+from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
@@ -85,7 +86,6 @@ from promptpotter.domain.pipeline_schema import (
     NodeSearchNarrowing,
     ParamLayer,
     ParamSource,
-    PipelineView,
     reach_map,
 )
 from promptpotter.domain.run_records import (
@@ -535,18 +535,14 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], d
     return {}, {}
 
 
-def nested_pipeline_refs(
-    backend_type: str, experiment: Mapping[str, Any] | None, view: PipelineView | None
-) -> list[NestedPipelineRef]:
-    """One per dataset the cells' inner campaigns measure, by name."""
-    node = measurement_node(view)
-    if node is None or experiment is None or not is_self_optimization(backend_type):
-        return []
-    resolved = parse_resolved(experiment)
-    return [
-        NestedPipelineRef(node=node, dataset=name)
-        for name in sorted(set(resolved.datasets.values()))
+def _nests(schema: PipelineSchema) -> list[NestedPipelineRef]:
+    """One per dataset a gateway's measurement runs, as the served declaration names it."""
+    refs = [
+        NestedPipelineRef(node=node.name, dataset=dataset)
+        for node in schema.declared_nodes
+        for dataset in node.nested_datasets
     ]
+    return sorted(refs, key=lambda ref: (ref.dataset, ref.node))
 
 
 def resolved_output_schemas(
@@ -654,6 +650,12 @@ class _Merge:
     layers: ParamLayers
     # The free tier fences the target's nodes: it is offered only the tier's task models.
     free: bool
+
+    @functools.cached_property
+    def optimizer(self) -> SelectedOptimizer:
+        """`cfg`'s one selection, made where a read takes it: one that only folds the params
+        (`_runs_with`) stands on a config whose overlay no longer selects."""
+        return select_optimizer(self.cfg.optimization)
 
 
 @dataclass(frozen=True)
@@ -820,7 +822,6 @@ def _response(
     dataset_name: str,
     connector: str,
     backend_type: str,
-    nests: list[NestedPipelineRef],
     mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
     rows = _rows(m, folded)
@@ -832,14 +833,14 @@ def _response(
         backend_type=backend_type,
         self_optimization=is_self_optimization(backend_type),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.cfg, mint, m.filtered),
+        optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
         params=folded.params,
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, folded.params),
         model_capabilities=_served_menu(m, folded.params, workspace),
         reach=reach_map(rows),
-        nests=nests,
+        nests=_nests(m.declared),
         is_single_node=m.filtered.is_single_node,
     )
 
@@ -858,13 +859,12 @@ def resolve_pipeline_for_draft(
         dataset_name=draft.slug,
         connector=served.connector,
         backend_type=served.connector,
-        # A dataset dir is what declares inner cells, and a check-in has none yet.
-        nests=[],
         mint=_draft_mint(stores, draft, m),
     )
 
 
-class DraftPipeline(NamedTuple):
+@dataclass(frozen=True)
+class DraftPipeline:
     """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
     the chain they run in, the chain as declared before the draft narrowed it, and its config."""
 
@@ -873,6 +873,12 @@ class DraftPipeline(NamedTuple):
     chain: PipelineSchema
     declared: PipelineSchema
     config: CampaignConfig
+
+    @functools.cached_property
+    def optimizer(self) -> SelectedOptimizer:
+        """`config`'s selection, made only where a read takes it: a draft whose overlay no
+        longer selects still folds, rows and gates."""
+        return select_optimizer(self.config.optimization)
 
 
 def draft_pipeline(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftPipeline:
@@ -913,7 +919,6 @@ def resolve_pipeline_for_campaign(
         connector=m.declaration["backend_name"],
         # The campaign's DECLARED kind — one definition serves every campaign on the slug.
         backend_type=campaign.connector,
-        nests=nested_pipeline_refs(campaign.connector, m.experiment, m.filtered.view),
         mint=_cycle_mint(stores, m),
     )
 
@@ -969,8 +974,9 @@ async def resolve_pipeline_for_dataset(
     declared = await dataset_pipeline(stores, dataset, experiment=experiment)
     cfg = load_dataset_campaign_config(dataset.directory)
     definition = runnable_definition(dataset.directory)
+    schema = parse_pipeline_response(declared)
     _, filtered = _resolve_active_schema(
-        parse_pipeline_response(declared),
+        schema,
         exclude=list(cfg.exclude_nodes),
         narrowing=cfg.optimizer_narrowing,
         declared=pipeline_declared_nodes(definition.pipeline),
@@ -981,7 +987,7 @@ async def resolve_pipeline_for_dataset(
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),
-        nests=nested_pipeline_refs(definition.backend_type, experiment, filtered.view),
+        nests=_nests(schema),
     )
 
 

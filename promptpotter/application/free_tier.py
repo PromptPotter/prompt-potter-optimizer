@@ -116,16 +116,17 @@ def outside_free_tier(
                     values += space.param_options(declared, param, model=m) or ["any"]
                 out += [f"{param} {v} on {m}" for v in values if v not in admitted]
     for name in selected.llm_nodes:
-        cfg = selected.node_config(name)
-        if cfg["provider"] not in fence.providers:
+        called = selected.node_config(name)
+        if called.provider not in fence.providers:
             continue
-        if (bounds := tier.optimizer_models.get(model := str(cfg.get("model")))) is None:
+        if (bounds := tier.optimizer_models.get(model := called.model)) is None:
             out.append(f"the optimizer model {model}")
             continue
+        laid = called.model_dump(include=set(bounds), exclude_unset=True)
         out += [
             f"{param} {value} on the optimizer model {model}"
             for param, admitted in bounds.items()
-            if (value := cfg.get(param, "default")) not in admitted
+            if (value := laid.get(param, "default")) not in admitted
         ]
     return list(dict.fromkeys(out))
 

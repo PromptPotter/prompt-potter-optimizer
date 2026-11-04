@@ -12,20 +12,28 @@ if TYPE_CHECKING:
 
 def init_prompt(ctx: NodeContext) -> str:
     node = ctx.read(Target).prompt_node
-    return ctx.read(Calls).fill(task_description=task_description(ctx, node))
+    return ctx.read(Calls).prompt().compile_prompt(task_description=task_description(ctx, node))
 
 
 def crossover_prompt(ctx: NodeContext, mother: OptSearchPoint, father: OptSearchPoint) -> str:
     node = ctx.read(Target).prompt_node
-    return ctx.read(Calls).fill(
-        task_description=task_description(ctx, node),
-        mother=shown(ctx, mother, node),
-        father=shown(ctx, father, node),
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            task_description=task_description(ctx, node),
+            mother=shown(ctx, mother, node),
+            father=shown(ctx, father, node),
+        )
     )
 
 
 def mutation_prompt(ctx: NodeContext, individual: OptSearchPoint) -> str:
     node = ctx.read(Target).prompt_node
-    return ctx.read(Calls).fill(
-        task_description=task_description(ctx, node), instruction=shown(ctx, individual, node)
+    return (
+        ctx.read(Calls)
+        .prompt()
+        .compile_prompt(
+            task_description=task_description(ctx, node), instruction=shown(ctx, individual, node)
+        )
     )
