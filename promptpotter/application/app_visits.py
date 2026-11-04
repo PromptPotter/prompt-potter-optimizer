@@ -134,6 +134,10 @@ def _span(seconds: float) -> str:
     return f"{seconds / 60:.0f} min" if seconds < 7200 else f"{seconds / 3600:.0f} h"
 
 
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
 def _top(counts: Counter[str], n: int = 3) -> str:
     return ", ".join(f"{name} {count}" for name, count in counts.most_common(n))
 
@@ -171,10 +175,17 @@ def visits_digest(records: Iterable[SiteRecord], *, key: str, hours: int) -> Vis
             lines.append(f"Answered: {', '.join(answered[:5])}")
     crawlers = kinds["crawler"]
     if crawlers:
-        agents: Counter[str] = Counter()
+        requests: Counter[str] = Counter()
+        addresses: Counter[str] = Counter()
         for c in crawlers:
-            agents.update(c.agents)
-        lines.append(f"Crawlers {len(crawlers)}: {_top(agents, 6)}")
+            requests.update(c.agents)
+            addresses.update(c.agents.keys())
+        named = [
+            f"{name} ({_plural(addresses[name], 'address', 'addresses')}, "
+            f"{_plural(count, 'request', 'requests')})"
+            for name, count in requests.most_common(6)
+        ]
+        lines.append(f"Crawlers: {', '.join(named)}")
     visitors = kinds["visitor"]
     if visitors:
         countries: Counter[str] = Counter()
