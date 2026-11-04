@@ -409,6 +409,21 @@ fixtures.
   moving `charges.jsonl` aside, which also drops the account's bill. A grant that counts charges from
   its own `granted_at` would make a re-grant the reset; today `wallet_store.py::CouponGrant.granted_at`
   is written and never read.
+- **The box holds the app's environment twice**: the services load `/etc/promptpotter.env`
+  (`ENV_FILE`, root `0600`), and the login user's CLI reads the checkout's `.env` through
+  `config/paths.py::env_file_path`. The two had drifted by 2026-11-03: `ALLOWED_ORIGINS` and the
+  admin bot's token differed, and some keys were in only one file, so a CLI verb on the box read
+  other keys than the app it inspected. A re-issued token pasted into the checkout file reached no
+  service; `channel:telegram` caught it at deploy. One file must serve both. Either the CLI reads
+  `ENV_FILE`, which needs read access for the login user, or the services read the checkout file,
+  which SELinux denies under `$HOME`. That choice is the operator's.
+- **A site-record file's mode is the writing process's umask**: `store/site_records.py::SiteRecordStore.keep`
+  appends through `store/io.py::append_jsonl`, which sets no mode. On the box the admin bot wrote
+  `app_visit_digests.jsonl` 0644 beside the API's 0600 tables. The store must create its files private
+  itself, whichever service writes first.
+- **The first visits digest told a window nothing recorded**: `app_visits.py::due_digest` reads the last
+  24 h whenever no digest is kept for today, so the deploy that began recording sent "last 24 h … Nobody"
+  at 22:53. The window must start where recording did, which no record holds yet.
 - **Left by the payer rule (2026-11-02)**:
   - `quota.py::sends_on` raises `NoApiKeyError` for a provider no key pays, so `change-run-limits`
     (`clamp_budget_change`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
@@ -702,6 +717,18 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 ## Open — from the head-to-head arc
 
 A leading **INVESTIGATE** means nobody has shown the item is real; answer that first.
+
+- **An arm is planned on a replicate it does not have yet**: `command_kinds.py::HeadToHeadRequest.purpose`
+  declares replicate 1, and `jobs/mint.py::_numbered` overwrites it under the record hold. The number
+  keys on `plan.treatment`, which `resolve_cycle_plan` builds from a whole `RunDeclaration` that already
+  holds `purpose`, so the plan cannot be built without a number. The placeholder also reaches the root id
+  (`measured_address`), so admission prices plans whose ids are not final. Holding the record across
+  planning is no fix: the hold is try-once, and the arms mint after the dispatcher's ack. Action: a
+  purpose-free run spec feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
+  `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
+  `declare` rewrites `optimizer_narrowing` and `bench_trigger` on `isinstance(purpose, Compare)`, and that
+  moves with it. **Rides with:** U1a's `RunScope` (`campaign_config.py`). **Re-test:**
+  `git grep -n "replicate=1" -- promptpotter`.
 
 - **`dashboard.json::run_limits`'s money axes still go stale on `set-limits --max-usd`**: the
   `CampaignCeilingRecord` sits on the root cycle's ledger, which no other cycle's fold reads, so
