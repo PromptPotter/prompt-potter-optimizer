@@ -9,14 +9,15 @@ import textwrap
 import types
 import typing
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from fastapi.routing import APIRoute
-from processes import REPO
 from pydantic import BaseModel
 from pydantic.fields import ComputedFieldInfo, FieldInfo
 
-sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
 from promptpotter.domain.said import TONES
 from promptpotter.main import API_ROUTERS, app
@@ -33,6 +34,7 @@ def _served_roots() -> list[typing.Any]:
     return roots
 
 
+REPO = PACKAGE_ROOT.parent
 _OUT_PATH = REPO / "webapp" / "lib" / "api" / "types.generated.ts"
 
 # Each named type the roots reach, in the order first reached, held as its interface.

@@ -29,7 +29,7 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   // Pinned so a stray ~/package-lock.json cannot move Turbopack's inferred workspace root.
   turbopack: { root: workspaceRoot() },
-  // The gate sizes the static-generation workers from free memory (`scripts/gate.py::RamBudget`).
+  // The gate sizes the static-generation workers from free memory (`scripts/processes.py::RamBudget`).
   ...(process.env.NEXT_BUILD_CPUS && { experimental: { cpus: Number(process.env.NEXT_BUILD_CPUS) } }),
   async rewrites() {
     // Dev-mode only: `output: "export"` strips rewrites, and production shares the API's origin.

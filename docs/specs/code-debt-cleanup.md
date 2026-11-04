@@ -235,22 +235,6 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `runner/inner/tasks.InnerCells` moved into `domain/l4` (optimizer code imports a runner internal).
 - **Rejected:** a concept-first vertical re-cut (§0's "One rejected re-cut").
 
-### Tooling seen while landing #59–#62
-
-- **`scripts/offline_run.py` runs whatever package its interpreter imports**: run from a worktree with
-  the main tree's venv, its child runs import the main tree and it reports UNMOVED. Action: refuse when
-  `promptpotter.__file__` is not under the tree the script sits in. **Re-test:** run it from a worktree
-  with the main venv; it refuses.
-- **The pre-commit hook runs bare `python`**, so a commit in a worktree builds and syncs a `.venv` there.
-  Action: the hook resolves the clone's venv like `_BORROWED` does. **Re-test:** a commit in a fresh
-  worktree creates no `.venv`.
-- **The gate measures whatever extras the venv happens to hold**: `gate.py::_PINNED_EXTRAS` syncs
-  `--inexact`, so packages outside the pinned set stay installed and an optional import loads them. A
-  venv built with `uv sync --all-extras` put the suite over `tests_owning.py::WIN32_CEILING_MB`;
-  resynced to the pinned extras, the same tree passed. Action: the gate refuses a venv holding packages
-  outside `_PINNED_EXTRAS`, naming the sync that makes it exact. **Re-test:** `uv sync --all-extras`,
-  then `gate.py --only pytest` refuses before it measures.
-
 ### The webapp's vanilla pass (audit 2026-10-29)
 
 - **Failures dropped to booleans before `FailureLine` can render them**: `useConnector` folds its read
@@ -620,10 +604,23 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 
 ### The member backbone
 
-- **The dev loop serializes where it need not:** sibling gates queue whole runs, `next-build` peaks
-  near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
-  green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:** five builders plus one full gate with no reap and no gate waiting
-  longer than its own run.
+- **The dev loop still serializes on two tools:** `next-build` peaks near 4 GB (rides the Vite arc),
+  and Vitest's pool fails a worker that takes past its hard-coded 90 s to start (`WORKER_START_TIMEOUT`),
+  which a host loaded from outside the gate lock (a builder's bare `pytest` or `vitest`) still trips,
+  though the gate runs it `alone` on one unisolated worker per project. **Re-test:** five builders
+  plus one full gate with no reap and no gate waiting longer than its own run.
+- **Four `--staged` checks queue only because their regenerators always write**: `ts-types`,
+  `vendor-marks`, `optimizer-schemas` and `specs` rewrite their tracked output on every run, even
+  when it is unchanged, so they cannot be `gate.py::Check.light`. Two more keep a commit queued:
+  eslint's `--cache` write and tsc's typegen. `ts-types`, `optimizer-schemas` and `specs` read
+  `!webapp/`, so nearly every commit selects one. Action: each regenerator writes only when the
+  content differs, via atomic `os.replace`; mark the four light. **Re-test:** a `--staged` gate
+  selecting them starts while a sibling gate runs.
+- **Two gates can still lose each other's greens**: `last_green.py::LastGreen.record` re-loads
+  `greens.json` just before an atomic replace, but nothing locks the load-to-replace span, so of two
+  gates finishing together the later drops the earlier's greens (a rerun, never a false green).
+  Action: hold an exclusive lock across load, merge and replace. **Re-test:** two concurrent
+  `record` calls on distinct checks both persist.
 - **`initialization/session.py::LaunchState.ledger` is `Optional` while a round needs it**:
   `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
   asserts presence and five other readers branch on `None`. Action: the run's state is built with its
@@ -894,10 +891,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 - **`round_cells` has two meanings for one draw:** potter's unclamped value, read by L4, verify and the
   overlap, and the backbone's ceiling panel, clamped to the search split. Also, `RoundPlan.walk` and
   `round_walks` each decide which walk counts as a round of its own.
-- **`gate.py --only` queues behind other worktrees' gates** (`queue_behind_siblings`), so one
-  regeneration waits minutes. `scripts/build_ts_types.py` cannot run under `-m`, because it imports
-  `processes` from `scripts/`. A bare `mypy` run shows errors in `evidence/subjects.py` and
-  `tests/test_scoring.py` that the gate's mypy passes.
 - **The library's duplicate-text check is written twice**: `application/library.py::bank_snippet` (a
   no-op) and `infrastructure/store/account_packs.py::bank_into_account_pack` (under the lock).
   `SnippetLibrary`'s empty copy still says "installed".
@@ -1106,25 +1099,9 @@ word's `git grep -c` for that sense is 0.
   ("points out of the filesystem root"), so `next-build` and `playwright` never run there, and pytest's
   `compileall` breaks on long Temp paths. A rebuilt commit series is therefore gated without them.
   **Re-test:** the full gate green in a worktree.
-- **`p_served`'s ceiling is slack** (175 measured under 176 since 3dfce02f0); the gate allows slack, so
-  the ratchet never tightened. **Re-test:** BASELINE equals the measured count.
 - **The installed webapp packages drift from `package.json`**: `npm ls` reports `next@16.3.8` against
   `16.4.1` and `vitest@4.1.11` against `^4.1.12`, so the gate builds with versions the lock does not
   name. **Re-test:** `npm ls --depth=0` clean.
-- **`scripts/offline_run.py` imports the gate for `RamBudget`**: the script the gate runs loads
-  `gate.py` (and through it `tests_owning`, `yaml`) in every child, while `OFFLINE_RUN_READS` names
-  neither file. Fan-out sizing sits beside `processes.py::free_mb`. **Re-test:**
-  `git grep -n "from gate import" -- scripts`.
-- **A killed push leaves live links into the main tree.** `gate.py::_tip_checkout` links `.venv` and
-  `webapp/node_modules` into `%TEMP%\pp-push-*`. A hard kill skips the unlink, so the temp dir keeps
-  junctions that a later recursive temp delete could follow. Action: the next `--push` sweeps stale
-  `pp-push-*` (unlink, then `git worktree prune`). **Re-test:** kill a push mid-run, then run
-  `--push` again and list `%TEMP%\pp-push-*`.
-- **`scripts/offline_run.py --controlled` crashes on main** (fd51d06 and after): the potter arm's
-  `_variant_edit` asserts `no framing to cite`, since the controlled leg's prompt holds no
-  `task_context`, so its arm-exit check (`run_controlled`: a fork takes its arm out) never runs.
-  Action: the leg declares the framing its fake proposer cites. **Re-test:**
-  `PROMPTPOTTER_HOME=<dir> python scripts/offline_run.py --controlled` exits 0.
 - **Seen bounding the perimeter** (2026-10-29):
   - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
     `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against
@@ -1171,9 +1148,6 @@ word's `git grep -c` for that sense is 0.
   - The onboarding dialogs use raw `<button className="login-button">`, not `ui/Button`; and
     `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
     **Re-test:** `git grep -n "login-button" -- webapp/components/onboarding`.
-- **The offline legs rest on fake-data draws keyed by the whole node config**
-  (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
-  leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
 - **Seen removing the migrations** (2026-10-30):
   - `LLMCallRecord.payload_kind == "synthesized"` and `usage is None` state one fact twice.
   - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.

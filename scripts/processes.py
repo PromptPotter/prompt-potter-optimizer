@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -21,6 +22,9 @@ _EXTENDED_LIMIT_INFORMATION = 9
 # A child starts suspended and joins its check's job before it can start a grandchild.
 _CREATE_SUSPENDED = 0x4
 _SET_QUOTA_TERMINATE_RESUME = 0x0100 | 0x0001 | 0x0800
+_QUERY_LIMITED_INFORMATION = 0x1000
+_ERROR_ACCESS_DENIED = 5
+_STILL_ACTIVE = 259
 
 
 class _Basic(ctypes.Structure):
@@ -88,6 +92,7 @@ if sys.platform == "win32":
     _kernel32.OpenProcess.restype = ctypes.c_void_p
     _kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
     _kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    _kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
     _kernel32.K32GetProcessMemoryInfo.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)
     _ntdll = ctypes.WinDLL("ntdll")
     _ntdll.NtResumeProcess.argtypes = (ctypes.c_void_p,)
@@ -138,6 +143,29 @@ def close_job(job: int | None) -> int | None:
             raise ctypes.WinError(ctypes.get_last_error())
         return int(usage.peak_job_memory) >> 20
     return None
+
+
+def alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        process = _kernel32.OpenProcess(_QUERY_LIMITED_INFORMATION, False, pid)
+        if not process:
+            # Denied is a process this user may not query; any other refusal is no process.
+            return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
+        try:
+            code = ctypes.c_ulong()
+            if not _kernel32.GetExitCodeProcess(process, ctypes.byref(code)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return code.value == _STILL_ACTIVE
+        finally:
+            _kernel32.CloseHandle(process)
+    else:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            pass
+        return True
 
 
 def end_children_with_this_process() -> None:
@@ -208,12 +236,17 @@ def _locked(fd: int) -> bool:
 _HELD = "PROMPTPOTTER_HEAVY_LOCK_HELD"
 
 
-def clone_cache() -> Path:
-    """The clone's one `.gate_cache`, every worktree's and every pushed tip's."""
+def clone_root() -> Path:
+    """The clone's main tree, which every worktree and every pushed tip shares."""
     rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
     if rc:
         raise RuntimeError(f"gate: {REPO} is not in a git clone: {common}")
-    cache = Path(common.strip()).parent / ".gate_cache"
+    return Path(common.strip()).parent
+
+
+def clone_cache() -> Path:
+    """The clone's one `.gate_cache`, every worktree's and every pushed tip's."""
+    cache = clone_root() / ".gate_cache"
     cache.mkdir(exist_ok=True)
     return cache
 
@@ -266,6 +299,39 @@ def free_mb() -> int:
             return next(
                 int(line.split()[1]) >> 10 for line in info if line.startswith("MemAvailable:")
             )
+
+
+# What one unit of each fan-out commits: the slope of its check's job peak across widths.
+_OFFLINE_RUN_CHILD_MB = 108
+_NEXT_WORKER_MB = 80
+# Each lane's heaviest check at full width (offline-run; a cold eslint): below their sum, in turn.
+_PY_LANE_MB = 1200
+_WEB_LANE_MB = 1000
+# Past these, free memory is no reason to widen: the OS kills concurrent processes on low memory.
+OFFLINE_RUN_CHILDREN_MAX = 8
+NEXT_WORKERS_MAX = 4
+
+
+@dataclass(frozen=True)
+class RamBudget:
+    """Free memory, read off the box when a fan-out starts: what that fan-out is sized by."""
+
+    free_mb: int
+
+    @classmethod
+    def read(cls) -> RamBudget:
+        return cls(free_mb())
+
+    def lanes_overlap(self) -> bool:
+        return self.free_mb >= _PY_LANE_MB + _WEB_LANE_MB
+
+    def offline_run_children(self, tasks: int) -> int:
+        fit = self.free_mb // _OFFLINE_RUN_CHILD_MB
+        return max(2, min(fit, tasks, os.cpu_count() or 2, OFFLINE_RUN_CHILDREN_MAX))
+
+    def next_workers(self) -> int:
+        fit = self.free_mb // _NEXT_WORKER_MB
+        return max(1, min(fit, (os.cpu_count() or 2) - 1, NEXT_WORKERS_MAX))
 
 
 def peak_mb() -> int:

@@ -31,10 +31,12 @@ from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from processes import (
     REPO,
     Outcome,
+    RamBudget,
+    alive,
     clone_cache,
+    clone_root,
     close_job,
     end_children_with_this_process,
-    free_mb,
     git,
     metered,
     open_job,
@@ -45,42 +47,9 @@ from processes import (
 logger = logging.getLogger(__name__)
 
 _WEBAPP = REPO / "webapp"
-_PINNED = REPO / ".venv"
+# The clone's one venv: a worktree or a pushed tip reads it in place, so a commit there builds none.
+_PINNED = clone_root() / ".venv"
 _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
-
-
-# What one unit of each fan-out commits: the slope of its check's job peak across widths.
-_OFFLINE_RUN_CHILD_MB = 108
-_NEXT_WORKER_MB = 80
-# Each lane's heaviest check at full width (offline-run; a cold eslint): below their sum, in turn.
-_PY_LANE_MB = 1200
-_WEB_LANE_MB = 1000
-# Past these, free memory is no reason to widen: the OS kills concurrent processes on low memory.
-OFFLINE_RUN_CHILDREN_MAX = 8
-NEXT_WORKERS_MAX = 4
-
-
-@dataclass(frozen=True)
-class RamBudget:
-    """Free memory, read off the box when a fan-out starts: what that fan-out is sized by."""
-
-    free_mb: int
-
-    @classmethod
-    def read(cls) -> RamBudget:
-        return cls(free_mb())
-
-    def lanes_overlap(self) -> bool:
-        return self.free_mb >= _PY_LANE_MB + _WEB_LANE_MB
-
-    def offline_run_children(self, tasks: int) -> int:
-        fit = self.free_mb // _OFFLINE_RUN_CHILD_MB
-        return max(2, min(fit, tasks, os.cpu_count() or 2, OFFLINE_RUN_CHILDREN_MAX))
-
-    def next_workers(self) -> int:
-        fit = self.free_mb // _NEXT_WORKER_MB
-        return max(1, min(fit, (os.cpu_count() or 2) - 1, NEXT_WORKERS_MAX))
-
 
 _LINTED = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 # Anything else under `webapp/` is in no module graph, so it narrows nothing.
@@ -1012,6 +981,8 @@ class Check:
     run: Callable[[Selection], Outcome]
     # The pre-commit hook's fast set (`--staged`). The pre-push hook runs every check CI runs.
     on_commit: bool = False
+    # Cheap and writes nothing a sibling gate reads, so a gate of only these never queues behind a sibling's.
+    light: bool = False
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak (next-build's) is more than any lane beside it leaves free.
@@ -1080,28 +1051,18 @@ def _owning_tests(_changed: Sequence[str]) -> tuple[str, ...] | None:
     return None if nodes is None else tuple(nodes)
 
 
-# The plug point's one out-of-package optimizer, typechecked so a contract change breaks it here.
+# The plug point's one out-of-package optimizer.
 _EXAMPLE_PLUGIN_DIR = "examples/optimizer-plugin"
 _PLATFORMS = ("linux", "win32")
 
 
 def _mypy(_sel: Selection) -> Outcome:
-    targets = (
-        "promptpotter/",
-        "scripts/",
-        "tests/",
-        f"{_BBEH_DIR}/bbeh_potter_runner.py",
-        f"{_EXAMPLE_PLUGIN_DIR}/example_optimizer/",
-    )
+    # Its files and search path are `pyproject.toml`'s, so a bare `mypy` checks what this does.
     # mypy checks only the `sys.platform` branch it is told; a shared cache would evict per pass.
     # The warm `.mypy_cache/` is TRUSTED: delete it only on a suspected false green against CI.
     for platform in _PLATFORMS:
         foreign = () if platform == sys.platform else ("--cache-dir", f".mypy_cache/{platform}")
-        rc, out = run(
-            _py("mypy", "--platform", platform, *foreign, *targets),
-            REPO,
-            MYPYPATH=os.pathsep.join(str(REPO / d) for d in (_BBEH_DIR, _EXAMPLE_PLUGIN_DIR)),
-        )
+        rc, out = run(_py("mypy", "--platform", platform, *foreign), REPO)
         if rc:
             return rc, f"as {platform}:\n{out}"
     return 0, ""
@@ -1165,6 +1126,20 @@ def _optimizer_plugin(_: Selection) -> Outcome:
     return 0, out
 
 
+def _offline_run(_: Selection) -> Outcome:
+    # The clone's homes, so a worktree's run answers for main and the worktree deletes clean. One
+    # home per leg: a home stamped for other arguments is rewritten whole.
+    failed: list[tuple[int, str]] = []
+    for leg, flags in ((OFFLINE_RUN, ()), (f"{OFFLINE_RUN}-controlled", ("--controlled",))):
+        argv = [sys.executable, "scripts/offline_run.py", *flags]
+        code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(clone_cache() / leg))
+        if code:
+            failed.append((code, f"{leg}:\n{out}"))
+    if failed:
+        return failed[0][0], "\n".join(out for _, out in failed)
+    return 0, ""
+
+
 _EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
 
 
@@ -1188,8 +1163,15 @@ def _extras(_: Selection) -> Outcome:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("ruff-format", "py", _ruff("format", "--check"), on_commit=True, reads=_RUFF_READS),
-    Check("ruff-check", "py", _ruff("check"), on_commit=True, reads=_RUFF_READS),
+    Check(
+        "ruff-format",
+        "py",
+        _ruff("format", "--check"),
+        on_commit=True,
+        light=True,
+        reads=_RUFF_READS,
+    ),
+    Check("ruff-check", "py", _ruff("check"), on_commit=True, light=True, reads=_RUFF_READS),
     Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
     Check("mypy", "py", _mypy),
     Check(
@@ -1197,6 +1179,7 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _extras,
         on_commit=True,
+        light=True,
         reads=("pyproject.toml", ".github/workflows/", "deploy-linux/", *_GATE),
     ),
     Check(
@@ -1204,6 +1187,7 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _layering,
         on_commit=True,
+        light=True,
         reads=("promptpotter/", "scripts/tests_owning.py", *_GATE),
     ),
     Check(
@@ -1218,13 +1202,14 @@ CHECKS: tuple[Check, ...] = (
         _Probe(_HANDLER_PROBE, judge=_dangling_handlers),
         reads=_ENGINE_RUNTIME,
     ),
-    Check("instruction-files", "py", _instruction_files, on_commit=True, reads=_TREE),
-    Check("doc-claims", "py", _doc_claims, on_commit=True, reads=_TREE),
+    Check("instruction-files", "py", _instruction_files, on_commit=True, light=True, reads=_TREE),
+    Check("doc-claims", "py", _doc_claims, on_commit=True, light=True, reads=_TREE),
     Check(
         "surface-ledger",
         "py",
         lambda _: run([sys.executable, "scripts/complexity_ledger.py", "--check"], REPO),
         on_commit=True,
+        light=True,
         reads=(
             "promptpotter/",
             "tests/",
@@ -1235,7 +1220,7 @@ CHECKS: tuple[Check, ...] = (
         ),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
-    Check("undiffable", "py", _undiffable, on_commit=True, reads=_TREE),
+    Check("undiffable", "py", _undiffable, on_commit=True, light=True, reads=_TREE),
     Check(
         "ts-types",
         "py",
@@ -1300,18 +1285,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
     # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
-    Check(
-        OFFLINE_RUN,
-        "py",
-        lambda _: run(
-            [sys.executable, "scripts/offline_run.py"],
-            REPO,
-            # The clone's, so a worktree's run answers for main and the worktree deletes clean.
-            PROMPTPOTTER_HOME=str(clone_cache() / OFFLINE_RUN),
-        ),
-        landing=True,
-        reads=OFFLINE_RUN_READS,
-    ),
+    Check(OFFLINE_RUN, "py", _offline_run, landing=True, reads=(*OFFLINE_RUN_READS, *_GATE)),
     Check(
         "optimizer-plugin",
         "py",
@@ -1319,7 +1293,7 @@ CHECKS: tuple[Check, ...] = (
         landing=True,
         reads=(*OFFLINE_RUN_READS, f"{_EXAMPLE_PLUGIN_DIR}/", *_GATE),
     ),
-    Check("lockfile", "web", _lockfile, on_commit=True),
+    Check("lockfile", "web", _lockfile, on_commit=True, light=True),
     Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
     Check(
@@ -1423,8 +1397,11 @@ def _lanes(
 
 # The one remote ref a push proves.
 _PROVEN_REF = "refs/heads/main"
-# What a pushed tip's checkout borrows from the pushing tree: its env. Its greens are the clone's.
-_BORROWED = (".venv", "webapp/node_modules")
+# What a pushed tip's checkout borrows from the pushing tree. Its venv and greens are the clone's.
+_BORROWED = ("webapp/node_modules",)
+# The temp dir is the machine's: the clone's tag keeps one clone's sweep off another's checkouts.
+_TIP_CHECKOUT = f"pp-push-{digest(str(clone_root()).encode()).hex()[:8]}-"
+_TIP_NAME = re.compile(rf"{_TIP_CHECKOUT}[0-9a-f]+-(\d+)")
 
 
 def _link(link: Path, target: Path) -> None:
@@ -1436,9 +1413,27 @@ def _link(link: Path, target: Path) -> None:
         link.symlink_to(target, target_is_directory=True)
 
 
+def _unlink_borrowed(tree: Path) -> None:
+    # Each link goes before the tree, so no delete walks into what it points at.
+    for link in (tree / rel for rel in _BORROWED):
+        if link.is_symlink() or link.is_junction():
+            os.unlink(link)
+
+
+def _sweep_tip_checkouts() -> None:
+    """A checkout whose pushing process is gone was hard-killed before its own cleanup."""
+    for tree in Path(tempfile.gettempdir()).glob(f"{_TIP_CHECKOUT}*"):
+        if (named := _TIP_NAME.fullmatch(tree.name)) and not alive(int(named[1])):
+            _unlink_borrowed(tree)
+            shutil.rmtree(tree)
+    code, out = git("worktree", "prune")
+    if code:
+        raise RuntimeError(f"git worktree prune: {out}")
+
+
 @contextlib.contextmanager
 def _tip_checkout(tip: str) -> Iterator[Path]:
-    tree = Path(tempfile.gettempdir()) / f"pp-push-{tip[:12]}-{os.getpid()}"
+    tree = Path(tempfile.gettempdir()) / f"{_TIP_CHECKOUT}{tip[:12]}-{os.getpid()}"
     code, out = git("worktree", "add", "--detach", str(tree), tip)
     if code:
         raise RuntimeError(f"git worktree add {tip}: {out}")
@@ -1448,10 +1443,7 @@ def _tip_checkout(tip: str) -> Iterator[Path]:
             _link(link, (REPO / link.relative_to(tree)).resolve())
         yield tree
     finally:
-        # Each link goes before the tree, so no delete walks into what it points at.
-        for link in links:
-            if link.is_symlink() or link.is_junction():
-                os.unlink(link)
+        _unlink_borrowed(tree)
         code, out = git("worktree", "remove", "-f", "-f", str(tree))
         if code:
             raise RuntimeError(f"git worktree remove {tree}: {out}")
@@ -1463,6 +1455,7 @@ def _prove_tips(refs: str, names: Sequence[str]) -> int:
     # sha is a deletion: no tip to prove.
     pushed = [line.split() for line in refs.splitlines()]
     tips = sorted({sha for _, sha, ref, _ in pushed if ref == _PROVEN_REF and set(sha) != {"0"}})
+    _sweep_tip_checkouts()
     failed = 0
     for tip in tips:
         began = time.monotonic()
@@ -1505,38 +1498,69 @@ def _editable_target() -> Path | None:
     return Path.from_uri(json.loads(record)["url"]).resolve() if record else None
 
 
+def _surplus(uv: str, owner: Path, extras: list[str]) -> list[str]:
+    """What the venv holds that an exact sync to the pinned extras would uninstall."""
+    dry = subprocess.run(
+        [uv, "sync", "--frozen", "--dry-run", *extras],
+        cwd=owner,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if dry.returncode:
+        raise SystemExit(f"gate: `uv sync --dry-run` failed:\n{dry.stdout}{dry.stderr}")
+    said = (dry.stdout + dry.stderr).splitlines()
+
+    def named(sign: str) -> set[str]:
+        return {re.split(r"[=@ ]", ln[3:], maxsplit=1)[0] for ln in said if ln.startswith(sign)}
+
+    # An editable install is reinstalled on every sync: out and in again is no surplus.
+    return sorted(named(" - ") - named(" + "))
+
+
 def _reexec_pinned() -> None:
     # From another interpreter, `mypy` resolves different stubs than `uv.lock` pins.
     if os.environ.get(_REEXEC):
         return
-    # A junctioned `.venv` is its owner's: a sync here would re-point the owner's editable install.
+    # A sync from another tree would re-point the owner's editable install.
     owner = _PINNED.resolve().parent
     extras = [arg for extra in _PINNED_EXTRAS for arg in ("--extra", extra)]
+    exact = f"uv sync --frozen {' '.join(extras)}"
+    uv = shutil.which("uv")
+    if not uv:
+        raise SystemExit(
+            f"gate: `uv` is not on PATH, so the locked env is unreachable.\nRun: {exact}"
+        )
     locked = _install_digest(extras)
     bindir = _PINNED / ("Scripts" if sys.platform == "win32" else "bin")
     python = bindir / ("python.exe" if sys.platform == "win32" else "python")
     stamped = _LOCK_STAMP.exists() and _LOCK_STAMP.read_text() == locked
     target = _editable_target()
-    if python.exists() and stamped and target == owner:
-        if Path(sys.prefix) == _PINNED and target == REPO:
-            return
-    else:
+    fresh = python.exists() and stamped and target == owner
+    if not fresh:
         if owner != REPO:
+            remedy = (
+                f"Run the gate in {owner}: it syncs the clone's venv."
+                if stamped
+                else f"Run `git -C {owner} switch --detach <sha>`, then the gate in {owner}: only "
+                f"that tree syncs the venv, and the switch moves the shared main tree."
+            )
             raise SystemExit(
                 f"gate: {_PINNED} is {owner}'s venv, and the gate never syncs a venv this tree "
                 f"does not own (pins {'match' if stamped else 'differ'}, editable on {target}).\n"
-                f"Run the gate from {owner}, or give this tree its own venv: replace the "
-                f"junction, then `uv sync --frozen --inexact {' '.join(extras)}`."
-            )
-        uv = shutil.which("uv")
-        if not uv:
-            raise SystemExit(
-                "gate: `uv` is not on PATH, so the locked env is unreachable.\n"
-                f"Run: uv sync --frozen --inexact {' '.join(extras)}"
+                f"{remedy}"
             )
         if subprocess.run([uv, "sync", "--frozen", "--inexact", *extras], cwd=REPO).returncode:
             raise SystemExit("gate: `uv sync` could not build the locked env.")
         _LOCK_STAMP.write_text(locked)
+    # `--inexact` keeps what an exact sync would uninstall, so a surplus is refused, never dropped.
+    if surplus := _surplus(uv, owner, extras):
+        raise SystemExit(
+            f"gate: {_PINNED} holds {', '.join(surplus)} beyond the pinned extras, and an optional "
+            f"import loads what the gate would measure. Run in {owner}: {exact}"
+        )
+    if fresh and Path(sys.prefix) == _PINNED and target == REPO:
+        return
     proc = subprocess.run(
         [str(python), __file__, *sys.argv[1:]],
         cwd=REPO,
@@ -1637,8 +1661,9 @@ def main() -> int:
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
-    # The pre-commit set is light and holds a commit open, so it never waits; one CI runner, one gate.
-    queue_behind_siblings(f"gate[{label}]", exempt=bool(args.staged or os.environ.get("CI")))
+    # One CI runner, one gate.
+    light = all(c.light for c in checks)
+    queue_behind_siblings(f"gate[{label}]", exempt=light or bool(os.environ.get("CI")))
     budget = RamBudget.read()
 
     # `--staged` checks less than any key names, so it neither reads nor records a green.

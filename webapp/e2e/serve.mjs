@@ -1,6 +1,6 @@
 // It does not build — `npm run e2e` builds once, since two servers start at once.
 
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,11 +10,25 @@ const WEBAPP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(WEBAPP, "..");
 const PORT = process.env.PP_E2E_PORT || "8123";
 
-// Never a bare `python`: a system interpreter imports promptpotter but not its deps.
+// Never a bare `python`: a system interpreter imports promptpotter but not its deps. The venv is the
+// clone's one (`scripts/processes.py::clone_root`), which a worktree or a pushed tip reads in place.
+const CLONE = path.dirname(
+  execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    cwd: REPO,
+    encoding: "utf8",
+  }).trim(),
+);
 const PYTHON =
   process.platform === "win32"
-    ? path.join(REPO, ".venv", "Scripts", "python.exe")
-    : path.join(REPO, ".venv", "bin", "python");
+    ? path.join(CLONE, ".venv", "Scripts", "python.exe")
+    : path.join(CLONE, ".venv", "bin", "python");
+// That venv's editable install names its owner; the walk serves this tree.
+const PYTHON_ENV = {
+  ...process.env,
+  PYTHONPATH: [REPO, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+  // This interpreter is cp1252; the live display writes box-drawing characters.
+  PYTHONUTF8: "1",
+};
 
 // Auth posture is what tells the worlds apart, so it is an argument: an inherited or `.env` value would decide it unseen.
 const AUTH = process.argv.find((arg) => arg.startsWith("--auth="))?.slice("--auth=".length);
@@ -47,11 +61,7 @@ const home = process.env.PROMPTPOTTER_HOME;
 if (home && process.env.PP_E2E_RESET === "1" && process.env.PP_E2E_KEEP !== "1") {
   const args = [path.join(WEBAPP, "e2e", "reset_world.py"), path.resolve(home)];
   if (process.env.PP_E2E_DROP_CACHES === "1") args.push("--drop-caches");
-  const reset = spawnSync(PYTHON, args, {
-    cwd: REPO,
-    stdio: "inherit",
-    env: { ...process.env, PYTHONUTF8: "1" },
-  });
+  const reset = spawnSync(PYTHON, args, { cwd: REPO, stdio: "inherit", env: PYTHON_ENV });
   if (reset.status !== 0) process.exit(reset.status ?? 2);
 }
 
@@ -88,12 +98,7 @@ const server = spawn(
   {
     cwd: REPO,
     stdio: ["inherit", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      PROMPTPOTTER_AUTH: AUTH,
-      // This interpreter is cp1252; the live display writes box-drawing characters.
-      PYTHONUTF8: "1",
-    },
+    env: { ...PYTHON_ENV, PROMPTPOTTER_AUTH: AUTH },
   },
 );
 tee(server.stdout, process.stdout);

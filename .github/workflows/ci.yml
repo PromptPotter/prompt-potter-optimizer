@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# A new push to a PR cancels the run of the commit it replaces. A push to main groups by commit,
+# so no merged commit's run is ever cancelled or left queued behind the next one.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
 # Every job checks out and reads; none writes to the repository, a PR or a check.
 permissions:
   contents: read

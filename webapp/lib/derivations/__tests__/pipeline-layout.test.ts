@@ -147,6 +147,7 @@ describe("layoutGrid on the served potter view", () => {
   });
 
   it("holds its text, folds into its box, and routes no edge through a node", () => {
+    const faults: string[] = [];
     for (const [name, sub] of Object.entries(SUBS)) {
       const folds = new Set<number>();
       for (let maxW = 80; maxW <= 1000; maxW += 10) {
@@ -154,40 +155,57 @@ describe("layoutGrid on the served potter view", () => {
         const at = `${name} @ ${maxW}px, ${out.cols} cols`;
         folds.add(out.cols);
         const boxes = boxesOf(out);
+        const spot = (b: Box) =>
+          `${b.id} [${b.x0.toFixed(1)},${b.y0.toFixed(1)} ${b.x1.toFixed(1)},${b.y1.toFixed(1)}]`;
 
         for (const b of boxes) {
-          expect(b.x0, `${b.id} left, ${at}`).toBeGreaterThanOrEqual(0);
-          expect(b.x1, `${b.id} right, ${at}`).toBeLessThanOrEqual(out.width);
-          expect(b.y1, `${b.id} bottom, ${at}`).toBeLessThanOrEqual(out.height);
+          if (b.x0 < 0) faults.push(`left ${spot(b)}, ${at}`);
+          if (b.x1 > out.width) faults.push(`right ${spot(b)} past ${out.width}, ${at}`);
+          if (b.y0 < 0) faults.push(`top ${spot(b)}, ${at}`);
+          if (b.y1 > out.height) faults.push(`bottom ${spot(b)} past ${out.height}, ${at}`);
         }
-        if (maxW >= out.cell + 14) expect(out.width, at).toBeLessThanOrEqual(maxW);
+        if (maxW >= out.cell + 14 && out.width > maxW) {
+          faults.push(`width ${out.width} past ${maxW}, ${at}`);
+        }
 
         for (const a of boxes) {
           for (const b of boxes) {
             if (a.id === b.id || out.pos.get(a.id)!.row !== out.pos.get(b.id)!.row) continue;
-            expect(overlap(a, b), `${a.id} meets ${b.id}, ${at}`).toBe(false);
+            if (overlap(a, b)) faults.push(`${spot(a)} meets ${spot(b)}, ${at}`);
           }
         }
 
-        expect(out.edges.map((e) => `${e.from}>${e.to}`)).toContain("escalation>adaptive_queue");
+        const present = out.edges.map((e) => `${e.from}>${e.to}`);
+        if (!present.includes("escalation>adaptive_queue")) {
+          faults.push(`loop edge missing among [${present.join(", ")}], ${at}`);
+        }
         for (const e of out.edges) {
           const pts = sample(e.d);
+          if (pts.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))) {
+            faults.push(`${e.from}>${e.to} has a non-finite coordinate in "${e.d}", ${at}`);
+            continue;
+          }
           for (const b of boxes) {
             if (b.id === e.from || b.id === e.to) continue;
             const hit = pts.find((p) => inside(b, p));
-            expect(hit, `${e.from}>${e.to} crosses ${b.id}, ${at}`).toBeUndefined();
+            if (hit) {
+              faults.push(
+                `${e.from}>${e.to} crosses ${spot(b)} at ${hit[0].toFixed(1)},${hit[1].toFixed(1)}, ${at}`,
+              );
+            }
           }
         }
 
         for (const [id, p] of out.pos) {
-          expect(p.label.join(""), `${id}, ${at}`).toBe(id);
-          expect(p.sub.join(""), `${id}, ${at}`).toBe(sub(id));
+          if (p.label.join("") !== id) faults.push(`${id} label "${p.label.join("")}", ${at}`);
+          if (p.sub.join("") !== sub(id)) faults.push(`${id} sub "${p.sub.join("")}", ${at}`);
         }
       }
       for (const cols of [1, 2, 3, 4, 5, 6]) {
-        expect(folds.has(cols), `${name} folds to ${cols}`).toBe(true);
+        if (!folds.has(cols)) faults.push(`${name} never folds to ${cols}`);
       }
     }
+    expect(faults.slice(0, 30), `${faults.length} faults`).toEqual([]);
   });
 
   it("draws no text on a compact level, a dot per cell", () => {

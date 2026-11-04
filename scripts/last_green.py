@@ -118,6 +118,7 @@ class LastGreen:
 
     def record(self, verdicts: Mapping[str, str | None]) -> None:
         """A key files a green beside the others; ``None`` drops every green the check holds."""
+        # Loaded here, beside the write: a sibling gate's greens recorded meanwhile are kept.
         green = self._load()
         for name, key in verdicts.items():
             if key is None:
@@ -125,6 +126,11 @@ class LastGreen:
             else:
                 kept = [k for k in green.get(name, ()) if k != key]
                 green[name] = [*kept, key][-self._KEPT :]
-        self._store.write_text(
-            json.dumps({"green": green}, indent=1, sort_keys=True), encoding="utf-8"
-        )
+        staged = self._store.with_name(f"{self._store.name}.{os.getpid()}.tmp")
+        try:
+            staged.write_text(
+                json.dumps({"green": green}, indent=1, sort_keys=True), encoding="utf-8"
+            )
+            os.replace(staged, self._store)
+        finally:
+            staged.unlink(missing_ok=True)

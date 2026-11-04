@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING, Any, get_args
 
 import tests_owning
 import yaml
-from gate import RamBudget
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from offline_world import (
     LABELS,
@@ -43,8 +42,9 @@ from offline_world import (
     draw,
     install_network,
 )
-from processes import REPO, end_children_with_this_process, queue_behind_siblings
+from processes import REPO, RamBudget, end_children_with_this_process, queue_behind_siblings
 
+import promptpotter
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -202,7 +202,13 @@ def _marks(text: str) -> list[int]:
 
 
 _AXIS_MENU = re.compile(r"EXACTLY one of: (.+)")
-_TASK_CONTEXT = "TASK CONTEXT:\n"
+# A cited panel, by the heading it opens on: the framing where the leg's config renders one.
+FRAMING = ("task_context", "TASK CONTEXT:\n")
+TALLY = ("answer_distribution", "ANSWER DISTRIBUTION (")
+
+
+def cited_panel(config: CampaignConfig) -> tuple[str, str]:
+    return FRAMING if config.task_framing == "committed" else TALLY
 
 
 def _axis_menu(prompt: str) -> list[str]:
@@ -298,11 +304,13 @@ class ByCallIdentity:
         capture: Path,
         templates: dict[str, str],
         *,
+        cites: tuple[str, str],
         rebasing: bool = False,
         crossing: bool = False,
     ) -> None:
         self.capture = capture
         self.templates = templates
+        self.cites = cites
         self.rebasing = rebasing
         self.crossing = crossing
         self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
@@ -418,15 +426,11 @@ class ByCallIdentity:
         v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
         grounding = filler.resolve(item["properties"]["evidence_grounding"])
         cited = filler.resolve(grounding["properties"]["field"])["enum"]
-        # A citation quotes the panel it names: the framing, at an offset that is the call's, not the text's.
-        assert "task_context" in cited and _TASK_CONTEXT in prompt, (
-            "offline run: no framing to cite"
-        )
-        start = prompt.index(_TASK_CONTEXT) + len(_TASK_CONTEXT) + draw("cite", generation, i) % 20
-        v["evidence_grounding"] = {
-            "field": "task_context",
-            "citation": prompt[start : start + 40],
-        }
+        # A citation quotes the panel it names, at an offset that is the call's, not the text's.
+        field, heading = self.cites
+        assert field in cited and heading in prompt, f"offline run: no {field} panel to cite"
+        start = prompt.index(heading) + len(heading) + draw("cite", generation, i) % 20
+        v["evidence_grounding"] = {"field": field, "citation": prompt[start : start + 40]}
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
         offered = item["properties"]["prompt_fields_updates"]["properties"]
         second = ("thinking_style",) if self.crossing else ()
@@ -610,10 +614,18 @@ class Harness:
 
     @classmethod
     def installed(
-        cls, out: Path, templates: dict[str, str], samples: list[Sample], *, crossing: bool
+        cls,
+        out: Path,
+        config: CampaignConfig,
+        templates: dict[str, str],
+        samples: list[Sample],
+        *,
+        crossing: bool,
     ) -> Harness:
         (out / "requests").mkdir(parents=True)
-        llm = ByCallIdentity(out / "requests", templates, crossing=crossing)
+        llm = ByCallIdentity(
+            out / "requests", templates, cites=cited_panel(config), crossing=crossing
+        )
         backend = FakeBackend(samples)
         router = Router(FakeLLM(llm), backend)
         install_network(router)
@@ -640,7 +652,7 @@ async def run_one(
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
     harness = Harness.installed(
-        out, text_templates(config), samples, crossing=crossover is not None
+        out, config, text_templates(config), samples, crossing=crossover is not None
     )
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
@@ -749,7 +761,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     )
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()
-    llm = ByCallIdentity(workspace / "requests", text_templates(config))
+    llm = ByCallIdentity(workspace / "requests", text_templates(config), cites=cited_panel(config))
     # A rewind lands on a round holding a θ level, which only a ruler spanning the rows gives.
     install_network(Router(FakeLLM(llm), FakeBackend(samples, hardness=REBASE_HARDNESS)))
     stores = build_stores(default_identity(), projects_root=default_projects_root())
@@ -803,7 +815,7 @@ def run_terminal(
     samples = synthetic_rows(rows)
     requests = workspace / f"requests-{verb}"
     requests.mkdir()
-    llm = FakeLLM(ByCallIdentity(requests, text_templates(config)))
+    llm = FakeLLM(ByCallIdentity(requests, text_templates(config), cites=cited_panel(config)))
     install_network(Router(llm, FakeBackend(samples, interrupts=interrupts)))
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
@@ -868,7 +880,9 @@ async def run_arms(
     templates = {
         node: t for config in configs.values() for node, t in text_templates(config).items()
     }
-    harness = Harness.installed(workspace / "arms", templates, samples, crossing=False)
+    harness = Harness.installed(
+        workspace / "arms", configs[names[0]], templates, samples, crossing=False
+    )
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
     session = await open_session(DATASET, stores=stores)
@@ -1417,6 +1431,14 @@ def proven_home(workspace: Path) -> None:
         )
 
 
+def refuse_another_tree() -> None:
+    if not (imported := Path(promptpotter.__file__).resolve().parent).is_relative_to(REPO):
+        raise SystemExit(
+            f"offline run: this interpreter imports {imported}, not {REPO}'s package, so the "
+            f"run would answer for that other tree; set PYTHONPATH={REPO}"
+        )
+
+
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
@@ -1498,6 +1520,7 @@ def main() -> int:
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
+    refuse_another_tree()
     if args.digests:
         print(json.dumps(digests(), indent=1))
         return 0

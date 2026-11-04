@@ -241,6 +241,15 @@ addopts = "-q --tb=short --no-header"
 filterwarnings = ["ignore::RuntimeWarning"]
 
 [tool.mypy]
+# The plug point's example is its own distribution, typechecked so a contract change breaks it.
+files = [
+    "promptpotter",
+    "scripts",
+    "tests",
+    "paper/bbeh-comparison/bbeh_potter_runner.py",
+    "examples/optimizer-plugin/example_optimizer",
+]
+mypy_path = ["paper/bbeh-comparison", "examples/optimizer-plugin"]
 python_version = "3.13"
 strict = true
 warn_unreachable = true

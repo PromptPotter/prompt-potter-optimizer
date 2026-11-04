@@ -21,17 +21,18 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 the pause and the resume rather than the search) and `--rows` (the synthetic bank) size it.
 `--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`application/embedded_run.py::grade_bench`), so
 its `decisions.json` holds the same rounds and headline as the default `at_end` run's.
-Run it from the tree under test with that tree's own venv — a worktree probe run through another
-tree's interpreter answers for that other tree.
+It refuses an interpreter whose `promptpotter` is another tree's, naming the `PYTHONPATH` that
+pins its own: a worktree run through the main tree's venv would answer for the main tree.
 
-**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in the
-clone's home (`processes.py::clone_cache`, one for every worktree) — whenever a file the engine runs from has changed since it was last green, so an
+**The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments and then
+`--controlled`, each in its own home of the clone's (`processes.py::clone_cache`, one for every
+worktree) — whenever a file the engine runs from has changed since it was last green, so an
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
 docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-push
 hook runs it on a tip pushed to main** with every other CI check (`gate.py --push`; any other branch
 pushes unproven), in a throwaway `git worktree` of that tip
-borrowing the pushing tree's `.venv` and `webapp/node_modules` as links
-(`gate.py::_tip_checkout`), so its verdict is the tip's whatever the working tree holds. The green
+on the clone's venv, borrowing the pushing tree's `webapp/node_modules` as a link
+(`gate.py::_tip_checkout`); the next push sweeps one a hard kill left. Its verdict is the tip's whatever the working tree holds. The green
 store is the clone's (`last_green.py::LastGreen`), keyed by content, so a tip already green in any
 worktree is a stamp read. The pre-commit hook and `--changed` leave it out: it proves a
 landing, not an edit. CI runs it on every push.
@@ -71,7 +72,7 @@ foreign campaign moved the decisions is printed as a reading. `head_to_head.json
 One workspace per optimizer, `<home>/<optimizer>/`, because the measurement archive and the δ ruler
 pool across the campaigns of one workspace — a shared one lets one optimizer's run move another's
 decisions. Each campaign is a child process, as many at once as free memory holds
-(`scripts/gate.py::RamBudget`), never past the core count or `OFFLINE_RUN_CHILDREN_MAX`. In each workspace:
+(`scripts/processes.py::RamBudget`), never past the core count or `OFFLINE_RUN_CHILDREN_MAX`. In each workspace:
 
 | Path | What it is |
 |---|---|
