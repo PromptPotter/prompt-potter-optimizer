@@ -1464,9 +1464,10 @@ def _prove_tips(refs: str, names: Sequence[str]) -> int:
     return 1 if failed else 0
 
 
+# The one list of the env every verdict is taken in; CI's and a release's gate build it too.
 # `api`, `mcp`: mypy resolves fastapi and the MCP SDK. `harbor`, `dspy`, `mcp`: a test skipped
-# for a missing extra never ran.
-_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel", "mcp")
+# for a missing extra never ran. `benchmarks`: the hub datasets the box offers start here too.
+_PINNED_EXTRAS = ("dev", "api", "harbor", "dspy", "excel", "mcp", "benchmarks")
 # What decides the installed env; a tool table (`[tool.ruff]`, `[tool.deptry]`) does not.
 _INSTALL_KEYS = ("dependencies", "optional-dependencies", "requires-python")
 _LOCK_STAMP = _PINNED / "gate-lock.sha256"

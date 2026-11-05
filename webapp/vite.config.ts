@@ -2,7 +2,7 @@ import path from "node:path";
 import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from "vite";
-import { brandOf, softwareApplicationLd, type Brand } from "./lib/brand-of";
+import { brandOf, softwareApplicationLd, type Brand } from "./lib/brand-of.ts";
 
 const WEBAPP = import.meta.dirname;
 const APP = path.join(WEBAPP, "app");

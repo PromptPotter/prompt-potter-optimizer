@@ -16,6 +16,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noEmit": true,
+    // Vite's native config loader resolves no extensionless relative import.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

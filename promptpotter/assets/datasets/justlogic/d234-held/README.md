@@ -1,4 +1,4 @@
-# JustLogic d234, held — the same pools under a 150-row bench
+# JustLogic d234 — a 150-row bench for head-to-heads
 
 [`justlogic/d234`](../d234/README.md) with a wider bench and nothing else moved. The
 task, the pin and the `:nitro` trade are that file's; this one states only the cut.

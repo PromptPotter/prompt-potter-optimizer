@@ -30,17 +30,12 @@ jobs:
         with:
           enable-cache: true
 
-      # The extras are `scripts/gate.py::_PINNED_EXTRAS`, the env the verdict is taken in; one
-      # missing here reads green at the desk and red on CI (litellm, reached through `harbor`).
-      - name: Install dependencies
-        run: uv sync --extra dev --extra api --extra harbor --extra dspy --extra excel --frozen
-
       # One step, and deliberately: `scripts/gate.py` is the single declaration of
       # what this repo checks, so the desk and CI cannot drift apart. It also runs
       # every check even after one fails — as named steps these masked each other,
       # and each hidden failure cost another push to discover.
       - name: Gate
-        run: uv run python scripts/gate.py --py
+        run: uv run --frozen python scripts/gate.py --py
 
   # The wheel is a shape we ship and never run. In a checkout `assets/webapp/` — a tree
   # the wheel serves — is read by no dev run and no test, and `pyproject.toml`'s

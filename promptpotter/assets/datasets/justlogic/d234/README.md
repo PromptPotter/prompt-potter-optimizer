@@ -1,4 +1,4 @@
-# JustLogic d234 — the live L4 inner instrument
+# JustLogic d234 — deductive reasoning, depths 2 to 4
 
 3-class deductive reasoning (Chen 2025, `michaelchenkj/JustLogic`, [arXiv 2501.14851](https://arxiv.org/abs/2501.14851)):
 given a paragraph of logical premises and a claim, answer `TRUE` / `FALSE` / `Uncertain`. Synthetic

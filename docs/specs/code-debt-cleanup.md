@@ -53,6 +53,228 @@ acting.
 
 **Rides with:** the next arc's first builder wave.
 
+### The excision pass (six layer audits and a plan review, 2026-11-05)
+
+One read-only audit per layer, each tracing a real path end to end; then four reviewers read the plan
+for transition code, coherence, the risky cuts and the layers no audit walked. Each action is the
+largest cut that holds: the layer goes unless something in it varies, and no arc builds on a shape a
+later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](roadmap.md) § The crunch
+(operator, 2026-11-04).
+
+**Decided once, read by every arc below.**
+- **Two carriers.** The run's `RunScope` (§ Config resolution and run scope, item 4), bound once where the
+  cycle opens, carries the plan, the ledger and the sender. The member's node context yields a per-call
+  context holding node, config, round and index only. A `ContextVar` that stays propagates within one
+  task. U2 binds `RunScope`, S fills its sender, the potter arc deletes the bundle. **Re-test:**
+  `git grep -c "ContextVar(" -- promptpotter`.
+- **One subject.** A `Subject` (path, candidate, at, mask) in `domain/cycle_paths.py`; the hash,
+  `?descend=`, the evidence string (`read_params.py::EvidenceParams`, rebuilt by `api/reads.ts::subjectKey`)
+  and the hierarchy addresses are its encodings. EA owns it; EW and U5 read it.
+- **View state.** Whatever names the viewed thing (subject, candidate, at, view keys, round pick, sample
+  set) lives in the hash; a module store holds only transient state.
+- **One fold vocabulary**: a `Projection` on `read_model.py::LedgerIndex`. `LedgerFold.feed`, the tracing
+  sinks' `on_*` and the `RunCallbacks` doors go (U3).
+- **One word per thing.** "Arm" is the round's; a head-to-head's arms become `RunStart`s (U2).
+  `poll.tsx::useCycleStream` is the dashboard poll, not the event stream, and is renamed for it (EW). A
+  host task is a command id (EA).
+
+**Batch E: each cut lands final.**
+- **EA: each read is spelled three times**: a `command_kinds.py::ReadKind` row, a params class and a
+  hand-written route, which `catalogue.py::bind_surface` asserts agree; most routes only forward, and the
+  CLI reads past the catalogue (`cycles` keeps its own lifecycle default; `application/views/evidence.py`,
+  the largest view, has the CLI as its only reader; six CLI sites resolve a campaign-id hint each). A
+  running act's status and stop live only in MCP memory (`host_surface.py::_cancel_task`,
+  `host_surface.py::cancel_acts`): REST serves no job read and the webapp has no stop for verify or bench.
+  Action: each read's params declare its path and method, one loop mounts every row and `bind_surface`
+  goes; the CLI read verbs derive from the rows and resolve their `Subject` once; MCP's double dispatch and
+  second rate draw fold into one admit; a task is a command id, its status a read row over the jobs
+  `run_records.py::LaunchedEffect` already names, its cancel one command on every entry point. The
+  hand-typed launch routes stay for U2. **Re-test:**
+  `git grep -cE "^\s+return (await )?read\.answer\(caller\)$" -- promptpotter/presentation`;
+  `git grep -n "def _cancel_task" -- promptpotter`.
+- **EW: the webapp's providers re-store the read cache.** `lib/read-cache.ts` keeps one body and one flight
+  per id, yet the registry, cycle-stream, lineage, hard-samples and connector providers mirror it, and other
+  callers need second doors (`poll.tsx::useDashboardAt`, `hard-samples.tsx::usePresetCells`). Read hooks
+  re-encode the read result into their own loading and failure records and rename served fields;
+  `useCandidatesModel.ts::useCandidatesModel`, `useRemoteModel.ts::useRemoteModel` and
+  `useChannelModel.ts::useChannelModel` hand bags of context down as props; `ingest-flow.tsx::IngestFlowProvider`
+  re-exposes the workspace; `lib/api/types.ts` re-exports generated types by hand beside two more doors.
+  Each provider also holds a singleton a bare hook would multiply: `poll.tsx::CycleStreamProvider`
+  invalidates on a phase change, slows when the connection drops, keeps the dashboard across `at` re-keys
+  and reports a gone cycle once; `useServedCriterion.ts::useScoringMaskSeed` must seed the mask before a
+  cycle's first tree goes out. `lib/read-cache.ts` has no subscription, and a re-ask deletes the flight in
+  the air. Action: a read's descriptor declares its cadence, keep key, accept predicate, gone reporter and
+  change effects, and the cache runs each once per id and exposes `subscribe`; one hook per read; a derived
+  index memoizes on the body it read; the mask seed is part of the tree read's key; state that names no
+  view (lens, debounce, scope, ranking, lifecycle filter) moves to module stores; components read wire
+  names; `useChannelModel`'s bag and the providers go; one type door. The selection half
+  (`SelectionContext.tsx`, `useCandidatesModel`, the workspace's keying) is U5's, `useRemoteModel` B's.
+  **Re-test:** `git grep -c "Provider value=" -- webapp/lib`.
+- **EN: a draft spells its config flat; the pipeline answer is flattened, re-packed and edited twice.**
+  `domain/checkin_draft.py::DraftFile`, `domain/draft_edit.py::EditDraftPatch` and `draft_campaign.py::DraftCampaign`
+  each hold the declaration as five flat fields (`scoring_matcher`, `scoring_dials`, `pipeline_overlay`,
+  `pipeline_steps`, `optimization_overrides`). Two functions rebuild a `CampaignConfig` from them, one per
+  basis; the scoring conversion loses a pinned formula's anchors both ways; one bag holds node config and
+  narrowing, split by `isinstance`; the kept steps are a list turned into exclusions. Nothing varies:
+  `authored.py::with_optimization` already lays a delta over a config. `draft_build.py::draft_wire`
+  flattens it into the draft; `useConnector.ts::draftConnector` re-packs it into
+  `types/connector.ts::ConnectorView` beside a second read-state vocabulary, `types/connector.ts::PipelineStatus`.
+  Two editors edit one config row with two parsers (`node-config.ts::parseKnob` beside
+  `node-config.ts::coerce`), behind `NodeSurface`, `NodeConfigEditor` and `PromptWithLibrary` forwarding
+  to each other. Action: the draft holds one partial `CampaignConfig` laid over its basis, and the patch
+  addresses config paths; the five fields and their converters go, absorbing the `DraftCampaign` twin and
+  the optimizer-switch row of `draft_patch.py`; `draft.json` is run data, so it is wiped. The draft carries
+  the pipeline response whole; `ConnectorView` and `PipelineStatus` go and `useConnector` returns the read
+  result. The one node editor, with the strict parser, is U1b's. **Re-test:**
+  `git grep -c "scoring_dials" -- promptpotter`; `git grep -n "interface ConnectorView" -- webapp`.
+- **ED: nothing says who a dataset or a word is for.** The wheel ships every definition under
+  `assets/datasets/` though only `email-tagging` and the hub-backed `justlogic` cuts are startable product;
+  `promptpotter-self` (the L4 panel and the browser-walk fixture) is research and test tooling, and an
+  unset `DATASET_OFFER` treats every pip user as a developer. `formula/compiler.py::CELL_TERMS` serves nine
+  "L4:" per-cell terms on every campaign, so every criterion's term menu offers them. The card is parsed
+  out of README prose by `dataset_access.py::_read_heading` (the heading verbatim as the title, the
+  description cut at the first ". ", so "Yang et al." ends it), and a node's `description:` with its
+  research notes is served on screen. `startability.py::dataset_reading` refuses on the source's extra
+  before reading the bank, though a bank on disk starts without it, and `extras.py::install_hint` names pip.
+  Action: where a definition lives says what it is. The wheel holds only what a user may start;
+  `promptpotter-self` moves to a research tier, never listed, so an L4 campaign shows only because it
+  exists. A tenant dataset cannot be that tier: `dataset_access.py::definition_chain` lays no family or
+  default under it. So the resolved dataset carries its tier root, the chain lays the install root's
+  `defaults.yaml` under the research tier, the research root is a `Stores` field defaulted from a setting
+  (unset: none) and carried by `JobSpec` and the inner spawn context, and a name resolves tenant, install,
+  then research, refused where two tiers hold it. Each connector declares its cell vocabulary as data on
+  the pipeline answer, not a `Worded` table: the `promptpotter` connector its nine terms, named with the
+  held-out word now so U4 renames nothing (`held_out` and `Sample.bench_only` become one word here);
+  `inner` and `mean_bench_lift` leave the core cell, and `evaluators.py::CELL_TERM_META` keeps the core
+  terms. The card's title and summary are declared fields and every served description is product copy;
+  a held bank starts and only a fetch needs the extra, refusing with its uv command. Owns
+  `connectors/protocol.py` and `runner/inner/connector.py` too, and shares the pipeline answer's model
+  with EN. Wipes run data and re-keys the estimator digest. **Re-test:**
+  `git grep -c '"L4: ' -- promptpotter/application/scoring/formula/compiler.py`.
+- **EM: `domain/wire_record.py::WireRecord` is a second model framework beside pydantic**: a
+  source generator (exec plus linecache) behind six classes, each shadowed by a `TypedDict` and bridged
+  back through `__get_pydantic_core_schema__`. What varies is speed only ("no per-cell field loop").
+  Action: time a cold fold of a large ledger both ways; where pydantic holds, the generator goes and the
+  six classes are plain frozen models. **Re-test:** `git grep -n "class WireRecord" -- promptpotter`.
+
+**Batch 3: the run's start (U2) and the potter arc (U1b with EP).**
+- **Five doors and three job lifecycles meet in one `HeldRun`.** `jobs/launcher/launch.py::_hold`
+  switches over three request types; a head-to-head mints through a second door and plans and prices
+  before admission, while a single launch admits first; `embedded_run.py::run_campaign` and
+  `runner/inner/spawn.py::_open_seat` mint or resume their own way; `admission.py::embedded_share` and
+  `admission.py::inner_share` copy one lifecycle beside `run_job.py::run_held_job`. The detached child
+  rebuilds its plan through `run_job.py::open_held_cycle` and `mint.py::resolve_resume` (the drift
+  check), while the inline path runs the mint's session: two sessions for one run. What varies, and
+  stays: what starts (a mint, a cycle, a check-in, mint-or-continue), its admission (a slot that may
+  queue only when one run is asked, no slot, the enclosing book, carried by a fork) and how it runs
+  (detached, inline, a task); a plan holds a `Session` and cannot cross the process boundary. Action:
+  `start(RunStart × N) → [Launched(job, held or none)]`, a `RunStart` holding those three fields; the
+  running process builds its `HeldRun` by one drift-checked `open_cycle(hop)`, which binds `RunScope`; a
+  fork is `open_cycle` under a carried admission inside `run()`, never through `start`. The two
+  `run_records.py::RunWiringRecord` writes stay: they record two moments (declared and admitted budget).
+  **Re-test:** `git grep -c "release_slot(\|job_registry.release(" -- promptpotter`.
+- **Run init is five modules in the wrong order.** `runner/entry.py::run_optimization`'s preamble,
+  `runner/run_prep.py::prepare_run`, `origin.py::establish_campaign_origin` and
+  `initialization/loop_start.py::finalize_loop_state` write `session.state` from eight modules, and ORIGIN
+  starts before INIT. Action: `open_cycle` in `runner/`, INIT then ORIGIN; it is § Config resolution
+  items 4 and 5 made concrete. **Re-test:** `git grep -c "session.state.[a-z_]* =" -- promptpotter/application`.
+- **Round 0 has two doors.** `origin.py::establish_campaign_origin` walks it before the cycle exists;
+  `bench/node_context.py::rewalk_origin` walks it again for the gate and the repair. Seated from outside
+  the walk and kept: `origin.py::try_inherit_fork_origin` (a fork's concluded origin), a standing origin,
+  and an empty bank. `origin.py::lock_criterion` changes the scorer's id, which keys the difficulty
+  ruler, `bench/difficulty.py::DifficultyView` and `indexes/sample.py::SampleIndex`. Action: round 0 is
+  seated unmeasured, inherited or standing (an empty bank seats no cells), and walked only inside the round
+  loop; its close locks the criterion, re-opens the scorer-keyed state and carries the origin's accuracy
+  and formula, which INIT's exit stops serving; the bench pass and its set-aside run after the gate.
+  Absorbs § The origin gate (batch-2 reviews, 2026-11-05). **Re-test:**
+  `git grep -n "def establish_campaign_origin" -- promptpotter`.
+- **Each entry point builds its own answer to a launch**, though the ack's `run_records.py::LaunchedEffect`
+  records the job. Action: the dispatcher computes one wire answer (the applied model, else the launched
+  jobs, else the record); `checkin.py::StartCheckinResponse` and `launcher/head_to_head.py::HeadToHeadStarted` stop
+  being wire models. **Re-test:** `git grep -n "class StartCheckinResponse" -- promptpotter`.
+- **`--diag` mints a sibling cycle** (`commands/launching.py::_diag_target`) and `potter/generation_only.py`
+  drives its rounds a second way. Action: an unmeasured mode on `RunStart` that the round loop reads;
+  both go. Shares `generation_only.py` with the potter arc. **Re-test:** `git grep -n "def mint_diag_sibling" -- promptpotter`.
+- **The test builders replay production by hand**: `tests/factories.py::seat` builds a cycle as run init
+  does, `tests/factories.py::close_round` replays the runner's append order, and two more mint "as the mint
+  does". Action: they call `open_cycle` and the mint. **Re-test:** `git grep -c "def seat(" -- tests/factories.py`.
+- **The potter arc (U1b with EP): potter's calls bypass the bench's call door**, and its prompt is a class
+  U1b deletes, so the two land as one arc and one re-key. The peers ask through `node_context.py::Calls`;
+  potter builds each call by hand (`dispatch/facade.py::build_bundle`, then `llm_call.py::run_optimizer_node`)
+  and handles one fault four ways, one silently: the round's adapter step runs under `graceful`, so a
+  failed critique is only logged. `escalation/firing.py::Layer` and `escalation/firing.py::TransitionResult`
+  are a second member protocol; `dispatch/bundle.py::InjectionBundle` hand-copies run state for every
+  renderer; `escalation/rules.py::_first_match` runs a fixed rule table. The fitness formula has a second,
+  short spelling (`evaluators.py::resolve_cell_formula`) that only ever reads "fit", banked on four views
+  and every arm record. Action: `Calls.ask(prompt, reply=Model)` with one fault policy, and
+  `run_optimizer_node` goes; renderers read a potter-owned view of the node context and the ladder, its
+  derived reads in a hashed potter module so a prompt change still re-keys, each signal's reads
+  satisfiable wherever it renders; the rules three match functions that keep the rule name
+  `escalation/rules.py::EscalationEvent` stamps; one formula spelling, the anchors off the records.
+  Rewritten modules land at Wave C's paths. **Re-test:** `git grep -n "class InjectionBundle" -- promptpotter`.
+
+**Batch 4: the ledger (U3, with ET) and spend (S).**
+- **U3: the ledger read stack.** Three push paths (`ledger.py::CycleEventLog` subscribers,
+  `read_model.py::appended_here` and `event_stream.py::CycleLedgerTail` re-reading bytes into its own feed),
+  three fold protocols, every `CycleEventLog.open` re-counting the ledger, store accessors four hops deep,
+  and `live_dashboard/projection.py::DashboardCheckout` writing a `dashboard.json` only
+  `scripts/offline_run.py` reads. Action: `RunScope`'s ledger is the one producer door (`RunCallbacks` and
+  the telemetry `emit_*` go); `LedgerIndex` the one live fold with the writing projections on it;
+  accessors `append` and `last`; the audit sidecar a fold. **Re-test:** `git grep -c "CycleEventLog.open(" -- promptpotter`.
+- **ET, inside U3: tracing translates the ledger twice.** `tracing/bridge.py::TracingProjection` re-encodes
+  records into a sink vocabulary, `tracing/langfuse_sink.py::LangfuseSink` re-encodes it again over
+  `tracing/langfuse_client.py::LangfuseLogger`; `tracing/file_sink.py::FileSink` has no reader. Action:
+  Langfuse and MLflow are each a writing projection on `LedgerIndex` over the typed records; the
+  translator, the fan-out and the file sink go. [`architecture.md`](../architecture.md) §0.5 names
+  "Langfuse-shape events" as the tracing bucket's foundation; that line becomes the projections in the
+  same commit (operator, 2026-11-05). **Re-test:** `git grep -n "class FileSink" -- promptpotter`.
+- **U3: the ledger is narrated twice.** `views/readout.py::ReadoutProjection` (the readout log) and
+  `domain/activity.py::ActivityFeed` (the chat) each word the same record kinds their own way, each with
+  its own hold dedupe and arm labels, and the words already drift; announced arms are folded in five
+  places. What varies is only verbosity and lifetime. Action: one narration table from record to `Said`
+  with a lifetime: the readout log writes it as lines, the chat keeps the latest per lifetime, and the
+  round tables render from fold state. **Re-test:** `git grep -c "AnnouncedArms" -- promptpotter`.
+- **U3: one phase act is said three ways, and render text is banked on the ledger.**
+  `run_records.py::PhaseRecord` carries a phase string, an untyped event string and a view whose kind
+  repeats both; five folds switch on them. `InitEnterView` banks fields nothing reads and display text
+  (a cut prompt preview, a short cycle id), and `view_models.py::ViewContext` is a mutable bag on
+  `RunCallbacks` that a fork inherits. Action: the typed act is the record, phase and event derive from
+  it, text is computed at render, and `ViewContext` goes. **Re-test:** `git grep -n "class ViewContext" -- promptpotter`.
+- **S: spend is booked twice and folded many times.** `wallet_store.py::HeldCharge` and
+  `wallet_store.py::BilledCharge` repeat `run_records.py::SpendHoldRecord` and `run_records.py::TokenUsageRecord`;
+  `spend_book.py::SpendBook` counts through its ledger subscription and through admission.
+  `spend_book.py::Admission` writes each home differently: a bill lands on the run's ledger, on the root's
+  rewritten copy and on the account; a failed hold and a muted ledger reach the account only; a replay
+  reaches the ledger only. One send reads about fifteen `ContextVar`s, and `jobs/coupon.py::keyed_client`
+  rebuilds the client per call (it reads the key and grant files, re-folds the charges and hashes the
+  key). Action: one charge value (hold id, key source, kind, model, provider, cost, rate, tokens, ledger,
+  timestamp) that the ledger records embed; the account takes each send once, at the root, never a
+  replay or a mirror; one fold parameterized by subject (the account, a campaign with its tombstones, a
+  cycle's own lines) and meter; the sender (key, pacing, book, charges, reuse cache) built once at the
+  account bind, on `RunScope`. `charges.jsonl` is a survivor: its migration maps each line one to one and
+  keeps its timestamp. The ledger records' reshape wipes run data. **Re-test:**
+  `git grep -n "class HeldCharge" -- promptpotter`.
+
+**Batch 5 and after.**
+- **U5: one viewed searchpoint.** Six hosts assemble a picked arm from several reads each, the Leader and
+  the inspector show one pick at once, three shapes describe one program, and `SelectionContext.tsx::SelectionProvider`
+  keys a pick beside the hash; the Leader shows the pick by default, so one pick renders twice. Action
+  (operator, 2026-11-05): one searchpoint read and one rendering that hosts give identity only; the Leader
+  always shows the leader; the pick lives in the hash and renders once, where
+  `ScoringInspector.tsx::ScoringInspector` stands, a region A4 keeps. EW's selection half lands here, so
+  every candidate component is rewritten once: `SelectionContext.tsx`, `useCandidatesModel`'s bag and the
+  workspace's four-way address become the `Subject` and the served arm row. **Re-test:** `git grep -n "searchpointCopyChoices(" -- webapp`.
+- **D: the catch-up pool.** `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
+  one implementation, looped bench → race → bench. Action: the bench owns the pool and the race exposes
+  only its priors. **Re-test:** `git grep -c "NoCatchUps" -- promptpotter`.
+- **INVESTIGATE: each resume decision is spelled twice**, live and by a per-member replayer over untyped
+  dicts (`potter/resume.py::_replay_round_winner`). Whether the live methods are pure over a seated round
+  decides if the replay calls them. **Re-test:** `git grep -n "def _replay_round_winner" -- promptpotter`.
+- **Two word tables over one enum, three times** (`evidence/head_to_head.py::GUARD_STATE_INFO` beside its labels,
+  `paired_reading.py::READING_STATE_KIND` beside its info, `origin_panel.py::ROUND_ADVANCE_STALL` beside its
+  info), and `library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable fields.
+  Action: one table each; the snippet keeps its union. Rides with the arc that next owns each file.
+
 ### Config resolution and run scope (backbone hunt 2026-10-31, ranked by impact radius)
 
 **Rides with:** one arc; 4 absorbs 7.
@@ -189,7 +411,7 @@ loop decides, so it lands with an offline run.
   field, run once and then deleted ([`../decisions.md`](../decisions.md) § 0011). **Rides with:** the
   next survivor-row reshape. **Re-test:** `git grep -n "\.renamed" -- promptpotter` finds no reader.
 - **`held_out` (`InnerTask`, `domain/cells.py`) and `Sample.bench_only` name one concept**, translated in
-  `ResolvedPanel.samples`. Rides with the "held-out" rename (§ One record shape for every scoring pass).
+  `ResolvedPanel.samples`. Rides with ED (§ The excision pass), which names the cell terms with the final word.
 
 ### The file layout (import-graph pass 2026-10-31)
 
