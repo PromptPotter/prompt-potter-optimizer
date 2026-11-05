@@ -1,9 +1,7 @@
 import { useMemo } from "react";
-import { dashboardRead, isWarming } from "@/lib/api";
 import type { MeasuredUnit, VerificationMark, VerifyReading } from "@/lib/api/types";
 import type { CyclePath } from "@/lib/ids";
-import { useDashboardAt } from "@/lib/poll";
-import { readyData, useRead } from "./useRead";
+import { useDashboard } from "@/lib/poll";
 
 interface VerifyState {
   readings: ReadonlyMap<string, VerifyReading>;
@@ -14,17 +12,13 @@ interface VerifyState {
 
 export function useVerify(
   path: CyclePath | null,
-  // Set only while a pass is awaited: nothing else moves the off-stream read.
-  intervalMs?: number,
+  // Set only while a pass is awaited: nothing else moves another cycle's dashboard read.
+  intervalMs: number | null,
 ): VerifyState {
-  const at = useDashboardAt(path);
-  const read = readyData(
-    useRead(path && !at.streamed ? dashboardRead(path, null) : null, { auth: true, intervalMs }),
-  );
-  const body = at.streamed ? at.dash : read && !isWarming(read) ? read : null;
-  const rounds = body?.rounds;
-  const marks = body?.verification;
-  const unit = body?.measured_unit ?? null;
+  const { dash } = useDashboard(path, intervalMs);
+  const rounds = dash?.rounds;
+  const marks = dash?.verification;
+  const unit = dash?.measured_unit ?? null;
   return useMemo(() => {
     const readings = new Map<string, VerifyReading>();
     for (const r of rounds ?? []) {

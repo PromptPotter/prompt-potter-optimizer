@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { READING_STATE_INFO } from "@/lib/api/types.generated";
+import { READING_STATE_INFO } from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
 import { pairedReading, unreadOverlap } from "@/lib/test-fixtures";
 import { liftOf, readPaired } from "../paired-reading";

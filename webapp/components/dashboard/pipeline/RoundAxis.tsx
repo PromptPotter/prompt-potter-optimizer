@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useSelection } from "@/lib/SelectionContext";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 
 export function RoundAxis() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const { round: selectedRound, setSelectionForRound } = useSelection();
   const completed = dash?.round_axis.completed ?? [];
   const liveRound = dash?.round_axis.live ?? null;

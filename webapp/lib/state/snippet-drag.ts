@@ -1,4 +1,4 @@
-import type { LibrarySnippet } from "@/lib/api";
+import type { LibrarySnippet } from "@/lib/api/types";
 import { createModuleStore } from "@/lib/state/module-store";
 
 // The snippet in flight between the library and a prompt field. Held here, not on the

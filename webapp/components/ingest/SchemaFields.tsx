@@ -1,6 +1,6 @@
 import { CommitInput } from "@/components/ui";
 import { childOf as child, type FieldSchema } from "@/lib/derivations";
-import { CAP_AXIS_INFO } from "@/lib/api/types.generated";
+import { CAP_AXIS_INFO } from "@/lib/api/types";
 import { isCapAxis, parseCapIn } from "@/lib/run-limits";
 
 // `writeOnly`: the value rides Start and is stored nowhere; otherwise it is the draft patch at `path`.

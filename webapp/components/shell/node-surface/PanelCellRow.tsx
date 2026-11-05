@@ -1,6 +1,6 @@
 import { figureOf, panelCellLabel, phaseIs, phaseWalks } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
-import type { HierarchyCourse } from "@/lib/api";
+import type { HierarchyCourse } from "@/lib/api/types";
 import { PairedLift } from "@/components/shell/PairedLift";
 import { PLACEHOLDER } from "@/lib/format";
 

@@ -1,9 +1,6 @@
 import { useState, type ReactNode } from "react";
-import {
-  libraryRead,
-  type LibraryResponse,
-  type LibrarySnippet,
-} from "@/lib/api";
+import { libraryRead } from "@/lib/api";
+import type { LibraryResponse, LibrarySnippet } from "@/lib/api/types";
 import { useRead } from "@/lib/hooks/useRead";
 import { promptFieldLabel } from "@/lib/prompt-fields";
 import { endSnippetDrag, startSnippetDrag } from "@/lib/state/snippet-drag";

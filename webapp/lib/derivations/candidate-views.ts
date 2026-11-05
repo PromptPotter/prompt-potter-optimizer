@@ -1,10 +1,11 @@
-import type {
-  ArmReading,
-  HierarchyCourse,
-  LineageNode,
-  VerificationMark,
+import {
+  type ArmReading,
+  type HierarchyCourse,
+  type LineageNode,
+  type VerificationMark,
+  DISPLAY_METRIC_INFO,
+  type DisplayMetric,
 } from "@/lib/api/types";
-import { DISPLAY_METRIC_INFO, type DisplayMetric } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
 import { fmtUnit } from "@/lib/format";
 import { tagValue } from "./hierarchy";

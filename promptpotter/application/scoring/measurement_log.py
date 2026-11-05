@@ -48,7 +48,6 @@ from promptpotter.domain.scoring import (
     CellSheet,
     SampleStatus,
     ground_truth_text,
-    is_hit,
     is_verifier_graded,
 )
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -614,6 +613,5 @@ def measurement_log(
         candidates=candidates,
         cells=kept,
         total_measurements=len(graded_all),
-        total_hits=sum(1 for f in graded_all if is_hit(f)),
         mean_fitness=sum(graded_all) / len(graded_all) if graded_all else None,
     )

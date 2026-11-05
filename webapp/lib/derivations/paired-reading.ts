@@ -1,5 +1,4 @@
-import { READING_STATE_INFO } from "@/lib/api/types.generated";
-import type { MeasuredLift, PairedReading } from "@/lib/api/types";
+import { READING_STATE_INFO, type MeasuredLift, type PairedReading } from "@/lib/api/types";
 import { fmtLift, fmtUnit } from "@/lib/format";
 
 type PairRead =

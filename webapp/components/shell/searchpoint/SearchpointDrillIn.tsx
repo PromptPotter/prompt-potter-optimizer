@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
-import type { ArmReading, VerificationMark } from "@/lib/api/types";
 import {
+  type ArmReading,
+  type VerificationMark,
   PREFIX_STATE_TITLES,
   READING_STATE_INFO,
   type ReadingState,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import type { NodeSchemaReading } from "@/lib/types";
+import type { ReadFailure } from "@/lib/read-cache";
 import { NOT_SEPARABLE, readPaired, type ObserveConfig } from "@/lib/derivations";
-import { Said, Term } from "@/components/ui";
+import { FailureLine, Said, Term } from "@/components/ui";
 import {
   fmtLiftBand,
   fmtPct1,
@@ -26,6 +28,7 @@ export function SearchpointDrillIn({
   measurements,
   schema,
   pending,
+  failure = null,
   overlay,
   onOverlay,
   actions,
@@ -38,6 +41,8 @@ export function SearchpointDrillIn({
   measurements?: ReactNode;
   schema: NodeSchemaReading;
   pending: string;
+  // The failed read `cfg` and `reading` come from: said in place of `pending`.
+  failure?: ReadFailure | null;
   overlay?: Record<string, unknown>;
   onOverlay?: (next: Record<string, Record<string, unknown>>) => void;
   actions?: React.ReactNode;
@@ -47,6 +52,13 @@ export function SearchpointDrillIn({
   const bench = reading?.bench ?? null;
   const pair = reading?.vs_reference ? readPaired(reading.vs_reference) : null;
   const paired = pair?.read ? pair.lift : null;
+  // Said once, in the first slot left empty.
+  const note =
+    failure !== null ? (
+      <FailureLine failure={failure} lead="Could not read this searchpoint." className="inspector-note" />
+    ) : (
+      <p className="inspector-note">{pending}</p>
+    );
   return (
     <>
       {stats}
@@ -60,11 +72,11 @@ export function SearchpointDrillIn({
           onConfigChange={onOverlay}
         />
       ) : (
-        <p className="inspector-note">{pending}</p>
+        note
       )}
       <div className="inspector-body">
         {reading === null ? (
-          <div className="inspector-note">{pending}</div>
+          cfg && note
         ) : (
           <>
             <Fact k="label" v={reading.arm.label} />

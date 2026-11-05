@@ -1,4 +1,5 @@
-import { optimizerRosterRead, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
+import { optimizerRosterRead } from "@/lib/api";
+import type { DraftCampaignWire, DraftPatch } from "@/lib/api/types";
 import { useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
 import { ReadState, SegmentedControl } from "@/components/ui";

@@ -4,6 +4,7 @@ import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/shell/PairedLift";
 import type { PairedReading, ScoreboardRow } from "@/lib/api/types";
 import { fmtLiftBand, fmtPct1, fmtSigned, fmtUnit } from "@/lib/format";
+import { failureOf, readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import type { CyclePath } from "@/lib/ids";
 
@@ -87,7 +88,9 @@ export function RoundFileView({
   raw: string;
 }) {
   const [showRaw, setShowRaw] = useState(false);
-  const { doc, failure } = useRound(path, round);
+  const { read } = useRound(path, round);
+  const doc = readyData(read);
+  const failure = failureOf(read);
   const headline = doc?.headline ?? null;
   const election = doc?.election ?? null;
   const own = headline?.own;

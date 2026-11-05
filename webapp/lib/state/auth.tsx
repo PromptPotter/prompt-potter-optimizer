@@ -7,9 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { failureKind, meRead, type MeResponse } from "@/lib/api";
-import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types.generated";
-import { DASHBOARD_RECONNECT_POLL_MS } from "@/lib/cadence";
+import { failureKind, failurePasses, meRead } from "@/lib/api";
+import { type MeResponse, SIGN_IN_REFUSAL_INFO } from "@/lib/api/types";
+import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
 import { clearReadCache, readThrough } from "@/lib/read-cache";
 
@@ -55,11 +55,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const adopt = (identity: string | null) => {
       if (identityRef.current === identity) return;
       identityRef.current = identity;
-      clearReadCache();
+      clearReadCache(identity !== null);
     };
     // The probe `useRead`'s own gate stands on, so it cannot ride the hook; it shares the cache.
-    const probe = meRead();
-    readThrough(probe.id, probe.load, new AbortController().signal)
+    readThrough(meRead(), new AbortController().signal)
       .then((data) => {
         if (cancelled || probeIdRef.current !== probeId) return;
         adopt(`${data.tenant_id}\x1f${data.user_id}`);
@@ -71,12 +70,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const kind = failureKind(e);
         // A 401 is the probe's ordinary answer; anything else is an incident.
         if (kind !== "auth") reportIncident(e, { surface: "me" });
-        // A transient failure says nothing of the session: a probed one keeps its identity and
+        // A failure that passes says nothing of the session: a probed one keeps its identity and
         // cache; an unprobed one stays `loading` (never anon, so a signed-in reload during an
-        // outage is not signed out) and re-probes on the reconnect beat (I7).
-        if (kind === "transient") {
+        // outage or a throttle is not signed out) and re-probes on the reconnect beat (I7).
+        if (failurePasses(kind)) {
           if (identityRef.current === undefined) {
-            retry = setTimeout(refresh, DASHBOARD_RECONNECT_POLL_MS);
+            retry = setTimeout(refresh, RECONNECT_POLL_MS);
           }
           return;
         }

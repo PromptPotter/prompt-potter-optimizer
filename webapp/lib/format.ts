@@ -1,13 +1,15 @@
-import type { LiftEstimate, MeasuredUnit, MetricSpec } from "@/lib/api/types";
-import { cx } from "@/lib/cx";
 import {
+  type LiftEstimate,
+  type MeasuredUnit,
+  type MetricSpec,
   LIFT_SIDE_TONE,
   RECENT_STEP_S,
   SAMPLE_TAG_DIGITS,
   UNIT_FORMATS,
   type MeasurandUnit,
   type UnitFormat,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
+import { cx } from "@/lib/cx";
 
 type LiftSide = LiftEstimate["side"];
 

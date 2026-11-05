@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { candidateSearchPoint } from "../candidate-search-point";
-import type { RoundView } from "@/lib/types";
+import type { RoundView } from "@/lib/api/types";
 import { measuredArm, roundDoc, roundOfArms } from "@/lib/test-fixtures";
 
 const doc: RoundView = roundOfArms(2, [

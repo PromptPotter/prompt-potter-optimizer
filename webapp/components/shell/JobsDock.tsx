@@ -1,13 +1,12 @@
-import { useRegistry } from "@/lib/state/registry";
+import { useRegistry } from "@/lib/hooks/useRegistry";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import { fmtAgo } from "@/lib/format";
-import { STATUS_MARK_INFO } from "@/lib/api/types.generated";
+import { STATUS_MARK_INFO, type HierarchyCourse, type MachineSlot } from "@/lib/api/types";
 import { figureOf } from "@/lib/derivations";
 import { readyData } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
-import type { HierarchyCourse, MachineSlot } from "@/lib/api";
 import { Menu, MenuCheck, MenuItem } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
 

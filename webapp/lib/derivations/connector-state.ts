@@ -1,8 +1,8 @@
 // A null `health` probe means not probed yet ("probing"), never down.
 
-import type { BackendHealthResponse } from "@/lib/api";
-import { BACKEND_REACHABILITY_INFO } from "@/lib/api/types.generated";
-import { shownData, type ReadResult } from "@/lib/hooks/useRead";
+import { type BackendHealthResponse, BACKEND_REACHABILITY_INFO } from "@/lib/api/types";
+import { shownData } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
 import type { PipelineStatus } from "@/lib/types";
 
 // A failed revalidation keeps the body it painted over, so a failure is a read with nothing to show.

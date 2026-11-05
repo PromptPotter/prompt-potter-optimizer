@@ -7,7 +7,7 @@ import {
   VERIFY_STRATEGY_LABELS,
   VERIFY_WORDS,
   type CommandResponses,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
 import { VERIFY_PASS_POLL_MS } from "@/lib/cadence";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -49,7 +49,7 @@ export function VerifyAction({
     setSaturated(null);
   }
   const sending = cmd.pending !== null;
-  const { readings, passes, unit } = useVerify(path, sending ? VERIFY_PASS_POLL_MS : undefined);
+  const { readings, passes, unit } = useVerify(path, sending ? VERIFY_PASS_POLL_MS : null);
 
   if (!path || !candidate.label) return null;
 

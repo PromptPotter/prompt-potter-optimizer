@@ -1,14 +1,14 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/host-assistant.md`): never hide them.
 import { useEffect, useRef, useState } from "react";
-import { useHardSamples } from "@/lib/hard-samples";
+import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
 import { useViewedCourse } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { entryAlone } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
-import { useIngest } from "@/lib/ingest-flow";
+import { useCheckinSubject } from "@/lib/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
-import type { HierarchyCourse } from "@/lib/api";
+import type { HierarchyCourse } from "@/lib/api/types";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
 import {
@@ -23,9 +23,9 @@ import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 
 // The pane renders ONE subject's conversation: the viewed check-in's, or the viewed run's.
 export function ChatPane() {
-  const { datasetName } = useHardSamples();
+  const datasetName = useLeafDatasetName();
   const { viewedPath, cycleId, leafCycleId } = useWorkspace();
-  const { subject } = useIngest();
+  const subject = useCheckinSubject();
   const threads = useThreads<HierarchyCourse>();
   const runKey = viewedPath ? runThreadKey(encodeCyclePath(viewedPath)) : null;
   const threadKey =

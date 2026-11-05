@@ -1,10 +1,10 @@
 import { useState } from "react";
-import type { Budget, OptimizerLimit, RunLimitOverrides } from "@/lib/api";
+import type { RunLimitOverrides } from "@/lib/api";
+import { type Budget, type OptimizerLimit, CAP_AXIS_INFO } from "@/lib/api/types";
 import { budgetAxis } from "@/lib/derivations";
-import { CAP_AXIS_INFO } from "@/lib/api/types.generated";
 import { capInput, capText, parseCap, parseCapIn, type CapBounds } from "@/lib/run-limits";
 import type { CyclePath } from "@/lib/ids";
-import { useDashboardAt } from "@/lib/poll";
+import { useDashboard } from "@/lib/poll";
 
 interface Fields {
   rounds: string;
@@ -28,7 +28,7 @@ export function LimitReconcile({
   path: CyclePath;
   onChange: (limits: RunLimitOverrides) => void;
 }) {
-  const { dash } = useDashboardAt(path);
+  const { dash } = useDashboard(path, null);
   const left = dash?.fork_remainder ?? null;
   const rl = dash?.run_limits ?? null;
   const declared = rl?.optimizer ?? [];

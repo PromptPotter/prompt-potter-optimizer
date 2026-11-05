@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { cycleAddress, postCommand, type Budget, type MeteredSpend } from "@/lib/api";
+import { cycleAddress, postCommand } from "@/lib/api";
 import {
+  type Budget,
+  type MeteredSpend,
   ACCOUNT_TAB_INFO,
   CAP_AXIS_INFO,
   CEILING_METER_LABELS,
   type CapAxis,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
 import { budgetAxis } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";

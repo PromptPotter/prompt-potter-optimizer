@@ -1,7 +1,7 @@
 import { API, send, toApiError } from "./client";
 import { postCommand } from "./commands";
 import { mintIdempotencyKey } from "./errors";
-import type { DraftCampaignWire } from "./types";
+import type { DraftCampaignWire } from "@/lib/api/types";
 
 export async function postIngestDataset(
   file: File,

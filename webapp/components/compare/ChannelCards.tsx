@@ -1,9 +1,8 @@
 import { useMemo } from "react";
-import type { Evidence, SubjectReading } from "@/lib/api";
+import type { Evidence, SubjectReading, HierarchyEntry } from "@/lib/api/types";
 import { readingPath } from "@/lib/api/reads";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import type { HierarchyEntry } from "@/lib/api";
 import { campaignAt, compareItems } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 import { seriesVar } from "@/lib/theme";

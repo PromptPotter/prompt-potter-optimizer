@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import type { HierarchyCandidate, SubjectReading } from "@/lib/api";
+import type { HierarchyCampaign, HierarchyCandidate } from "@/lib/api/types";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
   Forest,
@@ -9,25 +9,28 @@ import {
 import type { RoundNodePos } from "@/components/candidates/forest-layout";
 import { Empty, ReadState } from "@/components/ui";
 import { shownData } from "@/lib/hooks/useRead";
-import { useCompareSelection } from "@/lib/state/compare-selection";
-import { nodeOverlays } from "@/lib/derivations";
+import { useChannelView, useCompareSelection } from "@/lib/state/compare-selection";
+import { nodeOverlays, type CompareItem } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
 import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
-import type { ChannelModel } from "./useChannelModel";
+import { channelInk, useChannelTree, useInvalidated } from "./channel-hooks";
 
 export function ChannelMap({
-  model,
-  reading,
+  item,
+  run,
   points,
-  own,
 }: {
-  model: ChannelModel;
-  reading: SubjectReading | null;
+  item: CompareItem;
+  run: HierarchyCampaign | null;
   points: readonly CladogramChannel[];
-  own: CladogramChannel | null;
 }) {
-  const { tree, selected, setSelected, invalidated, subject } = model;
+  const { reading, channel } = item;
+  const subject = channel.subject;
+  const own = channelInk(item, points);
+  const tree = useChannelTree(run);
   const { index, rootPath } = tree;
+  const { selected, select: setSelected } = useChannelView(item, index);
+  const invalidated = useInvalidated(index);
   const root = shownData(tree.read);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [whole, setWhole] = useState(false);

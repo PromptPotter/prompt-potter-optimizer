@@ -1,26 +1,25 @@
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
 import { armAt, individualOf, type ObservePoint } from "@/lib/derivations";
 import { useViewedLineage } from "@/lib/lineage";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useCompareWithOrigin } from "./useCompareWithOrigin";
 import { useEvidence, type EvidenceAsk } from "./useEvidence";
-import type { ReadFailure } from "./useRead";
+import { readyData } from "./useRead";
+import type { ReadResult } from "@/lib/read-cache";
 
 const WITH_CONFIG: EvidenceAsk = { config: true };
 
-// `compared` with no keys is the ONLY reading that says "identical".
-export type OriginChanges =
-  | { status: "pending" }
-  | { status: "failed"; failure: ReadFailure }
-  | { status: "unrecorded" }
-  | { status: "compared"; keys: string[] };
+// `compared` with no keys is the ONLY reading that says "identical"; null is not read yet (the
+// read's own status says whether it is loading or failed).
+export type OriginChanges = { status: "unrecorded" } | { status: "compared"; keys: string[] } | null;
 
 export interface OriginEvidence {
   origin: SubjectReading | null;
   // Null while the point IS the origin, or the tree has not placed it yet.
   shown: SubjectReading | null;
   vsOrigin: PairwiseComparison | null;
+  read: ReadResult<Evidence>;
   changes: OriginChanges;
   compare: (() => void) | null;
 }
@@ -31,13 +30,11 @@ function recorded(subject: SubjectReading | null): boolean {
 
 function changesOf(
   evidence: Evidence | null,
-  failure: ReadFailure | null,
   origin: SubjectReading | null,
   // `undefined`: the point IS the origin.
   shown: SubjectReading | null | undefined,
 ): OriginChanges {
-  if (failure) return { status: "failed", failure };
-  if (!evidence?.config_keys) return { status: "pending" };
+  if (!evidence?.config_keys) return null;
   if (!recorded(origin) || (shown !== undefined && !recorded(shown))) {
     return { status: "unrecorded" };
   }
@@ -49,39 +46,41 @@ function changesOf(
 export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const { viewedPath } = useWorkspace();
   const { index } = useViewedLineage();
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const attached = dash?.producer.attached === true;
   const placed = point ? armAt(index, viewedPath, point.key) : null;
   const pair = useCompareWithOrigin(viewedPath, placed ? placed.facts.reading.arm.key : null);
   // A closed round and a newly scored cell re-ask at once rather than on the slow beat.
   const rounds = dash?.rounds.length ?? 0;
   const cells = point?.row?.reading.panel.scored ?? 0;
-  const { evidence, failure } = useEvidence(
+  const read = useEvidence(
     pair.subjects,
     { live: attached, moved: attached ? `${rounds}:${cells}` : "" },
     WITH_CONFIG,
   );
+  const evidence = readyData(read);
 
   const [originKey, shownKey] = pair.subjects;
-  const read = (key: string | undefined) =>
+  const subject = (key: string | undefined) =>
     key === undefined ? null : (evidence?.subjects.find((s) => s.key === key) ?? null);
   const vsOrigin =
     shownKey === undefined
       ? undefined
       : evidence?.metric.pairwise.find((p) => p.subject_a === originKey && p.subject_b === shownKey);
-  const origin = read(originKey);
-  const shown = read(shownKey);
+  const origin = subject(originKey);
+  const shown = subject(shownKey);
   return {
     origin,
     shown,
     vsOrigin: vsOrigin ?? null,
+    read,
     // A point the tree has not placed reads the origin alone, which is no comparison yet.
     changes:
       point !== null && placed === null
-        ? { status: "pending" }
+        ? null
         : placed !== null && individualOf(index, placed) === null
           ? { status: "unrecorded" }
-          : changesOf(evidence, failure, origin, shownKey === undefined ? undefined : shown),
+          : changesOf(evidence, origin, shownKey === undefined ? undefined : shown),
     compare: pair.run,
   };
 }

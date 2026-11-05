@@ -2,7 +2,7 @@
 // detail sits behind `Term`. Only a `live` row, whose content changes in place, is announced.
 
 import type { ReactNode } from "react";
-import type { Tone } from "@/lib/api/types.generated";
+import type { Tone } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { Term } from "./Term";
 

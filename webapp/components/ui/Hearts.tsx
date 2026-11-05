@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { LIVES_WORDS, type Said } from "@/lib/api/types.generated";
+import { LIVES_WORDS, type Said } from "@/lib/api/types";
 import { HeartIcon } from "./HeartIcon";
 
 // The served `lives` row: its value's pips drawn as hearts, an empty bank its skull, never an empty

@@ -1,4 +1,3 @@
-import { invalidateReads } from "@/lib/read-cache";
 import { AccountSection } from "./AccountSection";
 import {
   Button,
@@ -12,27 +11,26 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { allowanceCaveats, billText } from "@/lib/derivations";
-import { ACCOUNT_TAB_INFO, SLOT_BOUND_WORDS } from "@/lib/api/types.generated";
+import {
+  ACCOUNT_TAB_INFO,
+  SLOT_BOUND_WORDS,
+  type CouponStatus,
+  type MachineSlot,
+  type MachineStatusResponse,
+  type QuotaStatus,
+} from "@/lib/api/types";
 import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
-import {
-  couponRead,
-  quotaRead,
-  postCommand,
-  type CouponStatus,
-  type MachineSlot,
-  type MachineStatusResponse,
-  type QuotaStatus,
-} from "@/lib/api";
+import { couponRead, quotaRead, postCommand } from "@/lib/api";
 
 const SEGMENTED_MAX = 8;
 
 export function AccountUsageTab() {
-  const read = useRead(quotaRead(), { auth: true });
-  const coupon = useRead(couponRead(), { auth: true });
+  const read = useRead(quotaRead());
+  const coupon = useRead(couponRead());
   const machine = readyData(useMachineStatus());
   return (
     <>
@@ -251,11 +249,8 @@ function LimitControl({ quota }: { quota: QuotaStatus }) {
 
   const save = async (next: number) => {
     if (next === limit || !Number.isInteger(next) || next < 1) return;
-    await cmd.run(
-      "set-concurrent-cycles",
-      () => postCommand("set-concurrent-cycles", { max_concurrent_cycles: next }),
-      () =>
-      invalidateReads("quota"),
+    await cmd.run("set-concurrent-cycles", () =>
+      postCommand("set-concurrent-cycles", { max_concurrent_cycles: next }),
     );
   };
 

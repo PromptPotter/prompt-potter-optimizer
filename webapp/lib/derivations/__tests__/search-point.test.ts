@@ -1,6 +1,11 @@
-import type { RunStanding } from "@/lib/api/types";
+import type {
+  RunStanding,
+  ServedDashboard,
+  ArmName,
+  LiveCandidate,
+  ServedRound,
+} from "@/lib/api/types";
 import { describe, expect, it } from "vitest";
-import type { ServedDashboard } from "@/lib/api";
 import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
@@ -10,7 +15,6 @@ import {
   type ObserveSelection,
   type ObserveSubject,
 } from "../search-point";
-import type { ArmName, LiveCandidate, ServedRound } from "@/lib/api/types";
 import {
   armReading,
   currentRound,
@@ -54,20 +58,20 @@ describe("liveCandidateObserveConfig", () => {
   ]);
 
   it("locates the in-flight candidate by label (not the latest-seeded one)", () => {
-    const r = liveCandidateObserveConfig(snap, "C1.1");
-    expect(r?.label).toBe("live — C1.1");
+    const r = liveCandidateObserveConfig(snap, "C1.1", "selected · C1.1");
+    expect(r?.label).toBe("selected · C1.1");
     expect(r?.prompts).toEqual(p("a"));
     expect(r?.config).toEqual({ llm: { model: "x" } });
   });
 
   it("returns null for an unknown / not-yet-seeded label", () => {
-    expect(liveCandidateObserveConfig(snap, "C1.10")).toBeNull();
-    expect(liveCandidateObserveConfig(snap, "")).toBeNull();
+    expect(liveCandidateObserveConfig(snap, "C1.10", "x")).toBeNull();
+    expect(liveCandidateObserveConfig(snap, "", "x")).toBeNull();
   });
 
   it("returns null without a live round", () => {
-    expect(liveCandidateObserveConfig(null, "C1.1")).toBeNull();
-    expect(liveCandidateObserveConfig(dash({}), "C1.1")).toBeNull();
+    expect(liveCandidateObserveConfig(null, "C1.1", "x")).toBeNull();
+    expect(liveCandidateObserveConfig(dash({}), "C1.1", "x")).toBeNull();
   });
 });
 

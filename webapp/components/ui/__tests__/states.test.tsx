@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { ReadResult } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
 import { FailureLine, ReadState } from "../states";
 
 const failure = { kind: "transient" as const, message: "Could not reach the server." };

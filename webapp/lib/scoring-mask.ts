@@ -1,4 +1,4 @@
-import { CELL_TERM_META, type CellTerm } from "@/lib/api/types.generated";
+import { CELL_TERM_META, type CellTerm, type ServedDashboard } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { createModuleStore } from "@/lib/state/module-store";
 
@@ -56,7 +56,7 @@ export function lensOf(mask: ScoringMask | null, own: readonly CellTerm[]): stri
 }
 
 // Module state, not a context: the candidates card and `lib/lineage.tsx` share no ancestor.
-interface MaskState {
+export interface MaskState {
   open: boolean;
   mask: ScoringMask;
   seededForCycle: string | null;
@@ -66,6 +66,29 @@ const store = createModuleStore<MaskState>({ open: false, mask: NO_DIALS, seeded
 
 export const setScoringMask = store.set;
 
-export function useScoringMask(): MaskState {
-  return store.useStore();
+// Every mask reader reads the store alone, never the dashboard: a reader keyed on it (the time ray,
+// a sidebar row's tree) re-renders only when the mask moves, never on a dashboard landing. Until
+// `seededForCycle` names the viewed cycle, its mask is not known and a tree under it is held.
+export const useMaskState = store.useStore;
+
+// The viewed cycle's mask is its served criterion until the operator edits it: seeded once per
+// viewed cycle, where its dashboard lands (`poll.tsx::useViewedDashboard`). A dashboard serving no
+// formula (a run that died in INIT) seeds no dials.
+export function seededMask(
+  state: MaskState,
+  cycleId: string,
+  dash: Pick<ServedDashboard, "composite_fitness_formula" | "composite_fitness_weights">,
+): MaskState {
+  if (state.seededForCycle === cycleId) return state;
+  return {
+    open: state.open,
+    mask: servedMask(dash.composite_fitness_formula, dash.composite_fitness_weights),
+    seededForCycle: cycleId,
+  };
+}
+
+export function seedScoringMask(cycleId: string, dash: ServedDashboard): void {
+  const state = store.get();
+  const next = seededMask(state, cycleId, dash);
+  if (next !== state) store.set(next);
 }

@@ -20,8 +20,7 @@ import type {
   SubtreeCampaign,
   SubtreeCourse,
   UnstartedCampaign,
-} from "@/lib/api";
-import { useIngest } from "@/lib/ingest-flow";
+} from "@/lib/api/types";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { PLACEHOLDER } from "@/lib/format";
@@ -126,8 +125,7 @@ function ListedRow({ campaign, ctx }: { campaign: ListedCampaign; ctx: TreeCtx }
 
 // No cycle, so no subtree to open and no line to compare: a tap reopens its check-in.
 function UnstartedRow({ campaign }: { campaign: UnstartedCampaign }) {
-  const { checkin } = useWorkspace();
-  const { openDraft } = useIngest();
+  const { checkin, navigate } = useWorkspace();
   const selected = checkin?.draftId === campaign.address;
   return (
     <RowHoverCard card={campaign}>
@@ -135,7 +133,7 @@ function UnstartedRow({ campaign }: { campaign: UnstartedCampaign }) {
         <button
           type="button"
           className="unit-library-item"
-          onClick={() => openDraft(campaign.address)}
+          onClick={() => navigate({ draftId: campaign.address })}
           aria-current={selected ? "true" : undefined}
         >
           <CampaignRowLabel campaign={campaign} />

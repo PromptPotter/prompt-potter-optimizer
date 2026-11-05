@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
+import type { DraftCampaignWire, DraftPatch } from "@/lib/api/types";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { CopyButton } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";

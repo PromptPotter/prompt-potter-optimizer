@@ -1,4 +1,4 @@
-import type { PipelineViewEdge, PipelineViewNode } from "@/lib/types";
+import type { PipelineViewEdge, PipelineViewNode } from "@/lib/api/types";
 
 interface Pt {
   x: number;

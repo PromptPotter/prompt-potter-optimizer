@@ -1,17 +1,20 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { StartCheckinOptions } from "@/lib/api";
-import type { SetupStep as Step } from "@/lib/api/types.generated";
-import { backendHealthRead } from "@/lib/api/reads";
-import { CONNECTOR_HEALTH_POLL_MS, ELAPSED_TICK_MS } from "@/lib/cadence";
-import { BACKEND_REACHABILITY_INFO, LAUNCH_REFUSAL_LABELS } from "@/lib/api/types.generated";
+import {
+  type SetupStep as Step,
+  BACKEND_REACHABILITY_INFO,
+  LAUNCH_REFUSAL_LABELS,
+} from "@/lib/api/types";
+import { backendHealthRead, datasetIndexRead, originsRead } from "@/lib/api/reads";
+import { ELAPSED_TICK_MS } from "@/lib/cadence";
 import { stepAnswer, type FieldSchema } from "@/lib/derivations";
-import { useCollection } from "@/lib/hooks/useCollection";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
-import { useRegistry } from "@/lib/state/registry";
+import { useRegistry } from "@/lib/hooks/useRegistry";
 import type { BlockItem } from "@/lib/chat/thread";
-import { useIngest } from "@/lib/ingest-flow";
+import { useCheckinSubject, useIngest } from "@/lib/ingest-flow";
+import { useAuth } from "@/lib/state/auth";
 import { useWorkspace } from "@/lib/workspace";
 import { familiesNamed } from "@/components/shell/families";
 import { Composer } from "@/components/chat/Composer";
@@ -60,13 +63,16 @@ function EntryList({
 }) {
   const follow = useThreadFollow();
   const drafts = useRegistry().unstarted;
-  // Read only while the list is on screen: a run viewed never waits on, or polls, either.
-  const collection = useCollection();
-  if (collection.kind === "needsAuth") return null;
+  // What a fresh campaign starts from, read only while the list is on screen: a run viewed never
+  // waits on, or polls, either. The open check-ins are the registry's unstarted campaigns.
+  const { status } = useAuth();
+  const datasets = useRead(datasetIndexRead());
+  const origins = useRead(originsRead());
+  if (status === "unauthed") return null;
   const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   const counts =
-    collection.kind === "ready"
-      ? `${count(collection.origins.length, "origin")} · ${count(collection.entries.length, "dataset")}`
+    datasets.status === "ready" && origins.status === "ready"
+      ? `${count(origins.data.origins.length, "origin")} · ${count(datasets.data.datasets.length, "dataset")}`
       : "origins and datasets";
   return (
     <details
@@ -82,7 +88,8 @@ function EntryList({
       </summary>
       <DatasetPickList
         drafts={drafts}
-        collection={collection}
+        datasets={datasets}
+        origins={origins}
         onReopenDraft={onReopenDraft}
         onDiscarded={flow.discarded}
         onOpenOrigin={flow.openOrigin}
@@ -130,7 +137,9 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
 
 // The check-in's own blocks; the pane mounts them only while a check-in is the subject.
 export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail: BlockItem[] } {
-  const { flow, openDraft } = useIngest();
+  const flow = useIngest();
+  const { navigate } = useWorkspace();
+  const openDraft = (draftId: string) => navigate({ draftId });
   const head: BlockItem[] =
     flow.phase.stage === "idle"
       ? [
@@ -149,7 +158,8 @@ export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail:
 
 // Off a check-in a file opens a fresh one, and text is command words: the view labels it names open.
 export function IngestComposer() {
-  const { flow, subject } = useIngest();
+  const flow = useIngest();
+  const subject = useCheckinSubject();
   const { open } = useWorkspace();
   const [words, setWords] = useState("");
   const onRun = subject === null;
@@ -184,10 +194,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
   // The probe the run control reads, on the connector this draft would launch.
   const health = readyData(
-    useRead(served ? backendHealthRead(served.connector) : null, {
-      auth: true,
-      intervalMs: CONNECTOR_HEALTH_POLL_MS,
-    }),
+    useRead(served ? backendHealthRead(served.connector) : null),
   );
   const [h2h, setH2h] = useState<HeadToHeadDraft>({ id: "", arms: [] });
   const [seededFor, setSeededFor] = useState<string | null>(null);

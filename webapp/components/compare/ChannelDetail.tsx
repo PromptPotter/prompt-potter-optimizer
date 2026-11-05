@@ -1,35 +1,40 @@
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
-import type { CladogramChannel } from "@/components/candidates/Forest";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import { searchpointCopyChoices, selectedNodeOf, type CompareItem } from "@/lib/derivations";
+import { COPY_WITHOUT_CELLS, searchpointCopyChoices, selectedNodeOf } from "@/lib/derivations";
 import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";
-import { CopyButton, Said, SegmentedControl, Term } from "@/components/ui";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { CopyButton, FailureLine, Said, SegmentedControl, Term } from "@/components/ui";
 import { ChannelMap } from "./ChannelMap";
 import { CellMeans, MainLine } from "./channel-parts";
 import { ChannelRestore, useScenarioEdits, withOverlay } from "./config-edit";
-import type { ChannelModel } from "./useChannelModel";
+import {
+  channelLevel,
+  rulerNoteOf,
+  useChannelHead,
+  useChannelTree,
+  useInvalidated,
+  usePickedPoint,
+} from "./channel-hooks";
+import { useChannelView } from "@/lib/state/compare-selection";
+import type { ChannelProps } from "./ChannelCard";
 
-export function ChannelDetail({
-  model,
-  item: { reading, headline },
-  rulerNote,
-  points,
-  own,
-  axis,
-}: {
-  model: ChannelModel;
-  item: CompareItem;
-  rulerNote: boolean;
-  points: readonly CladogramChannel[];
-  own: CladogramChannel | null;
-  axis: string;
-}) {
+// Mounted only while the detail fold is open, so its reads cost nothing until then.
+export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps) {
+  const { reading, headline } = item;
+  const axis = spec.axis_label;
   const { edits, setEdits } = useScenarioEdits();
-  const { folds, head, selected, setSelected, picked, level, spentTo, line } = model;
-  if (!folds.detail) return null;
-  const map = <ChannelMap model={model} reading={reading} points={points} own={own} />;
+  const { index } = useChannelTree(run);
+  const { selected, select, folds, toggleFold } = useChannelView(item, index);
+  const head = useChannelHead(index, reading, selected);
+  const picked = usePickedPoint(item, selected, index);
+  const { spentTo, line } = picked;
+  const invalidated = useInvalidated(index);
+  const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
+  const rulerNote = rulerNoteOf(item, ownNote);
+  const level = channelLevel(reading, withdrawn, spec);
+  const map = <ChannelMap item={item} run={run} points={points} />;
   if (reading === null) return map;
   if (!level) return null;
   return (
@@ -38,7 +43,7 @@ export function ChannelDetail({
         <SegmentedControl
           options={head.options}
           value={head.value}
-          onChange={(v) => setSelected(head.nodeFor(v))}
+          onChange={(v) => select(head.nodeFor(v))}
           ariaLabel="Which searchpoint of this branch is highlighted"
         />
       )}
@@ -137,7 +142,7 @@ export function ChannelDetail({
           type="button"
           className="cmp-link"
           aria-expanded={folds.map}
-          onClick={() => model.toggleFold("map")}
+          onClick={() => toggleFold("map")}
         >
           {folds.map ? "▾" : "▸"} Lineage
         </button>
@@ -149,7 +154,7 @@ export function ChannelDetail({
           <summary
             onClick={(e) => {
               e.preventDefault();
-              model.toggleFold("setup");
+              toggleFold("setup");
             }}
           >
             <span>
@@ -175,10 +180,13 @@ export function ChannelDetail({
             }
             schema={picked.schema}
             overlay={picked.overlay}
+            failure={failureOf(picked.roundRead)}
             pending={
-              picked.docLoading
-                ? "Reading this searchpoint's round file…"
-                : "No round file on disk for this point — a round still scoring has not written one yet, and this tab streams no cycle to read it from."
+              picked.unfiled
+                ? "This round is still scoring — the point appears as its cycle streams it."
+                : picked.roundRead.status === "loading"
+                  ? "Reading this searchpoint's round file…"
+                  : "This searchpoint's round file does not hold it."
             }
             onOverlay={(next) =>
               setEdits(withOverlay(edits, picked.key, next, picked.cfg?.config ?? {}))
@@ -206,11 +214,12 @@ export function ChannelDetail({
           choices={searchpointCopyChoices({
             cfg: picked.cfg,
             reading: picked.reading,
-            cells: picked.cells,
+            cells: shownData(picked.cellsRead)?.cells ?? [],
           })}
           title="Copy this searchpoint"
         />
       </div>
+      <FailureLine failure={failureOf(picked.cellsRead)} lead={COPY_WITHOUT_CELLS} />
     </>
   );
 }

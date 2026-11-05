@@ -1,13 +1,13 @@
 // The dashboard's view families: each a run of `.box-grid` boxes, read top-down in the preset's order.
 import { memo, useMemo } from "react";
 import { CardFrame, Said } from "@/components/ui";
-import { HEALTH_GRADE_INFO } from "@/lib/api/types.generated";
-import { useCycleStream } from "@/lib/poll";
+import { HEALTH_GRADE_INFO } from "@/lib/api/types";
+import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useCandidatesState } from "@/lib/state/candidates";
 import { useSelection } from "@/lib/SelectionContext";
 import { hasTag } from "@/lib/derivations";
-import { useEntry } from "@/lib/state/registry";
+import { useEntry } from "@/lib/hooks/useRegistry";
 import { useWorkspace } from "@/lib/workspace";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
@@ -36,7 +36,7 @@ export function TimelinePane() {
 
 // A critical round is the run's pinned line (`dash.said`); a degraded one is read under the timeline.
 const DegradedRounds = memo(function DegradedRounds() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const rounds = dash?.rounds;
   const degraded = useMemo(() => (rounds ?? []).filter((r) => r.health.grade === "degraded"), [rounds]);
   if (degraded.length === 0) return null;

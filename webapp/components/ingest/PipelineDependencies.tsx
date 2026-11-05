@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { DraftDependency } from "@/lib/api";
+import type { DraftDependency } from "@/lib/api/types";
 
 interface DependencyProps {
   librarySize: number;

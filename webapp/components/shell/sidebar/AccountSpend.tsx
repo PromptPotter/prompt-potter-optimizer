@@ -1,25 +1,12 @@
-import { useEffect, useRef } from "react";
 import { Term } from "@/components/ui";
 import { couponRead } from "@/lib/api";
 import { cx } from "@/lib/cx";
 import { allowanceCaveats, billText } from "@/lib/derivations";
 import { cssPct } from "@/lib/format";
 import { shownData, useRead } from "@/lib/hooks/useRead";
-import { invalidateReads } from "@/lib/read-cache";
-import { useRegistry } from "@/lib/state/registry";
 
 export function AccountSpend() {
-  const { entries } = useRegistry();
-  // No poll: spend moves only where a course's served lifetime bill moves, or a write re-asks it.
-  const read = useRead(couponRead(), { auth: true });
-
-  const signature = entries.map((c) => c.facts.spend_lifetime.billed_usd).join(",");
-  const asked = useRef(signature);
-  useEffect(() => {
-    if (asked.current === signature) return;
-    asked.current = signature;
-    invalidateReads("coupon");
-  }, [signature]);
+  const read = useRead(couponRead());
 
   if (read.status === "idle") return null;
   const data = shownData(read);

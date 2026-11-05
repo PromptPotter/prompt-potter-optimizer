@@ -1,4 +1,4 @@
-import type { CandidateFacts, LensShift } from "@/lib/api";
+import type { CandidateFacts, LensShift } from "@/lib/api/types";
 import type { CandidateBar } from "@/lib/types";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 

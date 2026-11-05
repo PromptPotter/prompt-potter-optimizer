@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "@/lib/state/auth";
 import { clearReadCache } from "@/lib/read-cache";
 import { accountKey, couponStatus, providerRoute } from "@/lib/test-fixtures";
-import type { CouponStatus } from "@/lib/api";
+import type { CouponStatus } from "@/lib/api/types";
 import { ProviderKeys } from "../AccountKeysTab";
 
 interface Sent {
@@ -36,7 +36,7 @@ function view(coupon: CouponStatus) {
 }
 
 describe("ProviderKeys", () => {
-  beforeEach(clearReadCache);
+  beforeEach(() => clearReadCache(true));
 
   it("shows a held key by its last four alone, and removing it issues the command", async () => {
     const sent = serve(() => Response.json({ command_id: "c1" }, { status: 202 }));

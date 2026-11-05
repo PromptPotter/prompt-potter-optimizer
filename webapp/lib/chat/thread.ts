@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Tone } from "@/lib/api/types.generated";
+import type { Tone } from "@/lib/api/types";
 
 export interface MessageItem {
   id: string;

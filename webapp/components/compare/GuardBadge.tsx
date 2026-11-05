@@ -1,5 +1,4 @@
-import type { PairGuard } from "@/lib/api/types";
-import { GUARD_STATE_LABELS } from "@/lib/api/types.generated";
+import { type PairGuard, GUARD_STATE_LABELS } from "@/lib/api/types";
 import { Badge, Term } from "@/components/ui";
 
 export function GuardBadge({ guard }: { guard: PairGuard }) {

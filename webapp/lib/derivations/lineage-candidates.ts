@@ -6,12 +6,12 @@ import type {
   SubtreeCampaign,
   SubtreeCourse,
   SubtreeEntry,
-} from "@/lib/api";
+  DisplayMetric,
+} from "@/lib/api/types";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { tagValue } from "./hierarchy";
 import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel } from "./headline-stats";
-import type { DisplayMetric } from "@/lib/api/types.generated";
 
 export interface RetiredGroup {
   // The address of the course that took the tail's place.

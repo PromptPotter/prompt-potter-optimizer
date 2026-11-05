@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Empty, FailureLine, Loading, SignInPrompt } from "@/components/ui";
 import { useAuth } from "@/lib/state/auth";
 import { tagValue } from "@/lib/derivations";
-import { useActivePointer, useRegistry } from "@/lib/state/registry";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
+import {
+  listedUnder,
+  setListedLifecycle,
+  useListedLifecycle,
+} from "@/lib/state/listed-lifecycle";
 import { useShowCandidates } from "@/lib/prefs/tree";
 import { useNodeToggle } from "@/lib/state/view-memory";
 import { useWorkspace } from "@/lib/workspace";
@@ -12,12 +18,19 @@ import { SidebarFilterPopover } from "./SidebarFilterPopover";
 export function SidebarContent() {
   const { status } = useAuth();
   const { viewedPath, viewedCandidateId } = useWorkspace();
-  const { listed, loaded, failure, listedLifecycle, setListedLifecycle } = useRegistry();
-  const { campaignId: activeCampaignId, cycleId: activeCycleId } = useActivePointer();
+  const { read, entries } = useRegistry();
+  const listedLifecycle = useListedLifecycle();
+  const loaded = shownData(read) !== null;
+  const failure = failureOf(read);
+  const { active } = useActivePointer();
   const nodes = useNodeToggle();
   const [showCandidates] = useShowCandidates();
   const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
+  const listed = useMemo(
+    () => entries.filter((c) => listedUnder(listedLifecycle, c)),
+    [entries, listedLifecycle],
+  );
   const shown = useMemo(
     () =>
       datasetFilter == null
@@ -33,14 +46,14 @@ export function SidebarContent() {
   }, [listed]);
 
   // The ACTIVE cycle, never the viewed one: a manual selection must not pop a course open.
-  const focusKey = activeCampaignId && activeCycleId ? activeCampaignId : null;
+  const focusKey = active?.campaign_id ?? null;
 
   // Latched per (campaign, active cycle): unlatched, a remount re-opens a row just collapsed.
   useEffect(() => {
-    if (!focusKey || !activeCampaignId || !activeCycleId) return;
-    if (nodes.autoExpandedFor(activeCampaignId) === activeCycleId) return;
-    nodes.markAutoExpanded(activeCampaignId, activeCycleId, focusKey);
-  }, [focusKey, activeCampaignId, activeCycleId, nodes]);
+    if (!focusKey || !active) return;
+    if (nodes.autoExpandedFor(active.campaign_id) === active.cycle_id) return;
+    nodes.markAutoExpanded(active.campaign_id, active.cycle_id, focusKey);
+  }, [focusKey, active, nodes]);
 
   const ctx: TreeCtx = useMemo(
     () => ({

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Term } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";
-import type { Said } from "@/lib/api/types.generated";
+import type { Said } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { useWorkspace } from "@/lib/workspace";
 import { FAMILIES } from "./families";

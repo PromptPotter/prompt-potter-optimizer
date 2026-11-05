@@ -3573,10 +3573,6 @@
             "title": "Scope",
             "type": "string"
           },
-          "total_hits": {
-            "title": "Total Hits",
-            "type": "integer"
-          },
           "total_measurements": {
             "description": "Graded cells across `samples` — the headline's denominator, served so the reader adds nothing up.",
             "title": "Total Measurements",
@@ -3597,7 +3593,6 @@
           "candidates",
           "cells",
           "total_measurements",
-          "total_hits",
           "mean_fitness",
           "never_hit",
           "partly_hit",
@@ -3917,11 +3912,6 @@
       "ConfigEstimandGroup": {
         "additionalProperties": false,
         "properties": {
-          "doc": {
-            "description": "Plain-language one-liner of what this estimand is",
-            "title": "Doc",
-            "type": "string"
-          },
           "key": {
             "description": "Estimand key (selection, difficulty, ability, …)",
             "title": "Key",
@@ -3944,7 +3934,6 @@
         "required": [
           "key",
           "label",
-          "doc",
           "knobs"
         ],
         "title": "ConfigEstimandGroup",

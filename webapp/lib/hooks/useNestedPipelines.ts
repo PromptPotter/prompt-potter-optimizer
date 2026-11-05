@@ -11,7 +11,7 @@ import type {
   NodeConfigParam,
   NodeReach,
   PipelineView,
-} from "@/lib/api";
+} from "@/lib/api/types";
 import type { PipelineStatus } from "@/lib/types";
 
 // One per dataset a level's cells measure, so a level holds several; `parent` is the enclosing layer's `key`.
@@ -74,8 +74,7 @@ function nestedPipelinesRead(roots: NestedPipelineRef[]): ReadDescriptor<NestedP
         const key = `${next.parent}>${ref.dataset}`;
         let resp: DatasetPipelineResponse;
         try {
-          const level = datasetPipelineRead(ref.dataset);
-          resp = await readThrough(level.id, level.load, signal);
+          resp = await readThrough(datasetPipelineRead(ref.dataset), signal);
         } catch (e) {
           if (signal.aborted) throw e;
           // The level stays in the stack, carrying its failure; what it nests is unknown.

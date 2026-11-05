@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
-import { postCommand, type ListedCampaign } from "@/lib/api";
+import { postCommand } from "@/lib/api";
+import type { ListedCampaign } from "@/lib/api/types";
 import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useIngest } from "@/lib/ingest-flow";
@@ -14,7 +15,7 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
   const renameFormId = useId();
   // The ROOT hop: a drilled-in inner leaf still belongs to the campaign being deleted.
   const { campaignId: viewedCampaignId, navigate } = useWorkspace();
-  const { flow } = useIngest();
+  const flow = useIngest();
   // An unstarted campaign has no run to rename or archive: Delete is its one action.
   const unstarted = campaign.level === "unstarted";
 

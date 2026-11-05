@@ -1,5 +1,4 @@
-import type { OptimizerFact } from "@/lib/api/types";
-import type { ServedDashboard } from "@/lib/api";
+import type { OptimizerFact, ServedDashboard } from "@/lib/api/types";
 
 export interface RoundReading {
   round: number;

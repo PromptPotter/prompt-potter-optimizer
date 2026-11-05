@@ -17,7 +17,6 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     Estimand,
-    estimand_doc,
     knob_label,
 )
 from promptpotter.domain.strict_model import StrictModel
@@ -39,7 +38,6 @@ class ConfigKnob(StrictModel):
 class ConfigEstimandGroup(StrictModel):
     key: str = Field(description="Estimand key (selection, difficulty, ability, …)")
     label: str = Field(description="Human-readable estimand name")
-    doc: str = Field(description="Plain-language one-liner of what this estimand is")
     knobs: list[ConfigKnob] = Field(description="Knobs that move this estimand, in declared order")
 
 
@@ -82,7 +80,6 @@ def config_map(config: CampaignConfig) -> ConfigMapResponse:
         ConfigEstimandGroup(
             key=estimand.value,
             label=estimand.value.replace("_", " ").title(),
-            doc=estimand_doc(estimand),
             knobs=[
                 ConfigKnob(path=s.path, label=knob_label(s.path), value=s.value, source=s.source)
                 for s in states

@@ -1,7 +1,6 @@
 import { liveCandidates, roundOf } from "@/lib/poll";
-import type { ServedDashboard } from "@/lib/api";
-import type { ArmReading } from "@/lib/api/types";
-import type { ArmRow, RoundCandidates, RoundView } from "@/lib/types";
+import type { ServedDashboard, ArmReading, RoundView } from "@/lib/api/types";
+import type { ArmRow, RoundCandidates } from "@/lib/types";
 
 export function scoreboardReading(doc: RoundView | null, key: string): ArmReading | null {
   return doc?.scoreboard.find((r) => r.reading.arm.key === key)?.reading ?? null;

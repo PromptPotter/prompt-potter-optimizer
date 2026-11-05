@@ -355,7 +355,6 @@ class CellsResponse(StrictModel):
         description="Graded cells across `samples` — the headline's denominator, served so the "
         "reader adds nothing up."
     )
-    total_hits: int
     mean_fitness: float | None = Field(
         description="Mean graded fitness across those cells; null when the scope holds none."
     )

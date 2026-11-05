@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { liveCandidates, useCycleStream } from "@/lib/poll";
+import { liveCandidates, useViewedDashboard } from "@/lib/poll";
 import type { ServedRound } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
 import {
@@ -14,7 +14,7 @@ import { useWorkspace } from "@/lib/workspace";
 import type { CandidateBar } from "@/lib/types";
 
 export function useCandidateBars(index: LineageIndex) {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const { viewedPath, viewedCandidateId } = useWorkspace();
   const { sampleSet } = useSelection();
 

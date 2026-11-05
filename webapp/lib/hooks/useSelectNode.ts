@@ -4,7 +4,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { isSelectedCandidate } from "@/lib/types";
 import { selectedNodeOf } from "@/lib/derivations";
 import { pathLeaf, pathOfAddress } from "@/lib/ids";
-import type { HierarchyCandidate } from "@/lib/api";
+import type { HierarchyCandidate } from "@/lib/api/types";
 
 interface SelectNode {
   isPicked: (node: HierarchyCandidate) => boolean;

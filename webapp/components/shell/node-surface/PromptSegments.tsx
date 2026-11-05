@@ -1,4 +1,4 @@
-import type { LibraryResponse } from "@/lib/api";
+import type { LibraryResponse } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import {
   freeText,

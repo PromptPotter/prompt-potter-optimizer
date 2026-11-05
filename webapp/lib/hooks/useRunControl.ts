@@ -3,7 +3,7 @@ import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import type { RunAdmission } from "@/lib/api/types";
 import { pauseNextStep, phasePauseLabel, phaseWalks } from "@/lib/derivations";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
 interface RunControl {
@@ -22,7 +22,7 @@ interface RunControl {
 }
 
 export function useRunControl(): RunControl | null {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const { viewedPath } = useWorkspace();
   const cmd = useCommand<"pause-cycle" | "start-run">("run-control");
   const [pausing, setPausing] = useState(false);

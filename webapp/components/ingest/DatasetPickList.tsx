@@ -1,18 +1,21 @@
+import { postCommand } from "@/lib/api";
 import {
-  postCommand,
   type DatasetIndexEntry,
+  type DatasetIndexResponse,
   type OriginEntry,
+  type OriginListResponse,
   type UnstartedCampaign,
-} from "@/lib/api";
-import { START_BLOCK_WORDS } from "@/lib/api/types.generated";
+  START_BLOCK_WORDS,
+} from "@/lib/api/types";
 import { fmtAgo, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
-import type { CollectionState } from "@/lib/hooks/useCollection";
+import type { ReadResult } from "@/lib/read-cache";
 import { FailureLine } from "@/components/ui";
 
 export function DatasetPickList({
   drafts,
-  collection,
+  datasets: datasetsRead,
+  origins: originsRead,
   onReopenDraft,
   onDiscarded,
   onOpenOrigin,
@@ -20,9 +23,10 @@ export function DatasetPickList({
   busy,
 }: {
   // The unstarted campaigns: each `address` is its draft id.
-  drafts: UnstartedCampaign[];
-  // Its own reads: the open check-ins list while these load.
-  collection: CollectionState;
+  drafts: readonly UnstartedCampaign[];
+  // Their own reads: the open check-ins list while these load.
+  datasets: ReadResult<DatasetIndexResponse>;
+  origins: ReadResult<OriginListResponse>;
   onReopenDraft: (draftId: string) => void;
   onDiscarded: (draftId: string) => void;
   onOpenOrigin: (entry: OriginEntry) => void;
@@ -37,9 +41,9 @@ export function DatasetPickList({
       () => postCommand("discard-draft", { draft_id: draftId }),
       () => onDiscarded(draftId),
     );
-  const ready = collection.kind === "ready";
-  const origins = ready ? collection.origins : [];
-  const datasets = ready ? collection.entries : [];
+  const ready = datasetsRead.status === "ready" && originsRead.status === "ready";
+  const origins = originsRead.status === "ready" ? originsRead.data.origins : [];
+  const datasets = datasetsRead.status === "ready" ? datasetsRead.data.datasets : [];
   if (ready && drafts.length === 0 && origins.length === 0 && datasets.length === 0) {
     return (
       <div className="chat-msg ai ingest-picklist">
@@ -88,12 +92,13 @@ export function DatasetPickList({
         </div>
       ) : null}
 
-      {collection.kind === "loading" ? (
+      {!ready && datasetsRead.status !== "failed" && originsRead.status !== "failed" ? (
         <p role="status" aria-live="polite">
           Loading your origins and datasets…
         </p>
       ) : null}
-      {collection.kind === "error" ? <FailureLine failure={collection.failure} /> : null}
+      {datasetsRead.status === "failed" ? <FailureLine failure={datasetsRead.failure} /> : null}
+      {originsRead.status === "failed" ? <FailureLine failure={originsRead.failure} /> : null}
 
       {origins.length > 0 ? (
         <div className="ingest-picklist-group">

@@ -1,7 +1,8 @@
-import { machineStatusRead, type MachineStatusResponse } from "@/lib/api";
-import { MACHINE_STATUS_POLL_MS } from "@/lib/cadence";
-import { useRead, type ReadResult } from "@/lib/hooks/useRead";
+import { machineStatusRead } from "@/lib/api";
+import type { MachineStatusResponse } from "@/lib/api/types";
+import { useRead } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
 
 export function useMachineStatus(): ReadResult<MachineStatusResponse> {
-  return useRead(machineStatusRead(), { auth: true, intervalMs: MACHINE_STATUS_POLL_MS });
+  return useRead(machineStatusRead());
 }

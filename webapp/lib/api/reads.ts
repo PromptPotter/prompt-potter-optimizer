@@ -1,11 +1,22 @@
 import { API, InvalidInputError, jget, jgetIfModified, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
-import type { ExportTier } from "./types.generated";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
-import type { ReadDescriptor } from "../read-cache";
+import {
+  ACTIVE_POINTER_POLL_MS,
+  CONNECTOR_HEALTH_POLL_MS,
+  DRAFT_POLL_MS,
+  MACHINE_STATUS_POLL_MS,
+  REGISTRY_POLL_MS,
+} from "../cadence";
+import { invalidateReads, readThrough, type CadenceState, type ReadDescriptor } from "../read-cache";
 import type {
   ActiveSessionResponse,
   ActivityResponse,
+  ActivityGroupBy,
+  ActivityWindow,
   BackendHealthResponse,
+  CellStatus,
+  ExportTier,
+  HardSampleOrder,
   HealthResponse,
   BackendResponse,
   CampaignPipelineResponse,
@@ -41,11 +52,6 @@ import type {
   WorkspaceStorageResponse,
 } from "./types";
 
-export type ActivityWindow = ActivityResponse["window"];
-export type ActivityGroupBy = ActivityResponse["group_by"];
-export type HardSampleOrder = CellsResponse["order"];
-export type CellStatus = CellsResponse["cells"][number]["status"];
-
 const SEP = "\x1f";
 const enc = encodeURIComponent;
 
@@ -64,8 +70,12 @@ function byEtag<T>(name: string, url: string): ReadDescriptor<T> {
   };
 }
 
+// The interval whatever the read's state; null reads once.
+const every = (ms: number | null) => () => ms;
+
+// The tenant's LATEST launch, not the live set.
 export function activeRead(): ReadDescriptor<ActiveSessionResponse> {
-  return once("active", `${API}/sessions/active`);
+  return { ...once("active", `${API}/sessions/active`), auth: true, cadence: every(ACTIVE_POINTER_POLL_MS) };
 }
 
 export function healthRead(): ReadDescriptor<HealthResponse> {
@@ -81,16 +91,33 @@ export function userSettingsRead(): ReadDescriptor<UserSettings> {
 }
 
 export function quotaRead(): ReadDescriptor<QuotaStatus> {
-  return once("quota", `${API}/auth/quota-status`);
+  return { ...once<QuotaStatus>("quota", `${API}/auth/quota-status`), auth: true };
 }
 
-// The account's money: the host's allowance, what each wallet paid, and the keys it holds.
+// The account's money: the host's allowance, what each wallet paid, and the keys it holds. No
+// poll: a moved bill on the listing re-asks it (`hierarchyRead`), as does a write naming it.
 export function couponRead(): ReadDescriptor<CouponStatus> {
-  return once("coupon", `${API}/auth/coupon`);
+  return { ...once<CouponStatus>("coupon", `${API}/auth/coupon`), auth: true };
+}
+
+// The served fields the draft's cadence reads.
+type DraftStage = Pick<DraftReopenResponse, "start"> & {
+  draft: Pick<DraftReopenResponse["draft"], "raw_task_description">;
+};
+
+// The draft's cadence off the served stage the flow shows (`useIngestFlow`'s `land`). A draft past
+// its task and before Start is in review — a refused resolver turn's included — and re-reads
+// Start's refusal, which tracks the wallet. One awaiting its task, a held Start (the listing
+// follows it) and a write in flight on it rest: the write's answer re-asks it. A lost reopen is
+// re-asked on the cache's own beat.
+export function draftCadence({ body, writing }: CadenceState<DraftStage>): number | null {
+  if (writing || body === null) return null;
+  const review = body.start === null && body.draft.raw_task_description !== null;
+  return review ? DRAFT_POLL_MS : null;
 }
 
 export function draftRead(draftId: string): ReadDescriptor<DraftReopenResponse> {
-  return once("draft", `${API}/drafts/${enc(draftId)}`);
+  return { ...once<DraftReopenResponse>("draft", `${API}/drafts/${enc(draftId)}`), cadence: draftCadence };
 }
 
 export function activityRead(
@@ -101,11 +128,11 @@ export function activityRead(
 }
 
 export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
-  return once("datasets", `${API}/datasets`);
+  return { ...once<DatasetIndexResponse>("datasets", `${API}/datasets`), auth: true };
 }
 
 export function originsRead(): ReadDescriptor<OriginListResponse> {
-  return once("origins", `${API}/origins`);
+  return { ...once<OriginListResponse>("origins", `${API}/origins`), auth: true };
 }
 
 export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {
@@ -127,15 +154,23 @@ export function datasetPipelineRead(name: string): ReadDescriptor<DatasetPipelin
 }
 
 export function backendsRead(): ReadDescriptor<BackendResponse[]> {
-  return once("backends", `${API}/backends`);
+  return { ...once<BackendResponse[]>("backends", `${API}/backends`), auth: true };
 }
 
 export function backendHealthRead(backendId: string): ReadDescriptor<BackendHealthResponse> {
-  return once("backend-health", `${API}/backends/${enc(backendId)}/health`);
+  return {
+    ...once<BackendHealthResponse>("backend-health", `${API}/backends/${enc(backendId)}/health`),
+    auth: true,
+    cadence: every(CONNECTOR_HEALTH_POLL_MS),
+  };
 }
 
 export function machineStatusRead(): ReadDescriptor<MachineStatusResponse> {
-  return once("machine-status", `${API}/machine-status`);
+  return {
+    ...once<MachineStatusResponse>("machine-status", `${API}/machine-status`),
+    auth: true,
+    cadence: every(MACHINE_STATUS_POLL_MS),
+  };
 }
 
 export function cyclePathUrl(path: CyclePath, suffix: string): string {
@@ -198,12 +233,12 @@ export function cellsRead(
   order: HardSampleOrder | null,
   filter: CellsFilter = {},
   // The server replays the CYCLE scope alone and refuses `at` elsewhere.
-  at: number | null = null,
-  limit = 1000,
-): ReadDescriptor<CellsResponse> {
+  at: number | null,
+  intervalMs: number | null,
+): ReadDescriptor<CellsResponse | null> {
   const root = pathRoot(path);
   const descend = encodeDescend(path);
-  const params = new URLSearchParams({ limit: String(limit), scope });
+  const params = new URLSearchParams({ limit: "1000", scope });
   if (order) params.set("order", order);
   if (scope === "campaign" || scope === "cycle" || descend) {
     params.set("campaign_id", root.campaignId);
@@ -214,7 +249,14 @@ export function cellsRead(
   if (filter.round != null) params.set("round", String(filter.round));
   if (filter.status) params.set("status", filter.status);
   if (at != null && scope === "cycle") params.set("at", String(at));
-  return byEtag("cells", `${API}/datasets/${enc(name)}/cells?${params.toString()}`);
+  return {
+    ...byEtag<CellsResponse | null>("cells", `${API}/datasets/${enc(name)}/cells?${params.toString()}`),
+    // A 404 is an honest empty, answered null: no pooled slice exists before the first round closes.
+    expects: "gone",
+    cadence: every(intervalMs),
+    // A re-ranked, re-scoped or replayed slice still in flight dims this one rather than blanking.
+    keep: `cells${SEP}${name}${SEP}${encodeCyclePath(path)}${SEP}${JSON.stringify(filter)}`,
+  };
 }
 
 export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
@@ -223,22 +265,48 @@ export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
 
 type DashboardBody = ServedDashboard | WarmingDashboard;
 
-export function isWarming(body: DashboardBody): body is WarmingDashboard {
-  return "warming_up" in body;
-}
-
 // `at` is a leaf-cycle ledger offset (`StepFacts.offset`); one file, so it validates on `Last-Modified`.
-export function dashboardRead(path: CyclePath, at: number | null): ReadDescriptor<DashboardBody> {
+export function dashboardRead(
+  path: CyclePath,
+  at: number | null,
+  intervalMs: number | null,
+): ReadDescriptor<ServedDashboard, DashboardBody> {
   const url = cyclePathUrl(path, at == null ? "/dashboard" : `/dashboard?at=${at}`);
   return {
     id: `dashboard${SEP}${url}`,
     load: (signal, validator) => jgetIfModified<DashboardBody>(url, validator, signal),
+    auth: true,
+    // A warming cycle has no dashboard yet.
+    accept: (body): body is ServedDashboard => !("warming_up" in body),
+    // Moving the viewed moment keeps the unit's last snapshot rather than blanking the page.
+    keep: `dashboard${SEP}${encodeCyclePath(path)}`,
+    // A lost read reconnects on the cache's own beat.
+    cadence: every(intervalMs),
   };
+}
+
+// The viewed cycle's phase change re-asks every mounted read: `run_phase` also rides `/hierarchy`
+// and `/hierarchy/{address}`. Another cycle's dashboard carries none (`poll.tsx::useDashboard`).
+export function onViewedPhaseChange(prev: ServedDashboard, next: ServedDashboard): void {
+  if (prev.run_phase !== next.run_phase) invalidateReads();
 }
 
 // Every lifecycle: an address resolves whether or not the sidebar's filter lists it.
 export function hierarchyRead(): ReadDescriptor<HierarchyResponse> {
-  return byEtag("hierarchy", `${API}/hierarchy?depth=1&lifecycle=all`);
+  return {
+    ...byEtag<HierarchyResponse>("hierarchy", `${API}/hierarchy?depth=1&lifecycle=all`),
+    auth: true,
+    cadence: every(REGISTRY_POLL_MS),
+    // A moved bill re-asks the account's money.
+    onChange: (prev, next) => {
+      if (billOf(prev) !== billOf(next)) invalidateReads("coupon");
+    },
+  };
+}
+
+// Every entry's lifetime bill, an open check-in's included.
+function billOf(body: HierarchyResponse): string {
+  return body.entries.map((e) => e.facts.spend_lifetime.billed_usd).join(",");
 }
 
 export function campaignStorageRead(campaignId: string): ReadDescriptor<LeafBytes> {
@@ -335,15 +403,22 @@ export function evidenceRead(
     config?: boolean;
     metric?: string;
     grid?: string;
-  } = {},
+  },
+  intervalMs: number | null,
 ): ReadDescriptor<Evidence> {
-  const qs = [...subjects].sort().map((s) => `subject=${enc(s)}`);
+  const named = [...subjects].sort().map((s) => `subject=${enc(s)}`);
+  const qs = [...named];
   if (opts.ranking) qs.push("ranking=true");
   if (opts.winnerChain) qs.push("winner_chain=true");
   if (opts.config) qs.push("config=true");
   if (opts.metric) qs.push(`metric=${enc(opts.metric)}`);
   if (opts.grid) qs.push(`grid=${enc(opts.grid)}`);
-  return byEtag("evidence", `${API}/evidence?${qs.join("&")}`);
+  return {
+    ...byEtag<Evidence>("evidence", `${API}/evidence?${qs.join("&")}`),
+    cadence: every(intervalMs),
+    // A refused metric or grid keeps the same subjects' last reading.
+    keep: `evidence${SEP}${named.join("&")}`,
+  };
 }
 
 // `lens` is `score:<formula>` or `abort:<variant>`; `samples` is ignored under `abort:`.
@@ -359,11 +434,24 @@ export interface SubtreeMoment {
 }
 
 // The campaign at `address` with every level under it; any other level there is a failed read.
+// `"seeding"`: the mask is the viewed cycle's own seed, not landed yet — the read waits on its
+// keep body rather than sending a tree under another cycle's mask.
 export function subtreeRead(
   address: string,
-  mask: SubtreeMask | null,
-  moment: SubtreeMoment | null = null,
+  mask: SubtreeMask | "seeding" | null,
+  moment: SubtreeMoment | null,
+  intervalMs: number | null,
 ): ReadDescriptor<SubtreeCampaign> {
+  const keep = `subtree${SEP}${address}`;
+  if (mask === "seeding") {
+    return {
+      id: `subtree${SEP}${address}${SEP}seeding`,
+      auth: true,
+      held: true,
+      keep,
+      load: () => Promise.reject(new Error(`a seeding tree asks nothing: ${address}`)),
+    };
+  }
   const params = new URLSearchParams();
   if (mask?.lens) params.set("lens", mask.lens);
   if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));
@@ -375,6 +463,11 @@ export function subtreeRead(
   const entry = byEtag<SubtreeEntry>("subtree", `${API}/hierarchy/${enc(address)}${q ? `?${q}` : ""}`);
   return {
     id: entry.id,
+    auth: true,
+    // A mask or moment re-keys the read; the campaign's last tree stands meanwhile.
+    keep,
+    // A lost tree is re-asked on the cache's own beat.
+    cadence: every(intervalMs),
     load: async (signal, validator) => {
       const res = await entry.load(signal, validator);
       if (res.kind === "not_modified") return res;
@@ -388,12 +481,48 @@ export function subtreeRead(
 }
 
 // A course's steps, windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
+// `intervalMs` is the head window's (`poll.tsx::useTimeRay`); a page never moves and reads once.
 export function stepsRead(
   path: CyclePath,
   limit: number,
-  before: string | null = null,
+  before: string | null,
+  intervalMs: number | null,
 ): ReadDescriptor<HierarchySteps> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (before) params.set("before", before);
-  return byEtag("steps", `${API}/hierarchy/${enc(encodeCyclePath(path))}/@?${params.toString()}`);
+  return {
+    ...byEtag<HierarchySteps>(
+      "steps",
+      `${API}/hierarchy/${enc(encodeCyclePath(path))}/@?${params.toString()}`,
+    ),
+    auth: true,
+    cadence: every(intervalMs),
+  };
+}
+
+// The `pages` windows before `anchor` (a head window's `cursor_prev`), as one body oldest-first:
+// each page is its own `stepsRead`, so asking one more page re-validates the ones already held.
+export function earlierStepsRead(
+  path: CyclePath,
+  limit: number,
+  anchor: string,
+  pages: number,
+): ReadDescriptor<HierarchySteps> {
+  const unit = encodeCyclePath(path);
+  return {
+    id: `earlier-steps${SEP}${unit}${SEP}${anchor}${SEP}${pages}`,
+    auth: true,
+    // One more page asked keeps the pages already shown.
+    keep: `earlier-steps${SEP}${unit}${SEP}${anchor}`,
+    load: async (signal) => {
+      let steps: HierarchySteps["steps"] = [];
+      let cursor: string | null = anchor;
+      for (let page = 0; page < pages && cursor !== null; page++) {
+        const window: HierarchySteps = await readThrough(stepsRead(path, limit, cursor, null), signal);
+        steps = [...window.steps, ...steps];
+        cursor = window.cursor_prev;
+      }
+      return { kind: "ok", data: { steps, cursor_prev: cursor }, validator: null };
+    },
+  };
 }

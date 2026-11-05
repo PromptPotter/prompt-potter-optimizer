@@ -28,7 +28,7 @@ import {
   EXPORT_TIER_INFO,
   PREFIX_STATE_TITLES,
   SCORE_LENS_LABELS,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { setScoringMask } from "@/lib/scoring-mask";
 

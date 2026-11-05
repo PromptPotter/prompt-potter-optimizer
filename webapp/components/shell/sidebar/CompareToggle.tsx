@@ -1,4 +1,4 @@
-import type { HierarchyCampaign } from "@/lib/api";
+import type { HierarchyCampaign } from "@/lib/api/types";
 import { defaultChannel, useCompareSelection } from "@/lib/state/compare-selection";
 
 export function CompareToggle({ campaign }: { campaign: HierarchyCampaign }) {

@@ -1,4 +1,4 @@
-import { CAP_AXIS_INFO, type CapAxis, type CapAxisInfo } from "@/lib/api/types.generated";
+import { CAP_AXIS_INFO, type CapAxis, type CapAxisInfo } from "@/lib/api/types";
 
 export interface CapBounds {
   integer?: boolean | undefined;

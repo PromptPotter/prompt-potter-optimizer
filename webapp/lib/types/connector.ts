@@ -2,15 +2,15 @@ import type {
   BackendHealthResponse,
   BackendResponse,
   CapabilityMenu,
+  CellTerm,
   NestedPipelineRef,
   NodeConfigParam,
   NodeOutputSchema,
   NodeReach,
   OptimizerSetup,
-} from "@/lib/api";
-import type { CellTerm } from "@/lib/api/types.generated";
-import type { ReadFailure } from "@/lib/hooks/useRead";
-import type { PipelineView } from "./pipeline";
+  PipelineView,
+} from "@/lib/api/types";
+import type { ReadFailure } from "@/lib/read-cache";
 
 // A failed read IS its `ReadFailure`, so every surface renders its sentence through `FailureLine`.
 export type PipelineStatus = "unbound" | "loading" | "ok" | ReadFailure;

@@ -1,29 +1,21 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { DASHBOARD_LIVE_POLL_MS, DASHBOARD_RECONNECT_POLL_MS } from "@/lib/cadence";
-import { phaseIs } from "@/lib/derivations";
-import { dashboardRead, isWarming, stepsRead } from "./api";
+import { useCallback, useMemo } from "react";
+import { failurePasses } from "./api/client";
+import { dashboardRead, earlierStepsRead, onViewedPhaseChange, stepsRead } from "./api/reads";
+import { DASHBOARD_LIVE_POLL_MS, RECONNECT_POLL_MS } from "./cadence";
+import { phaseIs } from "./derivations/run-phase";
 import { encodeCyclePath, type CyclePath } from "./ids";
-import type { HierarchyStep, LiveCandidate, ServedDashboard } from "./api/types";
-import type { Said } from "./api/types.generated";
-import { shownData, useRead, type ReadFailure } from "./hooks/useRead";
-import { invalidateReads } from "./read-cache";
-import { useWorkspace } from "./workspace";
-
-// The CONNECTION's state, never the run's — that is the served `dash.producer`. `lost`: the read
-// failed, a transient failure being the server unreachable; `gone`: the address no longer exists.
-export type Connection =
-  | { kind: "connected" }
-  | { kind: "lost"; failure: ReadFailure }
-  | { kind: "gone" };
+import type {
+  HierarchyStep,
+  HierarchySteps,
+  LiveCandidate,
+  Said,
+  ServedDashboard,
+} from "@/lib/api/types";
+import { shownData, useRead } from "./hooks/useRead";
+import { invalidateReads, type ReadFailure, type ReadResult } from "./read-cache";
+import { seedScoringMask } from "./scoring-mask";
+import { createModuleStore } from "./state/module-store";
+import { useMomentAt, useWorkspace } from "./workspace";
 
 // Stable reference: a fresh `[]` per poll drives the candidates card into a setState loop.
 const NO_ROWS: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
@@ -40,242 +32,145 @@ export function liveCandidate(
   return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
 }
 
-interface CycleStreamState {
-  dash: ServedDashboard | null;
-  connection: Connection;
-  isLive: boolean;
-}
-
-const CONNECTED: Connection = { kind: "connected" };
-const GONE: Connection = { kind: "gone" };
-
 export const DASHBOARD_PENDING = "Waiting for this run’s dashboard…";
 
-// The connection's own row: the one `Said` the client makes. Only a transient failure is the
-// server unreachable; an answered refusal says its own sentence.
-export function connectionSaid(connection: Connection): Said | null {
-  if (connection.kind === "connected") return null;
-  if (connection.kind === "gone") {
+// Whose read failed: the viewed cycle's, pinned or followed, or with no cycle in view the reads that
+// list and point at runs; `left` is the workspace just leaving a gone pin, whatever is read now.
+export type FailureOf = "pinned" | "followed" | "listing" | "left";
+
+// The CONNECTION's own row, never the run's (that is the served `dash.said`): the one `Said` the
+// client makes, off the failed read itself. Only a transient failure is the server unreachable;
+// an answered refusal says its own sentence, and one that passes is asked again. A 404 says a
+// campaign is gone on the viewed cycle's read alone, and the run is returned to only off a pin
+// (`workspace.tsx::reportAddressGone`): a followed run gone stays in view until the pointer moves.
+export function connectionSaid(failure: ReadFailure | null, of: FailureOf): Said | null {
+  const gone = failure?.kind === "gone" && of !== "listing";
+  if (of === "left" || gone) {
     return {
       key: "address_gone",
       tone: "attention",
       label: "This campaign no longer exists",
       value: null,
       sub: null,
-      detail: "It was deleted, or its store was reset. Returning to the active run.",
+      detail: `It was deleted, or its store was reset.${of === "followed" ? "" : " Returning to the active run."}`,
     };
   }
-  const offline = connection.failure.kind === "transient";
+  if (failure === null) return null;
+  const offline = failure.kind === "transient";
   return {
     key: "connection_lost",
     tone: "danger",
-    label: offline ? "PromptPotter API unreachable" : connection.failure.message,
+    label: offline ? "PromptPotter API unreachable" : failure.message,
     value: null,
     sub: null,
-    detail: offline
-      ? `Reconnecting every ${DASHBOARD_RECONNECT_POLL_MS / 1000} s — check the server is running.`
-      : null,
+    detail: !failurePasses(failure.kind)
+      ? null
+      : offline
+        ? "Reconnecting — check the server is running."
+        : "Retrying automatically.",
   };
-}
-
-const RAY_WINDOW = 200;
-
-// The head window's read: `failed` carries the failure, never a flag.
-export type RayRead =
-  | { status: "loading" }
-  | { status: "ready" }
-  | { status: "failed"; failure: ReadFailure };
-
-interface TimeRayState {
-  steps: HierarchyStep[];
-  head: RayRead;
-  // The last "earlier" page asked, null while none failed.
-  olderFailure: ReadFailure | null;
-  hasMore: boolean;
-  loadOlder: () => void;
 }
 
 export function roundOf(dash: ServedDashboard | null): number | null {
   return dash?.current_round.round ?? null;
 }
 
-const CycleStreamContext = createContext<CycleStreamState | null>(null);
-
-export function useCycleStream(): CycleStreamState {
-  const v = useContext(CycleStreamContext);
-  if (!v) {
-    throw new Error("useCycleStream must be called inside <CycleStreamProvider>");
-  }
-  return v;
-}
-
-const StreamedAddressContext = createContext<string | null>(null);
-
-// `streamed`: `path` is the address this provider polls, so `dash` is its dashboard (null until it
-// lands); off the stream `dash` is null and a caller needing one reads its own.
-export function useDashboardAt(path: CyclePath | null): {
-  streamed: boolean;
+interface DashboardPoll {
+  read: ReadResult<ServedDashboard>;
+  // The read's body, or the unit's last one while a moved moment loads; null once the unit is gone.
   dash: ServedDashboard | null;
-} {
-  const unit = useContext(StreamedAddressContext);
-  const { dash } = useCycleStream();
-  const streamed = path !== null && unit !== null && encodeCyclePath(path) === unit;
-  return { streamed, dash: streamed ? dash : null };
+  isLive: boolean;
 }
 
-// Its own context: sharing `dash`'s would re-render every memoized chart when only the ray moved.
-const TimeRayContext = createContext<TimeRayState | null>(null);
-
-export function useTimeRay(): TimeRayState {
-  const v = useContext(TimeRayContext);
-  if (!v) {
-    throw new Error("useTimeRay must be called inside <CycleStreamProvider>");
-  }
-  return v;
-}
-
-function useDashboard(path: CyclePath | null, unit: string | null, intervalMs: number) {
-  const { at, reportAddressGone } = useWorkspace();
-  const read = useRead(path ? dashboardRead(path, at) : null, {
-    auth: true,
-    intervalMs,
-    onGone: () => {
-      if (unit !== null) reportAddressGone(unit);
-    },
-  });
-
-  const body = shownData(read);
-  const landed = body && !isWarming(body) ? body : null;
-  // The last snapshot this unit showed, so moving the viewed moment does not blank the page.
-  const [shown, setShown] = useState<{ unit: string | null; dash: ServedDashboard | null }>({
-    unit,
-    dash: null,
-  });
-  if (shown.unit !== unit || (body !== null && shown.dash !== landed)) {
-    setShown({ unit, dash: landed });
-  }
-
-  const state = useMemo((): Omit<CycleStreamState, "isLive"> => {
-    const kept = shown.unit === unit ? shown.dash : null;
-    if (read.status === "ready") return { dash: landed, connection: CONNECTED };
-    if (read.status === "failed") {
-      if (read.failure.kind === "gone") return { dash: null, connection: GONE };
-      // `dash` stays, so a client blip cannot read an in-flight cycle as gone.
-      return { dash: landed ?? kept, connection: { kind: "lost", failure: read.failure } };
-    }
-    return { dash: kept, connection: CONNECTED };
-  }, [read, landed, shown, unit]);
-
-  return { state, replaying: at !== null };
-}
-
-const NO_STEPS: HierarchyStep[] = [];
-
-interface Paged {
-  unit: string | null;
-  steps: HierarchyStep[];
-  cursor: string | null;
-  // The cursor whose page `steps` already holds, so a re-asked page is never prepended twice.
-  through: string | null;
-}
-
-function useRay(path: CyclePath | null, unit: string | null, intervalMs: number | undefined): TimeRayState {
-  const head = useRead(path ? stepsRead(path, RAY_WINDOW) : null, { auth: true, intervalMs });
-  const headWindow = shownData(head);
-
-  const fresh: Paged = { unit, steps: [], cursor: null, through: null };
-  const [paged, setPaged] = useState<Paged>(fresh);
-  const [asked, setAsked] = useState<{ unit: string | null; cursor: string } | null>(null);
-  if (paged.unit !== unit) {
-    setPaged(fresh);
-    setAsked(null);
-  }
-  const own = paged.unit === unit ? paged : fresh;
-  const askedCursor = asked !== null && asked.unit === unit ? asked.cursor : null;
-  // A fresh head window's cursor names a boundary already paged past.
-  const cursor = own.steps.length > 0 ? own.cursor : (headWindow?.cursor_prev ?? null);
-
-  const page = useRead(path && askedCursor ? stepsRead(path, RAY_WINDOW, askedCursor) : null, {
-    auth: true,
-  });
-  if (page.status === "ready" && askedCursor !== null && own.through !== askedCursor) {
-    setPaged({
-      unit,
-      steps: [...page.data.steps, ...own.steps],
-      cursor: page.data.cursor_prev,
-      through: askedCursor,
-    });
-  }
-  // One value guards the claim and its fetch: a page is in the air while its cursor is unpaged.
-  const inFlight = askedCursor !== null && own.through !== askedCursor && page.status !== "failed";
-  const pageFailed = page.status === "failed";
-  const loadOlder = useCallback(() => {
-    if (cursor === null || inFlight) return;
-    // The same page asked again re-asks the read; a new cursor names a new one.
-    if (pageFailed && askedCursor === cursor) invalidateReads("steps");
-    else setAsked({ unit, cursor });
-  }, [cursor, inFlight, unit, pageFailed, askedCursor]);
-
-  const older = own.steps.length > 0 ? own.steps : NO_STEPS;
-  const headSteps = headWindow?.steps;
-  const steps = useMemo(() => [...older, ...(headSteps ?? [])], [older, headSteps]);
-  const headRead = useMemo<RayRead>(
-    () =>
-      head.status === "failed"
-        ? { status: "failed", failure: head.failure }
-        : head.status === "ready"
-          ? { status: "ready" }
-          : { status: "loading" },
-    [head],
-  );
-  const olderFailure = page.status === "failed" ? page.failure : null;
-
-  return useMemo<TimeRayState>(
-    () => ({ steps, head: headRead, olderFailure, hasMore: cursor !== null, loadOlder }),
-    [steps, headRead, olderFailure, cursor, loadOlder],
-  );
-}
-
-export function CycleStreamProvider({
-  path,
-  children,
-}: {
-  path: CyclePath | null;
-  children: ReactNode;
-}) {
+// A cycle's dashboard poll: every caller naming one unit and moment shares one read, at the most
+// eager caller's `intervalMs` (null reads once). Every caller of the viewed cycle's carries its
+// phase re-ask, so the read's change effect is that whoever subscribed last
+// (`read-cache.ts::descriptorOf`).
+export function useDashboard(path: CyclePath | null, intervalMs: number | null): DashboardPoll {
+  const { reportAddressGone, viewedPath } = useWorkspace();
+  const at = useMomentAt(path);
   const unit = path ? encodeCyclePath(path) : null;
-  const [slow, setSlow] = useState(false);
-  const intervalMs = slow ? DASHBOARD_RECONNECT_POLL_MS : DASHBOARD_LIVE_POLL_MS;
-  const { state, replaying } = useDashboard(path, unit, intervalMs);
-  // A replayed moment polls on the slow beat too: a fold at a past offset is immutable.
-  const wantSlow = state.connection.kind === "lost" || replaying;
-  if (wantSlow !== slow) setSlow(wantSlow);
-  // `run_phase` also rides `/hierarchy` and `/hierarchy/{address}`, so a change re-asks every live read.
-  const phase = state.dash?.run_phase ?? null;
-  // A settled run's steps move only on a resume, whose phase change re-asks them below.
-  const ray = useRay(path, unit, phaseIs(phase, "settled") ? undefined : intervalMs);
-  const seenRef = useRef<{ unit: string | null; phase: string | null }>({ unit: null, phase: null });
-  useEffect(() => {
-    if (phase === null) return;
-    const seen = seenRef.current;
-    seenRef.current = { unit, phase };
-    if (seen.unit === unit && seen.phase !== null && seen.phase !== phase) invalidateReads();
-  }, [unit, phase]);
-
-  const stream = useMemo<CycleStreamState>(
-    () => ({
-      ...state,
-      isLive:
-        !replaying && state.connection.kind === "connected" && state.dash?.producer.appending === true,
-    }),
-    [state, replaying],
+  const viewed = unit !== null && viewedPath !== null && unit === encodeCyclePath(viewedPath);
+  const read = useRead(
+    path
+      ? {
+          ...dashboardRead(path, at, intervalMs),
+          ...(viewed ? { onChange: onViewedPhaseChange } : {}),
+          onGone: () => reportAddressGone(encodeCyclePath(path)),
+        }
+      : null,
   );
+  const gone = read.status === "failed" && read.failure.kind === "gone";
+  const dash = gone ? null : shownData(read);
+  const isLive = at === null && read.status !== "failed" && dash?.producer.appending === true;
+  return useMemo(() => ({ read, dash, isLive }), [read, dash, isLive]);
+}
 
-  return (
-    <StreamedAddressContext.Provider value={unit}>
-      <CycleStreamContext.Provider value={stream}>
-        <TimeRayContext.Provider value={ray}>{children}</TimeRayContext.Provider>
-      </CycleStreamContext.Provider>
-    </StreamedAddressContext.Provider>
+// The viewed cycle's beat, for its dashboard and the steps beside it: a replayed moment, or a
+// lost read, polls slow, since a fold at a past offset is immutable.
+export function viewedIntervalMs(at: number | null, lost: boolean): number {
+  return at !== null || lost ? RECONNECT_POLL_MS : DASHBOARD_LIVE_POLL_MS;
+}
+
+// The viewed cycle's dashboard, and the one place its scoring mask is seeded from. A lost read
+// slows on the cache's own floor (`read-cache.ts::intervalOf`).
+export function useViewedDashboard(): DashboardPoll {
+  const { viewedPath, cycleId, at } = useWorkspace();
+  const poll = useDashboard(viewedPath, viewedIntervalMs(at, false));
+  if (cycleId !== null && poll.dash !== null) seedScoringMask(cycleId, poll.dash);
+  return poll;
+}
+
+const RAY_WINDOW = 200;
+
+// How far back the operator paged the viewed course: naming no view, it outlives the ray's mount;
+// the pages themselves are `earlierStepsRead`'s, in the cache beside the head window.
+const paging = createModuleStore<{ unit: string | null; anchor: string | null; pages: number }>({
+  unit: null,
+  anchor: null,
+  pages: 0,
+});
+
+interface TimeRay {
+  steps: HierarchyStep[];
+  head: ReadResult<HierarchySteps>;
+  earlier: ReadResult<HierarchySteps>;
+  hasMore: boolean;
+  loadOlder: () => void;
+}
+
+// The viewed course's steps: a head window on its dashboard's beat, then pages asked one by one. A
+// settled run's steps move only on a resume, whose phase change re-asks them
+// (`reads.ts::onViewedPhaseChange`).
+export function useTimeRay(): TimeRay {
+  const { viewedPath: path, at } = useWorkspace();
+  const { read: board, dash } = useViewedDashboard();
+  const lost = board.status === "failed" && board.failure.kind !== "gone";
+  const intervalMs = phaseIs(dash?.run_phase, "settled") ? null : viewedIntervalMs(at, lost);
+  const unit = path ? encodeCyclePath(path) : null;
+  const head = useRead(path ? stepsRead(path, RAY_WINDOW, null, intervalMs) : null);
+  const headWindow = shownData(head);
+  const paged = paging.useStore();
+  const own = paged.unit === unit && paged.anchor !== null ? paged : null;
+  const earlier = useRead(
+    path && own?.anchor ? earlierStepsRead(path, RAY_WINDOW, own.anchor, own.pages) : null,
   );
+  const earlierWindow = shownData(earlier);
+  const cursor = own ? (earlierWindow?.cursor_prev ?? null) : (headWindow?.cursor_prev ?? null);
+  const earlierStatus = earlier.status;
+  const loadOlder = useCallback(() => {
+    // The same pages asked again re-ask the read; one more page names a new one.
+    if (earlierStatus === "failed") invalidateReads("earlier-steps");
+    else if (earlierStatus === "loading" || cursor === null) return;
+    else if (own) paging.set({ pages: own.pages + 1 });
+    else paging.set({ unit, anchor: cursor, pages: 1 });
+  }, [earlierStatus, cursor, own, unit]);
+
+  const earlierSteps = earlierWindow?.steps;
+  const headSteps = headWindow?.steps;
+  const steps = useMemo(
+    () => [...(earlierSteps ?? []), ...(headSteps ?? [])],
+    [earlierSteps, headSteps],
+  );
+  return { steps, head, earlier, hasMore: cursor !== null, loadOlder };
 }

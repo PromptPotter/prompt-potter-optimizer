@@ -7,7 +7,7 @@ import type {
   RoundFacts,
   SubtreeCampaign,
   SubtreeCourse,
-} from "@/lib/api";
+} from "@/lib/api/types";
 import { candidatesOf, descentOf, tagValue } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { pathOfAddress } from "@/lib/ids";

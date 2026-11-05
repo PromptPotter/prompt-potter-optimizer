@@ -12,8 +12,11 @@ import {
   seedOverlayFromRows,
   type ConfigRow,
 } from "../node-config";
-import type { ModelCapability, NodeConfigParam } from "@/lib/api";
-import { SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
+import {
+  type ModelCapability,
+  type NodeConfigParam,
+  SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX,
+} from "@/lib/api/types";
 import { configParam as param } from "@/lib/test-fixtures";
 
 function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRow {

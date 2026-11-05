@@ -1,12 +1,12 @@
-import type {
-  CapabilityMenu,
-  DraftPatch,
-  ModelCapability,
-  NodeConfigParam,
-  OptimizerSetup,
-} from "@/lib/api";
-import type { ParamIntent } from "@/lib/api/types";
-import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
+import {
+  type CapabilityMenu,
+  type DraftPatch,
+  type ModelCapability,
+  type NodeConfigParam,
+  type OptimizerSetup,
+  type ParamIntent,
+  SCHEMA_DESCRIPTION_PREFIX,
+} from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
 

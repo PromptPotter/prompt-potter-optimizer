@@ -7,17 +7,11 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import {
-  backendHealthRead,
-  backendsRead,
-  campaignPipelineRead,
-  type BackendResponse,
-  type CampaignPipelineResponse,
-  type DraftCampaignWire,
-} from "@/lib/api";
-import { CONNECTOR_HEALTH_POLL_MS } from "@/lib/cadence";
+import { backendHealthRead, backendsRead, campaignPipelineRead } from "@/lib/api";
+import type { BackendResponse, CampaignPipelineResponse, DraftCampaignWire } from "@/lib/api/types";
 import { pipelineReadStatus } from "@/lib/derivations";
-import { readyData, shownData, useRead, type ReadResult } from "@/lib/hooks/useRead";
+import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
 import type { ConnectorView } from "@/lib/types";
 
 const EMPTY: ConnectorView = {
@@ -50,7 +44,7 @@ export function useCampaignPipeline(
 
 function useConnectorViewEngine(campaignId: string | null, at: string | null): ConnectorView {
   // Gated on the session: an anon preview must never fire the protected read (I5).
-  const backends = shownData(useRead(backendsRead(), { auth: true })) ?? NO_BACKENDS;
+  const backends = shownData(useRead(backendsRead())) ?? NO_BACKENDS;
 
   const read = useCampaignPipeline(campaignId, at);
   const resp = shownData(read);
@@ -64,10 +58,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
 
   // Our own API down is the dashboard banner's to say: a failed read is unknown, not offline.
   const health = readyData(
-    useRead(activeId ? backendHealthRead(activeId) : null, {
-      auth: true,
-      intervalMs: CONNECTOR_HEALTH_POLL_MS,
-    }),
+    useRead(activeId ? backendHealthRead(activeId) : null),
   );
 
   return useMemo<ConnectorView>(() => {

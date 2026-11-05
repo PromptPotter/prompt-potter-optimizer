@@ -1,6 +1,11 @@
-import type { CapabilityMenu, DraftPatch, NodeOutputSchema } from "@/lib/api";
-import type { ParamIntent } from "@/lib/api/types";
-import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
+import {
+  type CapabilityMenu,
+  type DraftPatch,
+  type NodeOutputSchema,
+  type ParamIntent,
+  SCHEMA_DESCRIPTION_PREFIX,
+  type PipelineViewNode,
+} from "@/lib/api/types";
 import type { NodeSchemaReading } from "@/lib/types";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import {
@@ -11,7 +16,6 @@ import {
   outputContract,
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
-import type { PipelineViewNode } from "@/lib/types";
 import type { NodeScope } from "@/lib/address";
 import { PromptWithLibrary } from "./PromptWithLibrary";
 import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";

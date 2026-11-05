@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CheckinQuestion, DraftPatch } from "@/lib/api";
+import type { CheckinQuestion, DraftPatch } from "@/lib/api/types";
 import { setIn } from "./SchemaFields";
 
 // A served question carries the patch path its answer is written at, and the answers it takes.

@@ -1,14 +1,15 @@
 import { liveCandidate, roundOf } from "@/lib/poll";
-import type { ServedDashboard } from "@/lib/api";
 import type {
+  ServedDashboard,
   ArmName,
   ArmReading,
   CellRow,
   HierarchyCandidate,
   NodePrompt,
   RunStanding,
+  RoundView,
 } from "@/lib/api/types";
-import type { ArmRow, RoundView, SelectedCandidate } from "@/lib/types";
+import type { ArmRow, SelectedCandidate } from "@/lib/types";
 import { armSearchpoint, type ArmSearchpoint } from "./candidate-search-point";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
@@ -39,9 +40,12 @@ export interface ObserveConfig {
   // `OptSearchPoint.prompts`: per prompt node, its fields and shots.
   prompts: Record<string, NodePrompt>;
   config: Record<string, unknown>;
-  // Decorated header ("live — C1.3"); never a join key.
+  // The header its reader names ("selected · C1.3"); never a join key.
   label: string;
 }
+
+// The lead of a failed cells read beside a copy: the copy offers no cells.
+export const COPY_WITHOUT_CELLS = "Copies carry no cells:";
 
 // Keys are the served names, so a paste greps against `round_NNNN.json`; cells are ALL of them, never the render cap.
 export function searchpointCopyChoices({
@@ -110,10 +114,10 @@ function rowConfig(
 export function liveCandidateObserveConfig(
   dash: ServedDashboard | null,
   key: string | null,
+  display: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  const row = liveCandidate(dash, key);
-  return row && rowConfig(row, `live — ${row.reading.arm.label}`, nodeId);
+  return rowConfig(liveCandidate(dash, key), display, nodeId);
 }
 
 export function candidateObserveConfig(

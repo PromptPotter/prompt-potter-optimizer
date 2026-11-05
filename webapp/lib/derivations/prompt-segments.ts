@@ -3,7 +3,7 @@
 // The shape is always free, (snippet, free)*: a box to write in before, between and after every
 // snippet, so what is rendered never changes with what is typed.
 
-import type { LibrarySnippet } from "@/lib/api";
+import type { LibrarySnippet } from "@/lib/api/types";
 
 export interface KnownSnippet {
   text: string;

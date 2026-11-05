@@ -1,9 +1,5 @@
-import {
-  optimizerRosterRead,
-  type ManifestNodeOverlay,
-  type OptimizerSetup,
-  type StartCheckinOptions,
-} from "@/lib/api";
+import { optimizerRosterRead, type StartCheckinOptions } from "@/lib/api";
+import type { ManifestNodeOverlay, OptimizerSetup } from "@/lib/api/types";
 import { knobGroups, type KnobGroup } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { Button, CommitInput, ReadState, SegmentedControl } from "@/components/ui";

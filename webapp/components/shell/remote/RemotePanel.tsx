@@ -1,7 +1,6 @@
-import type { ServedBackpressure } from "@/lib/api";
+import { type ServedBackpressure, LOOKAHEAD_WORDS } from "@/lib/api/types";
 import { Said, SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
-import { LOOKAHEAD_WORDS } from "@/lib/api/types.generated";
 import { affordableText, lookaheadDepthLabel, lookaheadExplained } from "@/lib/derivations";
 import { fmtDuration, fmtUsd } from "@/lib/format";
 import { RunLimitsControl } from "@/components/shell/remote/RunLimitsControl";

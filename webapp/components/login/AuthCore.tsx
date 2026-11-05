@@ -1,5 +1,5 @@
 import { Said } from "@/components/ui";
-import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types.generated";
+import { SIGN_IN_REFUSAL_INFO } from "@/lib/api/types";
 import type { SignInRefusal } from "@/lib/state/auth";
 
 function GoogleMark() {

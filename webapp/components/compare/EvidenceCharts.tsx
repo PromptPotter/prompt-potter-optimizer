@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
-import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api";
+import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api/types";
 import { maskedSubject } from "@/lib/api/reads";
 import {
   DataTable,

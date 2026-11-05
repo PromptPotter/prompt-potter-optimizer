@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
-import type { MeasuredLift } from "@/lib/api/types";
+import type { Evidence, HierarchyCourse, SubjectReading, MeasuredLift } from "@/lib/api/types";
 import {
   CardFrame,
   DataTable,
@@ -16,8 +15,9 @@ import {
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { campaignAt, readPaired } from "@/lib/derivations";
-import { useRegistry } from "@/lib/state/registry";
+import { useRegistry } from "@/lib/hooks/useRegistry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
+import { shownData } from "@/lib/hooks/useRead";
 import {
   sideTone,
   fmtLift,
@@ -79,13 +79,17 @@ export function ComparePane() {
       .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.status.run_phase}`)
       .join("|"),
   };
-  const { evidence, loading, failure, invalidMetric } = useEvidence(selected, pulse, {
+  const read = useEvidence(selected, pulse, {
     ranking,
     winnerChain,
     config,
     metric,
     grid,
   });
+  // A failed read keeps the last answer on screen beside its failure: a refused metric or grid
+  // beside the picker, any other above the channels.
+  const evidence = shownData(read);
+  const invalidMetric = read.status === "failed" && read.failure.kind === "invalid" ? read.failure : null;
 
   // Keyed on campaigns, so re-pointing a channel keeps the metric; a stale metric pick 400s.
   const campaignsKey = useMemo(
@@ -106,7 +110,7 @@ export function ComparePane() {
   const names = useMemo(() => channelNames(evidence?.subjects ?? []), [evidence?.subjects]);
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;
-  if (masking !== null && evidence && !loading && maskTarget === null) setMasking(null);
+  if (masking !== null && evidence && maskTarget === null) setMasking(null);
   const hasBranch = !!evidence && evidence.branch_subjects > 0;
 
   return (
@@ -123,20 +127,23 @@ export function ComparePane() {
                 rather than refusing it.
               </p>
             </CardFrame>
-          ) : failure !== null ? (
+          ) : evidence === null && read.status === "failed" ? (
             <CardFrame title="Compare" headingTag="h2">
-              <FailureLine failure={failure} lead="Could not read the selection." />
+              <FailureLine failure={read.failure} lead="Could not read the selection." />
             </CardFrame>
-          ) : !evidence || loading ? (
+          ) : evidence === null ? (
             <CardFrame title="Compare" headingTag="h2">
               <Loading>Reading {selected.length} channel(s)…</Loading>
             </CardFrame>
           ) : (
             <ScenarioEditsProvider value={editing}>
+              {read.status === "failed" && invalidMetric === null && (
+                <FailureLine failure={read.failure} lead="Could not re-read the selection." />
+              )}
               <ChannelCards evidence={evidence} byAddress={byAddress} />
 
               {config ? (
-                <SearchpointCards evidence={evidence} loading={loading} />
+                <SearchpointCards evidence={evidence} />
               ) : (
                 <CardFrame title="How these searchpoints are configured" headingTag="h2">
                   <p className="note-lede">

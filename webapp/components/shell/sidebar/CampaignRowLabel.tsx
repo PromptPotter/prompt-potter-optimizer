@@ -1,6 +1,10 @@
 import { VendorLogo } from "@/components/ui";
-import type { HierarchyCampaign, HierarchyCourse, ListedCampaign } from "@/lib/api";
-import { STATUS_MARK_INFO } from "@/lib/api/types.generated";
+import {
+  type HierarchyCampaign,
+  type HierarchyCourse,
+  type ListedCampaign,
+  STATUS_MARK_INFO,
+} from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { fmtAgo } from "@/lib/format";
 import { figureOf, tagLabel } from "@/lib/derivations";

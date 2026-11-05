@@ -1,6 +1,6 @@
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { HierarchyCourse } from "@/lib/api";
+import type { HierarchyCourse } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { runNextStep } from "@/lib/derivations";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
@@ -8,7 +8,7 @@ import { HardSamplesPreview } from "@/components/chat/HardSamplesPreview";
 
 // The chat's one run block, the sample walk: the leader and the heatmap are the dashboard's.
 export function RunCard() {
-  const { dash, isLive } = useCycleStream();
+  const { dash, isLive } = useViewedDashboard();
   const cv = useConnector();
 
   if (cv.selfOptimization || !dash?.cycle_id) return null;

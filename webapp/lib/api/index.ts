@@ -2,9 +2,9 @@ export {
   ApiError,
   buildIsStale,
   failureKind,
+  failurePasses,
   type FailureKind,
 } from "./client";
-export * from "./types";
 export * from "./reads";
 export * from "./account";
 export * from "./commands";

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { ServedDashboard } from "@/lib/api";
+import type { ServedDashboard } from "@/lib/api/types";
 import { FitnessChart } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
 import { ThetaCaveats } from "./AbilityInfo";
@@ -13,7 +13,7 @@ import { FitnessRankSummary } from "./FitnessRankSummary";
 import { SampleSetControl } from "./SampleSetControl";
 import { cx } from "@/lib/cx";
 import { useViewedLineage } from "@/lib/lineage";
-import { DASHBOARD_PENDING, useCycleStream } from "@/lib/poll";
+import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/poll";
 
 function ForestToggle({ model: m }: { model: CandidatesModel }) {
   const { showForest, totalDescendants } = m;
@@ -62,7 +62,7 @@ function FitnessLegend({ model: m }: { model: CandidatesModel }) {
 
 // The bars are the lineage tree's rows, so the card waits on that read as well as the dashboard.
 export function CandidatesCard() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const { tree, treeRead } = useViewedLineage();
   if (dash && tree !== null) return <ReadCandidatesCard dash={dash} />;
   return (

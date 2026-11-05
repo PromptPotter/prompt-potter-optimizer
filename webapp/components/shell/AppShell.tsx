@@ -1,11 +1,7 @@
-import { useEffect, useMemo, type CSSProperties } from "react";
-import { subjectKey } from "@/lib/api";
-import { CycleStreamProvider } from "@/lib/poll";
+import { useEffect, type CSSProperties } from "react";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
-import { HardSamplesProvider } from "@/lib/hard-samples";
-import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
-import { pathLeaf } from "@/lib/ids";
+import { useLeafSubject } from "@/lib/hooks/useLeafDatasetName";
 import { SIDEBAR_WIDTH, useSidebarCollapsed, useSidebarWidth } from "@/lib/prefs/sidebar";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
@@ -13,10 +9,8 @@ import { VendorSprite } from "@/components/ui";
 import { Sidebar } from "@/components/shell/sidebar/Sidebar";
 import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
-import { CompareSelectionProvider } from "@/lib/state/compare-selection";
 import { SelectionProvider } from "@/lib/SelectionContext";
-import { LineageProvider } from "@/lib/lineage";
-import { IngestFlowProvider, useIngest } from "@/lib/ingest-flow";
+import { IngestFlowProvider, useCheckinDraft } from "@/lib/ingest-flow";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/remote/RemoteControl";
@@ -25,38 +19,19 @@ import { ViewTabs } from "@/components/shell/ViewTabs";
 import { Views } from "@/components/shell/Views";
 
 export function AppShell() {
-  const { viewedPath } = useWorkspace();
   return (
-    // Outside the cycle-keyed providers: a comparison spans campaigns.
-    <CompareSelectionProvider>
-      <CycleStreamProvider path={viewedPath}>
-        <ThreadProvider>
-          <IngestFlowProvider>
-            <AppShellInner />
-          </IngestFlowProvider>
-        </ThreadProvider>
-      </CycleStreamProvider>
-    </CompareSelectionProvider>
+    <ThreadProvider>
+      <IngestFlowProvider>
+        <AppShellInner />
+      </IngestFlowProvider>
+    </ThreadProvider>
   );
 }
 
 function AppShellInner() {
-  const { viewedPath, campaignId, cycleId, leafCycleId, views } = useWorkspace();
-  const { draft } = useIngest();
-  // The chain is the hops ABOVE the leaf, so an L4 inner run resolves its OWN pipeline.
-  const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
-  const connectorAt = useMemo(
-    () =>
-      leafHop && viewedPath
-        ? subjectKey("course", [leafHop.campaignId, leafHop.cycleId], viewedPath.slice(0, -1))
-        : null,
-    [leafHop, viewedPath],
-  );
-  const leafDatasetName = useLeafDatasetName(
-    viewedPath,
-    leafHop ? leafHop.campaignId : null,
-    connectorAt,
-  );
+  const { viewedPath, leafCampaignId, leafCycleId, views } = useWorkspace();
+  const draft = useCheckinDraft();
+  const connectorAt = useLeafSubject();
   const [sidebarCollapsed] = useSidebarCollapsed();
   // Applied inline only while expanded, so the collapsed rail's class rule still wins.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
@@ -66,11 +41,9 @@ function AppShellInner() {
   }, []);
 
   return (
+    // Every surface reading the viewed tree composes `sampleSet` into the masked read.
     <SelectionProvider cycleId={leafCycleId}>
-    <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt} draft={draft}>
-    {/* Inside SelectionProvider: it composes `sampleSet` into the masked read. */}
-    <LineageProvider campaignId={campaignId} cycleId={cycleId}>
-    <HardSamplesProvider path={viewedPath} datasetName={leafDatasetName}>
+    <ConnectorProvider campaignId={leafCampaignId} at={connectorAt} draft={draft}>
     <div
       className={cx(
         "shell",
@@ -107,8 +80,6 @@ function AppShellInner() {
       <RemoteControl />
       <VendorSprite />
     </div>
-    </HardSamplesProvider>
-    </LineageProvider>
     </ConnectorProvider>
     </SelectionProvider>
   );

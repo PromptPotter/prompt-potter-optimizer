@@ -19,9 +19,8 @@ import {
   type Campaign,
   type Draft,
 } from "../harness";
-import { CAP_AXIS_INFO, SETUP_STEP_TITLES } from "@/lib/api/types.generated";
+import { CAP_AXIS_INFO, SETUP_STEP_TITLES, type RunLimits } from "@/lib/api/types";
 import type { Page } from "@playwright/test";
-import type { RunLimits } from "@/lib/api/types.generated";
 
 const DATASET = process.env.PP_E2E_DATASET || "email-tagging";
 const BUDGET_USD = Number(process.env.PP_E2E_BUDGET_USD || "0.05");

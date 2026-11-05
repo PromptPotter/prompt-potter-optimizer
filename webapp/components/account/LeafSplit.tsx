@@ -1,6 +1,5 @@
 import { Fragment } from "react";
-import type { LeafBytes } from "@/lib/api";
-import { LEAF_INFO } from "@/lib/api/types.generated";
+import { type LeafBytes, LEAF_INFO } from "@/lib/api/types";
 import { fmtBytes } from "@/lib/format";
 import { Term } from "@/components/ui";
 

@@ -106,7 +106,7 @@ invariants:
 
 **Every surface that lists, switches, docks or heads a run renders ONE served entry shape** —
 `domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone, read by
-`GET /hierarchy` (`lib/state/registry.tsx`, the `cycles` verb), discriminated on `level`. Campaign,
+`GET /hierarchy` (`lib/hooks/useRegistry.ts`, the `cycles` verb), discriminated on `level`. Campaign,
 course and candidate wear the envelope (`label`, `tags`, `figures`, `lines`) over typed `facts`; a round
 and a step are bare nodes. A `facts` field no reader names is deleted
 (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). The address grammar is
@@ -132,7 +132,7 @@ and a step are bare nodes. A `facts` field no reader names is deleted
   `attached` and no clock: it answers 304 between writes, so a seconds count would freeze.
 - **A campaign is always served**, with a line saying so before its `CycleIndex` exists.
 - **One poll**, over every lifecycle; the sidebar's filter is layout over `facts.lifecycle`.
-  <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/state/registry.tsx == 1 -->
+  <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/hooks/useRegistry.ts == 1 -->
 - **The genealogy is the same entry, read deep** — `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`,
   bounded at `lineage_queries.py::MAX_COURSE_DEPTH`; no second route, no client fold. Drawing is
   [`store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree's; the webapp

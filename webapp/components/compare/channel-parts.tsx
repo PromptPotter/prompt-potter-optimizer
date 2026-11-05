@@ -1,13 +1,14 @@
 import { CELL_MEAN_ROWS } from "@/lib/cell-means";
-import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
-import type { MeasuredLift } from "@/lib/api/types";
-import { GuardBadge } from "./GuardBadge";
 import {
+  type HeadToHeadRow,
+  type MeteredSpend,
+  type MeasuredLift,
   READING_STATE_INFO,
   CEILING_METER_LABELS,
   COST_ABSENCE_WORDS,
   STOP_REASON_INFO,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
+import { GuardBadge } from "./GuardBadge";
 import {
   liftOf,
   meteredBucketsLine,

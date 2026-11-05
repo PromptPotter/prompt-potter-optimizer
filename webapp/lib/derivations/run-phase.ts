@@ -1,18 +1,16 @@
-import type {
-  DashboardState,
-  LookaheadDepth,
-  PauseReading,
-  RunPhase,
-  RunStatus,
-  SampleLookahead,
-  StopReason,
-} from "@/lib/api/types.generated";
 import {
+  type DashboardState,
+  type LookaheadDepth,
+  type PauseReading,
+  type RunPhase,
+  type RunStatus,
+  type SampleLookahead,
+  type StopReason,
   DASHBOARD_STATE_PAUSE_WORDS,
   LOOKAHEAD_WORDS,
   RUN_PHASE_INFO,
   STOP_REASON_INFO,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { filled } from "@/lib/format";
 
 // served: `RUN_PHASE_INFO` is `domain/phases.py`

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError, commandMessage, failureKind, operatorMessage } from "@/lib/api";
+import {
+  ApiError,
+  commandMessage,
+  failureKind,
+  failurePasses,
+  operatorMessage,
+  type FailureKind,
+} from "@/lib/api";
 import { toApiError } from "@/lib/api/client";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
 import { connectionSaid } from "@/lib/poll";
@@ -15,8 +22,8 @@ describe("failureKind", () => {
     const auth = new ApiError(401, "/api/v1/x");
     const kind = failureKind(auth);
     const message = operatorMessage(auth, kind);
-    const refused = connectionSaid({ kind: "lost", failure: { kind, message } });
-    const offline = connectionSaid({ kind: "lost", failure: { kind: "transient", message } });
+    const refused = connectionSaid({ kind, message }, "followed");
+    const offline = connectionSaid({ kind: "transient", message }, "followed");
     expect(refused?.label).toBe(message);
     expect(refused?.label).not.toBe(offline?.label);
   });
@@ -35,6 +42,45 @@ describe("failureKind", () => {
     expect(operatorMessage(capped, failureKind(capped))).toBe("Raise the cap to go on.");
     const bare = new ApiError(429, "/api/v1/x");
     expect(operatorMessage(bare, failureKind(bare))).not.toMatch(/reach/i);
+  });
+
+  it("reads the request-rate throttle as passing, and a throttled write as never applied", () => {
+    const slow = new ApiError(429, "/api/v1/commands/x", "rate_limited", null, null, "Slow down.");
+    expect(failureKind(slow)).toBe("throttled");
+    expect(commandMessage(slow, failureKind(slow))).toBe("Slow down.");
+  });
+
+  it("names the failures that pass, and the connection row says such a read is asked again", () => {
+    // A 404 passes for no reader: the cache alone re-asks it, until its gone verdict.
+    const passes: Record<FailureKind, boolean> = {
+      transient: true,
+      throttled: true,
+      gone: false,
+      auth: false,
+      denied: false,
+      invalid: false,
+      refused: false,
+    };
+    for (const [kind, expected] of Object.entries(passes) as [FailureKind, boolean][]) {
+      expect(failurePasses(kind)).toBe(expected);
+    }
+    const throttled = connectionSaid({ kind: "throttled", message: "Slow down." }, "followed");
+    expect(throttled?.label).toBe("Slow down.");
+    expect(throttled?.detail).not.toBeNull();
+    expect(connectionSaid({ kind: "denied", message: "Not yours." }, "followed")?.detail).toBeNull();
+    // Off any read but the viewed cycle's, a 404 is its own sentence, never a gone campaign.
+    const missing = connectionSaid({ kind: "gone", message: "No such route." }, "listing");
+    expect(missing).toMatchObject({ key: "connection_lost", label: "No such route.", detail: null });
+  });
+
+  it("says a gone viewed campaign returns to the active run off a pin alone", () => {
+    const gone = { kind: "gone" as const, message: "Not found." };
+    const returning = /Returning to the active run/;
+    expect(connectionSaid(gone, "pinned")?.detail).toMatch(returning);
+    expect(connectionSaid(null, "left")?.detail).toMatch(returning);
+    const followed = connectionSaid(gone, "followed");
+    expect(followed?.key).toBe("address_gone");
+    expect(followed?.detail).not.toMatch(returning);
   });
 
   it("treats a non-ApiError (network, parse, abort) as transient", () => {

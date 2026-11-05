@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { NodeConfigParam, OptimizerSetup, StartCheckinOptions } from "@/lib/api";
+import type { StartCheckinOptions } from "@/lib/api";
+import type { NodeConfigParam, OptimizerSetup } from "@/lib/api/types";
 import { configParam } from "@/lib/test-fixtures";
 import { HeadToHeadArms, startOptions, type HeadToHeadDraft } from "../HeadToHeadArms";
 

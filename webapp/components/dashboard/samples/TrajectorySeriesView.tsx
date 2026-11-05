@@ -12,7 +12,7 @@ import {
   unionFirstAppearance,
   type SortedRounds,
 } from "@/lib/derivations";
-import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types.generated";
+import { SAMPLE_MOVEMENT_LABELS } from "@/lib/api/types";
 
 interface HoverState {
   round: number;

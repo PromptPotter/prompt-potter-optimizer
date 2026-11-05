@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useWidth } from "@/lib/hooks/useWidth";
-import type { PipelineView, PipelineViewEdge } from "@/lib/types";
-import type { NodeReach } from "@/lib/api";
+import {
+  type PipelineView,
+  type PipelineViewEdge,
+  type NodeReach,
+  MOVABLE_AGENT_LABELS,
+} from "@/lib/api/types";
 import { nodeKey, type NodeScope } from "@/lib/address";
 import type { PipelineStatus } from "@/lib/types";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useViewedNode, useWorkspace } from "@/lib/workspace";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import { interiorNodes, layoutGrid, nodeModel, rowHopD, wrapAt } from "@/lib/derivations";
 import { reportIncident } from "@/lib/diagnostics";
 import { getCss } from "@/lib/theme";
@@ -463,7 +466,7 @@ function FlowEnd({ icon, lbl, val }: { icon: ReactNode; lbl: string; val: string
 
 export function PipelineFlow({ layer, inspector, nested, tone, bare = false }: PipelineFlowProps) {
   const { view, status } = layer;
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   // The input IS the query in flight, when the run names one.
   const query = (layer.isLive && dash?.current_query_payload) || "Query";
   const interior = interiorNodes(view);
