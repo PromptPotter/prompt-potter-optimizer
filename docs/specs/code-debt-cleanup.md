@@ -573,6 +573,46 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   two records, or one whose displacement is its own field. **Rides with:** the `arc/records` arc.
   **Re-test:** `git grep -n "rewound" -- promptpotter/domain/run_records.py`.
 
+### The origin gate (batch-2 reviews, 2026-11-05)
+
+**Rides with:** the next pass through `bench/resume_and_fork/repair.py` or `runner/origin_gate.py`.
+
+- **A fork cut at round 0 keeps its origin's holes**: `bench/cycle.py::Cycle.reopen_origin` leaves
+  round 0 with no close, so `resume_and_fork/repair.py::rewalk_lost_origin` returns at once and
+  `round.py::emit_origin_round` closes it on the dead cells; under the strict gate the fork halts
+  again with the backend fixed (one extra launch). Action: what re-walks an inherited origin is
+  whether its rows were measured by another launch, not whether round 0 closed. **Re-test:**
+  `--fork-on-divergence` at round 0 of a gate-halted campaign, backend fixed: the fork passes on
+  health in one launch.
+- **The first launch pays a still-refusing backend twice**: `application/origin.py::establish_campaign_origin`
+  re-scores after a transient abort, sending each refused cell again (3 cells, 10 attempts each in
+  the offline `gated/` leg). Action: one walk per launch, as a resume already has. **Re-test:** the
+  `gated/` leg's first launch sends each cell once.
+- **The bench pass runs on a launch the origin gate halts**, sending its cells to a dead backend
+  (10 in `gated/`). Action: the gate decides before the bench spends. **Re-test:** the `gated/`
+  leg's halted launches send no bench cell.
+- **`runner/origin_gate.py::run_origin_gate` logs a failed re-score and holds again**: an error
+  swallowed into a log. Action: the failure is the halt's served cause. **Re-test:**
+  `git grep -n "logger" -- promptpotter/application/runner/origin_gate.py`.
+- **`capo/members.py::CapoInit.refuse_origin` reads a schema fact ("no prompt node") off answered
+  rows**, so it needs a guard for an origin nothing answered. Action: refuse on the pipeline
+  schema at selection. **Re-test:** `git grep -n "refuse_origin" -- promptpotter/application/optimizers/capo/members.py`.
+- **`tests/test_archive.py::test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass`
+  walks zero cells**: `run_round_loop(cycle, [], …)` re-walks the dead origin over no dataset and
+  closes an empty round 0, so the halt and override pass on an empty origin, not a holed one.
+  Action: hand it the origin's cells through the `offline` fixture. **Re-test:** the test's dataset
+  is non-empty.
+
+### Words and the sample tag (batch-2 reviews, 2026-11-05)
+
+- **Unpadded `#N` outlives the one `sample_tag`**: `TrajectorySeriesView.tsx::SeriesHoverPopup`, the
+  `L1Variants.tsx` targets line and `readout.py::on_race_catch_up` spell the id themselves.
+  Action: each reads `format.ts::fmtSampleTag` / `domain/sample.py::sample_tag`. **Re-test:**
+  `git grep -nE "#\\$\\{|'#' \\+|f\"#\\{" -- webapp/components promptpotter/application/views`.
+- **`config/settings.py::_git_head` answers `UNVERSIONED` silently** for a ref in neither the loose
+  refs nor `packed-refs` (a reftable repo, corrupt refs). Action: the landing's refusal names the
+  checkout it could not version. **Re-test:** a landing from a reftable clone names why.
+
 ## Open — multi-arc
 
 - **The crowning bar tests nothing a result can quote.** `application/scoring/selection.py::elect_round_winner`
