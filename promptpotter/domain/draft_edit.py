@@ -16,8 +16,9 @@ MAX_EDITED_ROUNDS = 100
 
 
 class OptimizationOverrides(OptimizerChoice):
-    """The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal
-    ``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it."""
+    """An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.
+    Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read through it,
+    so a reused dataset may exceed it."""
 
     budget: Budget = Field(
         Budget(rounds=DEFAULT_BUDGET_ROUNDS),
@@ -56,21 +57,23 @@ class EditDraftPatch(StrictModel):
         default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"
     )
     connector: str | None = Field(default=None, min_length=1, max_length=64)
-    scoring_matcher: str | None = Field(default=None, min_length=1, max_length=64)
-    # The empty string clears the dials back to correctness alone.
-    scoring_dials: str | None = Field(default=None, max_length=512)
     # A blank task is no task: the draft holds none until one is set.
     raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
-    pipeline_overlay: dict[str, Any] | None = None
+    config: dict[str, Any] | None = Field(
+        default=None,
+        description="A partial `CampaignConfig`, by its own paths, laid over the draft's by "
+        "`campaign_config.py::merge_config_layers`; its `optimization` reads as an "
+        "`OptimizationOverrides`. A string `scoring` names the criterion whole; a `scoring` "
+        "mapping is folded into the criterion the draft runs, key by key: `matcher` picks "
+        "the per-sample matcher, `dials` the composite's weights (the empty string clears them), "
+        "`per_sample` and `per_cell` set those formulas.",
+    )
     node_narrowing: dict[str, list[ParamIntent]] | None = None
     node_output: NodeOutputEdit | None = None
-    pipeline_steps: list[str] | None = None
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
     # Per step, its fields by name; replaces the draft's whole map.
     origin_prompts: dict[str, dict[str, str]] | None = None
-    # Merged onto the draft's current overrides, `nodes` key by key.
-    optimization_overrides: dict[str, Any] | None = None
     candidate_library: list[str] | None = Field(default=None, min_length=1)
 
 

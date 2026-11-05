@@ -10,11 +10,7 @@ from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
     with_optimization,
 )
-from promptpotter.application.datasets.draft_build import (
-    default_campaign_block,
-    draft_task_context,
-)
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, committed_pipeline_json
+from promptpotter.application.datasets.draft_build import draft_task_context
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.coupon import Send
@@ -32,10 +28,10 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import land_job, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, draft_declared
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.checkin_draft import UploadBasis
+from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.spend import Budget
@@ -49,7 +45,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.pipeline_resolve import DraftPipeline
-    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +65,7 @@ class OriginIncompleteError(PayloadInvalidError):
         )
 
 
-def assert_origin_ready(draft: DraftCampaign, pipeline: DraftPipeline) -> None:
+def assert_origin_ready(draft: DraftFile, pipeline: DraftPipeline) -> None:
     readiness = origin_readiness(draft, pipeline)
     if not readiness.complete:
         raise OriginIncompleteError(readiness.gaps)
@@ -189,26 +184,27 @@ async def hold_fresh_mint(
 
 def commit_upload_definition(
     stores: Stores,
-    draft: DraftCampaign,
-    upload: UploadBasis,
+    draft: DraftFile,
     *,
     source: dict[str, Any],
-    chain: PipelineSchema,
+    pipeline: DraftPipeline,
 ) -> None:
-    """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug."""
+    """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug.
+    Writes the two halves its check-in read: the definition *pipeline* laid, and the campaign
+    half (no free tier's layer, which a Start lays per account)."""
     stores.write_own_definition(
         draft.slug,
         source=source,
-        pipeline=committed_pipeline_json(draft, upload),
-        campaign=default_campaign_block(draft, upload),
+        pipeline=pipeline.local,
+        campaign=draft_declared(stores, draft).model_dump(mode="json", exclude_defaults=True),
         description=draft.confirmed_task(),
         framing=draft_task_context(draft),
-        origin=draft.committed_prompts(chain),
+        origin=draft.committed_prompts(pipeline.chain),
     )
     persist_origin_candidate_library(stores, draft.slug, draft)
 
 
-def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftCampaign) -> None:
+def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftFile) -> None:
     """Tenant datasets only: a reopened repo benchmark is not ours to mutate."""
     if draft.candidate_library and stores.tenant_datasets.slug_exists(slug):
         stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)

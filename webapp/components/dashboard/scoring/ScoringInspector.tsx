@@ -4,7 +4,7 @@ import { failureOf, shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import type { SelectedCandidate } from "@/lib/types";
-import { COPY_WITHOUT_CELLS, searchpointCopyChoices } from "@/lib/derivations";
+import { COPY_WITHOUT_CELLS, nodeSchemaReading, searchpointCopyChoices } from "@/lib/derivations";
 import { CopyButton, FailureLine, Toolbar, ToolbarSpacer } from "@/components/ui";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
@@ -25,7 +25,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
 
 function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose: () => void }) {
   const { dash } = useViewedDashboard();
-  const cv = useConnector();
+  const schema = nodeSchemaReading(useConnector());
   const { viewedPath } = useWorkspace();
   const round = useRound(viewedPath, selected.round);
   const reading = round.reading(selected.arm);
@@ -61,7 +61,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
         cfg={cfg}
         benchPass={benchPass?.state === "done" ? null : benchPass}
         measurements={<MeasurementsPane preset={{ ...preset, groupBy: "none" }} />}
-        schema={cv.schema}
+        schema={schema}
         failure={failureOf(round.read)}
         pending={
           round.unfiled
@@ -76,7 +76,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
             <SteerForkAction
               candidate={selected}
               path={viewedPath}
-              schema={cv.schema}
+              schema={schema}
             />
           </>
         }

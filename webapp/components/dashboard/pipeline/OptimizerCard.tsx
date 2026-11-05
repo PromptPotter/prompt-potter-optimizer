@@ -4,6 +4,7 @@ import { figureOf, phaseWalks } from "@/lib/derivations";
 import { useViewedCourse } from "@/lib/lineage";
 import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { shownData } from "@/lib/hooks/useRead";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
   Button,
@@ -27,7 +28,8 @@ export function OptimizerCard() {
   const runState = figureOf(useViewedCourse(), "state");
   const activeId = dash?.current_round.active_node ?? null;
   const { nodes: roundNodes, showsCurrent: viewingLive } = useRoundNodes();
-  const { optimizerSetup, schema } = useConnector();
+  const read = useConnector();
+  const optimizerSetup = shownData(read)?.optimizer_setup ?? null;
 
   const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
   // What the round axis beside it does not already say: the node firing, else the SERVER's phase
@@ -81,7 +83,7 @@ export function OptimizerCard() {
           bare
           layer={{
             view: optimizerSetup?.view ?? null,
-            status: schema.status,
+            read,
             connector: null,
             reach: optimizerSetup?.reach ?? null,
             scope: "optimizer",

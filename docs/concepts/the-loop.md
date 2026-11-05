@@ -71,7 +71,7 @@ an `answer_format` satisfying the scorer's extraction contract (`formula/matcher
 
 - **Readiness** — static, no LLM (`application/datasets/origin_readiness.py`): mint is blocked until query,
   ground truth and framing are confirmed and every active LLM node owns a model. No single prompt field is
-  gated; a closed label set is appended to `answer_format` deterministically (`DraftCampaign.committed_prompts`).
+  gated; a closed label set is appended to `answer_format` deterministically (`DraftFile.committed_prompts`).
 - **The round-0 origin gate** — empirical: a floor the health signal (`domain/results_health.py`) grades
   `critical` halts before round 1, and under the default `strict` mode `degraded` halts too
   (`application/runner/termination.py::origin_gate_tripped`). It asks coverage before any rate: cells a

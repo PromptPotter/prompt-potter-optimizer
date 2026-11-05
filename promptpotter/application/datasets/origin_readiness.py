@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field, computed_field
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.domain.checkin_draft import (
     CheckinQuestion,
+    DraftFile,
     OriginResolution,
     SetupStep,
 )
@@ -37,9 +37,9 @@ assert SETUP_STEP_TITLES.keys() == set(SetupStep)
 
 
 class ChecklistField(NamedTuple):
-    # The `EditDraftPatch` key, and `DraftCampaign` attribute, one answer writes; None where no
-    # single value closes it (a node's model lives inside the whole overlay a patch replaces).
-    patch_key: str | None
+    # The `EditDraftPatch` path one answer writes: a draft attribute, or a path into its partial
+    # `config`, which the server folds in by that path (a node's model).
+    patch_path: tuple[str, ...]
     # The step whose fold sets it; None where the chat answers it.
     step: SetupStep | None
     # What a proposal of a value reads as.
@@ -51,20 +51,32 @@ class ChecklistField(NamedTuple):
 #: THE checklist: every field the gate keys a gap by, and what a resolver may propose or ask.
 CHECKLIST_FIELDS: dict[str, ChecklistField] = {
     "column.query": ChecklistField(
-        "column_query", SetupStep.DATA, "Read the input from “{}”", of_headers=True
+        ("column_query",), SetupStep.DATA, "Read the input from “{}”", of_headers=True
     ),
     "column.ground_truth": ChecklistField(
-        "column_ground_truth", SetupStep.DATA, "Grade against “{}”", of_headers=True
+        ("column_ground_truth",), SetupStep.DATA, "Grade against “{}”", of_headers=True
     ),
-    "task_description": ChecklistField("raw_task_description", None, "Set the task: “{}”"),
+    "task_description": ChecklistField(("raw_task_description",), None, "Set the task: “{}”"),
 }
 _NODE_MODEL = re.compile(r"node\.(?P<node>.+)\.model")
 
 
 def checklist_field(field: str) -> ChecklistField | None:
     if node := _NODE_MODEL.fullmatch(field):
-        return ChecklistField(None, SetupStep.PIPELINE, f"Run {node['node']} on “{{}}”")
+        return ChecklistField(
+            ("config", "pipeline_overlay", node["node"], "model"),
+            SetupStep.PIPELINE,
+            f"Run {node['node']} on “{{}}”",
+        )
     return CHECKLIST_FIELDS.get(field)
+
+
+def patch_at(path: tuple[str, ...], value: object) -> dict[str, object]:
+    """The `EditDraftPatch` body writing *value* at *path*."""
+    out: dict[str, object] = {path[-1]: value}
+    for key in reversed(path[:-1]):
+        out = {key: out}
+    return out
 
 
 class FieldGap(StrictModel):
@@ -98,19 +110,17 @@ class OriginReadiness(StrictModel):
         return not self.gaps
 
 
-def checkin_questions(
-    draft: DraftCampaign, asked: Iterable[OriginQuestion]
-) -> list[CheckinQuestion]:
-    """A question on a field no single patch closes is dropped, as `raised_commands` drops a finding."""
+def checkin_questions(draft: DraftFile, asked: Iterable[OriginQuestion]) -> list[CheckinQuestion]:
+    """A question on no checklist field is dropped, as `raised_commands` drops a finding."""
     questions: list[CheckinQuestion] = []
     for question in asked:
         row = checklist_field(question.field)
-        if row is None or row.patch_key is None:
+        if row is None:
             continue
         questions.append(
             CheckinQuestion(
                 field=question.field,
-                path=[row.patch_key],
+                path=list(row.patch_path),
                 step=row.step,
                 prompt=question.prompt,
                 options=question.options or (list(draft.headers) if row.of_headers else []),
@@ -119,7 +129,7 @@ def checkin_questions(
     return questions
 
 
-def origin_readiness(draft: DraftCampaign, pipeline: DraftPipeline) -> OriginReadiness:
+def origin_readiness(draft: DraftFile, pipeline: DraftPipeline) -> OriginReadiness:
     """Over the *pipeline* the draft's declaration resolves to. Ready is not mintable: a node's
     required ``{{template vars}}`` are checked only at mint."""
     gaps = _column_gaps(draft)
@@ -137,12 +147,12 @@ def origin_readiness(draft: DraftCampaign, pipeline: DraftPipeline) -> OriginRea
     return OriginReadiness(gaps=tuple(gaps))
 
 
-def columns_confirmed(draft: DraftCampaign) -> bool:
+def columns_confirmed(draft: DraftFile) -> bool:
     """The gate's column clause: only past it may anything cut the upload's rows."""
     return not _column_gaps(draft)
 
 
-def _column_gaps(draft: DraftCampaign) -> list[FieldGap]:
+def _column_gaps(draft: DraftFile) -> list[FieldGap]:
     gaps: list[FieldGap] = []
     for field_key, value, label in (
         ("column.query", draft.column_query, "input"),
@@ -171,7 +181,7 @@ def _column_gaps(draft: DraftCampaign) -> list[FieldGap]:
 
 
 def _check_column(
-    draft: DraftCampaign,
+    draft: DraftFile,
     *,
     field_key: str,
     value: str | None,
@@ -203,7 +213,7 @@ def _check_column(
 
 
 def _check_confirmed(
-    draft: DraftCampaign,
+    draft: DraftFile,
     *,
     field_key: str,
     value: str | None,
@@ -239,8 +249,8 @@ def _check_node_models(pipeline: DraftPipeline, *, gaps: list[FieldGap]) -> None
             )
 
 
-def field_values(draft: DraftCampaign) -> dict[str, Any]:
-    getters: dict[str, Callable[[DraftCampaign], Any]] = {
+def field_values(draft: DraftFile) -> dict[str, Any]:
+    getters: dict[str, Callable[[DraftFile], Any]] = {
         "column.query": lambda d: d.column_query,
         "column.ground_truth": lambda d: d.column_ground_truth,
         "task_description": lambda d: d.raw_task_description,
@@ -250,12 +260,12 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def save_checkin_draft(
-    stores: Stores, draft: DraftCampaign, *, resolution: OriginResolution | None = None
-) -> DraftCampaign:
-    stores.drafts.write_draft(draft.draft_id, draft.to_disk())
+    stores: Stores, draft: DraftFile, *, resolution: OriginResolution | None = None
+) -> DraftFile:
+    stores.drafts.write_draft(draft)
     stores.drafts.write_resolution(draft.draft_id, resolution or OriginResolution())
     return draft
 
 
-def load_resolution(stores: Stores, draft: DraftCampaign) -> OriginResolution:
+def load_resolution(stores: Stores, draft: DraftFile) -> OriginResolution:
     return stores.drafts.load_resolution(draft.draft_id) or OriginResolution()

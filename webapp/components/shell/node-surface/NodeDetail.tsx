@@ -15,11 +15,17 @@ import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { NodeSchemaReading } from "@/lib/types";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { readGap, shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
-import { interiorNodes, type ObserveState, type ObserveSubject } from "@/lib/derivations";
+import {
+  interiorNodes,
+  nodeSchemaReading,
+  type ObserveState,
+  type ObserveSubject,
+} from "@/lib/derivations";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
 import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
@@ -44,38 +50,28 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   const flow = useIngest();
   const draft = useCheckinDraft();
   const onPromptApply = draft ? flow.applyPatch : undefined;
+  const read = useConnector();
+  const served = shownData(read);
+  // A check-in's draft is the connector read's transport, so its params are the read's.
   const authoring = useMemo<NodeAuthoring | undefined>(
     () =>
       draft && !isOptimizer
-        ? { overlay: draft.pipeline_overlay, prompts: draftPrompts(draft.origin_prompts) }
+        ? { overlay: served?.params ?? {}, prompts: draftPrompts(draft.origin_prompts) }
         : undefined,
-    [draft, isOptimizer],
+    [draft, isOptimizer, served],
   );
-
-  const cv = useConnector();
+  const schema = nodeSchemaReading(read, isOptimizer ? "optimizer" : "target");
   const { dash, isLive } = useViewedDashboard();
-  const optimizer = cv.optimizerSetup;
+  const optimizer = served?.optimizer_setup ?? null;
   const subject = useObserveSubject();
   const observed = useSearchpointRead(!isOptimizer && !authoring ? subject.point : null, id);
 
-  const view = isOptimizer ? optimizer?.view : cv.view;
+  const view = isOptimizer ? optimizer?.view : served?.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
   const servedKind = node?.kind ?? null;
-  const schema = useMemo<NodeSchemaReading>(
-    () =>
-      isOptimizer
-        ? {
-            status: cv.schema.status,
-            config: optimizer?.node_config_schema ?? null,
-            output: optimizer?.node_output_schema ?? null,
-            isSingleNode: false,
-          }
-        : cv.schema,
-    [isOptimizer, optimizer, cv.schema],
-  );
   const modelCapabilities = isOptimizer
     ? (optimizer?.model_capabilities ?? {})
-    : cv.modelCapabilities;
+    : (served?.model_capabilities ?? {});
 
   const {
     nodes: roundNodes,
@@ -86,7 +82,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
 
   // Under the viewed config, its field edits laid on: what this node runs, not the bare template.
-  const origin = (isOptimizer ? cv.optimizerSetup?.prompts[id] : undefined) ?? null;
+  const origin = (isOptimizer ? optimizer?.prompts[id] : undefined) ?? null;
 
   const identity = { id, scope, kind: servedKind };
   const program = isOptimizer
@@ -178,7 +174,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             block={block}
             round={viewedRound}
             loading={audit.status === "loading"}
-            kindLoading={cv.schema.status === "loading"}
+            kindLoading={readGap(read)?.status === "loading"}
             inFlight={isLiveNow}
           />
         )}

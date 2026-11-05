@@ -45,10 +45,11 @@ from promptpotter.application.pipeline_resolve import (
     cycle_config,
     draft_pipeline,
     draft_served,
+    permitted_narrowing,
     resolve_pipeline_for_campaign,
     steer_verdict,
 )
-from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, LaidSpan
+from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -85,9 +86,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def parse_cycle_seed(
-    sent: ForkSeed, campaign: CampaignConfig, stores: Stores, of: Campaign, hop: CycleHop
-) -> CycleSeed:
+def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop) -> CycleSeed:
     narrowing: dict[str, NodeSearchNarrowing] = {}
     if sent.node_narrowing:
         # The rows served at *hop*, not the root's: a row's menu is its cycle's own declaration.
@@ -99,7 +98,7 @@ def parse_cycle_seed(
             }
         except ValueError as exc:
             raise PayloadInvalidError(f"payload.seed.node_narrowing invalid: {exc}") from exc
-    verdict = steer_verdict(stores, campaign.optimizer_narrowing, sent.pipeline_overlay)
+    verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.pipeline_overlay)
     if verdict == "refused":
         logger.warning(
             "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
@@ -224,8 +223,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         dispatched.hop,
     )
     stores = dispatcher.stores
-    campaign_config = cycle_config(stores, campaign, None).config
-    seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
+    seed = parse_cycle_seed(payload.seed, stores, campaign, hop)
 
     async def _apply_fork() -> Launched:
         new_cycle_id = mint_operator_fork(

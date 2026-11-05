@@ -9,6 +9,7 @@ scored on text it was never meant to carry.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import io
 import json
@@ -49,26 +50,47 @@ from promptpotter.application.bench.children import (
 )
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import declare_steered_values
-from promptpotter.application.bench.task_context import campaign_framing, checkin_template
+from promptpotter.application.bench.task_context import (
+    CheckinOutput,
+    OriginFinding,
+    campaign_framing,
+    checkin_template,
+)
 from promptpotter.application.commands import launching
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
-from promptpotter.application.datasets import ingest, loaders, startability, tabular_ingest
+from promptpotter.application.datasets import (
+    ingest,
+    loaders,
+    origin_resolve,
+    startability,
+    tabular_ingest,
+)
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
     dataset_campaign_block,
     validated_campaign_config,
 )
-from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCriterion,
+    draft_criterion,
+    new_draft,
+    owned_draft,
+)
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
-from promptpotter.application.datasets.origin_resolve import build_origin_consultation
+from promptpotter.application.datasets.origin_resolve import (
+    build_origin_consultation,
+    raised_commands,
+)
+from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.hierarchy import entries_version, list_hierarchy
 from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
+from promptpotter.application.jobs.launcher.mint_and_start import commit_upload_definition
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
@@ -120,9 +142,12 @@ from promptpotter.application.pipeline_resolve import (
     draft_pipeline,
     draft_served,
     experiment_outside_run,
+    fork_preview,
     identity_layer,
+    permitted_narrowing,
     resolved_output_schemas,
 )
+from promptpotter.application.pipeline_responses import ForkPreviewResponse
 from promptpotter.application.run_observers import declare_run_wiring
 from promptpotter.application.runner.arm_gate import author_arm
 from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
@@ -133,6 +158,7 @@ from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
 )
+from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
@@ -151,7 +177,7 @@ from promptpotter.domain.campaign_config import (
     effective_config,
 )
 from promptpotter.domain.cells import Seat
-from promptpotter.domain.checkin_draft import DatasetBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     ForkSeed,
@@ -209,6 +235,7 @@ from promptpotter.domain.run_records import (
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.identity import blocklist, grants
@@ -1268,10 +1295,13 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
 
 def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
-    tmp_path: Path, built_stores: Stores, offline: Router
+    tmp_path: Path, built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The draft's CHAIN reaches the mint on a reused dataset.
-    pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
+    pinned = {
+        "per_sample": "label_match(predicted, ground_truth)",
+        "per_cell": "fitness * (0.92 + 0.08 * 120.0 / max(120.0, tokens))",
+    }
     root = built_stores.tenant_datasets.dataset_dir("ds")
     optimization = dict(CONNECTORS.get(DEFAULT_CONNECTOR).default_optimization)
     schema = pipeline_schema(
@@ -1288,29 +1318,69 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     draft = new_draft(
-        tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="ds",
         basis=DatasetBasis(dataset="ds"),
         n_samples=1,
         sample_preview=[],
         headers=[],
-    ).patch(optimization_overrides={"optimizer": "capo"})
-    picked = draft.patch(pipeline_steps=["llm_only"])
+    ).patch(config={"optimization": {"optimizer": "capo"}})
+    picked = draft.patch(config={**draft.config, "exclude_nodes": ["rerank", "web_search"]})
     chosen = draft_config(built_stores, picked, schema)
-    assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"], "a picked chain ran whole"
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"], (
         "the excluded complement runs another chain than was picked"
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
-    assert chosen.scoring == pinned, "the pinned criterion did not reach the mint"
-    dialled = draft_config(built_stores, picked.patch(scoring_dials="cost=0.1"), schema)
-    assert dialled.scoring == {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}, (
+    assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
+    assert draft_config(built_stores, draft, schema).exclude_nodes == [], (
+        "an untouched chain excluded a node"
+    )
+
+    def planned(on: DraftFile, **patch: Any) -> CampaignConfig:
+        plan = asyncio.run(plan_draft_patch(built_stores, on, EditDraftPatch.model_validate(patch)))
+        return draft_config(built_stores, apply_draft_patch(on, plan), schema)
+
+    # A check-in picks the criterion as the server reads it; sent back, a pinned formula's own
+    # dials move nothing, and a matcher pick keeps the composite.
+    assert draft_criterion(chosen.scoring, campaign_terms(DEFAULT_CONNECTOR)) == DraftCriterion(
+        matcher="label_match", dials="tokens=0.08"
+    ), "the served criterion is not the pinned formula's"
+    assert planned(draft, config={"scoring": {"dials": "tokens=0.08"}}).scoring == pinned, (
+        "a pinned formula's anchors did not survive a round trip"
+    )
+    assert planned(draft, config={"scoring": {"matcher": "em_match"}}).scoring == {
+        **pinned,
+        "per_sample": "em_match(predicted, ground_truth)",
+    }, "a matcher pick dropped the composite"
+    dials = {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}
+    assert planned(draft, config={"scoring": {"dials": "cost=0.1"}}).scoring == dials, (
         "dials froze another criterion than they spell"
     )
-    untouched = draft_config(built_stores, draft, schema)
-    assert untouched.exclude_nodes == [], (
-        "`pipeline_steps=[]` is untouched: excluding its complement would close the whole pipeline"
+    # A knob edit on the basis's optimizer, then a switch: the knob addressed the old one.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("cap") / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": DEFAULT_CONNECTOR, "pipelines": dict(schema.pipelines)},
+            "campaign": {"optimization": {**optimization, "optimizer": "capo"}, "scoring": pinned},
+        },
+    )
+    on_capo = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="cap",
+        basis=DatasetBasis(dataset="cap"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    capo_knob = EditDraftPatch(
+        config={"optimization": {"nodes": {"blocks": {"config": {"block_size": 20}}}}}
+    )
+    knobbed = apply_draft_patch(
+        on_capo, asyncio.run(plan_draft_patch(built_stores, on_capo, capo_knob))
+    )
+    switched = planned(knobbed, config={"optimization": {"optimizer": "potter"}}).optimization
+    assert switched.optimizer == "potter" and "blocks" not in switched.nodes, (
+        "a switch kept the old optimizer's knobs"
     )
     # A draft edit sent as rows freezes the search space the overlay spelled. A REUSED dataset:
     # its file is not the check-in's to write, so the overlay rides the config.
@@ -1331,7 +1401,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     edited = new_draft(
-        tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="d",
         basis=DatasetBasis(dataset="d"),
@@ -1358,7 +1427,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert as_rows == {"llm_only": NodeSearchNarrowing.model_validate(spelled)}, (
         "rows froze another space"
     )
-    as_overlay = frozen(pipeline_overlay={"llm_only": {"optimizer": spelled}})
+    as_overlay = frozen(config={"optimizer_narrowing": {"llm_only": spelled}})
     assert as_rows == as_overlay.optimizer_narrowing, "rows and the overlay froze two spaces"
     # No field named `answer`, none named by the operator: the slot is the LAST, reasoning first.
     answer_schema = {"type": "object", "properties": {"reasoning": {}, "code": {}}}
@@ -1371,15 +1440,133 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "response_format": "json",
     }
     assert (
-        authored == frozen(pipeline_overlay={"llm_only": {"config": contract}}).pipeline_overlay
+        authored == frozen(config={"pipeline_overlay": {"llm_only": contract}}).pipeline_overlay
     ), "an authored output froze another contract than the overlay spells"
     assert authored["llm_only"]["answer_fields"] == ["code"], (
         "the answer slot is not the last field"
+    )
+    # A reused dataset's own contract is authored already: editing it reopens no axis.
+    contracted = {"model": "m", "output_schema": answer_schema, "answer_fields": ["reasoning"]}
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("dj") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "backend_type": "termnorm",
+                "nodes": {"llm_only": {**declared_node, "config": contracted}},
+            },
+            "campaign": _connector_config().model_dump(mode="json"),
+        },
+    )
+    reused_contract = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="dj",
+        basis=DatasetBasis(dataset="dj"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    contract_edit = EditDraftPatch.model_validate(
+        {"node_output": {"node": "llm_only", "output_schema": answer_schema}}
+    )
+    edited_node = asyncio.run(
+        plan_draft_patch(built_stores, reused_contract, contract_edit)
+    ).changes["config"]["pipeline_overlay"]["llm_only"]
+    assert "response_format" not in edited_node and edited_node["answer_fields"] == ["reasoning"], (
+        "a reused dataset's declared contract read as unauthored"
     )
     # A check-in names only a connector that runs its upload; a container one is never chosen there.
     for foreign in ("dbllmbench", "harbor", "dspy", "no-such"):
         with pytest.raises(PayloadInvalidError):
             frozen(connector=foreign)
+
+    # An upload's draft splits once: its node edit is the definition's, which its Start writes, so
+    # the campaign it mints declares none, as one named off that definition does not.
+    landed = asyncio.run(
+        ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\nz,1\n", filename="up.csv")
+    )
+    upload = owned_draft(built_stores, landed.draft_id).patch(
+        raw_task_description="Map q to a.", column_query="q", column_ground_truth="a"
+    )
+    upload_knob = {"config": {"pipeline_overlay": {"llm_only": {"temperature": 0.3}}}}
+    knob_plan = asyncio.run(
+        plan_draft_patch(built_stores, upload, EditDraftPatch.model_validate(upload_knob))
+    )
+    knobbed = apply_draft_patch(upload, knob_plan)
+    upload_laid = draft_pipeline(built_stores, knobbed, knob_plan.served)
+    assert "pipeline_overlay" not in upload_laid.config.model_dump(exclude_defaults=True), (
+        "an upload's check-in declares its definition's half into the campaign"
+    )
+    temperature = next(r for r in upload_laid.rows["llm_only"] if r.key == "temperature")
+    assert (temperature.value, temperature.source) == (0.3, "dataset"), (
+        "an upload's node edit reads as another layer than the definition its Start writes"
+    )
+    assert isinstance(knobbed.basis, UploadBasis)
+    commit_upload_definition(
+        built_stores,
+        knobbed,
+        source=upload_source(knobbed, knobbed.basis),
+        pipeline=upload_laid,
+    )
+    named = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name=knobbed.slug))
+    by_name = owned_draft(built_stores, named.draft_id)
+    again = draft_pipeline(built_stores, by_name, asyncio.run(draft_served(built_stores, by_name)))
+    assert (again.config, again.params) == (upload_laid.config, upload_laid.params), (
+        "a dataset named off an upload's Start declares or runs another config than its check-in"
+    )
+    # A resolver's model proposal is the one edit at its node's config path, applied as any edit.
+    menu = next(r for r in upload_laid.rows["llm_only"] if r.key == "model").options
+    model_found = OriginFinding(
+        field="node.llm_only.model", proposed_value=menu[-1], confidence="high", evidence="row 1"
+    )
+    (proposal,) = raised_commands(
+        knobbed, CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
+    )
+    proposed = asyncio.run(plan_draft_patch(built_stores, knobbed, proposal.patch))
+    assert (
+        draft_pipeline(built_stores, apply_draft_patch(knobbed, proposed), proposed.served).params[
+            "llm_only"
+        ]["model"]
+        == menu[-1]
+    ), "a resolver's model proposal was dropped"
+    # ...and only as that edit: a node's model moves spend, so the turn raises it and applies none.
+    answer = CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
+
+    async def answered(**_: object) -> tuple[CheckinOutput, int]:
+        return answer, 0
+
+    monkeypatch.setattr(origin_resolve, "run_checkin", answered)
+    monkeypatch.setattr(origin_resolve, "paid_call", lambda **_: contextlib.nullcontext())
+    turn = asyncio.run(
+        origin_resolve.resolve_origin_turn(stores=built_stores, draft=knobbed, pipeline=upload_laid)
+    )
+    assert turn.draft.config == knobbed.config, "a resolver turn applied a node's model unpriced"
+    assert [c.payload.patch for c in turn.resolution.raised] == [proposal.patch], (
+        "a resolver turn dropped the model edit it may not apply"
+    )
+    # An edit lays over the draft's config depth first, keeping the node's other knobs; a scoring
+    # edit names only what one takes, and its criterion compiles before it is kept.
+    capped = asyncio.run(
+        plan_draft_patch(
+            built_stores,
+            knobbed,
+            EditDraftPatch.model_validate(
+                {"config": {"pipeline_overlay": {"llm_only": {"max_tokens": 64}}}}
+            ),
+        )
+    )
+    assert capped.changes["config"]["pipeline_overlay"]["llm_only"] == {
+        "temperature": 0.3,
+        "max_tokens": 64,
+    }, "an edit to one knob clobbered the node's other"
+    for malformed in ({"weights": "tokens=1"}, {"per_cell": "correct +"}):
+        with pytest.raises((PayloadInvalidError, ScoringFormulaError)):
+            asyncio.run(
+                plan_draft_patch(
+                    built_stores,
+                    knobbed,
+                    EditDraftPatch.model_validate({"config": {"scoring": malformed}}),
+                )
+            )
 
     # A row reads as the search space its ticks and padlock drew.
     params = [
@@ -1485,7 +1672,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields_held=["instruction"],
         param_allowed_values={"model": ["x", "a", "b"]},
     ), "a steer reopened an axis, released a held field or dropped a permitted model"
-    assert laid.babysat, "a seed widening its own menu sanctioned the steer the campaign never did"
+    assert laid.steers_outside(probe.optimizer_narrowing), (
+        "a seed widening its own menu sanctioned the steer the campaign never did"
+    )
     # An onward seed lays by part over its parent's laid narrowing: a subset of a closed axis
     # stays closed, and a held field joins the ones its line held.
     onward = CycleSeed(
@@ -1497,9 +1686,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     grand = CycleConfig.laid(
         probe, [LaidSpan(seed=s, scoring_lock=None) for s in (steering, onward)]
     )
-    assert (grand.seed_overlay, grand.babysat) == (laid.seed_overlay, True), (
-        "a fork of a steered fork ran without its parent's steer"
-    )
+    assert (grand.seed_overlay, grand.steers_outside(probe.optimizer_narrowing)) == (
+        laid.seed_overlay,
+        True,
+    ), "a fork of a steered fork ran without its parent's steer"
     onward_laid = grand.config.optimizer_narrowing["solve"]
     assert (onward_laid.param_keys, onward_laid.prompt_fields_held) == (
         [],
@@ -1514,7 +1704,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.0},
             "optimizer": {
                 "param_keys": ["reasoning_effort", "temperature"],
-                "param_allowed_values": {"reasoning_effort": rungs},
+                "param_allowed_values": {"reasoning_effort": rungs, "model": ["m", "n"]},
             },
         }
         return {"backend_name": "termnorm", "nodes": {"a": node}, "pipelines": {"default": ["a"]}}
@@ -1542,11 +1732,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             model_capabilities={},
         )
     fork_seed = parse_cycle_seed(
-        ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
-        cycle_config(stores, steered, None).config,
-        stores,
-        steered,
-        fork,
+        ForkSeed.model_validate({"node_narrowing": {"a": rows}}), stores, steered, fork
     )
     assert fork_seed.optimizer_narrowing == {
         "a": NodeSearchNarrowing(
@@ -1563,11 +1749,23 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                     "pipeline_overlay": {"a": {"reasoning_effort": "xhigh"}},
                 }
             ),
-            cycle_config(stores, steered, None).config,
             stores,
             steered,
             fork,
         )
+    # A node permits what its recorded schema serves under the line, so the dataset's optimizer
+    # block sanctions a model the campaign's own (empty) layer never names.
+    assert fork_preview(stores, steered.campaign_id, {"a": {"model": "n"}}) == ForkPreviewResponse(
+        steer="clean", permitted={"a": ["m", "n"]}
+    ), "a steer inside the dataset's model list was graded the babysit act"
+    assert fork_preview(stores, steered.campaign_id, {"a": {"model": "z"}}).steer != "clean", (
+        "a model no layer permits forked clean"
+    )
+    at_fork = permitted_narrowing(stores, steered, fork)["a"].param_allowed_values
+    assert (at_fork["reasoning_effort"], at_fork["model"]) == (
+        ["low", "high", "xhigh"],
+        ["m", "n"],
+    ), "a fork's steer was checked against its root's menu, not its own"
     # A steer the campaign never sanctioned cannot pass as a clean fork.
     sanctioning = {
         "l1_generate": NodeSearchNarrowing(param_allowed_values={"model": ["openai/gpt-oss-120b"]})
@@ -2519,12 +2717,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     uploaded = owned_draft(built_stores, landed.draft_id)
     starved = {"l1_generate": {"config": {"model": "deepseek/deepseek-v4-flash", "max_tokens": 64}}}
     built_stores.drafts.write_draft(
-        uploaded.draft_id,
         uploaded.patch(
             column_query="q",
             column_ground_truth="a",
-            optimization_overrides={**uploaded.optimization_overrides, "nodes": starved},
-        ).to_disk(),
+            config={"optimization": {"optimizer": "potter", "nodes": starved}},
+        ),
     )
     monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
     for attempt in ("first", "retry"):
@@ -2546,8 +2743,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         {"pipeline": {"backend_type": "termnorm"}},
     )
     built_stores.drafts.write_draft(
-        uploaded.draft_id,
-        owned_draft(built_stores, uploaded.draft_id).patch(slug="email-tagging").to_disk(),
+        owned_draft(built_stores, uploaded.draft_id).patch(slug="email-tagging")
     )
     monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
     held_before = built_stores.tenant_datasets.held_version("email-tagging")

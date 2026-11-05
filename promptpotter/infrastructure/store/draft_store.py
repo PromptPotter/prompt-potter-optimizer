@@ -80,13 +80,16 @@ class DraftStore:
             raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
         return claim
 
-    def write_draft(self, draft_id: str, draft: DraftFile) -> Path:
-        path = self.draft_dir(draft_id) / DRAFT_FILE
+    def write_draft(self, draft: DraftFile) -> Path:
+        path = self.draft_dir(draft.draft_id) / DRAFT_FILE
         write_bytes(path, draft.model_dump_json(indent=2).encode("utf-8"))
         return path
 
     def read_draft(self, draft_id: str) -> DraftFile | None:
-        return read_file(self.draft_dir(draft_id) / DRAFT_FILE, DraftFile.model_validate_json)
+        return read_file(
+            self.draft_dir(draft_id) / DRAFT_FILE,
+            lambda raw: DraftFile.model_validate_json(raw).at(draft_id),
+        )
 
     def write_resolution(self, draft_id: str, resolution: OriginResolution) -> None:
         path = self.draft_dir(draft_id) / RESOLUTION_FILE

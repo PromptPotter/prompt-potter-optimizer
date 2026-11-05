@@ -1,5 +1,6 @@
 import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { shownData } from "@/lib/hooks/useRead";
 import type { HierarchyCourse } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { runNextStep } from "@/lib/derivations";
@@ -9,9 +10,9 @@ import { HardSamplesPreview } from "@/components/chat/HardSamplesPreview";
 // The chat's one run block, the sample walk: the leader and the heatmap are the dashboard's.
 export function RunCard() {
   const { dash, isLive } = useViewedDashboard();
-  const cv = useConnector();
+  const selfOptimization = shownData(useConnector())?.self_optimization ?? false;
 
-  if (cv.selfOptimization || !dash?.cycle_id) return null;
+  if (selfOptimization || !dash?.cycle_id) return null;
   if (!isLive && dash.round_axis.completed.length === 0) return null;
 
   return (

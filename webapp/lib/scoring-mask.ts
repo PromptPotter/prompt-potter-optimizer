@@ -11,7 +11,7 @@ export const NO_DIALS: ScoringMask = { kind: "dials", weights: {} };
 
 const CORE_TERMS: readonly CellTerm[] = wordRows(CELL_TERM_META).map(([, m]) => m);
 
-// The core's dials, then the campaign connector's own (`useConnector().cellTerms`).
+// The core's dials, then the campaign connector's own (`useConnector.ts::useCellTerms`).
 export function dialTerms(own: readonly CellTerm[]): readonly CellTerm[] {
   return [...CORE_TERMS, ...own].filter((m) => m.dial !== null);
 }

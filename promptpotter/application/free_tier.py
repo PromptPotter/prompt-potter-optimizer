@@ -52,27 +52,28 @@ def free_fence(stores: Stores, connector: str) -> FreeFence | None:
 
 
 def with_free_tier_layer(
-    config: CampaignConfig, task_nodes: Mapping[str, Mapping[str, Any]], fence: FreeFence
+    config: CampaignConfig, schema: PipelineSchema | None, fence: FreeFence
 ) -> CampaignConfig:
     """The tier's layer where anything the run sends draws the coupon, plus per fenced task node
-    its model's bounds: each searched axis narrowed to them, and an unset one launched at the
-    lowest."""
+    of *schema* its model's bounds: each searched axis narrowed to them within what the node
+    permits, and an unset one launched at the lowest. ``None`` reads no node."""
     if not fence.task and not fence.providers:
         return config
     tier = free_tier()
     merged = merge_config_layers(config.model_dump(mode="json", exclude_unset=True), tier.campaign)
-    for node, cfg in task_nodes.items() if fence.task else ():
-        if not (bounds := tier.task_models.get(str(cfg.get("model")))):
+    space = schema.narrow(config.optimizer_narrowing) if schema is not None and fence.task else None
+    for node in space.declared_nodes if space is not None else ():
+        cfg = {**node.current_config, **config.pipeline_overlay.get(node.name, {})}
+        if not node.is_llm or not (bounds := tier.task_models.get(str(cfg.get("model")))):
             continue
-        narrowed = config.optimizer_narrowing.get(node)
-        kept = {} if narrowed is None else narrowed.param_allowed_values
+        kept = node.param_allowed_values
         allowed = {p: [v for v in vs if p not in kept or v in kept[p]] for p, vs in bounds.items()}
         unset = {p: vs[0] for p, vs in bounds.items() if p not in cfg and vs}
         merged = merge_config_layers(
             merged,
             {
-                "pipeline_overlay": {node: unset},
-                "optimizer_narrowing": {node: {"param_allowed_values": allowed}},
+                "pipeline_overlay": {node.name: unset},
+                "optimizer_narrowing": {node.name: {"param_allowed_values": allowed}},
             },
         )
     return CampaignConfig.model_validate(merged)

@@ -5,17 +5,11 @@ from typing import Any
 
 from promptpotter.application.account import record_upload
 from promptpotter.application.datasets.authored import read_authored_dataset
-from promptpotter.application.datasets.draft_build import (
-    DraftCampaignWire,
-    draft_wire,
-    overlay_from_campaign_config,
-)
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
-    DraftCampaign,
     default_slug_from_filename,
     new_draft,
-    scoring_choice,
 )
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.prompts import origin_prompts
@@ -32,21 +26,14 @@ from promptpotter.application.datasets.tabular_ingest import (
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import cycle_config, draft_served
-from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.dataset_name import validate_dataset_name
-from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.pipeline_parsing import merge_node_blocks
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
-from promptpotter.infrastructure.store.dataset_access import (
-    claim_own_definition,
-    runnable_definition,
-)
+from promptpotter.infrastructure.store.dataset_access import claim_own_definition
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
@@ -82,7 +69,7 @@ def _first_blank_rows(headers: list[str], rows: list[dict[str, str]]) -> dict[st
     return blank
 
 
-async def _kept(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
+async def _kept(stores: Stores, draft: DraftFile) -> DraftCampaignWire:
     wire = draft_wire(stores, draft, await draft_served(stores, draft))
     save_checkin_draft(stores, draft)
     return wire
@@ -109,7 +96,6 @@ async def ingest_draft(
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
-        tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=base_slug,
         basis=UploadBasis(connector=DEFAULT_CONNECTOR, kept=kept.name),
@@ -138,14 +124,15 @@ async def draft_from_dataset(
     authored = read_authored_dataset(dataset)
     cc = authored.campaign_config
     task = authored.task_description or None
-    terms = campaign_terms(runnable_definition(dataset).backend_type)
-    matcher, dials = scoring_choice(cc.scoring, terms)
-    pipeline_overlay = authored.pipeline_nodes
+    # The dataset's block is the draft's basis: the draft sets only what the origin's declaration
+    # laid on its nodes.
+    config: dict[str, Any] = {}
     if origin_campaign is not None:
-        # A merge, not a replacement: the origin's declaration names only what its layers set.
-        pipeline_overlay = merge_node_blocks(
-            pipeline_overlay,
-            overlay_from_campaign_config(cycle_config(stores, origin_campaign, None).config),
+        declared = cycle_config(stores, origin_campaign, None).config
+        config = declared.model_dump(
+            mode="json",
+            exclude_unset=True,
+            include={"pipeline_overlay", "optimizer_narrowing"},
         )
 
     authored_prompts = {
@@ -161,7 +148,6 @@ async def draft_from_dataset(
     ]
 
     draft = new_draft(
-        tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=slug,
         basis=DatasetBasis(dataset=dataset_name),
@@ -173,20 +159,8 @@ async def draft_from_dataset(
     draft = draft.apply_resolution(
         values={
             "raw_task_description": task,
-            "scoring_matcher": matcher,
-            "scoring_dials": dials,
-            # Not validated: a dataset's ceiling may exceed the bound on the operator edit path.
-            "optimization_overrides": {
-                **OptimizationOverrides().model_dump(mode="json"),
-                "budget": Budget(rounds=cc.optimization.budget.rounds).model_dump(mode="json"),
-                "halt_at_accuracy": cc.optimization.halt_at_accuracy,
-                "optimizer": cc.optimization.optimizer,
-                "arm_gate": cc.optimization.arm_gate,
-                "nodes": {n: o.model_dump(mode="json") for n, o in cc.optimization.nodes.items()},
-            },
-            "pipeline_overlay": pipeline_overlay,
+            "config": config,
             "origin_prompts": authored_prompts,
-            "pipeline_steps": authored.active_steps,
             "candidate_library": authored.candidate_library,
         },
         provenance={} if task is None else {"task_description": Provenance.CONFIRMED},

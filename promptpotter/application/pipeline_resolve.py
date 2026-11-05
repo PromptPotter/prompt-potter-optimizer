@@ -10,16 +10,16 @@ from pydantic import ValidationError
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import (
+    campaign_config_over,
+    dataset_campaign_block,
     load_dataset_campaign_config,
-    with_optimization,
 )
 from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    committed_pipeline_json,
-    default_campaign_config,
-    draft_scoring_block,
-    scoring_choice,
-    split_overlay,
+    UPLOAD_DEFINITION_KEYS,
+    DraftCriterion,
+    draft_criterion,
+    upload_basis_block,
+    upload_pipeline_json,
 )
 from promptpotter.application.datasets.prompts import (
     declared_origin_prompts,
@@ -59,14 +59,13 @@ from promptpotter.domain.campaign_config import (
     effective_config,
     scoring_locked,
 )
-from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
     fold_output_contract,
-    merge_pipeline_params,
     node_config_items,
     normalize_model_id,
     permitted_models_from_narrowing,
@@ -337,7 +336,7 @@ async def served_pipeline(
     return ServedPipeline(connector.name, served)
 
 
-def _draft_dataset(stores: Stores, draft: DraftCampaign) -> ResolvedDataset | None:
+def _draft_dataset(stores: Stores, draft: DraftFile) -> ResolvedDataset | None:
     match draft.basis:
         case UploadBasis():
             return None
@@ -347,19 +346,21 @@ def _draft_dataset(stores: Stores, draft: DraftCampaign) -> ResolvedDataset | No
             assert_never(draft.basis)
 
 
-def _draft_local(stores: Stores, draft: DraftCampaign) -> dict[str, Any]:
-    """What run init lays over the served pipeline once Start lands: an upload's committed doc,
-    a reused dataset's own file."""
+def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
+    """What run init lays over the served pipeline once Start lands: an upload's definition, the
+    draft's definition half (`UPLOAD_DEFINITION_KEYS`) laid in, which its Start writes; a reused
+    dataset's own file."""
     match draft.basis:
         case UploadBasis() as upload:
-            return committed_pipeline_json(draft, upload)
+            half = campaign_config_over(upload_basis_block(upload), draft.config)
+            return upload_pipeline_json(upload, draft.slug, half.pipeline_overlay)
         case DatasetBasis(dataset=name):
             return runnable_definition(resolve_dataset(stores, name)).pipeline
         case _:
             assert_never(draft.basis)
 
 
-def draft_backend_type(stores: Stores, draft: DraftCampaign) -> str:
+def draft_backend_type(stores: Stores, draft: DraftFile) -> str:
     """The backend the draft's Start runs: an upload's pick, else the one its definition names."""
     match draft.basis:
         case UploadBasis(connector=connector):
@@ -370,7 +371,7 @@ def draft_backend_type(stores: Stores, draft: DraftCampaign) -> str:
             assert_never(draft.basis)
 
 
-async def draft_served(stores: Stores, draft: DraftCampaign) -> ServedPipeline:
+async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
     return await served_pipeline(
         stores,
         connectors.CONNECTORS.get(draft_backend_type(stores, draft)),
@@ -566,56 +567,45 @@ def resolved_output_schemas(
     return out
 
 
-def draft_config(stores: Stores, draft: DraftCampaign, declared: PipelineSchema) -> CampaignConfig:
+def draft_config(stores: Stores, draft: DraftFile, declared: PipelineSchema) -> CampaignConfig:
     """What Start declares and every read before it shows, over *declared*: the draft's chain
     (`DraftPipeline.declared`). A free account's takes the tier's layer last, bound to each node's model."""
-    config = _draft_declared(stores, draft)
-    if isinstance(draft.basis, DatasetBasis) and draft.pipeline_steps:
-        # Via `exclude_nodes`: a reused dataset's `pipelines.default` stays the first campaign's.
-        excluded = [n for n in declared.active_steps if n not in draft.pipeline_steps]
-        config = config.model_copy(update={"exclude_nodes": excluded})
+    config = draft_declared(stores, draft)
     fence = free_fence(stores, draft_backend_type(stores, draft))
-    if fence is None:
-        return config
-    nodes = {
-        n.name: {**n.current_config, **config.pipeline_overlay.get(n.name, {})}
-        for n in declared.declared_nodes
-        if n.is_llm
-    }
-    return with_free_tier_layer(config, nodes, fence)
+    return config if fence is None else with_free_tier_layer(config, declared, fence)
 
 
-def draft_budget(stores: Stores, draft: DraftCampaign) -> Budget:
+def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
     """The ceiling a Start admits: no node bears on it, so it reads no pipeline."""
-    config = _draft_declared(stores, draft)
+    config = draft_declared(stores, draft)
     fence = free_fence(stores, draft_backend_type(stores, draft))
     if fence is not None:
-        config = with_free_tier_layer(config, {}, fence)
+        config = with_free_tier_layer(config, None, fence)
     return config.optimization.budget
 
 
-def draft_sends(stores: Stores, draft: DraftCampaign) -> tuple[Send, ...]:
+def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
     """What a Start sends, and who pays each, off its declaration: it reads no pipeline."""
-    return sends_on(stores, _draft_declared(stores, draft), draft_backend_type(stores, draft))
+    return sends_on(stores, draft_declared(stores, draft), draft_backend_type(stores, draft))
 
 
-def _draft_declared(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
-    if isinstance(draft.basis, UploadBasis):
-        # A fresh upload commits its overlay and chain into its own `dataset.yaml::pipeline`.
-        return with_optimization(
-            default_campaign_config(draft, draft.basis), draft.optimization_overrides
-        )
-    declared = load_dataset_campaign_config(resolve_dataset(stores, draft.basis.dataset))
-    overrides, narrowing = split_overlay(draft.pipeline_overlay)
-    update: dict[str, Any] = {
-        "pipeline_overlay": {**declared.pipeline_overlay, **overrides},
-        "optimizer_narrowing": {**declared.optimizer_narrowing, **narrowing},
-    }
-    # The file's block carries anchors a draft's two fields cannot: it stands until they move.
-    terms = campaign_terms(draft_backend_type(stores, draft))
-    if scoring_choice(declared.scoring, terms) != (draft.scoring_matcher, draft.scoring_dials):
-        update["scoring"] = draft_scoring_block(draft)
-    return with_optimization(declared, draft.optimization_overrides).model_copy(update=update)
+def draft_declared(stores: Stores, draft: DraftFile) -> CampaignConfig:
+    """The campaign half of ``draft.config``, laid over its basis: an upload's connector defaults,
+    its definition's half (`UPLOAD_DEFINITION_KEYS`) left to `_draft_local`; a reused dataset's
+    own block, every key. A draft's ``scoring`` is the criterion whole, so it replaces the
+    basis's."""
+    partial = draft.config
+    match draft.basis:
+        case UploadBasis() as upload:
+            basis = upload_basis_block(upload)
+            partial = {k: v for k, v in partial.items() if k not in UPLOAD_DEFINITION_KEYS}
+        case DatasetBasis(dataset=name):
+            basis = dataset_campaign_block(resolve_dataset(stores, name))
+        case _:
+            assert_never(draft.basis)
+    if "scoring" in partial:
+        basis = {k: v for k, v in basis.items() if k != "scoring"}
+    return campaign_config_over(basis, partial)
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
@@ -672,19 +662,23 @@ class _CampaignMerge(_Merge):
     experiment: dict[str, Any] | None
 
 
-def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> _Merge:
+@dataclass(frozen=True)
+class _DraftMerge(_Merge):
+    # The definition the check-in lays over the served pipeline, which an upload's Start writes.
+    local: dict[str, Any]
+
+
+def _draft_merge(stores: Stores, draft: DraftFile, served: ServedPipeline) -> _DraftMerge:
     local = _draft_local(stores, draft)
     declared = parse_pipeline_response(served.over(local))
     cfg = draft_config(stores, draft, declared)
-    # Still the operator's own layer here, where a fresh upload's Start files it in `dataset.yaml::pipeline`.
-    overrides, narrowing = split_overlay(draft.pipeline_overlay)
     active, filtered = _resolve_active_schema(
         declared,
         exclude=list(cfg.exclude_nodes),
-        narrowing={**cfg.optimizer_narrowing, **narrowing},
+        narrowing=cfg.optimizer_narrowing,
         declared=pipeline_declared_nodes(local),
     )
-    return _Merge(
+    return _DraftMerge(
         # What was on OFFER before this draft narrowed it, so a menu cannot shrink to its own pick.
         declared=declared,
         filtered=filtered,
@@ -695,10 +689,11 @@ def _draft_merge(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -
             schema=filtered,
             workspace=stores.base_dir,
             dataset=pipeline_node_overlay(local),
-            campaign=merge_pipeline_params(cfg.pipeline_overlay, overrides, None) or {},
+            campaign=cfg.pipeline_overlay,
             identity=identity_layer(None, None, None, cfg.judges, active),
         ),
         free=_task_fenced(stores, served.connector),
+        local=local,
     )
 
 
@@ -776,7 +771,7 @@ def mint_facts(
     return MintFacts(demo, campaign_admits(cfg, schema), shelf)
 
 
-def _draft_mint(stores: Stores, draft: DraftCampaign, m: _Merge) -> MintFacts | None:
+def _draft_mint(stores: Stores, draft: DraftFile, m: _Merge) -> MintFacts | None:
     """The demo split the draft's Start will draw, so its pool offers the keys before Start."""
     samples = draft_samples(stores, draft)
     if samples is None:
@@ -853,7 +848,7 @@ def _response(
 
 
 def resolve_pipeline_for_draft(
-    stores: Stores, draft: DraftCampaign, served: ServedPipeline
+    stores: Stores, draft: DraftFile, served: ServedPipeline
 ) -> CampaignPipelineResponse:
     m = _draft_merge(stores, draft, served)
     return _response(
@@ -873,13 +868,17 @@ def resolve_pipeline_for_draft(
 @dataclass(frozen=True)
 class DraftPipeline:
     """The draft's pipeline before Start commits any of it: what its nodes run with, their rows,
-    the chain they run in, the chain as declared before the draft narrowed it, and its config."""
+    the chain they run in, the chain as declared before the draft narrowed it, its config (the
+    campaign half), the definition it lays (an upload's Start writes it), and the backend that
+    serves it."""
 
     params: dict[str, Any]
     rows: dict[str, list[NodeConfigParam]]
     chain: PipelineSchema
     declared: PipelineSchema
     config: CampaignConfig
+    local: dict[str, Any]
+    backend_type: str
 
     @functools.cached_property
     def optimizer(self) -> SelectedOptimizer:
@@ -887,11 +886,24 @@ class DraftPipeline:
         longer selects still folds, rows and gates."""
         return select_optimizer(self.config.optimization)
 
+    @functools.cached_property
+    def criterion(self) -> DraftCriterion:
+        """``config.scoring`` as a check-in picks it, its dials over this backend's terms."""
+        return draft_criterion(self.config.scoring, campaign_terms(self.backend_type))
 
-def draft_pipeline(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftPipeline:
+
+def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftPipeline:
     m = _draft_merge(stores, draft, served)
     folded = m.layers.fold()
-    return DraftPipeline(folded.params, _rows(m, folded), m.filtered, m.declared, m.cfg)
+    return DraftPipeline(
+        folded.params,
+        _rows(m, folded),
+        m.filtered,
+        m.declared,
+        m.cfg,
+        m.local,
+        served.connector,
+    )
 
 
 def resolve_pipeline_for_campaign(
@@ -954,6 +966,20 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
     return resolve_pipeline_for_campaign(leaf, owned_campaign(leaf, campaign_id), at=spec)
 
 
+def permitted_narrowing(
+    stores: Stores, campaign: Campaign, hop: CycleHop | None = None
+) -> dict[str, NodeSearchNarrowing]:
+    """What each node permits at *hop* (the root's, ``None``): its recorded schema's value spaces
+    narrowed by the line, never the campaign's own layer alone, which holds none of the dataset's
+    optimizer blocks. A steer outside them is the babysit act (decisions.md § 0005)."""
+    at = Subject(campaign.campaign_id) if hop is None else Subject.of((hop,))
+    return {
+        n.name: NodeSearchNarrowing(param_allowed_values=dict(n.param_allowed_values))
+        for n in _campaign_merge(stores, campaign, at).filtered.declared_nodes
+        if n.param_allowed_values
+    }
+
+
 def steer_verdict(
     stores: Stores, narrowing: Mapping[str, NodeSearchNarrowing], overlay: dict[str, Any] | None
 ) -> SteerVerdict:
@@ -964,9 +990,7 @@ def steer_verdict(
 
 
 def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> ForkPreviewResponse:
-    narrowing = cycle_config(
-        stores, owned_campaign(stores, campaign_id), None
-    ).config.optimizer_narrowing
+    narrowing = permitted_narrowing(stores, owned_campaign(stores, campaign_id))
     return ForkPreviewResponse(
         steer=steer_verdict(stores, narrowing, overlay),
         permitted=permitted_models_from_narrowing(narrowing),

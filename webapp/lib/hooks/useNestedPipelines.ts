@@ -1,9 +1,8 @@
-// Starts BELOW the dataset `ConnectorProvider` already holds, so the first hop is not re-fetched.
+// Starts BELOW the dataset `useConnector` already reads, so the first hop is not re-fetched.
 
-import { datasetPipelineRead } from "@/lib/api";
-import { failureKind, operatorMessage } from "@/lib/api";
+import { datasetPipelineRead, failureKind, operatorMessage } from "@/lib/api";
 import { reportIncident } from "@/lib/diagnostics";
-import { readThrough, type ReadDescriptor } from "@/lib/read-cache";
+import { readThrough, type ReadDescriptor, type ReadResult } from "@/lib/read-cache";
 import { useRead } from "./useRead";
 import type {
   DatasetPipelineResponse,
@@ -12,7 +11,6 @@ import type {
   NodeReach,
   PipelineView,
 } from "@/lib/api/types";
-import type { PipelineStatus } from "@/lib/types";
 
 // One per dataset a level's cells measure, so a level holds several; `parent` is the enclosing layer's `key`.
 interface NestedLayer {
@@ -26,7 +24,7 @@ interface NestedLayer {
   // Null is UNKNOWN, never shut.
   reach: Record<string, NodeReach> | null;
   nestsNode: string | null;
-  status: PipelineStatus;
+  read: ReadResult<unknown>;
 }
 
 const MAX_DEPTH = 6;
@@ -83,7 +81,7 @@ function nestedPipelinesRead(roots: NestedPipelineRef[]): ReadDescriptor<NestedP
           layers.push({
             ...unread(ref, next.parent, depth),
             key,
-            status: { kind, message: operatorMessage(e, kind) },
+            read: { status: "failed", failure: { kind, message: operatorMessage(e, kind) }, kept: null },
           });
           continue;
         }
@@ -97,7 +95,7 @@ function nestedPipelinesRead(roots: NestedPipelineRef[]): ReadDescriptor<NestedP
           schema: resp.node_config_schema,
           reach: resp.reach,
           nestsNode: resp.nests[0]?.node ?? null,
-          status: "ok",
+          read: { status: "ready", data: resp },
         });
         const below = new Set(above).add(ref.dataset);
         queue.push(...resp.nests.map((r) => ({ ref: r, parent: key, depth: depth + 1, above: below })));
@@ -130,6 +128,6 @@ function unread(ref: NestedPipelineRef, parent: string, depth: number): NestedLa
     schema: null,
     reach: null,
     nestsNode: null,
-    status: "loading",
+    read: { status: "loading", kept: null },
   };
 }

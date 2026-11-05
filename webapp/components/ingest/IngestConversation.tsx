@@ -9,7 +9,8 @@ import { backendHealthRead, datasetIndexRead, originsRead } from "@/lib/api/read
 import { ELAPSED_TICK_MS } from "@/lib/cadence";
 import { stepAnswer, type FieldSchema } from "@/lib/derivations";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
-import { readyData, useRead } from "@/lib/hooks/useRead";
+import { useCellTerms, useConnector } from "@/lib/hooks/useConnector";
+import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import type { BlockItem } from "@/lib/chat/thread";
@@ -22,7 +23,6 @@ import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { Button, FailureLine, Loading, Said } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
-import { useConnector } from "@/lib/hooks/useConnector";
 import { DatasetPreview } from "./DatasetPreview";
 import { SchemaFields, setIn, writeOnlyDefaults, type Commit } from "./SchemaFields";
 import { ComposerTools } from "./ComposerTools";
@@ -192,9 +192,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   // The schema's `writeOnly` subtree, already in `StartCheckinOptions` shape.
   const [launch, setLaunch] = useState<StartCheckinOptions>({});
   const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
+  // The draft's pipeline as every section under it reads it: the connector read.
+  const pipeline = shownData(useConnector());
   // The probe the run control reads, on the connector this draft would launch.
   const health = readyData(
-    useRead(served ? backendHealthRead(served.connector) : null),
+    useRead(served ? backendHealthRead(served.pipeline.connector) : null),
   );
   const [h2h, setH2h] = useState<HeadToHeadDraft>({ id: "", arms: [] });
   const [seededFor, setSeededFor] = useState<string | null>(null);
@@ -207,7 +209,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       Object.assign({}, ...stepSchemas.map((s) => writeOnlyDefaults(s))) as StartCheckinOptions,
     );
   }
-  const { cellTerms } = useConnector();
+  const cellTerms = useCellTerms();
   // Start sits right below the refusal, so scrolling to it shows both.
   const startRef = useRef<HTMLButtonElement>(null);
   const failure = flow.failure;
@@ -224,6 +226,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const gapped = new Set<Step | null>(gaps.map((g) => g.step));
   const steps = (draft.setup_schema as FieldSchema).properties ?? {};
   const runValues = { ...draft, ...launch };
+  const { criterion } = draft;
   const commit: Commit = (path, value, writeOnly) => {
     if (writeOnly) setLaunch((l) => setIn(l, path, value));
     else flow.applyPatch(setIn({}, path, value));
@@ -246,8 +249,8 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       ) : null}
 
       {/* The backbone leads: its knobs and prompts frame every step after it. */}
-      <SetupStep step="optimizer" answer={draft.optimization_overrides.optimizer} gapped={gapped}>
-        <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
+      <SetupStep step="optimizer" answer={pipeline?.optimizer ?? null} gapped={gapped}>
+        <OptimizerSetupSection onApply={flow.applyPatch} />
       </SetupStep>
 
       <SetupStep
@@ -259,18 +262,21 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         <DatasetPreview draft={draft} />
       </SetupStep>
 
-      <SetupStep step="scoring" answer={draft.scoring_matcher} gapped={gapped}>
+      <SetupStep step="scoring" answer={criterion.matcher} gapped={gapped}>
         <Criterion
           startRung={1}
           dialsOnly
-          mask={{ kind: "dials", weights: dialsOf(draft.scoring_dials) }}
+          mask={{ kind: "dials", weights: dialsOf(criterion.dials) }}
           onMask={(mask) => {
-            if (mask.kind === "dials") flow.applyPatch({ scoring_dials: dialsText(mask.weights, cellTerms) });
+            // The server folds an edit into the criterion it runs: no scoring block is built here.
+            if (mask.kind === "dials") {
+              flow.applyPatch({ config: { scoring: { dials: dialsText(mask.weights, cellTerms) } } });
+            }
           }}
           matcher={{
-            value: draft.scoring_matcher,
+            value: criterion.matcher ?? "",
             options: draft.scoring_matchers,
-            onPick: (scoring_matcher) => flow.applyPatch({ scoring_matcher }),
+            onPick: (matcher) => flow.applyPatch({ config: { scoring: { matcher } } }),
           }}
           note="What this campaign optimizes for. Accuracy always counts; pull a dial up to also reward a faster, shorter or cheaper prompt. Each anchor is measured on the origin and locked there."
         />
@@ -295,12 +301,14 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         answer={h2h.arms.length === 0 ? "one campaign" : h2h.arms.map((a) => a.key).join(" vs ")}
         gapped={gapped}
       >
-        <HeadToHeadSection
-          value={h2h}
-          onChange={setH2h}
-          base={draft.optimization_overrides.optimizer}
-          setup={draft.optimizer_setup}
-        />
+        {pipeline && (
+          <HeadToHeadSection
+            value={h2h}
+            onChange={setH2h}
+            base={pipeline.optimizer}
+            setup={pipeline.optimizer_setup}
+          />
+        )}
       </SetupStep>
 
       <SetupStep step="run" answer={steps.run ? stepAnswer(steps.run, runValues) : null} gapped={gapped}>

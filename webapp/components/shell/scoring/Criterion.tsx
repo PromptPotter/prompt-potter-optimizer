@@ -20,7 +20,7 @@ import {
 import type { CellTerm } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import type { ReadFailure } from "@/lib/read-cache";
-import { useConnector } from "@/lib/hooks/useConnector";
+import { useCellTerms } from "@/lib/hooks/useConnector";
 import { NO_DIALS, dialTerms, type ScoringMask } from "@/lib/scoring-mask";
 import { TERMS } from "@/lib/terms";
 
@@ -80,7 +80,7 @@ export function CriterionLine({
       <span className="criterion-glyph" aria-hidden="true">
         <IconTarget />
       </span>
-      {lineParts(mask, matcher, dialTerms(useConnector().cellTerms)).join(" · ")}
+      {lineParts(mask, matcher, dialTerms(useCellTerms())).join(" · ")}
     </span>
   );
 }
@@ -119,7 +119,7 @@ export function Criterion({
   // A dial at 0 has no other way to stay on screen.
   const [added, setAdded] = useState<readonly string[]>([]);
 
-  const terms = dialTerms(useConnector().cellTerms);
+  const terms = dialTerms(useCellTerms());
   const weights = mask.kind === "dials" ? mask.weights : NO_WEIGHTS;
   const shown = terms.filter((m) => {
     const on = (weights[m.name] ?? 0) > 0;

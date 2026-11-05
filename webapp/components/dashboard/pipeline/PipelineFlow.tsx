@@ -7,7 +7,8 @@ import {
   MOVABLE_AGENT_LABELS,
 } from "@/lib/api/types";
 import { nodeKey, type NodeScope } from "@/lib/address";
-import type { PipelineStatus } from "@/lib/types";
+import { readGap, shownData } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
 import { useViewedDashboard } from "@/lib/poll";
 import { useViewedNode, useWorkspace } from "@/lib/workspace";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -54,18 +55,20 @@ const LLM_ICON = (
 );
 
 // Never fabricate a node here: a failed read would pass for a real single-LLM pipeline.
-function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
-  const failure = typeof status === "object" ? status : null;
+function PipelinePlaceholder({ read }: { read: ReadResult<unknown> }) {
+  const gap = readGap(read);
+  const failure = gap?.status === "failed" ? gap.failure : null;
+  const loading = gap?.status === "loading";
   const [value, hint] = failure
     ? (["unavailable", undefined] as const)
-    : status === "loading"
+    : loading
       ? (["loading…", undefined] as const)
       : (["none", "No dataset bound to this campaign."] as const);
   return (
     <div
       className="wf-hero-node"
       aria-label={`Pipeline ${value}`}
-      aria-busy={status === "loading" || undefined}
+      aria-busy={loading || undefined}
       title={hint}
     >
       <div className="head">
@@ -80,7 +83,8 @@ function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
 
 export interface PipelineLayer {
   view: PipelineView | null;
-  status: PipelineStatus;
+  // The read that served `view`: an empty view under a pending read is in flight, never empty.
+  read: ReadResult<unknown>;
   connector: string | null;
   // A node absent from the map is UNKNOWN — never draw it as shut.
   reach: Record<string, NodeReach> | null;
@@ -110,13 +114,13 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
   const { connector, activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
   const selected = useViewedNode();
   const { open, close } = useWorkspace();
-  const cv = useConnector();
+  const served = shownData(useConnector());
   // The layer's own served rows at the viewed config: the model a node is configured with, nothing a run reported.
   const rows =
     scope === "optimizer"
-      ? (cv.optimizerSetup?.node_config_schema ?? null)
+      ? (served?.optimizer_setup.node_config_schema ?? null)
       : scope === "target"
-        ? cv.schema.config
+        ? (served?.node_config_schema ?? null)
         : null;
   const model = (id: string) => nodeModel(rows, id);
   // The ring folds to the box it sits in, so no node is ever scrolled out of sight.
@@ -465,14 +469,14 @@ function FlowEnd({ icon, lbl, val }: { icon: ReactNode; lbl: string; val: string
 }
 
 export function PipelineFlow({ layer, inspector, nested, tone, bare = false }: PipelineFlowProps) {
-  const { view, status } = layer;
+  const { view, read } = layer;
   const { dash } = useViewedDashboard();
   // The input IS the query in flight, when the run names one.
   const query = (layer.isLive && dash?.current_query_payload) || "Query";
   const interior = interiorNodes(view);
   const box =
     view == null || interior.length === 0 ? (
-      <PipelinePlaceholder status={status === "ok" ? "unbound" : status} />
+      <PipelinePlaceholder read={read} />
     ) : (
       <PipelineBox view={view} layer={layer} compact={nested != null} />
     );

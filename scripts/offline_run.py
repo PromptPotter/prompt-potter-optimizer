@@ -50,7 +50,6 @@ from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import dataset_campaign_block
-from promptpotter.application.datasets.draft_campaign import split_overlay
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import (
     grade_bench,
@@ -107,11 +106,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     load_population,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
-from promptpotter.infrastructure.store.dataset_access import (
-    install_dataset,
-    read_dataset_pipeline,
-    resolve_dataset,
-)
+from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.stores import build_stores
@@ -517,13 +512,8 @@ def campaign_config(
     crossover: str | None = None,
     knobs: dict[str, dict[str, Any]] | None = None,
 ) -> CampaignConfig:
-    shipped = install_dataset(install_datasets_root(), DATASET)
-    raw = dict(dataset_campaign_block(shipped))
-    # The narrowing a check-in of the shipped definition declares, its `optimizer` blocks included.
-    pipeline = read_dataset_pipeline(shipped)
-    assert pipeline is not None, f"{DATASET} declares a pipeline"
-    _, narrowing = split_overlay(pipeline["nodes"])
-    raw.update(BENCH, bench_trigger=bench_trigger, optimizer_narrowing=narrowing)
+    raw = dict(dataset_campaign_block(install_dataset(install_datasets_root(), DATASET)))
+    raw.update(BENCH, bench_trigger=bench_trigger)
     opt = raw["optimization"]
     # The template's node overlay is written for the optimizer it selects, and only that one.
     templated = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)

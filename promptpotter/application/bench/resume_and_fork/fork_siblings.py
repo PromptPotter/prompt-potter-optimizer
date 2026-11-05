@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -63,7 +63,7 @@ def _fork_sibling_setup(
     babysat = CycleConfig.laid(
         cycle_config(stores, campaign, None).config,
         [*cycle_config(stores, campaign, parent).spans, LaidSpan(seed=seed, scoring_lock=None)],
-    ).babysat
+    ).steers_outside(permitted_narrowing(stores, campaign))
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
@@ -255,10 +255,8 @@ def mint_operator_fork(
     reason: str = "",
 ) -> str:
     campaign = owned_campaign(stores, hop.campaign_id)
-    # Against the parent's laid narrowing, so the child lays over what its parent ran.
-    seed = declare_steered_values(
-        seed, cycle_config(stores, campaign, hop).config.optimizer_narrowing
-    )
+    # Against what the parent's nodes permit, so the child lays over what its parent ran.
+    seed = declare_steered_values(seed, permitted_narrowing(stores, campaign, hop))
     if not keep_rounds:
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
         caps = fork_remainder(stores, hop).under(seed.config_overrides)

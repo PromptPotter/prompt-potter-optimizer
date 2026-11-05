@@ -50,7 +50,7 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.extras import Extra, install_hint, installed
 
 if TYPE_CHECKING:
-    from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.domain.checkin_draft import DraftFile
     from promptpotter.domain.sample import Bank, Sample
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ def checkin_bank(stores: Stores, name: str) -> Bank:
     return fetched
 
 
-def upload_source(draft: DraftCampaign, upload: UploadBasis) -> dict[str, Any]:
+def upload_source(draft: DraftFile, upload: UploadBasis) -> dict[str, Any]:
     """The definition names the kept upload and the cut; the rows stay in the upload alone."""
     return {
         "recipe": "table",
@@ -172,7 +172,7 @@ def upload_source(draft: DraftCampaign, upload: UploadBasis) -> dict[str, Any]:
     }
 
 
-def draft_samples(stores: Stores, draft: DraftCampaign) -> Sequence[Sample] | None:
+def draft_samples(stores: Stores, draft: DraftFile) -> Sequence[Sample] | None:
     """What the draft's Start partitions; ``None`` while it has none to read: a read never fetches
     a bank, and never cuts an upload by columns the gate has not confirmed."""
     match draft.basis:
@@ -187,7 +187,7 @@ def draft_samples(stores: Stores, draft: DraftCampaign) -> Sequence[Sample] | No
             assert_never(draft.basis)
 
 
-def checkin_rows(stores: Stores, draft: DraftCampaign) -> list[dict[str, str]]:
+def checkin_rows(stores: Stores, draft: DraftFile) -> list[dict[str, str]]:
     match draft.basis:
         case UploadBasis(kept=kept):
             path = stores.tenant_datasets.upload_path(kept)

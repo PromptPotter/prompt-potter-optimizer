@@ -564,26 +564,27 @@ class CycleConfig(FrozenModel):
     # One per ledger of the cycle's chain, its root's first and its own last.
     spans: tuple[LaidSpan, ...]
     seed_overlay: dict[str, Any]
-    # The babysit act (decisions.md § 0005): a seed of the line steers outside the declaration.
-    babysat: bool
 
     @classmethod
     def laid(cls, declared: CampaignConfig, spans: Sequence[LaidSpan]) -> CycleConfig:
         config = declared
         overlay: dict[str, Any] = {}
-        babysat = False
         for span in spans:
             if (seed := span.seed) is not None:
                 config = apply_config_overrides(config, seed.config_overrides)
                 narrowing = _narrowed(config.optimizer_narrowing, seed.optimizer_narrowing)
                 config = config.model_copy(update={"optimizer_narrowing": narrowing})
                 overlay = merge_pipeline_params(overlay, seed.pipeline_overlay, None) or {}
-                # Per seed: a later steer back inside the menu leaves its parent's act standing.
-                babysat |= steers_disallowed_model(
-                    declared.optimizer_narrowing, seed.pipeline_overlay
-                )
             config = scoring_locked(config, span.scoring_lock)
-        return cls(config=config, spans=tuple(spans), seed_overlay=overlay, babysat=babysat)
+        return cls(config=config, spans=tuple(spans), seed_overlay=overlay)
+
+    def steers_outside(self, permitted: Mapping[str, NodeSearchNarrowing]) -> bool:
+        """The babysit act (decisions.md § 0005): a seed of the line steers outside what the nodes
+        *permitted* before any seed. Per seed, so a later steer back inside leaves its parent's act standing."""
+        return any(
+            span.seed is not None and steers_disallowed_model(permitted, span.seed.pipeline_overlay)
+            for span in self.spans
+        )
 
     @property
     def own_seed(self) -> CycleSeed | None:

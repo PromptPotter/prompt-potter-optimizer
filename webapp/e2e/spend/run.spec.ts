@@ -123,7 +123,7 @@ test.describe("a campaign, end to end", () => {
     // Candidate WIDTH is not set here: it rides the dataset definition's `campaign` section.
     const capped = await command(request, "edit-draft-campaign", {
       draft_id: draft!.draftId,
-      patch: { optimization_overrides: { budget: { rounds: WANT_ROUNDS - 1 } } },
+      patch: { config: { optimization: { budget: { rounds: WANT_ROUNDS - 1 } } } },
     });
     expect(capped.status, `capping the draft to ${WANT_ROUNDS - 1} search round(s): ${capped.body}`).toBeLessThan(300);
 

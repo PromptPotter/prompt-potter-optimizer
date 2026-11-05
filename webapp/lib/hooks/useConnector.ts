@@ -1,39 +1,29 @@
-// Mount `ConnectorProvider` ONCE above its consumers: one health poll per app.
+// The viewed pipeline: each caller its own `useRead` subscription, the cache's one flight per id.
 
-import {
-  createContext,
-  createElement,
-  useContext,
-  useMemo,
-  type ReactNode,
-} from "react";
-import { backendHealthRead, backendsRead, campaignPipelineRead } from "@/lib/api";
-import type { BackendResponse, CampaignPipelineResponse, DraftCampaignWire } from "@/lib/api/types";
-import { pipelineReadStatus } from "@/lib/derivations";
+import { useMemo } from "react";
+import { backendHealthRead, backendsRead, campaignPipelineRead, subjectKey } from "@/lib/api";
+import type {
+  BackendHealthResponse,
+  BackendResponse,
+  CampaignPipelineResponse,
+  CellTerm,
+} from "@/lib/api/types";
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
+import { pathLeaf } from "@/lib/ids";
+import { useCheckinDraft } from "@/lib/ingest-flow";
 import type { ReadResult } from "@/lib/read-cache";
-import type { ConnectorView } from "@/lib/types";
+import { useWorkspace } from "@/lib/workspace";
 
-const EMPTY: ConnectorView = {
-  connector: null,
-  backendType: null,
-  selfOptimization: false,
-  optimizer: null,
-  optimizerSetup: null,
-  view: null,
-  schema: { status: "unbound", config: null, output: null, isSingleNode: false },
-  active: null,
-  others: [],
-  baseUrl: null,
-  isTls: null,
-  health: null,
-  modelCapabilities: {},
-  reach: null,
-  nests: [],
-  cellTerms: [],
-};
+// The registered backends beside the one the viewed pipeline runs on.
+export interface BackendReading {
+  active: BackendResponse | null;
+  others: BackendResponse[];
+  // Real reachability, distinct from the stream's `isLive` (is the optimizer scoring through it now).
+  health: BackendHealthResponse | null;
+}
 
 const NO_BACKENDS: BackendResponse[] = [];
+const NO_TERMS: readonly CellTerm[] = [];
 
 export function useCampaignPipeline(
   campaignId: string | null,
@@ -42,99 +32,47 @@ export function useCampaignPipeline(
   return useRead(campaignId ? campaignPipelineRead(campaignId, at) : null);
 }
 
-function useConnectorViewEngine(campaignId: string | null, at: string | null): ConnectorView {
+// The viewed leaf as a course subject: the hops ABOVE it are its chain, so an L4 inner run
+// resolves its OWN pipeline.
+export function useLeafSubject(): string | null {
+  const { viewedPath } = useWorkspace();
+  return useMemo(() => {
+    const leaf = viewedPath ? pathLeaf(viewedPath) : null;
+    return leaf && viewedPath
+      ? subjectKey("course", [leaf.campaignId, leaf.cycleId], viewedPath.slice(0, -1))
+      : null;
+  }, [viewedPath]);
+}
+
+export function useConnector(): ReadResult<CampaignPipelineResponse> {
+  const { leafCampaignId } = useWorkspace();
+  const draft = useCheckinDraft();
+  const served = useCampaignPipeline(draft ? null : leafCampaignId, useLeafSubject());
+  // A viewed check-in's draft (`resolve_pipeline_for_draft`) is a second transport of the same answer, never a second source.
+  return useMemo(
+    () => (draft ? { status: "ready", data: draft.pipeline } : served),
+    [draft, served],
+  );
+}
+
+export function useBackend(): BackendReading {
+  const backendType = shownData(useConnector())?.backend_type ?? null;
   // Gated on the session: an anon preview must never fire the protected read (I5).
   const backends = shownData(useRead(backendsRead())) ?? NO_BACKENDS;
-
-  const read = useCampaignPipeline(campaignId, at);
-  const resp = shownData(read);
-  const pipelineStatus = pipelineReadStatus(read);
-
-  const backendType = resp?.backend_type ?? null;
-  const activeId = useMemo(
-    () => (backendType ? backends.find((b) => b.id === backendType)?.id ?? null : null),
+  const active = useMemo(
+    () => (backendType ? (backends.find((b) => b.id === backendType) ?? null) : null),
     [backendType, backends],
   );
-
   // Our own API down is the dashboard banner's to say: a failed read is unknown, not offline.
-  const health = readyData(
-    useRead(activeId ? backendHealthRead(activeId) : null),
+  const health = readyData(useRead(active ? backendHealthRead(active.id) : null));
+  return useMemo(
+    () => ({ active, others: active ? backends.filter((b) => b !== active) : backends, health }),
+    [active, backends, health],
   );
-
-  return useMemo<ConnectorView>(() => {
-    if (!resp) {
-      const others = typeof pipelineStatus === "object" ? backends : [];
-      return { ...EMPTY, schema: { ...EMPTY.schema, status: pipelineStatus }, others };
-    }
-    const active = backends.find((b) => b.id === resp.backend_type) ?? null;
-    const baseUrl = active?.base_url ?? null;
-    return {
-      connector: resp.connector,
-      // Top-level, never in `view`: the parsed `PipelineSchema` drops it.
-      backendType: resp.backend_type,
-      selfOptimization: resp.self_optimization,
-      optimizer: resp.optimizer,
-      optimizerSetup: resp.optimizer_setup,
-      view: resp.view,
-      schema: {
-        status: pipelineStatus,
-        config: resp.node_config_schema,
-        output: resp.node_output_schema,
-        isSingleNode: resp.is_single_node,
-      },
-      active,
-      others: active ? backends.filter((b) => b !== active) : backends,
-      baseUrl,
-      isTls: baseUrl ? baseUrl.startsWith("https://") : null,
-      health,
-      modelCapabilities: resp.model_capabilities,
-      reach: resp.reach,
-      nests: resp.nests,
-      cellTerms: resp.cell_terms,
-    };
-  }, [resp, pipelineStatus, backends, health]);
 }
 
-const ConnectorContext = createContext<ConnectorView | null>(null);
-
-// A viewed check-in's draft (`resolve_pipeline_for_draft`) is a second transport of the same answer, never a second source.
-function draftConnector(draft: DraftCampaignWire): ConnectorView {
-  return {
-    ...EMPTY,
-    connector: draft.connector,
-    optimizer: draft.optimization_overrides.optimizer,
-    optimizerSetup: draft.optimizer_setup,
-    view: draft.pipeline_view,
-    // Landed by construction; the default (`unbound`) would read as no campaign.
-    schema: {
-      status: "ok",
-      config: draft.node_config_schema,
-      output: draft.node_output_schema,
-      isSingleNode: draft.is_single_node,
-    },
-    modelCapabilities: draft.model_capabilities,
-    reach: draft.reach,
-  };
-}
-
-export function ConnectorProvider({
-  campaignId,
-  at,
-  draft,
-  children,
-}: {
-  campaignId: string | null;
-  at: string | null;
-  draft: DraftCampaignWire | null;
-  children: ReactNode;
-}) {
-  const served = useConnectorViewEngine(campaignId, at);
-  const drafted = useMemo(() => (draft ? draftConnector(draft) : null), [draft]);
-  return createElement(ConnectorContext.Provider, { value: drafted ?? served }, children);
-}
-
-export function useConnector(): ConnectorView {
-  const v = useContext(ConnectorContext);
-  if (!v) throw new Error("useConnector must be used inside <ConnectorProvider>");
-  return v;
+// served: `CampaignPipelineResponse.cell_terms`, the terms the connector adds to the core's;
+// empty until the pipeline lands.
+export function useCellTerms(): readonly CellTerm[] {
+  return shownData(useConnector())?.cell_terms ?? NO_TERMS;
 }

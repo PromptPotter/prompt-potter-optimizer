@@ -8,7 +8,7 @@ import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { lensOf, useMaskState } from "@/lib/scoring-mask";
-import { useConnector } from "@/lib/hooks/useConnector";
+import { useCellTerms } from "@/lib/hooks/useConnector";
 import type { HierarchyCourse, ServedDashboard, DisplayMetric } from "@/lib/api/types";
 import {
   candidatesAtPath,
@@ -63,7 +63,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const { open: maskOpen, mask } = useMaskState();
   const served = useServedCriterion();
-  const { cellTerms } = useConnector();
+  const cellTerms = useCellTerms();
   const activeLens = maskOpen ? lensOf(mask, cellTerms) : null;
 
   const compareKey =
