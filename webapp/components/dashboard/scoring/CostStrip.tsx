@@ -3,13 +3,13 @@ import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";
 import { CardFrame } from "@/components/ui";
 import { costSeries, roundCosts } from "@/lib/derivations";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 
 ensureChartRegistered();
 
 // How the bill splits by round; the bill itself is the masthead's SPEND.
 export const CostStrip = memo(function CostStrip() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   useThemeVersion();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rounds = useMemo(() => roundCosts(dash), [dash?.spend_metered_by_round]);

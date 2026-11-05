@@ -7,6 +7,7 @@ export function mintIdempotencyKey(): string {
 // True of a read and a write alike; what a dropped write may have done is `commandMessage`'s to say.
 const KIND_SENTENCE: Record<FailureKind, string> = {
   transient: "Could not reach the server.",
+  throttled: "Too many requests from this account — try again shortly.",
   auth: "Your session has ended — sign in again.",
   denied: "This account is not allowed to do that.",
   gone: "What this acts on no longer exists.",

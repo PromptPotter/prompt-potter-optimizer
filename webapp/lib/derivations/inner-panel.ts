@@ -1,6 +1,6 @@
 // Keyed on `reading.arm.label`: the joined rows come from the leaf's `dashboard.json`.
 
-import type { SubtreeCourse } from "@/lib/api";
+import type { SubtreeCourse } from "@/lib/api/types";
 import type { CyclePath } from "@/lib/ids";
 import { candidatesAtPath, type LineageIndex } from "./lineage-candidates";
 

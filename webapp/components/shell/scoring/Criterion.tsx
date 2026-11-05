@@ -17,9 +17,9 @@ import {
   Term,
   ValueList,
 } from "@/components/ui";
-import type { CellTerm } from "@/lib/api/types.generated";
+import type { CellTerm } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import type { ReadFailure } from "@/lib/hooks/useRead";
+import type { ReadFailure } from "@/lib/read-cache";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { NO_DIALS, dialTerms, type ScoringMask } from "@/lib/scoring-mask";
 import { TERMS } from "@/lib/terms";

@@ -1,8 +1,8 @@
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 
 // Members that caught up on a race, under the optimizer that ran it; nothing until one has.
 export function RaceCatchUp() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const log = dash?.catch_up_log;
   if (!log || log.length === 0) return null;
   return (

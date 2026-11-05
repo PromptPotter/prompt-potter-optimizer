@@ -1,9 +1,9 @@
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { fmtClock, fmtUnit } from "@/lib/format";
 
 // The backend's recent retries, under the pipeline that calls it; nothing while it answers cleanly.
 export function BackendRetries() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const warnings = dash?.recent_backend_warnings;
   if (!warnings || warnings.length === 0) return null;
   return (

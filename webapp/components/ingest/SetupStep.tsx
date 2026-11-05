@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { SETUP_STEP_TITLES, type SetupStep as Step } from "@/lib/api/types.generated";
+import { SETUP_STEP_TITLES, type SetupStep as Step } from "@/lib/api/types";
 
 // Closed it is one line naming its current answer, so a phone sees every step and Start.
 // It opens on a served gap naming it, and on nothing else.

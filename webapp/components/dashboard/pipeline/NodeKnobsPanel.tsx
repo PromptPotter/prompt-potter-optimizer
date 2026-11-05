@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { readyData, useRead } from "@/lib/hooks/useRead";
+import { optimizerRosterRead } from "@/lib/api";
 import {
-  optimizerRosterRead,
   type ManifestNodeOverlay,
   type NodeConfigParam,
   type OptimizerRoster,
@@ -9,8 +9,8 @@ import {
   type PoolFill,
   type PoolOffer,
   type PoolRow,
-} from "@/lib/api";
-import { POOL_SOURCE_INFO } from "@/lib/api/types.generated";
+  POOL_SOURCE_INFO,
+} from "@/lib/api/types";
 import { knobGroups, knobRange, knobText, parseKnob } from "@/lib/derivations";
 import { promptField, promptFieldLabel } from "@/lib/prompt-fields";
 import { useConnector } from "@/lib/hooks/useConnector";

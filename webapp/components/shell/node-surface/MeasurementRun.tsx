@@ -3,20 +3,13 @@ import { useSelection } from "@/lib/SelectionContext";
 import { useLeafIsL4, useWorkspace } from "@/lib/workspace";
 import { useRound } from "@/lib/hooks/useRound";
 import { useViewedLineage } from "@/lib/lineage";
-import {
-  candidateSearchPoint,
-  candidateVerdicts,
-  innerPanelIndex,
-  liveCandidateSearchPoint,
-  liveCandidateVerdicts,
-  panelCellKey,
-} from "@/lib/derivations";
+import { innerPanelIndex, panelCellKey } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { CellRow, HierarchyCourse } from "@/lib/api";
-import { ARM_END_INFO } from "@/lib/api/types.generated";
-import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
-import { useCycleStream } from "@/lib/poll";
+import { type CellRow, type HierarchyCourse, ARM_END_INFO } from "@/lib/api/types";
+import { useCells, type CellsPreset } from "@/lib/hooks/useCells";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { useViewedDashboard } from "@/lib/poll";
 import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
@@ -39,7 +32,7 @@ export function MeasurementRun({
 }: {
   round: number;
 }) {
-  const { dash, isLive } = useCycleStream();
+  const { dash, isLive } = useViewedDashboard();
   const cv = useConnector();
   const { viewedPath, leafCycleId, navigate } = useWorkspace();
   // The DECLARED backend type, not "the tree found inner runs": minting cells would tally as misses.
@@ -65,22 +58,24 @@ export function MeasurementRun({
   };
   const {
     unfiled: isLiveView,
-    doc: roundDoc,
-    loading: roundLoading,
-    failure: roundFailure,
+    read: roundRead,
     rows: candidates,
+    seed,
+    verdicts,
   } = useRound(viewedPath, round);
 
   const [candFilter, setCandFilter] = useState<string>("all");
   const picked = candidates.find((c) => c.reading.arm.key === candFilter);
   const narrowTo = picked && picked.source !== "inflight" ? picked.reading.arm.key : undefined;
   const preset: CellsPreset = { round, scope: "cycle", candidateId: narrowTo };
-  const measured = usePresetCells(preset);
+  const cellsRead = useCells(preset).read;
+  const measured = shownData(cellsRead);
+  const cellsFailure = failureOf(cellsRead);
   // Keyed on the arm the cell's candidate IS, and each cell names its query through its slot.
   const cellsOf = useMemo(() => {
-    const armOf = new Map(measured.candidates.map((c) => [c.key, c.candidate_id]));
+    const armOf = new Map((measured?.candidates ?? []).map((c) => [c.key, c.candidate_id]));
     const out = new Map<string, CellRow[]>();
-    for (const cell of measured.cells) {
+    for (const cell of measured?.cells ?? []) {
       const arm = armOf.get(cell.candidate);
       if (arm == null) continue;
       const list = out.get(arm);
@@ -88,16 +83,10 @@ export function MeasurementRun({
       else out.set(arm, [cell]);
     }
     return out;
-  }, [measured.candidates, measured.cells]);
+  }, [measured]);
   const queryAt = useMemo(
-    () => new Map(measured.items.map((it) => [it.position, it.query])),
-    [measured.items],
-  );
-
-  const verdicts = useMemo(
-    () =>
-      isLiveView ? liveCandidateVerdicts(dash) : candidateVerdicts(roundDoc),
-    [isLiveView, dash, roundDoc],
+    () => new Map((measured?.samples ?? []).map((it) => [it.position, it.query])),
+    [measured],
   );
 
   const groups = useMemo(() => {
@@ -109,17 +98,13 @@ export function MeasurementRun({
     for (const c of candidates) {
       const { arm } = c.reading;
       const filtered = cellsOf.get(arm.key) ?? [];
-      const spec =
-        c.source === "inflight"
-          ? liveCandidateSearchPoint(dash, arm.key)
-          : candidateSearchPoint(roundDoc, arm.key);
-      out.push({ candidate: c, samples: filtered, spec });
+      out.push({ candidate: c, samples: filtered, spec: seed(arm.key) });
     }
     if (candFilter !== "all") {
       return out.filter((g) => g.candidate.reading.arm.key === candFilter);
     }
     return out;
-  }, [candidates, candFilter, dash, roundDoc, cellsOf]);
+  }, [candidates, candFilter, seed, cellsOf]);
 
   const totalRows = useMemo(
     () => groups.reduce((n, g) => n + g.samples.length, 0),
@@ -128,7 +113,7 @@ export function MeasurementRun({
 
   const oneCandidate = candFilter !== "all";
 
-  if (!dash || (!isLiveView && roundLoading)) {
+  if (!dash || (!isLiveView && roundRead.status === "loading")) {
     return (
       <Region>
         <Loading className="samples-empty">Loading round {round}…</Loading>
@@ -136,11 +121,11 @@ export function MeasurementRun({
     );
   }
   const unit = dash.measured_unit;
-  if (!isLiveView && roundFailure) {
+  if (!isLiveView && roundRead.status === "failed") {
     return (
       <Region>
         <FailureLine
-          failure={roundFailure}
+          failure={roundRead.failure}
           lead={`Could not load round ${round}.`}
           className="samples-empty"
         />
@@ -175,6 +160,14 @@ export function MeasurementRun({
         </div>
         {cells && <span className="rsv-count">{unitCount(totalRows, unit)}</span>}
       </div>
+      {/* Without inner runs the pane below reads the same cells and says their failure. */}
+      {cells && (
+        <FailureLine
+          failure={cellsFailure}
+          lead={`Could not load round ${round}'s ${unitPlural(unit)}.`}
+          className="samples-empty"
+        />
+      )}
       <div className="rsv-groups">
         {groups.map((g) => {
           const { reading } = g.candidate;
@@ -284,7 +277,7 @@ export function MeasurementRun({
                 </div>
               )}
               {!cells ? null : g.samples.length === 0 ? (
-                <div className="rsv-empty-row">
+                cellsFailure === null && <div className="rsv-empty-row">
                   {invalid
                     ? `No ${unitPlural(unit)} — it was rejected before it ran.`
                     : `No matching ${unitPlural(unit)}.`}

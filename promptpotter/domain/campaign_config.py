@@ -49,24 +49,6 @@ class Estimand(StrEnum):
     DISPLAY = "display"
 
 
-_ESTIMAND_DOC: dict[Estimand, str] = {
-    Estimand.SELECTION: "Which samples get scored each round — the subset the fitness is measured over.",
-    Estimand.DIFFICULTY: "The per-sample difficulty ruler δ (1PL Rasch) used to difficulty-adjust scores.",
-    Estimand.DISCRIMINATION: "The per-sample discrimination aₛ (2PL) — how sharply a sample separates able from unable candidates; only estimated where a data-rich dataset graduates.",
-    Estimand.ABILITY: "The candidate ability θ — difficulty-adjusted skill, the metric the gate compares.",
-    Estimand.GATE: "The round-promotion / improvement gate — what counts as 'better' and is kept.",
-    Estimand.STOPPING: "What stops measuring before the budget is spent — an arm before its panel (elimination), the run before its round cap (lives, convergence).",
-    Estimand.CONTROLLER: "An optimizer's controller — when it changes strategy between rounds.",
-    Estimand.SEARCH: "The optimizer search space + data binding the loop explores.",
-    Estimand.SPEND: "The budget ceilings (USD / tokens) that halt the cycle.",
-    Estimand.DISPLAY: "What number the operator reads — no effect on the data or the decision.",
-}
-
-
-def estimand_doc(estimand: Estimand) -> str:
-    return _ESTIMAND_DOC[estimand]
-
-
 def knob_label(path: str) -> str:
     short = path.removeprefix("optimization.")
     if short.startswith("nodes."):

@@ -7,7 +7,7 @@ import {
   type CommandPayloads,
   type HierarchyResponse,
   type ServedRound,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { isStopReason, tagValue } from "@/lib/derivations";
 import { decodeCyclePath } from "@/lib/ids";
 

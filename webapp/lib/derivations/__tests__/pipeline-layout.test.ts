@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { flowOrder, layoutGrid, wrapAt } from "../pipeline-layout";
-import type { PipelineView, PipelineViewNode } from "@/lib/types";
+import type { PipelineView, PipelineViewNode } from "@/lib/api/types";
 
 // What `derive_pipeline_view` serves for `assets/optimizers/potter/pipeline.yaml`: the `run_init`
 // phase ahead of the `default` chain, which the loop closes.

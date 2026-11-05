@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Said } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { HierarchyEntry, UnstartedCampaign } from "@/lib/api";
+import type { HierarchyEntry, UnstartedCampaign } from "@/lib/api/types";
 import { Figure, FigureRow } from "./FigureRow";
 
 // An entry's served lines under its title, then its figures.

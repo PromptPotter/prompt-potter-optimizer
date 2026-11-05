@@ -2,7 +2,10 @@
 export const READ_BEAT_MS = 1000;
 
 export const DASHBOARD_LIVE_POLL_MS = 2000;
-export const DASHBOARD_RECONNECT_POLL_MS = 5000;
+// A failed read that recovers re-asks no faster than this (nor than its own cadence); the session
+// probe retries on it; a replayed moment's dashboard and the steps beside a lost or replayed one
+// poll on it too.
+export const RECONNECT_POLL_MS = 5000;
 // Matches the dashboard's live beat, so a CLI-minted cycle is followed without the registry's lag.
 export const ACTIVE_POINTER_POLL_MS = 2000;
 export const REGISTRY_POLL_MS = 10000;

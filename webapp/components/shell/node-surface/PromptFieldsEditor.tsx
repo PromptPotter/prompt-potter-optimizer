@@ -1,10 +1,10 @@
 import { useImperativeHandle, useMemo, useRef, useState, type DragEvent, type Ref } from "react";
-import { libraryRead, postCommand, type DraftPatch, type NodePrompt } from "@/lib/api";
+import { libraryRead, postCommand } from "@/lib/api";
+import type { DraftPatch, NodePrompt } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { segmentPrompt, type KnownSnippet } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
-import { invalidateReads } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/workspace";
 import { PromptSegments } from "./PromptSegments";
 import { promptField, promptFieldsPatch, withSnippet } from "@/lib/prompt-fields";
@@ -87,7 +87,7 @@ export function PromptFieldsEditor({
   // An edit is banked as a version of its snippet in the campaign or check-in it is written in.
   const { campaignId, checkin } = useWorkspace();
   const experiment = campaignId ?? checkin?.draftId ?? null;
-  const bank = useCommand<"bank-snippet">("prompt-snippets", { revalidate: false, scope: experiment });
+  const bank = useCommand<"bank-snippet">("prompt-snippets", { revalidate: ["library"], scope: experiment });
   const sent = useRef(new Set<string>());
   // Typed since the last bank, by field: framed until the served library holds it, and never in
   // another field.
@@ -118,16 +118,12 @@ export function PromptFieldsEditor({
       ),
     );
     if (owed.length === 0) return;
-    void bank.run(
-      "bank-snippet",
-      async () => {
-        for (const edit of owed) {
-          sent.current.add(edit.text);
-          await postCommand("bank-snippet", { ...edit, experiment });
-        }
-      },
-      () => invalidateReads("library"),
-    );
+    void bank.run("bank-snippet", async () => {
+      for (const edit of owed) {
+        sent.current.add(edit.text);
+        await postCommand("bank-snippet", { ...edit, experiment });
+      }
+    });
   };
   const dragged = useDraggedSnippet();
   const droppable = !readOnly && onApply != null && dragged !== null;

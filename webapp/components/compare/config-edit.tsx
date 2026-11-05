@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { SubjectReading } from "@/lib/api";
+import type { SubjectReading } from "@/lib/api/types";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import { overlayEdits } from "@/lib/derivations";
 import { CommitInput } from "@/components/ui";

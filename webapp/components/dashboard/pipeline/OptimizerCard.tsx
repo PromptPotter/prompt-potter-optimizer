@@ -2,7 +2,7 @@ import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { figureOf, phaseWalks } from "@/lib/derivations";
 import { useViewedCourse } from "@/lib/lineage";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
@@ -23,7 +23,7 @@ export function OptimizerCard() {
   const [knobsOpen, setKnobsOpen] = useState(false);
   const clashes = useKnobClashes();
   const clashCount = clashes.active?.length ?? 0;
-  const { dash, isLive } = useCycleStream();
+  const { dash, isLive } = useViewedDashboard();
   const runState = figureOf(useViewedCourse(), "state");
   const activeId = dash?.current_round.active_node ?? null;
   const { nodes: roundNodes, showsCurrent: viewingLive } = useRoundNodes();

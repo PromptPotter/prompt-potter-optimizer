@@ -3,22 +3,16 @@ import { FailureLine, ReadState, Switch } from "@/components/ui";
 import { patchUserSettings, userSettingsRead } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
-import { invalidateReads } from "@/lib/read-cache";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 import { useStageView } from "@/lib/prefs/stage";
 import { useShowCandidates } from "@/lib/prefs/tree";
 
 export function AccountPreferencesTab() {
   const read = useRead(userSettingsRead());
-  // No blanket revalidate: the write re-asks the one read carrying the setting.
-  const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
+  const cmd = useCommand<"user-settings">("preferences", { revalidate: ["user-settings"] });
 
   const toggle = (next: boolean) =>
-    void cmd.run(
-      "user-settings",
-      () => patchUserSettings({ demo_mode_enabled: next }),
-      () => invalidateReads("user-settings"),
-    );
+    void cmd.run("user-settings", () => patchUserSettings({ demo_mode_enabled: next }));
 
   const busy = cmd.pending !== null;
 

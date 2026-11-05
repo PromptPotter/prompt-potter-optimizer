@@ -1,17 +1,19 @@
 import { useState } from "react";
 import { fitnessStyle } from "@/lib/derivations";
-import { useHardSamples } from "@/lib/hard-samples";
-import { useCycleStream } from "@/lib/poll";
+import { useCells } from "@/lib/hooks/useCells";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { RosterNote } from "@/components/measurements/RosterNote";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 
 export function HardSamplesHeatmap() {
-  const { items: datasetItems, failure: datasetFailure } = useHardSamples();
-  const { dash } = useCycleStream();
+  const { read } = useCells({});
+  const samples = shownData(read)?.samples ?? [];
+  const { dash } = useViewedDashboard();
   const { open } = useWorkspace();
   const [bankExpanded, setBankExpanded] = useState(false);
-  const rosterShown = datasetFailure === null && datasetItems.length > 0;
+  const rosterShown = failureOf(read) === null && samples.length > 0;
 
   return (
     <div className="hs-heat-wrap">
@@ -27,7 +29,7 @@ export function HardSamplesHeatmap() {
             aria-label="Open the Samples leaderboard"
           >
             <span className="hs-mini-tiles" aria-hidden="true">
-              {datasetItems.map((it) => {
+              {samples.map((it) => {
                 const mean = it.mean_fitness ?? null;
                 return (
                   <span

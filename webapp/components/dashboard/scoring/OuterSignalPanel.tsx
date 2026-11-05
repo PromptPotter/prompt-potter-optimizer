@@ -1,7 +1,12 @@
 import { memo, useMemo } from "react";
-import { useCycleStream } from "@/lib/poll";
-import type { MeasuredLift, RoundAdvance, ServedRound } from "@/lib/api/types";
-import { PRECISION_VERDICT_ADVICE, ROUND_ADVANCE_INFO } from "@/lib/api/types.generated";
+import { useViewedDashboard } from "@/lib/poll";
+import {
+  type MeasuredLift,
+  type RoundAdvance,
+  type ServedRound,
+  PRECISION_VERDICT_ADVICE,
+  ROUND_ADVANCE_INFO,
+} from "@/lib/api/types";
 import {
   CardFrame,
   Badge,
@@ -80,7 +85,7 @@ function LiftRow({ d, domain, latest }: { d: Lift; domain: IntervalDomain; lates
 }
 
 export const OuterSignalPanel = memo(function OuterSignalPanel() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const rounds = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
   const lifts = useMemo(() => liftsOf(rounds), [rounds]);
 

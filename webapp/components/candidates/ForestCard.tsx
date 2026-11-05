@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ServedDashboard } from "@/lib/api";
+import type { ServedDashboard } from "@/lib/api/types";
 import {
   Badge,
   CardFrame,
@@ -11,7 +11,7 @@ import {
   Toolbar,
   ToolbarSpacer,
 } from "@/components/ui";
-import { DASHBOARD_PENDING, useCycleStream } from "@/lib/poll";
+import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
@@ -23,7 +23,7 @@ import { useLineage } from "@/lib/hooks/useLineage";
 import { useViewedCourse } from "@/lib/lineage";
 
 export function ForestCard() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   if (!dash) {
     return (
       <CardFrame className="forest-card" title={<span className="cand-title">Lineage</span>}>

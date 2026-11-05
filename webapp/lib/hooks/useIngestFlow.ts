@@ -6,21 +6,23 @@ import {
   postIngestDataset,
   postBuildCandidateLibraryFromColumn,
   postUploadCandidateLibrary,
-  type DatasetIndexEntry,
-  type DraftCampaignWire,
-  type DraftPatch,
-  type DraftReopenResponse,
-  type OriginEntry,
-  type OriginLastResolution,
-  type RaisedCommand,
   type StartCheckinOptions,
 } from "@/lib/api";
+import type {
+  DatasetIndexEntry,
+  DraftCampaignWire,
+  DraftPatch,
+  DraftReopenResponse,
+  OriginEntry,
+  OriginLastResolution,
+  RaisedCommand,
+  Tone,
+} from "@/lib/api/types";
 import { draftRead } from "@/lib/api/reads";
-import { DRAFT_POLL_MS } from "@/lib/cadence";
-import type { Tone } from "@/lib/api/types.generated";
 import { checkinThreadKey, useThreads } from "@/lib/chat/thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
-import { readyData, useRead, type ReadFailure } from "@/lib/hooks/useRead";
+import { readyData, useRead } from "@/lib/hooks/useRead";
+import type { ReadFailure } from "@/lib/read-cache";
 import { dropCachedRead } from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
@@ -53,6 +55,11 @@ type IngestPhase =
 export type CheckinSubject = string | null;
 export const NEW_CHECKIN = "";
 
+const DRAFT_READS = ["draft", "hierarchy"] as const;
+// A resolver turn is a paid call charged to the account: it moves the listing, whose moved bill
+// re-asks the coupon (`reads.ts::hierarchyRead`), and the activity.
+const RESOLVE_READS = [...DRAFT_READS, "activity"] as const;
+
 const QUEUED_LINE = "Campaign queued — it is minted and starts when a machine slot frees.";
 const STARTING_LINE = "Campaign starting — it is being minted and opens in your list once it runs.";
 
@@ -68,7 +75,7 @@ export interface IngestFlow {
   awaitingContext: boolean;
   // The refused write, shown beside Start in review: the thread sits above the card, off a phone's screen.
   failure: CommandFailure | null;
-  // The held draft's read, refused: a reopen retries it on its clock until it lands or is gone.
+  // The held draft's read, failed: a lost one retries on the reconnect beat, a refusal rests here.
   readFailure: ReadFailure | null;
   // A dataset file dropped anywhere: onto a fresh check-in, never into the viewed one's draft.
   attachFile: (file: File) => void;
@@ -111,9 +118,10 @@ export function useIngestFlow({
   const [minting, setMinting] = useState(false);
   // Every write rides a slot; a draft's edits are a queue on one, so overlapping blurs land in order.
   const opening = useCommand<"upload" | "dataset" | "origin">("checkin-open", { scope: subject });
-  // A landed write re-asks the draft read, so a tick in the air before it never lands over it.
-  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId });
-  const writing = useCommand<"edit" | "library">("checkin-edit", { scope: draftId });
+  // An answered write re-asks the draft read, so a tick in the air before it never lands over it. An
+  // edit moves the draft and its listing, a resolver turn those and the account's charges.
+  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId, revalidate: RESOLVE_READS });
+  const writing = useCommand<"edit" | "library">("checkin-edit", { scope: draftId, revalidate: DRAFT_READS });
   const starting = useCommand<"start">("checkin-start", { scope: draftId });
   // A counter, not a boolean: the first queued edit to land must not clear a sibling's flag.
   const [pendingPatches, setPendingPatches] = useState(0);
@@ -177,11 +185,8 @@ export function useIngestFlow({
       p.stage === "ready" && p.draft.draft_id === updated.draft_id ? { ...p, draft: updated } : p,
     );
 
-  // The held draft's one read: a reopen rides the clock until it lands, and while Start is on
-  // screen so does review, so the refusal tracks the wallet. Held across stages, so no kept body re-lands.
-  const draftNow = useRead(draftId !== null ? draftRead(draftId) : null, {
-    intervalMs: phase.stage === "ready" || phase.stage === "reopening" ? DRAFT_POLL_MS : undefined,
-  });
+  // The held draft's one read, its cadence its own served stage (`draftRead`). Held across stages, so no kept body re-lands.
+  const draftNow = useRead(draftId !== null ? draftRead(draftId) : null);
   const served = readyData(draftNow);
   const [landedServed, setLandedServed] = useState(served);
   if (served !== landedServed) {
@@ -353,7 +358,7 @@ export function useIngestFlow({
   // A revisit continues its kept thread; an empty one (a reload, a deep link) is retold.
   useEffect(() => {
     if (phase.stage !== "reopening") return;
-    // A refusal stays on `readFailure` while the clock retries it; a gone draft leaves the check-in idle.
+    // A refusal rests on `readFailure`, a lost read retries; a gone draft leaves the check-in idle.
     if (draftNow.status === "failed" && draftNow.failure.kind === "gone") {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPhase({ stage: "idle" });

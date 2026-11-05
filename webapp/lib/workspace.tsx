@@ -29,10 +29,10 @@ import {
   type View,
   type ViewedSubject,
 } from "./address";
-import type { ListedCampaign } from "./api";
+import type { ListedCampaign } from "@/lib/api/types";
 import { GONE_NOTICE_MS } from "./cadence";
 import { hasTag, tagValue } from "./derivations/hierarchy";
-import { useActivePointer, useCampaign, useEntry, useRegistry } from "./state/registry";
+import { useActivePointer, useCampaign, useEntry, useRegistry } from "./hooks/useRegistry";
 import { useViewMemory } from "./state/view-memory";
 
 interface WorkspaceState {
@@ -113,7 +113,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [reveal, setReveal] = useState<{ family: FamilyId } | null>(null);
 
   const { byAddress } = useRegistry();
-  const active = useActivePointer();
+  const { active } = useActivePointer();
   const { viewFor, recordView } = useViewMemory();
 
   // A mount effect, not a useState initializer: the static-export HTML and first client render must agree.
@@ -140,14 +140,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const checkin = subject !== null && "draftId" in subject ? subject : null;
 
   // A pin moves only onto a fork of its OWN campaign; the first pointer only sets the baseline.
-  const pointer =
-    active.campaignId && active.cycleId ? `${active.campaignId}::${active.cycleId}` : null;
+  const pointer = active ? `${active.campaign_id}::${active.cycle_id}` : null;
   const [prevPointer, setPrevPointer] = useState<string | null>(null);
   if (pointer !== null && pointer !== prevPointer) {
     setPrevPointer(pointer);
     const root = pinned ? pathRoot(pinned.path) : null;
     const forkOfPinned =
-      root !== null && root.campaignId === active.campaignId && root.cycleId !== active.cycleId;
+      root !== null &&
+      active !== null &&
+      root.campaignId === active.campaign_id &&
+      root.cycleId !== active.cycle_id;
     if (prevPointer !== null && forkOfPinned) setScreen((s) => ({ ...s, subject: null }));
   }
 
@@ -156,11 +158,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const viewedPath: CyclePath | null = useMemo(
     () =>
       subject === null
-        ? active.campaignId && active.cycleId
-          ? [{ campaignId: active.campaignId, cycleId: active.cycleId }]
+        ? active
+          ? [{ campaignId: active.campaign_id, cycleId: active.cycle_id }]
           : null
         : pinnedPath,
-    [subject, active.campaignId, active.cycleId, pinnedPath],
+    [subject, active, pinnedPath],
   );
 
   const rootHop = viewedPath ? pathRoot(viewedPath) : null;
@@ -253,7 +255,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     pinnedRef.current = pinnedPath;
   });
 
-  // The caller has already confirmed the verdict (`useRead.ts::GONE_CONFIRM_LIMIT`).
+  // The caller has already confirmed the verdict (`read-cache.ts::GONE_CONFIRM_LIMIT`).
   const reportAddressGone = useCallback(
     (address: string) => {
       const gone = pinnedRef.current;

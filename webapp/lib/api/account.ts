@@ -1,6 +1,6 @@
 import { API, send, toApiError } from "./client";
 import { postCommand } from "./commands";
-import type { AccountKey, UserSettings } from "./types";
+import type { AccountKey, UserSettings } from "@/lib/api/types";
 
 export function patchUserSettings(settings: UserSettings): Promise<UserSettings> {
   return postCommand("set-user-settings", settings);

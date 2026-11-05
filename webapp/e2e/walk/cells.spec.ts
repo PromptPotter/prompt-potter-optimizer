@@ -1,5 +1,5 @@
 import type { APIRequestContext } from "@playwright/test";
-import type { HierarchyCourse, SubtreeEntry } from "@/lib/api";
+import type { HierarchyCourse, SubtreeEntry } from "@/lib/api/types";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { test, expect, open, campaigns, DASHBOARD_VIEWS } from "../harness";
 

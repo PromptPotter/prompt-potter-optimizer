@@ -3,14 +3,13 @@ import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";
 import { setCandidatesState, useCandidatesState } from "@/lib/state/candidates";
 import { useCandidateBars } from "./useCandidateBars";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
-import { lensOf, useScoringMask } from "@/lib/scoring-mask";
+import { lensOf, useMaskState } from "@/lib/scoring-mask";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { HierarchyCourse, ServedDashboard } from "@/lib/api";
-import type { DisplayMetric } from "@/lib/api/types.generated";
+import type { HierarchyCourse, ServedDashboard, DisplayMetric } from "@/lib/api/types";
 import {
   candidatesAtPath,
   courseAt,
@@ -28,7 +27,7 @@ import { roundOf } from "./dendrogram";
 export type CandidatesModel = ReturnType<typeof useCandidatesModel>;
 
 export function useCandidatesModel(dash: ServedDashboard) {
-  const { isLive } = useCycleStream();
+  const { isLive } = useViewedDashboard();
   const unit = dash.measured_unit;
   const {
     campaignId,
@@ -62,7 +61,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const { history, overlap, sampleUniverse, viewedNode, areCourses, views, floorPinned } =
     useCandidateBars(overlay.index);
 
-  const { open: maskOpen, mask } = useScoringMask();
+  const { open: maskOpen, mask } = useMaskState();
   const served = useServedCriterion();
   const { cellTerms } = useConnector();
   const activeLens = maskOpen ? lensOf(mask, cellTerms) : null;

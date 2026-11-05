@@ -2,7 +2,7 @@ import { useState } from "react";
 import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";
 import { Criterion } from "@/components/shell/scoring/Criterion";
-import type { ReadFailure } from "@/lib/hooks/useRead";
+import type { ReadFailure } from "@/lib/read-cache";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { NO_DIALS, lensOf, type ScoringMask } from "@/lib/scoring-mask";
 

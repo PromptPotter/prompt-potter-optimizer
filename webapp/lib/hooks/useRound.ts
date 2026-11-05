@@ -1,20 +1,37 @@
 import { useMemo } from "react";
-import type { ServedDashboard } from "@/lib/api";
+import type { ArmReading, RoundView, ServedDashboard } from "@/lib/api/types";
 import { roundRead } from "../api";
-import { groupByRound, roundCandidates } from "../derivations";
+import {
+  candidateObserveConfig,
+  candidateSearchPoint,
+  candidateVerdicts,
+  groupByRound,
+  liveCandidateObserveConfig,
+  liveCandidateSearchPoint,
+  liveCandidateVerdicts,
+  roundCandidates,
+  scoreboardReading,
+  type CandidateSearchPoint,
+  type CandidateVerdict,
+  type ObserveConfig,
+} from "../derivations";
 import type { CyclePath } from "../ids";
-import { roundOf, useDashboardAt } from "../poll";
-import type { ArmRow, RoundView } from "../types";
+import { liveCandidate, roundOf, useDashboard } from "../poll";
+import type { ReadResult } from "../read-cache";
+import type { ArmRow } from "../types";
 import { useMomentAt } from "../workspace";
-import { readyData, useRead, type ReadFailure } from "./useRead";
+import { readyData, useRead } from "./useRead";
 
-interface RoundState {
+interface Round {
+  // The round still in flight has no file: everything below is the dashboard's, and `read` is idle.
   unfiled: boolean;
-  doc: RoundView | null;
-  loading: boolean;
-  failure: ReadFailure | null;
+  read: ReadResult<RoundView>;
   rows: ArmRow[];
-  row: (key: string | null) => ArmRow | null;
+  // A key's config, seed and reading, each off the one half that holds the round.
+  cfg: (key: string | null, display: string, nodeId?: string | null) => ObserveConfig | null;
+  seed: (key: string) => CandidateSearchPoint | null;
+  reading: (key: string | null) => ArmReading | null;
+  verdicts: Map<string, CandidateVerdict>;
 }
 
 // Not `round_axis.completed`: it drops the empty rounds that closed before measuring yet have a file.
@@ -25,29 +42,37 @@ export function isRoundUnfiled(dash: ServedDashboard | null, round: number | nul
 
 const NO_ROWS: ArmRow[] = [];
 
-export function useRound(path: CyclePath | null, round: number | null): RoundState {
-  const { dash } = useDashboardAt(path);
+export function useRound(path: CyclePath | null, round: number | null): Round {
+  // Another cycle's round reads its dashboard once; the viewed one rides the viewed poll.
+  const { dash } = useDashboard(path, null);
   const unfiled = isRoundUnfiled(dash, round);
   const at = useMomentAt(path);
   const read = useRead(path && round != null && !unfiled ? roundRead(path, round, at) : null);
   const doc = readyData(read);
-  const loading = read.status === "loading";
-  const failure = read.status === "failed" ? read.failure : null;
+  // Null while filed, so the answers below do not re-derive every poll.
+  const live = unfiled ? dash : null;
 
   const rows = useMemo(() => {
     if (round == null) return NO_ROWS;
     return groupByRound(roundCandidates(dash)).get(round) ?? NO_ROWS;
   }, [dash, round]);
 
-  return useMemo(
+  const answers = useMemo<Pick<Round, "cfg" | "seed" | "reading" | "verdicts">>(
     () => ({
-      unfiled,
-      doc,
-      loading,
-      failure,
-      rows,
-      row: (key) => rows.find((r) => r.reading.arm.key === key) ?? null,
+      cfg: (key, display, nodeId) =>
+        unfiled
+          ? liveCandidateObserveConfig(live, key, display, nodeId)
+          : candidateObserveConfig(doc, key, display, nodeId),
+      seed: (key) => (unfiled ? liveCandidateSearchPoint(live, key) : candidateSearchPoint(doc, key)),
+      reading: (key) =>
+        key === null
+          ? null
+          : unfiled
+            ? (liveCandidate(live, key)?.reading ?? null)
+            : scoreboardReading(doc, key),
+      verdicts: unfiled ? liveCandidateVerdicts(live) : candidateVerdicts(doc),
     }),
-    [unfiled, doc, loading, failure, rows],
+    [unfiled, live, doc],
   );
+  return useMemo(() => ({ unfiled, read, rows, ...answers }), [unfiled, read, rows, answers]);
 }

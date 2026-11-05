@@ -1,22 +1,27 @@
 import { useMemo } from "react";
-import type { DraftPatch, NodePrompt, OptimizerNodePrompt } from "@/lib/api";
+import {
+  type DraftPatch,
+  type NodePrompt,
+  type OptimizerNodePrompt,
+  type NodeBlock,
+  NODE_KIND_INFO,
+  type PipelineViewNode,
+} from "@/lib/api/types";
 import type { SelectedNode } from "@/lib/address";
 import { useSelection } from "@/lib/SelectionContext";
-import { useIngest } from "@/lib/ingest-flow";
+import { useCheckinDraft, useIngest } from "@/lib/ingest-flow";
 import { draftPrompts } from "@/lib/prompt-fields";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
-import type { NodeBlock } from "@/lib/api/types";
-import { NODE_KIND_INFO } from "@/lib/api/types.generated";
-import type { NodeSchemaReading, PipelineViewNode } from "@/lib/types";
+import type { NodeSchemaReading } from "@/lib/types";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { interiorNodes, type ObserveState, type ObserveSubject } from "@/lib/derivations";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
-import { CopyButton, Empty, Loading, SegmentedControl } from "@/components/ui";
+import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
@@ -36,7 +41,8 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   const { id, scope } = selected;
   const isOptimizer = scope === "optimizer";
   const { close } = useWorkspace();
-  const { draft, flow } = useIngest();
+  const flow = useIngest();
+  const draft = useCheckinDraft();
   const onPromptApply = draft ? flow.applyPatch : undefined;
   const authoring = useMemo<NodeAuthoring | undefined>(
     () =>
@@ -47,7 +53,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
   );
 
   const cv = useConnector();
-  const { dash, isLive } = useCycleStream();
+  const { dash, isLive } = useViewedDashboard();
   const optimizer = cv.optimizerSetup;
   const subject = useObserveSubject();
   const observed = useSearchpointRead(!isOptimizer && !authoring ? subject.point : null, id);
@@ -75,7 +81,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
     nodes: roundNodes,
     round: viewedRound,
     showsCurrent: viewingLive,
-    loading: nodesLoading,
+    audit,
   } = useRoundNodes();
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
 
@@ -171,7 +177,7 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             kind={servedKind}
             block={block}
             round={viewedRound}
-            loading={nodesLoading}
+            loading={audit.status === "loading"}
             kindLoading={cv.schema.status === "loading"}
             inFlight={isLiveNow}
           />
@@ -296,9 +302,15 @@ function TargetProgram({
             </p>
           )}
         </>
+      ) : observed.read.status === "failed" ? (
+        <FailureLine
+          failure={observed.read.failure}
+          lead="Could not read this searchpoint."
+          className="inspector-note"
+        />
       ) : (
         <p className="inspector-note">
-          {observed.loading
+          {observed.read.status === "loading"
             ? "Loading the searchpoint…"
             : isLive
               ? "Scoring in progress — the resolved spec appears when the round closes."

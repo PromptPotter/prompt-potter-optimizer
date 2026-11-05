@@ -3,7 +3,6 @@ import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/state/auth";
 import { postLogout } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useIngest } from "@/lib/ingest-flow";
 import { useSidebarCollapsed } from "@/lib/prefs/sidebar";
 import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
@@ -19,8 +18,9 @@ function flipTheme() {
 }
 
 export function Sidebar() {
-  const { views, open } = useWorkspace();
-  const { compose: onNewCycle } = useIngest();
+  const { views, open, navigate } = useWorkspace();
+  // `+ New campaign`: a fresh check-in's address.
+  const onNewCycle = () => navigate({ draftId: null });
   const [collapsed, onToggleCollapse] = useSidebarCollapsed();
 
   const { status, openAuthPrompt } = useAuth();

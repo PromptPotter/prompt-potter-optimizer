@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { filesRead, type FileEntry } from "@/lib/api";
-import { useActivePointer, useRegistry } from "@/lib/state/registry";
-import { useRead } from "@/lib/hooks/useRead";
+import { filesRead } from "@/lib/api";
+import type { FileEntry } from "@/lib/api/types";
+import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
+import { failureOf, useRead } from "@/lib/hooks/useRead";
 import { Empty, FailureLine, ReadState } from "@/components/ui";
 
 interface DirNode {
@@ -58,8 +59,8 @@ interface Props {
 }
 
 export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
-  const registryFailure = useRegistry().failure;
-  const pointerFailure = useActivePointer().failure;
+  const registryFailure = failureOf(useRegistry().read);
+  const pointerFailure = failureOf(useActivePointer().read);
   const read = useRead(campaignId && cycleId ? filesRead(campaignId, cycleId) : null);
   const netFailure = pointerFailure ?? registryFailure;
 

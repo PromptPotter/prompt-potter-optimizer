@@ -70,34 +70,16 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
 - **One subject.** `domain/cycle_paths.py::Subject` (path, candidate, round, at, mask): `?descend=`
   (`Subject.below`), the evidence string (`Subject.parse`, rebuilt by `api/reads.ts::subjectKey`) and the
   hierarchy addresses (`Subject.parse_address`) are its encodings, and `cycle_addressing.py::resolve_subject`
-  its one id-prefix resolution. The webapp's hash is not one yet: EW moves it onto the same grammar.
+  its one id-prefix resolution. The webapp's hash is not one yet: U5, which owns the workspace's keying,
+  moves it onto the same grammar.
 - **View state.** Whatever names the viewed thing (subject, candidate, at, view keys, round pick, sample
   set) lives in the hash; a module store holds only transient state.
 - **One fold vocabulary**: a `Projection` on `read_model.py::LedgerIndex`. `LedgerFold.feed`, the tracing
   sinks' `on_*` and the `RunCallbacks` doors go (U3).
 - **One word per thing.** "Arm" is the round's; a head-to-head's arms become `RunStart`s (U2).
-  `poll.tsx::useCycleStream` is the dashboard poll, not the event stream, and is renamed for it (EW). A
-  host task is a command id (Q1).
+  A host task is a command id (Q1).
 
 **Batch E: each cut lands final.**
-- **EW: the webapp's providers re-store the read cache.** `lib/read-cache.ts` keeps one body and one flight
-  per id, yet the registry, cycle-stream, lineage, hard-samples and connector providers mirror it, and other
-  callers need second doors (`poll.tsx::useDashboardAt`, `hard-samples.tsx::usePresetCells`). Read hooks
-  re-encode the read result into their own loading and failure records and rename served fields;
-  `useCandidatesModel.ts::useCandidatesModel`, `useRemoteModel.ts::useRemoteModel` and
-  `useChannelModel.ts::useChannelModel` hand bags of context down as props; `ingest-flow.tsx::IngestFlowProvider`
-  re-exposes the workspace; `lib/api/types.ts` re-exports generated types by hand beside two more doors.
-  Each provider also holds a singleton a bare hook would multiply: `poll.tsx::CycleStreamProvider`
-  invalidates on a phase change, slows when the connection drops, keeps the dashboard across `at` re-keys
-  and reports a gone cycle once; `useServedCriterion.ts::useScoringMaskSeed` must seed the mask before a
-  cycle's first tree goes out. `lib/read-cache.ts` has no subscription, and a re-ask deletes the flight in
-  the air. Action: a read's descriptor declares its cadence, keep key, accept predicate, gone reporter and
-  change effects, and the cache runs each once per id and exposes `subscribe`; one hook per read; a derived
-  index memoizes on the body it read; the mask seed is part of the tree read's key; state that names no
-  view (lens, debounce, scope, ranking, lifecycle filter) moves to module stores; components read wire
-  names; `useChannelModel`'s bag and the providers go; one type door. The selection half
-  (`SelectionContext.tsx`, `useCandidatesModel`, the workspace's keying) is U5's, `useRemoteModel` B's.
-  **Re-test:** `git grep -c "Provider value=" -- webapp/lib`.
 - **EN: a draft spells its config flat; the pipeline answer is flattened, re-packed and edited twice.**
   `domain/checkin_draft.py::DraftFile`, `domain/draft_edit.py::EditDraftPatch` and `draft_campaign.py::DraftCampaign`
   each hold the declaration as five flat fields (`scoring_matcher`, `scoring_dials`, `pipeline_overlay`,
@@ -225,9 +207,11 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   keys a pick beside the hash; the Leader shows the pick by default, so one pick renders twice. Action
   (operator, 2026-11-05): one searchpoint read and one rendering that hosts give identity only; the Leader
   always shows the leader; the pick lives in the hash and renders once, where
-  `ScoringInspector.tsx::ScoringInspector` stands, a region A4 keeps. EW's selection half lands here, so
+  `ScoringInspector.tsx::ScoringInspector` stands, a region A4 keeps. The webapp's selection half lands here, so
   every candidate component is rewritten once: `SelectionContext.tsx`, `useCandidatesModel`'s bag and the
-  workspace's four-way address become the `Subject` and the served arm row. **Re-test:** `git grep -n "searchpointCopyChoices(" -- webapp`.
+  workspace's four-way address become the `Subject` and the served arm row. Compare channels and their
+  picks are hash state too (`lib/state/compare-selection.ts` today; a reload drops both).
+  **Re-test:** `git grep -n "searchpointCopyChoices(" -- webapp`.
 - **D: the catch-up pool.** `validators.py::CatchUps` and `nodes.py::NoCatchUps` declare one protocol with
   one implementation, looped bench → race → bench. Action: the bench owns the pool and the race exposes
   only its priors. **Re-test:** `git grep -c "NoCatchUps" -- promptpotter`.
@@ -541,8 +525,8 @@ fixtures.
   test, worded into `truncated`. Action: the pipeline read serves the whole nest and its depth.
   **Blocked by** K1 (`application/pipeline_resolve.py`). **Re-test:** `git grep -n "MAX_DEPTH" -- webapp/lib/hooks`.
 - **`useEvidence`'s move re-asks every mounted evidence read**, not its own: `invalidateReads` takes a
-  read name, never an id; `useRay.loadOlder` (`lib/poll.tsx`) re-asks the head and every mounted ray
-  the same way via `invalidateReads("steps")`. **Re-test:** `git grep -nE 'invalidateReads\("(evidence|steps)"\)' -- webapp`.
+  read name, never an id; `useTimeRay`'s `loadOlder` retry re-asks every earlier-steps read the same
+  way via `invalidateReads("earlier-steps")`. **Re-test:** `git grep -nE 'invalidateReads\("(evidence|earlier-steps)"\)' -- webapp`.
 
 **F. The node editor reads served row facts.**
 - **Key-name tests stand in for row facts** (I9): `NodeSurface::onAuthor`, `node-config.ts::effortLadder` /
@@ -1025,7 +1009,7 @@ word's `git grep -c` for that sense is 0.
 
 **Rides with:** any change to the file named. **Re-test:** the `file::symbol` still holding it.
 
-- **Seen in the `lib/` regroup**: `lib/state/registry.tsx` and `lib/workspace.tsx` import `derivations/hierarchy` past the barrel
+- **Seen in the `lib/` regroup**: `lib/hooks/useRegistry.ts` and `lib/workspace.tsx` import `derivations/hierarchy` past the barrel
   to dodge a cycle (barrel → search-point → poll → workspace); `lib/theme.ts` mixes chart setup with
   the theme preference.
 
@@ -1077,7 +1061,7 @@ word's `git grep -c` for that sense is 0.
     (`iter_files(skip=)` exists); `domain/activity.py::ActivityFeed` falls back to `"run error"` where
     `run_said` has none; `iter_family_courses` reads each index twice; `list_hierarchy` re-calls
     `line_config` per non-holder course; `FileTree` mounts a 2 s `useActivePointer()` poll for one
-    failure line; a `/hierarchy` 200 replaces every entry object in `lib/state/registry.tsx`.
+    failure line; a `/hierarchy` 200 replaces every entry object `lib/hooks/useRegistry.ts::useRegistry` indexes.
 - **The collapse gate cuts a hedging arm on noise**: `pobb/checks.py::check` →
   `domain/scoring.py::is_answer_collapsed` reads one repeated label over `n_min` answered cells as
   "no measurement". The panel walk runs hardest-first, so its first cells can hold one or two truth

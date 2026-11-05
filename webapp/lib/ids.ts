@@ -3,7 +3,7 @@ import {
   CYCLE_PATH_HOP_SEP,
   CYCLE_PATH_UNIT_SEP,
   ID_COMPONENT_RE,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 
 // Mirror `store/layout.py::root_cycle_id` — change both.
 const SIBLING_LAST_SEP_RE = /_(fork|diag)_(?!.*_(?:fork|diag)_)([^/]*)$/;

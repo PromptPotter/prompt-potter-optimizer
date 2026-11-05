@@ -1,7 +1,5 @@
 import { liveCandidates } from "@/lib/poll";
-import type { ServedDashboard } from "@/lib/api";
-import type { ValidationFailure } from "@/lib/api/types";
-import type { RoundView } from "@/lib/types";
+import type { ServedDashboard, ValidationFailure, RoundView } from "@/lib/api/types";
 
 export interface CandidateVerdict {
   // `""` when absent — never a placeholder, which would read as the optimizer's words.

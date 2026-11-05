@@ -1,10 +1,15 @@
 import { useMemo, useState } from "react";
-import type { CapabilityMenu, DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
-import type { ParamIntent } from "@/lib/api/types";
+import {
+  type CapabilityMenu,
+  type DraftPatch,
+  type ModelCapability,
+  type NodeConfigParam,
+  type ParamIntent,
+  MOVABLE_AGENT_LABELS,
+} from "@/lib/api/types";
 import { CommitInput, FailureLine, ValueList } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
-import { MOVABLE_AGENT_LABELS } from "@/lib/api/types.generated";
 import {
   configRows,
   effortLadder,

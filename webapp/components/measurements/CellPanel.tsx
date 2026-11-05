@@ -1,6 +1,12 @@
 import { useState } from "react";
-import { cellRead, type Cell, type CellRow, type CellSpan } from "@/lib/api";
-import { RATE_PRICED_LABEL, SAMPLE_STATUS_LABELS } from "@/lib/api/types.generated";
+import { cellRead } from "@/lib/api";
+import {
+  type Cell,
+  type CellRow,
+  type CellSpan,
+  RATE_PRICED_LABEL,
+  SAMPLE_STATUS_LABELS,
+} from "@/lib/api/types";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { fitnessStyle } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";

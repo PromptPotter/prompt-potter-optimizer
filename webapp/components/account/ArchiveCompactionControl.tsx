@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { postCommand } from "@/lib/api";
-import type { ArchiveReport } from "@/lib/api/types";
-import { ARCHIVE_MODE_INFO, type ArchiveMode as Mode } from "@/lib/api/types.generated";
+import { type ArchiveReport, ARCHIVE_MODE_INFO, type ArchiveMode as Mode } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";

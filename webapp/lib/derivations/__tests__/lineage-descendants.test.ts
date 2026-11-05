@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { descendantsOf } from "../lineage-descendants";
 import { EMPTY_LINEAGE, indexLineage, mainLineOf } from "../lineage-candidates";
-import type { CourseKind, HierarchyCandidate, SubtreeCourse } from "@/lib/api";
+import type { CourseKind, HierarchyCandidate, SubtreeCourse } from "@/lib/api/types";
 import {
   subtreeCampaign,
   hierarchyCandidate,

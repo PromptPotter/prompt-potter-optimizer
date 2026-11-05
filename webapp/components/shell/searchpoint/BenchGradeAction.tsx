@@ -1,6 +1,6 @@
 import { Button, FailureLine, Term } from "@/components/ui";
 import { postCommand } from "@/lib/api/commands";
-import { BENCH_REFUSAL_INFO } from "@/lib/api/types.generated";
+import { BENCH_REFUSAL_INFO } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { encodeCyclePath, pathRoot } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";

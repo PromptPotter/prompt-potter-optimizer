@@ -6,8 +6,8 @@ import type {
   CommandResponses,
   ConfigOverrides as WireConfigOverrides,
   ForkSeed as WireForkSeed,
-} from "./types.generated";
-import type { VerifyReading } from "./types";
+  VerifyReading,
+} from "@/lib/api/types";
 
 export type VerifyStrategy = VerifyReading["strategy"];
 

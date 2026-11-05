@@ -1,6 +1,11 @@
-import { readyData, useRead, type ReadResult } from "@/lib/hooks/useRead";
-import { configMapRead, type ConfigCoupling, type ConfigMapResponse } from "@/lib/api";
-import { COUPLING_SEVERITY_INFO } from "@/lib/api/types.generated";
+import { readyData, useRead } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
+import { configMapRead } from "@/lib/api";
+import {
+  type ConfigCoupling,
+  type ConfigMapResponse,
+  COUPLING_SEVERITY_INFO,
+} from "@/lib/api/types";
 import { useWorkspace } from "@/lib/workspace";
 import { Badge, ReadState } from "@/components/ui";
 

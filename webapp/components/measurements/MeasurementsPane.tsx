@@ -1,20 +1,19 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type {
-  CellCandidate,
-  CellRow,
-  CellStatus,
-  DatasetItem,
-  HardSamplesScope,
-} from "@/lib/api";
 import {
+  type CellCandidate,
+  type CellRow,
+  type CellStatus,
+  type DatasetItem,
+  type HardSamplesScope,
   HARD_SAMPLE_ORDER_LABELS,
   HEATMAP_SCOPE_LABELS,
   SAMPLE_STATUS_LABELS,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
 import { fmtLogits, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
-import { useHardSamples, usePresetCells, type CellsPreset } from "@/lib/hard-samples";
+import { setCellsView, useCells, useCellsView, type CellsPreset } from "@/lib/hooks/useCells";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
 import {
   Chip,
@@ -65,6 +64,10 @@ const ORDERS = wordKeys(HARD_SAMPLE_ORDER_LABELS).map((value) => ({
   label: HARD_SAMPLE_ORDER_LABELS[value],
 }));
 
+const NO_SAMPLES: DatasetItem[] = [];
+const NO_CANDIDATES: CellCandidate[] = [];
+const NO_CELLS: CellRow[] = [];
+
 const cellId = (c: CellRow) => `${c.candidate}\u001f${c.position}`;
 
 function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
@@ -107,20 +110,29 @@ export function MeasurementsPane({
   cell?: string | null;
   heading?: ReactNode;
 }) {
-  const shared = useHardSamples();
+  const view = useCellsView();
   const { open: openView } = useWorkspace();
   const [groupBy, setGroupBy] = useState<GroupBy>(preset.groupBy ?? "none");
   const [status, setStatus] = useState<StatusPick>("all");
   const [hideUnmeasured, setHideUnmeasured] = useState(false);
 
-  const data = usePresetCells(preset, status === "all" ? undefined : status);
-  const { datasetName, failure, stale } = data;
+  const { datasetName, read } = useCells(preset, status === "all" ? undefined : status);
+  const body = shownData(read);
+  const failure = failureOf(read);
+  const { samples, candidates, cells } = useMemo(
+    () => ({
+      samples: body?.samples ?? NO_SAMPLES,
+      candidates: body?.candidates ?? NO_CANDIDATES,
+      cells: body?.cells ?? NO_CELLS,
+    }),
+    [body],
+  );
 
   const candidateOf = useMemo(() => {
     const m = new Map<string, CellCandidate>();
-    for (const c of data.candidates) m.set(c.key, c);
+    for (const c of candidates) m.set(c.key, c);
     return m;
-  }, [data.candidates]);
+  }, [candidates]);
 
   // A group's header already names what every row under it shares; fixed tracks, so each row's grid
   // lines up with the header's, and the predicted answer takes what is left, truncated.
@@ -151,28 +163,28 @@ export function MeasurementsPane({
     if (groupBy === "none") return undefined;
     const by = new Map<string, CellRow[]>();
     const keyOf = groupBy === "sample" ? (c: CellRow) => String(c.position) : (c: CellRow) => c.candidate;
-    for (const c of data.cells) {
+    for (const c of cells) {
       const k = keyOf(c);
       const list = by.get(k);
       if (list) list.push(c);
       else by.set(k, [c]);
     }
     if (groupBy === "sample")
-      return data.items
+      return samples
         .filter((it) => !hideUnmeasured || it.n_measured > 0)
         .map((it) => {
           const rows = by.get(String(it.position)) ?? [];
           return { key: String(it.position), header: <SampleHeader it={it} n={rows.length} />, rows };
         });
-    return data.candidates.map((c) => {
+    return candidates.map((c) => {
       const rows = by.get(c.key) ?? [];
       return { key: c.key, header: <CandidateHeader c={c} n={rows.length} />, rows };
     });
-  }, [groupBy, data.cells, data.items, data.candidates, hideUnmeasured]);
+  }, [groupBy, cells, samples, candidates, hideUnmeasured]);
 
   const walk = useMemo(
-    () => (groups ? groups.flatMap((g) => g.rows) : data.cells),
-    [groups, data.cells],
+    () => (groups ? groups.flatMap((g) => g.rows) : cells),
+    [groups, cells],
   );
   const openIdx = cell === null ? -1 : walk.findIndex((c) => c.answer === cell);
   const activeRowId = openIdx >= 0 ? cellId(walk[openIdx]!) : null;
@@ -180,27 +192,25 @@ export function MeasurementsPane({
   const open = (c: CellRow) => openView("samples", c.answer);
 
   // The key the rows were ranked by, off the server's echo — never the pick, which moves first.
-  const { rankedBy } = data;
-  const scope: HardSamplesScope = preset.scope ?? shared.scope;
-  const ranked = groupBy === "sample" ? rankedBy : null;
+  const scope: HardSamplesScope = preset.scope ?? view.scope;
+  const ranked = groupBy === "sample" ? (body?.order ?? null) : null;
 
-  const totals = data.totals;
   // Every choice that moves the numbers below is named here, so none hides behind the ⋯ menu.
   const summary = [
     datasetName,
     HEATMAP_SCOPE_LABELS[scope],
     groupBy === "none" ? null : `by ${groupBy}`,
     ranked ? `ranked by ${HARD_SAMPLE_ORDER_LABELS[ranked].toLowerCase()}` : null,
-    `${data.items.length} samples`,
-    totals ? `${totals.total_measurements} graded cells` : null,
-    totals?.mean_fitness != null ? `${fmtUnit("rate", totals.mean_fitness)} mean fitness` : null,
-    `${data.measuredCount} measured · ${data.unmeasuredCount} unmeasured`,
+    `${samples.length} samples`,
+    body ? `${body.total_measurements} graded cells` : null,
+    body?.mean_fitness != null ? `${fmtUnit("rate", body.mean_fitness)} mean fitness` : null,
+    `${body?.measured_samples ?? 0} measured · ${body?.unmeasured_samples ?? 0} unmeasured`,
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
-    <section className={cx("ms-pane", stale && "is-stale")} aria-label="Measurements">
+    <section className={cx("ms-pane", read.status === "loading" && "is-stale")} aria-label="Measurements">
       {heading}
       <Toolbar>
         <SegmentedControl ariaLabel="Cell status" value={status} onChange={setStatus} options={STATUSES} />
@@ -228,10 +238,10 @@ export function MeasurementsPane({
                   <MenuSep />
                   <MenuRadioGroup
                     label="Data scope"
-                    value={shared.scope}
+                    value={view.scope}
                     options={SCOPES}
                     onChange={(v) => {
-                      shared.setScope(v);
+                      setCellsView({ ...view, scope: v });
                       close();
                     }}
                   />
@@ -242,10 +252,10 @@ export function MeasurementsPane({
                   <MenuSep />
                   <MenuRadioGroup
                     label="Rank samples by"
-                    value={shared.rankedByPick ?? ranked}
+                    value={view.rankedBy ?? ranked}
                     options={ORDERS}
                     onChange={(v) => {
-                      shared.setRankedBy(v);
+                      setCellsView({ ...view, rankedBy: v });
                       close();
                     }}
                   />
@@ -270,13 +280,13 @@ export function MeasurementsPane({
         <DataTable
           ariaLabel="Measured cells"
           columns={columns}
-          rows={groups ? undefined : data.cells}
+          rows={groups ? undefined : cells}
           groups={groups}
           getRowId={cellId}
           activeRowId={activeRowId}
           onRowClick={open}
           expandedByDefault={groupBy !== "sample"}
-          empty={stale ? "Loading…" : "No measured cells here yet."}
+          empty={read.status === "ready" ? "No measured cells here yet." : "Loading…"}
         />
       )}
       {cell !== null && datasetName && (

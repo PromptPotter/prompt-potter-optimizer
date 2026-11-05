@@ -1,5 +1,4 @@
-import type { ArmReading } from "@/lib/api/types";
-import { DISPLAY_METRIC_INFO, type DisplayMetric } from "@/lib/api/types.generated";
+import { type ArmReading, DISPLAY_METRIC_INFO, type DisplayMetric } from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
 
 // DISPLAY only: the selector decides on its own objective (the served `elects_on`), whatever is read.

@@ -1,10 +1,13 @@
-import type { Budget, KindSpend, LifetimeSpend, MeteredSpend } from "@/lib/api/types";
-import type { ServedDashboard } from "@/lib/api";
 import {
+  type Budget,
+  type KindSpend,
+  type LifetimeSpend,
+  type MeteredSpend,
+  type ServedDashboard,
   RATE_PRICED_LABEL,
   SPEND_KIND_LABELS,
   type TokenUsageKind,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { fmtUnit, fmtUsd } from "@/lib/format";
 

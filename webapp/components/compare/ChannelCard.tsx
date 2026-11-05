@@ -1,73 +1,85 @@
-import type { SubjectReading } from "@/lib/api";
-import { SUBJECT_KIND_LABELS } from "@/lib/api/types.generated";
+import { type SubjectReading, SUBJECT_KIND_LABELS, type HierarchyCampaign } from "@/lib/api/types";
 import type { CladogramChannel } from "@/components/candidates/Forest";
-import { useCompareSelection } from "@/lib/state/compare-selection";
-import type { HierarchyCampaign } from "@/lib/api";
+import { useChannelView, useCompareSelection } from "@/lib/state/compare-selection";
 import type { CompareItem } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { Said } from "@/components/ui";
 import { ChannelDetail } from "./ChannelDetail";
 import { HeadlineBadges, HeadlineFacts, Metric, Swatch, benchLead } from "./channel-parts";
-import type { MetricFormat } from "@/lib/format";
-import { useChannelModel, type ChannelModel } from "./useChannelModel";
+import { shortId, type MetricFormat } from "@/lib/format";
+import {
+  channelInk,
+  channelLevel,
+  rulerNoteOf,
+  useChannelHead,
+  useChannelTree,
+  useInvalidated,
+} from "./channel-hooks";
 
-export function ChannelCard({
-  item,
-  ownNote,
-  points,
-  spec,
-  run,
-}: {
+export interface ChannelProps {
   item: CompareItem;
   ownNote: boolean;
   points: readonly CladogramChannel[];
   spec: MetricFormat & { axis_label: string };
   run: HierarchyCampaign | null;
-}) {
-  const { reading, headline, slot } = item;
-  const model = useChannelModel(item, run, spec);
-  // Null for an unread channel: it plots no series, so any ink here would be another channel's.
-  const own = slot === null ? null : (points[slot] ?? null);
-  const rulerNote = ownNote && reading?.comparable === false;
+}
+
+export function ChannelCard(props: ChannelProps) {
+  const { item, ownNote, points, spec, run } = props;
+  const { reading, headline } = item;
+  const { index } = useChannelTree(run);
+  const view = useChannelView(item, index);
+  const head = useChannelHead(index, reading, view.selected);
+  // A bench headline leads the card with the campaign's pick, so the highlight starts on it.
+  const seed = headline ? head.nodeFor("winner") : head.own;
+  if (seed && !view.seeded) view.select(seed);
+  const invalidated = useInvalidated(index);
+  const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
   return (
     <li className="cmp-channel">
-      <ChannelIdRow model={model} item={item} ink={own?.ink ?? null} axis={spec.axis_label} />
-      <ChannelNotes reading={reading} withdrawn={model.withdrawn} rulerNote={rulerNote && !headline} />
-      <details className="cmp-channel-detail" open={model.folds.detail}>
+      <ChannelIdRow
+        item={item}
+        run={run}
+        ink={channelInk(item, points)?.ink ?? null}
+        spec={spec}
+        withdrawn={withdrawn}
+      />
+      <ChannelNotes
+        reading={reading}
+        withdrawn={withdrawn}
+        rulerNote={rulerNoteOf(item, ownNote) && !headline}
+      />
+      <details className="cmp-channel-detail" open={view.folds.detail}>
         <summary
           onClick={(e) => {
             e.preventDefault();
-            model.toggleFold("detail");
+            view.toggleFold("detail");
           }}
         >
           {reading === null ? "Lineage" : "Search reading, lineage and configuration"}
         </summary>
-        <ChannelDetail
-          model={model}
-          item={item}
-          rulerNote={rulerNote}
-          points={points}
-          own={own}
-          axis={spec.axis_label}
-        />
+        {view.folds.detail && <ChannelDetail {...props} />}
       </details>
     </li>
   );
 }
 
 function ChannelIdRow({
-  model,
-  item: { reading, headline },
+  item: { channel, reading, headline },
+  run,
   ink,
-  axis,
+  spec,
+  withdrawn,
 }: {
-  model: ChannelModel;
   item: CompareItem;
+  run: HierarchyCampaign | null;
   ink: string | null;
-  axis: string;
+  spec: MetricFormat & { axis_label: string };
+  withdrawn: boolean;
 }) {
   const { remove } = useCompareSelection();
-  const { subject, level, withdrawn } = model;
+  const subject = channel.subject;
+  const level = channelLevel(reading, withdrawn, spec);
   const lead = benchLead(headline);
   return (
     <div className="cmp-channel-row">
@@ -78,7 +90,7 @@ function ChannelIdRow({
             ? headline.optimizer
             : reading && reading.kind !== "campaign"
               ? reading.label
-              : model.campaignName}
+              : run?.label || shortId(channel.rootCampaignId)}
         </span>
         <span className="cmp-channel-sub" title={subject}>
           {reading ? `${SUBJECT_KIND_LABELS[reading.kind]} · ${reading.campaign_id}` : "nothing measured"}
@@ -93,7 +105,7 @@ function ChannelIdRow({
       ) : (
         level && (
           <div className={cx("cmp-channel-lead", withdrawn && "cmp-channel-unknown")}>
-            <Metric label={axis} value={level.value} band={level.band} />
+            <Metric label={spec.axis_label} value={level.value} band={level.band} />
           </div>
         )
       )}

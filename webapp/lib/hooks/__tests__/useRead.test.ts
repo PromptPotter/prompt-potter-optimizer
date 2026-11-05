@@ -3,20 +3,23 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
-import { AuthProvider } from "@/lib/state/auth";
-import { READ_BEAT_MS } from "@/lib/cadence";
+import { AuthProvider, useAuth } from "@/lib/state/auth";
+import { READ_BEAT_MS, RECONNECT_POLL_MS } from "@/lib/cadence";
 import { clearIncidents } from "@/lib/diagnostics";
-import { GONE_CONFIRM_LIMIT, useRead } from "@/lib/hooks/useRead";
-import { clearReadCache, type ReadDescriptor } from "@/lib/read-cache";
+import { useRead } from "@/lib/hooks/useRead";
+import { GONE_CONFIRM_LIMIT, clearReadCache, type ReadDescriptor } from "@/lib/read-cache";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(AuthProvider, null, children);
 
 const beat = () => act(() => vi.advanceTimersByTimeAsync(READ_BEAT_MS));
+// A missed address is re-asked on the cache's reconnect beat, whatever the read's own cadence.
+const reconnect = () => act(() => vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS));
+const everyBeat = () => READ_BEAT_MS;
 
 describe("useRead — an address that stops existing", () => {
   beforeEach(() => {
-    clearReadCache();
+    clearReadCache(true);
     clearIncidents();
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
@@ -30,47 +33,52 @@ describe("useRead — an address that stops existing", () => {
     vi.useRealTimers();
   });
 
-  const gone = (): { read: ReadDescriptor<string>; calls: () => number } => {
+  const gone = (more: Partial<ReadDescriptor<string | null>> = {}) => {
     let calls = 0;
-    return {
-      calls: () => calls,
-      read: {
-        id: "dashboard\x1f/gone",
-        load: async () => {
-          calls += 1;
-          throw new ApiError(404, "/gone");
-        },
+    const read: ReadDescriptor<string | null> = {
+      id: "dashboard\x1f/gone",
+      load: async () => {
+        calls += 1;
+        throw new ApiError(404, "/gone");
       },
+      cadence: everyBeat,
+      ...more,
     };
+    return { read, calls: () => calls };
   };
 
   it("reports the address gone once, after the confirming misses, and stops its clock", async () => {
-    const { read, calls } = gone();
     const onGone = vi.fn();
-    const { result } = renderHook(() => useRead(read, { intervalMs: READ_BEAT_MS, onGone }), {
-      wrapper,
-    });
+    const { read, calls } = gone({ onGone });
+    const { result } = renderHook(() => useRead(read), { wrapper });
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(calls()).toBe(1);
     expect(onGone).not.toHaveBeenCalled();
 
-    for (let miss = 2; miss <= GONE_CONFIRM_LIMIT; miss++) await beat();
+    for (let miss = 2; miss <= GONE_CONFIRM_LIMIT; miss++) await reconnect();
     expect(calls()).toBe(GONE_CONFIRM_LIMIT);
     expect(onGone).toHaveBeenCalledTimes(1);
     expect(result.current).toMatchObject({ status: "failed", failure: { kind: "gone" } });
 
-    await beat();
-    await beat();
+    await reconnect();
+    await reconnect();
     expect(calls()).toBe(GONE_CONFIRM_LIMIT);
     expect(onGone).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps polling a read whose ordinary empty answer is a 404", async () => {
-    const { read, calls } = gone();
+  it("reports once per id, however many components read it", async () => {
     const onGone = vi.fn();
-    renderHook(() => useRead(read, { intervalMs: READ_BEAT_MS, expects: "gone", onGone }), {
-      wrapper,
-    });
+    const { read } = gone({ onGone });
+    renderHook(() => [useRead(read), useRead(read)], { wrapper });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    for (let i = 0; i < GONE_CONFIRM_LIMIT + 1; i++) await reconnect();
+    expect(onGone).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling a read whose ordinary empty answer is a 404", async () => {
+    const onGone = vi.fn();
+    const { read, calls } = gone({ expects: "gone", onGone });
+    renderHook(() => useRead(read), { wrapper });
     await act(() => vi.advanceTimersByTimeAsync(0));
     for (let i = 0; i < GONE_CONFIRM_LIMIT + 1; i++) await beat();
     expect(calls()).toBe(GONE_CONFIRM_LIMIT + 2);
@@ -79,6 +87,7 @@ describe("useRead — an address that stops existing", () => {
 
   it("starts the count again once the address answers", async () => {
     let calls = 0;
+    const onGone = vi.fn();
     const read: ReadDescriptor<string> = {
       id: "dashboard\x1f/flaky",
       load: async () => {
@@ -86,20 +95,98 @@ describe("useRead — an address that stops existing", () => {
         if (calls === GONE_CONFIRM_LIMIT) return { kind: "ok", data: "here", validator: null };
         throw new ApiError(404, "/flaky");
       },
+      cadence: everyBeat,
+      onGone,
     };
-    const onGone = vi.fn();
-    renderHook(() => useRead(read, { intervalMs: READ_BEAT_MS, onGone }), { wrapper });
+    renderHook(() => useRead(read), { wrapper });
     await act(() => vi.advanceTimersByTimeAsync(0));
-    for (let i = 0; i < GONE_CONFIRM_LIMIT + 1; i++) await beat();
+    // Misses reconnect on the slow beat; the answer polls on the read's own.
+    for (let i = 0; i < GONE_CONFIRM_LIMIT; i++) await reconnect();
     // Two misses, an answer, two misses: never the limit running.
     expect(calls).toBe(GONE_CONFIRM_LIMIT + 2);
     expect(onGone).not.toHaveBeenCalled();
   });
 });
 
+describe("useRead — a throttled session probe", () => {
+  const ME = { tenant_id: "t", user_id: "u" };
+  let throttled = true;
+  beforeEach(() => {
+    clearReadCache(true);
+    vi.useFakeTimers();
+    throttled = true;
+    vi.stubGlobal("fetch", async () =>
+      throttled
+        ? new Response(
+            JSON.stringify({ error: "rate_limited", error_id: "e1", message: "Slow down.", details: null }),
+            { status: 429 },
+          )
+        : new Response(JSON.stringify(ME), { status: 200 }),
+    );
+  });
+  afterEach(() => {
+    cleanup();
+    clearIncidents();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // The request rate drained by polling tabs: a reload is never signed out, a session keeps its reads.
+  it("keeps the identity and its gated reads, and re-probes an unprobed session", async () => {
+    const gated: ReadDescriptor<string> = {
+      id: "quota\x1f/q",
+      auth: true,
+      load: async () => ({ kind: "ok", data: "mine", validator: null }),
+    };
+    const { result } = renderHook(() => ({ auth: useAuth(), read: useRead(gated) }), { wrapper });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(result.current.auth.status).toBe("loading");
+
+    throttled = false;
+    await reconnect();
+    expect(result.current.auth.status).toBe("authed");
+    expect(result.current.read).toEqual({ status: "ready", data: "mine" });
+
+    throttled = true;
+    act(() => result.current.auth.refresh());
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(result.current.auth).toMatchObject({ status: "authed", me: ME });
+    expect(result.current.read).toEqual({ status: "ready", data: "mine" });
+  });
+});
+
+describe("useRead — a session probe answered 404", () => {
+  let probes = 0;
+  beforeEach(() => {
+    clearReadCache(true);
+    vi.useFakeTimers();
+    probes = 0;
+    vi.stubGlobal("fetch", async () => {
+      probes += 1;
+      return new Response(null, { status: 404 });
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    clearIncidents();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // No session route answers: the reload is signed out, never left loading on a re-probe.
+  it("signs the reload out once, and does not probe again on the reconnect beat", async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(result.current.status).toBe("unauthed");
+    await reconnect();
+    await reconnect();
+    expect(probes).toBe(1);
+  });
+});
+
 describe("useRead — a superseded id", () => {
   beforeEach(() => {
-    clearReadCache();
+    clearReadCache(true);
     vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
   });
   afterEach(() => {

@@ -1,4 +1,4 @@
-import type { DraftPatch, OriginLastResolution, RaisedCommand } from "@/lib/api";
+import type { DraftPatch, OriginLastResolution, RaisedCommand } from "@/lib/api/types";
 import { QuestionAnswer } from "./QuestionAnswer";
 
 // A proposal arrives already shaped as the `edit-draft-campaign` a click fires, worded — never rebuild one.

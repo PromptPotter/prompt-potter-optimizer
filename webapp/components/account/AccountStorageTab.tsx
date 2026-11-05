@@ -1,6 +1,6 @@
 import { useRead } from "@/lib/hooks/useRead";
-import { workspaceStorageRead, type WorkspaceStorageResponse } from "@/lib/api";
-import { LIFECYCLE_STATUS_LABELS } from "@/lib/api/types.generated";
+import { workspaceStorageRead } from "@/lib/api";
+import { type WorkspaceStorageResponse, LIFECYCLE_STATUS_LABELS } from "@/lib/api/types";
 import { cssPct, fmtBytes } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { Empty, ReadState } from "@/components/ui";

@@ -1,5 +1,5 @@
 import { useViewedCourse } from "@/lib/lineage";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useOrigin } from "@/lib/hooks/useOrigin";
 import { useOriginEvidence } from "@/lib/hooks/useOriginEvidence";
@@ -15,7 +15,7 @@ import { SubjectSignals } from "./SubjectSignals";
 import { WinnerStanding } from "./WinnerStanding";
 
 export function SubjectBox() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const { setObserve } = useSelection();
   const subject = useObserveSubject();
   const { point, reading } = subject;
@@ -60,11 +60,12 @@ export function SubjectBox() {
         <SubjectDiff
           cfg={cfg}
           changes={evidence.changes}
+          read={evidence.read}
           verdict={<RoundVerdict reading={subject.verdict} />}
         />
-      ) : shown.failure ? (
-        <FailureLine failure={shown.failure} />
-      ) : shown.loading ? (
+      ) : shown.read.status === "failed" ? (
+        <FailureLine failure={shown.read.failure} />
+      ) : shown.read.status === "loading" ? (
         <Loading>Loading the searchpoint…</Loading>
       ) : (
         <Empty>Nothing measured yet.</Empty>

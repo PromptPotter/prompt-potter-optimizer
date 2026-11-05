@@ -1,9 +1,7 @@
 // Seeds from the RESOLVED config: fork init layers it onto the dataset overlay (`entry.py`), so a sparse seed resets untouched params.
 
-import type { NodePrompt } from "@/lib/api/types";
-import type { ServedDashboard } from "@/lib/api";
+import type { NodePrompt, ServedDashboard, RoundView } from "@/lib/api/types";
 import { liveCandidate } from "@/lib/poll";
-import type { RoundView } from "@/lib/types";
 
 export interface CandidateSearchPoint {
   origin_prompts: Record<string, NodePrompt>;

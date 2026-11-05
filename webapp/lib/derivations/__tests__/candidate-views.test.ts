@@ -6,7 +6,7 @@ import type {
   HierarchyCandidate,
   SubtreeCourse,
   VerificationMark,
-} from "@/lib/api";
+} from "@/lib/api/types";
 import { encodeCyclePath } from "@/lib/ids";
 import {
   armReading,

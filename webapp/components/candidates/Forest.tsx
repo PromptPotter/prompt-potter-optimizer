@@ -5,8 +5,14 @@ import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
 import { figureOf, tagValue } from "@/lib/derivations";
-import type { CourseKind, CourseSpawn, HierarchyCourse, SubtreeCampaign } from "@/lib/api";
-import { DISPLAY_METRIC_INFO, type DisplayMetric } from "@/lib/api/types.generated";
+import {
+  type CourseKind,
+  type CourseSpawn,
+  type HierarchyCourse,
+  type SubtreeCampaign,
+  DISPLAY_METRIC_INFO,
+  type DisplayMetric,
+} from "@/lib/api/types";
 import {
   DIRECTION_GLYPH,
   HEADER_H,

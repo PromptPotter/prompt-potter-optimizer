@@ -1,5 +1,4 @@
-import type { NodeConfigParam } from "@/lib/api";
-import type { PipelineView, PipelineViewNode } from "@/lib/types";
+import type { NodeConfigParam, PipelineView, PipelineViewNode } from "@/lib/api/types";
 
 // `input` / `output` are synthetic terminals the server adds (`domain/pipeline_parsing.py`).
 export function interiorNodes(view: PipelineView | null | undefined): PipelineViewNode[] {

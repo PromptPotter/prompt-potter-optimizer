@@ -1,27 +1,133 @@
 // A remembered individual id resolves through `answers_for_id`, never the first row holding it.
 
-import { createContext, useContext, useMemo, useState } from "react";
-import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
-import type { Said } from "@/lib/api/types.generated";
-import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
+import { useMemo } from "react";
+import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api/reads";
+import type { Said, SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
 import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
 import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
-import { lensOf, useScoringMask } from "@/lib/scoring-mask";
-import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
+import { lensOf, useMaskState, type MaskState } from "@/lib/scoring-mask";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useDebounced } from "@/lib/hooks/useDebounced";
-import { shownData, useRead, type ReadResult } from "@/lib/hooks/useRead";
-import { useRegistry } from "@/lib/state/registry";
+import { shownData, useRead } from "@/lib/hooks/useRead";
+import { useRegistry } from "@/lib/hooks/useRegistry";
+import type { ReadResult } from "@/lib/read-cache";
 import { useSelection } from "@/lib/SelectionContext";
+import { createModuleStore } from "@/lib/state/module-store";
 import { useWorkspace } from "@/lib/workspace";
 
 export type CampaignTree = ReadResult<SubtreeCampaign>;
+
+// Keyed on the body it read: every reader of one tree shares one index.
+const indexed = new WeakMap<SubtreeCampaign, LineageIndex>();
+const NO_TREE = indexLineage(null);
+
+export function lineageIndexOf(tree: SubtreeCampaign | null): LineageIndex {
+  if (tree === null) return NO_TREE;
+  let index = indexed.get(tree);
+  if (!index) {
+    index = indexLineage(tree);
+    indexed.set(tree, index);
+  }
+  return index;
+}
+
+// "" (off), "score:<formula>", or "abort:<variant>", for the campaign it was picked on: a pick
+// never leaks across campaigns. The open scoring-mask panel overrides it.
+const lensStore = createModuleStore<{ campaignId: string | null; lens: string }>({
+  campaignId: null,
+  lens: "",
+});
+
+function useLens(campaignId: string | null): string {
+  const { campaignId: pickedOn, lens } = lensStore.useStore();
+  return pickedOn === campaignId ? lens : "";
+}
+
+// An operator's mask edit goes out once it rests; a cycle's seed goes out at once. The settle
+// restarts on the SEED (`seededForCycle`), never the cycle id: a cycle switch first shows the last
+// cycle's mask unseeded, and resetting there would debounce the new seed like an edit.
+const settling = createModuleStore<{ seed: string | null; live: string | null; settled: string | null }>(
+  { seed: null, live: null, settled: null },
+);
+let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+function useSettledLens(seed: string | null, live: string | null): string | null {
+  const shown = settling.useStore();
+  const now = settling.get();
+  if (now.seed !== seed) {
+    clearTimeout(settleTimer);
+    settling.set({ seed, live, settled: live });
+    return live;
+  }
+  if (now.live !== live) {
+    settling.set({ live });
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => settling.set({ settled: live }), MASK_LENS_DEBOUNCE_MS);
+  }
+  return shown.seed === seed ? shown.settled : live;
+}
+
+interface TreeKey {
+  address: string | null;
+  mask: SubtreeMask | "seeding" | null;
+  moment: SubtreeMoment | null;
+}
+
+// The tree's mask: `seeding` while the open mask panel's seed for the viewed cycle is not known, so
+// a cycle's first tree goes out under its own seed and the campaign's last tree stands meanwhile.
+export function treeMaskOf(
+  { open, seededForCycle }: MaskState,
+  cycleId: string | null,
+  lens: string | null,
+  samples: readonly number[] | null,
+): SubtreeMask | "seeding" | null {
+  if (open && seededForCycle !== cycleId) return "seeding";
+  return lens || samples ? { lens, samples } : null;
+}
+
+// The viewed tree's key off the mask store, which no dashboard landing moves. Keyed on the
+// campaign, not the cycle: a same-campaign cycle switch keeps one read.
+function useViewedTreeKey(maskState: MaskState): TreeKey {
+  const { open: maskOpen, mask, seededForCycle } = maskState;
+  const { campaignId, cycleId, at, viewedPath: leafPath } = useWorkspace();
+  const { sampleSet } = useSelection();
+  const lens = useLens(campaignId);
+  // Every reader names the same seed, seeding or not: the viewed cycle once seeded, else null.
+  const seed = seededForCycle === cycleId ? cycleId : null;
+  const { cellTerms } = useConnector();
+  const maskLens = useSettledLens(seed, maskOpen ? lensOf(mask, cellTerms) : null);
+  const lensParam = maskOpen ? maskLens : lens || null;
+  const samples = sampleSet && sampleSet.length > 0 ? sampleSet : null;
+  const address = campaignId && cycleId ? campaignId : null;
+  return {
+    address,
+    mask: treeMaskOf(maskState, cycleId, lensParam, samples),
+    // The offset is the viewed LEAF's, which the campaign-keyed subtree is not addressed by.
+    moment: at !== null && leafPath !== null ? { at, cycle: leafPath } : null,
+  };
+}
+
+// No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
+// A campaign the listing has every course settled in reads once, re-asked only by an invalidation.
+function useTree(key: TreeKey | null): CampaignTree {
+  const { started } = useRegistry();
+  const address = key?.address ?? null;
+  const rests = started.some(
+    (e) =>
+      e.address === address &&
+      e.children.length > 0 &&
+      e.children.every((c) => phaseIs(c.state.status.run_phase, "settled")),
+  );
+  return useRead(
+    key && address
+      ? subtreeRead(address, key.mask, key.moment, rests ? null : LINEAGE_POLL_MS)
+      : null,
+  );
+}
 
 interface ViewedLineage {
   tree: SubtreeCampaign | null;
   treeRead: CampaignTree;
   index: LineageIndex;
-  // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;
   setLens: (lens: string) => void;
   maskActive: boolean;
@@ -30,140 +136,38 @@ interface ViewedLineage {
   scoringMaskActive: boolean;
 }
 
-interface TreeAddressing {
-  viewedAddress: string | null;
-  viewedMask: SubtreeMask | null;
-  viewedMoment: SubtreeMoment | null;
-  // Campaigns whose every course entry is settled: read once, re-asked only by an invalidation.
-  resting: ReadonlySet<string>;
-}
+const masked = new WeakMap<LineageIndex, boolean>();
 
-// Two contexts: a sidebar row naming another campaign's read must not re-render per viewed-tree landing.
-const TreeAddressingContext = createContext<TreeAddressing | null>(null);
-const ViewedLineageContext = createContext<ViewedLineage | null>(null);
-
-function useTree(
-  address: string | null,
-  mask: SubtreeMask | null,
-  moment: SubtreeMoment | null,
-  resting: ReadonlySet<string>,
-): CampaignTree {
-  const rests = address !== null && resting.has(address);
-  // No `onGone`: the dashboard read owns that verdict, and this reader may be another campaign's row.
-  // Kept by address: a mask or moment re-keys the read, and the campaign's last tree stands meanwhile.
-  return useRead(address ? subtreeRead(address, mask, moment) : null, {
-    auth: true,
-    intervalMs: rests ? undefined : LINEAGE_POLL_MS,
-    keep: address,
-  });
-}
-
-export function LineageProvider({
-  campaignId,
-  cycleId,
-  children,
-}: {
-  campaignId: string | null;
-  cycleId: string | null;
-  children: React.ReactNode;
-}) {
-  const [lens, setLens] = useState<string>("");
-  // This provider lives at the shell root, so a lens would otherwise leak across campaigns.
-  const [prevCampaign, setPrevCampaign] = useState(campaignId);
-  if (campaignId !== prevCampaign) {
-    setPrevCampaign(campaignId);
-    setLens("");
+function maskActiveOf(index: LineageIndex): boolean {
+  let active = masked.get(index);
+  if (active === undefined) {
+    active = index.candidates.some((c) => c.facts.divergence !== null || c.facts.divergent);
+    masked.set(index, active);
   }
-
-  // Seeded here: any later, and a cycle's first tree goes out unmasked.
-  useScoringMaskSeed();
-  const { open: maskOpen, mask } = useScoringMask();
-  const { sampleSet } = useSelection();
-  const samples = useMemo(
-    () => (sampleSet && sampleSet.length > 0 ? sampleSet : null),
-    [sampleSet],
-  );
-  const { cellTerms } = useConnector();
-  const liveMaskLens = useMemo(
-    () => (maskOpen ? lensOf(mask, cellTerms) : null),
-    [maskOpen, mask, cellTerms],
-  );
-  const maskLens = useDebounced(liveMaskLens, MASK_LENS_DEBOUNCE_MS);
-  const lensParam = maskOpen ? maskLens : lens || null;
-
-  // Keyed on the campaign, not `cycleId`: a same-campaign cycle switch keeps one read.
-  const viewedAddress = campaignId && cycleId ? campaignId : null;
-  const viewedMask = useMemo<SubtreeMask | null>(
-    () => (lensParam || samples ? { lens: lensParam, samples } : null),
-    [lensParam, samples],
-  );
-
-  const { started } = useRegistry();
-  const resting = useMemo(
-    () =>
-      new Set(
-        started
-          .filter(
-            (e) =>
-              e.children.length > 0 &&
-              e.children.every((c) => phaseIs(c.state.status.run_phase, "settled")),
-          )
-          .map((e) => e.address),
-      ),
-    [started],
-  );
-
-  // The offset is the viewed LEAF's, which the campaign-keyed subtree is not addressed by.
-  const { at, viewedPath: leafPath } = useWorkspace();
-  const viewedMoment = useMemo<SubtreeMoment | null>(
-    () => (at !== null && leafPath !== null ? { at, cycle: leafPath } : null),
-    [at, leafPath],
-  );
-
-  const treeRead = useTree(viewedAddress, viewedMask, viewedMoment, resting);
-  const viewedTree = shownData(treeRead);
-  const index = useMemo(() => indexLineage(viewedTree), [viewedTree]);
-
-  const maskActive = useMemo(
-    () => index.candidates.some((c) => c.facts.divergence !== null || c.facts.divergent),
-    [index],
-  );
-
-  const readUnder = useMemo(
-    () => courseAt(index, leafPath)?.lines.find((l) => l.key === "read_under") ?? null,
-    [index, leafPath],
-  );
-
-  const viewed = useMemo<ViewedLineage>(
-    () => ({
-      tree: viewedTree,
-      treeRead,
-      index,
-      lens,
-      setLens,
-      maskActive,
-      readUnder,
-      scoringMaskActive: maskOpen,
-    }),
-    [viewedTree, treeRead, index, lens, maskActive, readUnder, maskOpen],
-  );
-
-  const addressing = useMemo<TreeAddressing>(
-    () => ({ viewedAddress, viewedMask, viewedMoment, resting }),
-    [viewedAddress, viewedMask, viewedMoment, resting],
-  );
-
-  return (
-    <TreeAddressingContext.Provider value={addressing}>
-      <ViewedLineageContext.Provider value={viewed}>{children}</ViewedLineageContext.Provider>
-    </TreeAddressingContext.Provider>
-  );
+  return active;
 }
 
 export function useViewedLineage(): ViewedLineage {
-  const ctx = useContext(ViewedLineageContext);
-  if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
-  return ctx;
+  const { campaignId, viewedPath: leafPath } = useWorkspace();
+  const mask = useMaskState();
+  const maskOpen = mask.open;
+  const treeRead = useTree(useViewedTreeKey(mask));
+  const tree = shownData(treeRead);
+  const index = lineageIndexOf(tree);
+  const lens = useLens(campaignId);
+  return useMemo(
+    () => ({
+      tree,
+      treeRead,
+      index,
+      lens,
+      setLens: (next: string) => lensStore.set({ campaignId, lens: next }),
+      maskActive: maskActiveOf(index),
+      readUnder: courseAt(index, leafPath)?.lines.find((l) => l.key === "read_under") ?? null,
+      scoringMaskActive: maskOpen,
+    }),
+    [tree, treeRead, index, lens, campaignId, leafPath, maskOpen],
+  );
 }
 
 // The viewed leaf's course entry: its `state` is the one word and next step every surface reads.
@@ -173,15 +177,14 @@ export function useViewedCourse(): SubtreeCourse | null {
   return useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);
 }
 
-// A sidebar row's campaign, by its address.
+// A campaign's tree by its address: the viewed campaign's under the viewed mask and moment.
 export function useLineageTree(address: string, enabled: boolean): CampaignTree {
-  const ctx = useContext(TreeAddressingContext);
-  if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
-  const viewed = address === ctx.viewedAddress;
-  return useTree(
-    enabled ? address : null,
-    viewed ? ctx.viewedMask : null,
-    viewed ? ctx.viewedMoment : null,
-    ctx.resting,
-  );
+  const { campaignId, cycleId } = useWorkspace();
+  const viewed = useViewedTreeKey(useMaskState());
+  const key = !enabled
+    ? null
+    : campaignId === address && cycleId !== null
+      ? viewed
+      : { address, mask: null, moment: null };
+  return useTree(key);
 }

@@ -1,5 +1,5 @@
 import { DataTable, type Column } from "@/components/ui";
-import type { DraftCampaignWire } from "@/lib/api";
+import type { DraftCampaignWire } from "@/lib/api/types";
 import { PLACEHOLDER } from "@/lib/format";
 
 type PreviewRow = DraftCampaignWire["sample_preview"][number];

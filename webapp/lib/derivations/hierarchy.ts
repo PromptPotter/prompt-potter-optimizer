@@ -4,8 +4,8 @@ import type {
   HierarchyEntry,
   HierarchyTag,
   ListedCampaign,
-} from "@/lib/api";
-import type { Figure } from "@/lib/api/types.generated";
+  Figure,
+} from "@/lib/api/types";
 
 export type FigureKey = Figure["key"];
 import { decodeCyclePath } from "@/lib/ids";

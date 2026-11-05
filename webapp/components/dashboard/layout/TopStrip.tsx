@@ -1,12 +1,12 @@
 import { memo } from "react";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useViewedCourse } from "@/lib/lineage";
 import { figureOf } from "@/lib/derivations";
 import { Hearts } from "@/components/ui";
 
 // A grid box of its own: with neither hearts nor a trace it renders nothing, and leaves no gap.
 export const TopStrip = memo(function TopStrip() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const lives = figureOf(useViewedCourse(), "lives");
   const trace = dash?.langfuse_trace_url ?? null;
   if (!lives && !trace) return null;

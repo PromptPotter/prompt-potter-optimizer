@@ -1,10 +1,11 @@
 import { DataTable, Term, type Column } from "@/components/ui";
-import type { MeteredSpend, ServedDashboard } from "@/lib/api";
 import {
+  type MeteredSpend,
+  type ServedDashboard,
   PREFIX_STATE_TITLES,
   RATE_PRICED_LABEL,
   type PrefixReading,
-} from "@/lib/api/types.generated";
+} from "@/lib/api/types";
 import { replayShareLine, spendLines } from "@/lib/derivations";
 import { fmtUsd } from "@/lib/format";
 

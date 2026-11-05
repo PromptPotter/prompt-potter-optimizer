@@ -1,14 +1,13 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import {
-  campaignStorageRead,
-  configMapRead,
-  type ConfigKnob,
-  type ConfigMapResponse,
-  type HierarchyEntry,
-  type UnstartedCampaign,
-} from "@/lib/api";
+import { campaignStorageRead, configMapRead } from "@/lib/api";
+import type {
+  ConfigKnob,
+  ConfigMapResponse,
+  HierarchyEntry,
+  UnstartedCampaign,
+} from "@/lib/api/types";
 import { LeafSplit } from "@/components/account/LeafSplit";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { entryAlone } from "@/lib/derivations";

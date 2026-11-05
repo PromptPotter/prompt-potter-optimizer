@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { renderMarkdownSafe } from "@/lib/markdown";
-import { cycleFileRead, type FileContentResponse } from "@/lib/api";
+import { cycleFileRead } from "@/lib/api";
+import type { FileContentResponse } from "@/lib/api/types";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { ReadState } from "@/components/ui";
 import { RoundFileView } from "./RoundFileView";

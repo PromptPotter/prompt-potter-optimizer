@@ -1,8 +1,8 @@
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { encodeCyclePath } from "@/lib/ids";
-import { useEntry } from "@/lib/state/registry";
+import { useEntry } from "@/lib/hooks/useRegistry";
 import { useWorkspace } from "@/lib/workspace";
 
 export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
@@ -10,7 +10,7 @@ export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
 export function useRemoteModel() {
   const { viewedPath, navigate } = useWorkspace();
   const leafEntry = useEntry(viewedPath ? encodeCyclePath(viewedPath) : null);
-  const { dash, isLive } = useCycleStream();
+  const { dash, isLive } = useViewedDashboard();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const isOuterView = (viewedPath?.length ?? 1) === 1;
 

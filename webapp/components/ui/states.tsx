@@ -3,7 +3,8 @@
 
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
-import { shownData, type ReadResult } from "@/lib/hooks/useRead";
+import { shownData } from "@/lib/hooks/useRead";
+import type { ReadResult } from "@/lib/read-cache";
 
 export function Empty({
   title,

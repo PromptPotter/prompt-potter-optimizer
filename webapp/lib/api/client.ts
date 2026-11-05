@@ -1,4 +1,4 @@
-import type { ErrorEnvelope } from "./types.generated";
+import type { ErrorEnvelope } from "@/lib/api/types";
 
 export const API = "/api/v1";
 
@@ -35,7 +35,14 @@ export class ApiError extends Error {
   }
 }
 
-export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid" | "refused";
+export type FailureKind =
+  | "transient"
+  | "throttled"
+  | "auth"
+  | "gone"
+  | "denied"
+  | "invalid"
+  | "refused";
 
 // A read refused client-side because the answer is not the kind it serves: no server said it.
 export class InvalidInputError extends Error {
@@ -52,9 +59,18 @@ export function failureKind(e: unknown): FailureKind {
   if (e.status === 403) return "denied";
   if (e.status === 404) return "gone";
   if (e.status === 400 || e.status === 422) return "invalid";
+  // The request rate's throttle (`quota.py::RateLimitedError`): it passes, and the act never ran.
+  if (e.code === "rate_limited") return "throttled";
   // The server answered and said no (a conflict, a spend cap): its sentence is the remedy.
   if (e.status >= 400 && e.status < 500) return "refused";
   return "transient";
+}
+
+// The failures that pass, saying nothing of the address or the session: the server unreachable,
+// its throttle. Any other kind the server would repeat; a 404 the cache alone re-asks, until its
+// gone verdict (`read-cache.ts::GONE_CONFIRM_LIMIT`).
+export function failurePasses(kind: FailureKind): boolean {
+  return kind === "transient" || kind === "throttled";
 }
 
 // The ONE envelope parser, reads and writes alike. A proxy 502 or a missing-page 404 answers

@@ -6,7 +6,7 @@ import type {
   HierarchyCandidate,
   MainLineStep,
   SubtreeCourse,
-} from "@/lib/api";
+} from "@/lib/api/types";
 import {
   DENSE,
   ROOMY,

@@ -3637,8 +3637,6 @@ export interface ConfigEstimandGroup {
   key: string;
   /** Human-readable estimand name */
   label: string;
-  /** Plain-language one-liner of what this estimand is */
-  doc: string;
   /** Knobs that move this estimand, in declared order */
   knobs: ConfigKnob[];
 }
@@ -3776,7 +3774,6 @@ export interface CellsResponse {
   /** Graded cells across `samples` — the headline's denominator, served so the
    * reader adds nothing up. */
   total_measurements: number;
-  total_hits: number;
   /** Mean graded fitness across those cells; null when the scope holds none. */
   mean_fitness: number | null;
   /** `samples` whose `hit_spread` is `never`. */

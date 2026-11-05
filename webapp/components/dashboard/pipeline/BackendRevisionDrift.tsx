@@ -1,8 +1,8 @@
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 
 // Served, never refused: this launch measures on the backend as it is.
 export function BackendRevisionDrift() {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const revision = dash?.backend_revision;
   if (!revision || revision.reported === revision.expected) return null;
   const { expected, reported, unread } = revision;

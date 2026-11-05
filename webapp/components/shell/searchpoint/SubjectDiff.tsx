@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { FailureLine } from "@/components/ui";
+import type { Evidence } from "@/lib/api/types";
 import type { ObserveConfig } from "@/lib/derivations";
 import type { OriginChanges } from "@/lib/hooks/useOriginEvidence";
+import type { ReadResult } from "@/lib/read-cache";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { promptFieldLabel } from "@/lib/prompt-fields";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
@@ -9,10 +11,12 @@ import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 export function SubjectDiff({
   cfg,
   changes,
+  read,
   verdict,
 }: {
   cfg: ObserveConfig;
   changes: OriginChanges;
+  read: ReadResult<Evidence>;
   verdict: ReactNode;
 }) {
   const cv = useConnector();
@@ -21,7 +25,7 @@ export function SubjectDiff({
       <summary>
         <span className="subject-diff-label">{cfg.label}</span>
         <span className="subject-diff-changes">
-          <Changes changes={changes} />
+          <Changes changes={changes} read={read} />
         </span>
         {verdict}
       </summary>
@@ -37,12 +41,15 @@ export function SubjectDiff({
   );
 }
 
-function Changes({ changes }: { changes: OriginChanges }) {
+function Changes({ changes, read }: { changes: OriginChanges; read: ReadResult<Evidence> }) {
+  if (changes === null) {
+    return read.status === "failed" ? (
+      <FailureLine failure={read.failure} lead="The origin could not be compared." />
+    ) : (
+      "comparing to origin…"
+    );
+  }
   switch (changes.status) {
-    case "pending":
-      return "comparing to origin…";
-    case "failed":
-      return <FailureLine failure={changes.failure} lead="The origin could not be compared." />;
     case "unrecorded":
       return "no configuration is recorded to compare";
     case "compared":

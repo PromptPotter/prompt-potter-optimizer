@@ -1,21 +1,18 @@
 import { AccountSection } from "./AccountSection";
 import { Button, CommitInput, Empty, FailureLine, ReadState } from "@/components/ui";
+import { couponRead, deleteApiKey, putApiKey } from "@/lib/api";
 import {
-  couponRead,
-  deleteApiKey,
-  putApiKey,
   type AccountKey,
   type CouponStatus,
   type ProviderRoute,
-} from "@/lib/api";
-import { KEY_SOURCE_LABELS } from "@/lib/api/types.generated";
+  KEY_SOURCE_LABELS,
+} from "@/lib/api/types";
 import { fmtAgo } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
-import { invalidateReads } from "@/lib/read-cache";
 
 export function AccountKeysTab() {
-  const read = useRead(couponRead(), { auth: true });
+  const read = useRead(couponRead());
   return (
     <ReadState read={read} subject="your provider keys">
       {(coupon) => <ProviderKeys coupon={coupon} />}
@@ -26,22 +23,12 @@ export function AccountKeysTab() {
 type KeyVerb = "save-key" | "remove-key";
 
 export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
-  // No blanket revalidate: the write re-asks the one read carrying the keys.
-  const cmd = useCommand<KeyVerb>("account-keys", { revalidate: false });
+  const cmd = useCommand<KeyVerb>("account-keys", { revalidate: ["coupon"] });
   const busy = cmd.pending !== null;
 
   const save = (provider: string, secret: string) =>
-    void cmd.run(
-      "save-key",
-      () => putApiKey(provider, secret),
-      () => invalidateReads("coupon"),
-    );
-  const remove = (provider: string) =>
-    void cmd.run(
-      "remove-key",
-      () => deleteApiKey(provider),
-      () => invalidateReads("coupon"),
-    );
+    void cmd.run("save-key", () => putApiKey(provider, secret));
+  const remove = (provider: string) => void cmd.run("remove-key", () => deleteApiKey(provider));
 
   return (
     <AccountSection

@@ -1,4 +1,4 @@
-import { CAP_AXIS_INFO } from "@/lib/api/types.generated";
+import { CAP_AXIS_INFO } from "@/lib/api/types";
 import { capText, isCapAxis } from "@/lib/run-limits";
 
 // The JSON Schema subset `DraftCampaignWire.setup_schema` speaks.

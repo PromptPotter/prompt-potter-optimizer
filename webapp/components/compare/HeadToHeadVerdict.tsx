@@ -1,4 +1,4 @@
-import type { HeadToHead } from "@/lib/api";
+import type { HeadToHead } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
 import { sideTone, fmtLiftBand, fmtPValue, PLACEHOLDER } from "@/lib/format";
 import { DataTable, Said, type Column } from "@/components/ui";

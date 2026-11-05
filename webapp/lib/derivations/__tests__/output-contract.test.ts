@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NodeOutputSchema } from "@/lib/api";
+import type { NodeOutputSchema } from "@/lib/api/types";
 import { outputContract } from "../output-contract";
 
 const L1_GENERATE: NodeOutputSchema = {

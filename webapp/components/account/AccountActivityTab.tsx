@@ -4,14 +4,14 @@ import { billText, ratePricedText } from "@/lib/derivations";
 import { fmtCompact } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
 import { useRead } from "@/lib/hooks/useRead";
+import { activityRead } from "@/lib/api";
 import {
-  activityRead,
   type ActivityBucket,
   type ActivityGroupBy,
   type ActivityResponse,
   type ActivityWindow,
-} from "@/lib/api";
-import { ACTIVITY_WINDOW_INFO } from "@/lib/api/types.generated";
+  ACTIVITY_WINDOW_INFO,
+} from "@/lib/api/types";
 import { wordKeys } from "@/lib/api/words";
 
 const WINDOW_ORDER = wordKeys(ACTIVITY_WINDOW_INFO);

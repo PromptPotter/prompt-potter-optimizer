@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { CAMPAIGN_LAYER, useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow, type PipelineLayer } from "./PipelineFlow";
@@ -34,7 +34,7 @@ const CAMPAIGN_LEVEL = 1;
 
 export function PipelineStack({ datasetName }: Props) {
   const cv = useConnector();
-  const { dash, isLive } = useCycleStream();
+  const { dash, isLive } = useViewedDashboard();
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
   // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
   const nested = useNestedPipelines(cv.nests, cv.schema.status === "ok");

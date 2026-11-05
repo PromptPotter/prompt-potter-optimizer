@@ -1,11 +1,10 @@
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { barValueLabel } from "@/lib/derivations";
-import type { DisplayMetric } from "@/lib/api/types.generated";
+import type { DisplayMetric, HierarchyCourse } from "@/lib/api/types";
 import { cssPct, PLACEHOLDER } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
-import type { HierarchyCourse } from "@/lib/api";
 import type { CandidateBar } from "@/lib/types";
 import { dendroRow, dendrogram, type DendroRow } from "./dendrogram";
 import type { PlotGeometry } from "./FitnessChart";

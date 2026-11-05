@@ -1,5 +1,8 @@
-import type { MeasuredUnit, VerifyReading as Reading } from "@/lib/api/types";
-import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import {
+  type MeasuredUnit,
+  type VerifyReading as Reading,
+  VERIFY_STRATEGY_LABELS,
+} from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { fmtSigned, fmtUnit, unitCount } from "@/lib/format";
 import { Term } from "@/components/ui";

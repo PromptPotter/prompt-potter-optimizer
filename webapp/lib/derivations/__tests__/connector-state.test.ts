@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { connectorReachability } from "../connector-state";
-import type { BackendHealthResponse } from "@/lib/api";
-import { BACKEND_REACHABILITY_INFO } from "@/lib/api/types.generated";
+import { type BackendHealthResponse, BACKEND_REACHABILITY_INFO } from "@/lib/api/types";
 
 const health = (status: BackendHealthResponse["status"]): BackendHealthResponse => ({
   backend_id: "b1",

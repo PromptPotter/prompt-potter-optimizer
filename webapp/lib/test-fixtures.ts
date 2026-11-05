@@ -33,8 +33,10 @@ import type {
   ServedDashboard,
   ServedRound,
   StepFacts,
+  Figure,
+  Said,
+  VerificationMark,
 } from "@/lib/api/types";
-import type { Figure, Said } from "@/lib/api/types.generated";
 
 // The envelope every rendered level wears, empty; each builder lays its level's own fields over it.
 function envelope(): { tags: HierarchyTag[]; figures: Figure[]; lines: Said[]; children: never[] } {
@@ -237,6 +239,20 @@ export function producerReading(over: Partial<ProducerReading> = {}): ProducerRe
     attached: false,
     appending: false,
     silent_for_s: null,
+    ...over,
+  };
+}
+
+// A verify pass on C1.1 that has sent its rows and scored none yet.
+export function verificationMark(over: Partial<VerificationMark> = {}): VerificationMark {
+  return {
+    kind: "verify",
+    arm: { key: "a1", round: 1, label: "C1.1" },
+    state: "running",
+    rows: 8,
+    scored: 0,
+    level: null,
+    failed_as: null,
     ...over,
   };
 }

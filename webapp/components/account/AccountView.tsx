@@ -10,7 +10,7 @@ import { AccountPreferencesTab } from "./AccountPreferencesTab";
 import { AccountStorageTab } from "./AccountStorageTab";
 import { cx } from "@/lib/cx";
 import { meRead } from "@/lib/api";
-import { ACCOUNT_TAB_INFO, type AccountTab } from "@/lib/api/types.generated";
+import { ACCOUNT_TAB_INFO, type AccountTab } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";

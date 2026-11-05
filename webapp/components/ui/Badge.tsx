@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Tone } from "@/lib/api/types.generated";
+import type { Tone } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import s from "./Badge.module.css";
 

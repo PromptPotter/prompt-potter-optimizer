@@ -3,7 +3,8 @@ import { PROVIDER_LABEL, ProviderIcon } from "./providers";
 import { Badge, Button, CopyButton, Empty, FailureLine, ReadState } from "@/components/ui";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
-import { meRead, postLogout, type MeResponse } from "@/lib/api";
+import { meRead, postLogout } from "@/lib/api";
+import type { MeResponse } from "@/lib/api/types";
 
 const CAP_PREFIX = "campaign.";
 

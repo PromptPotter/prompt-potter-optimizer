@@ -1,6 +1,6 @@
 // Reads `json_schema`, never `fields`/`field_descriptions`: top-level keys only, empty on every optimizer node.
 
-import type { NodeOutputSchema } from "@/lib/api";
+import type { NodeOutputSchema } from "@/lib/api/types";
 
 interface ContractField {
   key: string;

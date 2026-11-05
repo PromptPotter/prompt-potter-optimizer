@@ -1,110 +1,67 @@
-import { useMemo, useState } from "react";
-import {
-  cellsRead,
-  type CellCandidate,
-  type CellRow,
-  type CellsFilter,
-  type CellsResponse,
-  type DatasetItem,
-  type HardSampleOrder,
-  type HardSamplesScope,
-} from "../api";
+import { cellsRead } from "../api/reads";
+import type { CellStatus, CellsResponse, HardSampleOrder, HardSamplesScope } from "@/lib/api/types";
 import { CELLS_LIVE_POLL_MS } from "../cadence";
-import { encodeCyclePath, type CyclePath } from "../ids";
-import { useMomentAt } from "../workspace";
-import { useRead, type ReadFailure } from "./useRead";
+import type { CyclePath } from "../ids";
+import { useViewedDashboard } from "../poll";
+import type { ReadResult } from "../read-cache";
+import { createModuleStore } from "../state/module-store";
+import { useMomentAt, useWorkspace } from "../workspace";
+import { useLeafDatasetName } from "./useLeafDatasetName";
+import { useRead } from "./useRead";
 
-export type SeriesTotals = Pick<
-  CellsResponse,
-  "total_measurements" | "total_hits" | "mean_fitness" | "never_hit" | "partly_hit" | "always_hit"
->;
-
-interface ScopeSlice {
-  items: DatasetItem[];
-  candidates: CellCandidate[];
-  cells: CellRow[];
-  measuredCount: number;
-  unmeasuredCount: number;
-  // Null until a read lands: unread and zero-measured must not spell the same headline.
-  totals: SeriesTotals | null;
+// The roster's controls. `rankedBy` moves on click, while every LABEL names the served `order`
+// until the rows land; the optimizer's picker runs on the dataset scope regardless of `scope`.
+interface CellsView {
+  scope: HardSamplesScope;
+  rankedBy: HardSampleOrder | null;
 }
 
-interface CellsState extends ScopeSlice {
-  order: HardSampleOrder | null;
-  isStale: boolean;
-  // Consumers MUST render it: a failed read and an empty slice spell `items` the same way.
-  failure: ReadFailure | null;
+const view = createModuleStore<CellsView>({ scope: "campaign", rankedBy: null });
+
+export const setCellsView = view.set;
+export const useCellsView = view.useStore;
+
+// IDENTITY only: an unset field is the viewed unit's, the roster's scope or dataset.
+export interface CellsPreset {
+  path?: CyclePath;
+  datasetName?: string;
+  candidateId?: string | undefined;
+  round?: number;
+  scope?: HardSamplesScope;
 }
 
-const EMPTY_SLICE: ScopeSlice = {
-  items: [],
-  candidates: [],
-  cells: [],
-  measuredCount: 0,
-  unmeasuredCount: 0,
-  totals: null,
-};
-
-const EMPTY: CellsState = {
-  ...EMPTY_SLICE,
-  order: null,
-  isStale: false,
-  failure: null,
-};
-
-function sliceFrom(r: CellsResponse): ScopeSlice {
-  return {
-    items: r.samples,
-    candidates: r.candidates,
-    cells: r.cells,
-    measuredCount: r.measured_samples,
-    unmeasuredCount: r.unmeasured_samples,
-    totals: {
-      total_measurements: r.total_measurements,
-      total_hits: r.total_hits,
-      mean_fitness: r.mean_fitness,
-      never_hit: r.never_hit,
-      partly_hit: r.partly_hit,
-      always_hit: r.always_hit,
-    },
-  };
+interface Cells {
+  datasetName: string | null;
+  // `CellRow.candidate` joins `CellCandidate.key`. Served chronologically; bucket, never re-sort.
+  // Answered null where no slice is pooled yet. Consumers MUST render its failure: an empty roster
+  // and a broken read spell the rows the same way.
+  read: ReadResult<CellsResponse | null>;
 }
 
-export function useCells(
-  path: CyclePath | null,
-  datasetName: string | null,
-  scope: HardSamplesScope,
-  order: HardSampleOrder | null,
-  live: boolean,
-  filter: CellsFilter = {},
-): CellsState {
-  const unitKey = path ? encodeCyclePath(path) : null;
-
+// Every list of measured cells reads here: `useCells({})` is the viewed unit's roster, and a pane
+// naming the same preset shares its read.
+export function useCells(preset: CellsPreset | null, status?: CellStatus): Cells {
+  const { viewedPath } = useWorkspace();
+  const { scope, rankedBy } = useCellsView();
+  const leafDatasetName = useLeafDatasetName();
+  const path = preset?.path ?? viewedPath;
+  const datasetName = preset?.datasetName ?? leafDatasetName;
   const at = useMomentAt(path);
+  // The dashboard's liveness is the VIEWED unit's; a preset on another one does not poll.
+  const { isLive } = useViewedDashboard();
+  const intervalMs = preset?.path === undefined && isLive ? CELLS_LIVE_POLL_MS : null;
   const read = useRead(
-    path && datasetName ? cellsRead(datasetName, path, scope, order, filter, at) : null,
-    { expects: "gone", intervalMs: live ? CELLS_LIVE_POLL_MS : undefined },
+    preset !== null && path && datasetName
+      ? cellsRead(
+          datasetName,
+          path,
+          preset.scope ?? scope,
+          rankedBy,
+          { candidateId: preset.candidateId, round: preset.round, status },
+          at,
+          intervalMs,
+        )
+      : null,
   );
-
-  const own = read.status === "ready" ? read.data : read.status === "idle" ? null : read.kept;
-  // The last body this unit showed, so a slice still in flight dims it rather than blanking.
-  const [shown, setShown] = useState<{ unit: string; body: CellsResponse } | null>(null);
-  if (own && unitKey && shown?.body !== own) setShown({ unit: unitKey, body: own });
-  const body = own ?? (shown && shown.unit === unitKey ? shown.body : null);
-  const slice = useMemo(() => (body ? sliceFrom(body) : EMPTY_SLICE), [body]);
-
-  if (!unitKey) return EMPTY;
-  if (read.status === "idle") return { ...EMPTY_SLICE, order: null, isStale: true, failure: null };
-  if (read.status === "loading") {
-    return { ...slice, order: body?.order ?? null, isStale: true, failure: null };
-  }
-  if (own) return { ...slice, order: own.order, isStale: false, failure: null };
-  // 404 is an honest EMPTY: no pooled slice exists before the first round closes.
-  const dead = read.status === "failed" && read.failure.kind !== "gone";
-  return {
-    ...EMPTY_SLICE,
-    order: null,
-    isStale: false,
-    failure: dead ? read.failure : null,
-  };
+  return { datasetName, read };
 }

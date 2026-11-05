@@ -17,7 +17,7 @@ import {
   campaigns,
   type Campaign,
 } from "../harness";
-import { STOP_REASON_INFO, type RunLimits } from "@/lib/api/types.generated";
+import { STOP_REASON_INFO, type RunLimits } from "@/lib/api/types";
 import { isStopReason } from "@/lib/derivations";
 
 // Minted through the control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.

@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { FailureLine } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { HEARTBEAT_INTERVAL_S } from "@/lib/api/types.generated";
+import { HEARTBEAT_INTERVAL_S } from "@/lib/api/types";
 import { fmtGap } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
@@ -17,7 +17,7 @@ export const TimeRay = memo(function TimeRay() {
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
   const { pick } = useSelectNode();
-  const { steps: served, head, olderFailure, hasMore, loadOlder } = useTimeRay();
+  const { steps: served, head, earlier, hasMore, loadOlder } = useTimeRay();
 
   const rootKey = viewedPath ? encodeCyclePath(viewedPath) : "";
   const steps = useMemo(() => raySteps(served, rootKey), [served, rootKey]);
@@ -64,7 +64,9 @@ export const TimeRay = memo(function TimeRay() {
             ‹ earlier
           </button>
         )}
-        <FailureLine failure={olderFailure} lead="Earlier history did not load." />
+        {earlier.status === "failed" && (
+          <FailureLine failure={earlier.failure} lead="Earlier history did not load." />
+        )}
         {head.status === "failed" && steps.length === 0 && (
           <FailureLine failure={head.failure} lead="Chronology unavailable." />
         )}

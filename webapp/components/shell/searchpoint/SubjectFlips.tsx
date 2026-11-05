@@ -1,8 +1,8 @@
-import type { PairwiseComparison } from "@/lib/api/types";
-import type { CellRow } from "@/lib/api";
-import { usePresetCells } from "@/lib/hard-samples";
+import type { PairwiseComparison, CellRow } from "@/lib/api/types";
+import { useCells } from "@/lib/hooks/useCells";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
-import { HoverCard } from "@/components/ui";
+import { FailureLine, HoverCard } from "@/components/ui";
 import { fmtSampleTag } from "@/lib/format";
 
 export function SubjectFlips({
@@ -84,27 +84,37 @@ function bySlot(cells: readonly CellRow[]): Map<number, CellRow> {
 
 // Mounted only while the card is open, so the two reads cost nothing until a hover asks.
 function FlipList({ keys, arms }: { keys: string[]; arms: FlipArms }) {
-  const was = usePresetCells(arms.before ? { candidateId: arms.before, scope: "cycle" } : null);
-  const now = usePresetCells(arms.after ? { candidateId: arms.after, scope: "cycle" } : null);
-  const item = new Map([...was.items, ...now.items].map((it) => [it.sample_key, it]));
-  const wasAt = bySlot(was.cells);
-  const nowAt = bySlot(now.cells);
+  const was = useCells(arms.before ? { candidateId: arms.before, scope: "cycle" } : null);
+  const now = useCells(arms.after ? { candidateId: arms.after, scope: "cycle" } : null);
+  const wasBody = shownData(was.read);
+  const nowBody = shownData(now.read);
+  const item = new Map(
+    [...(wasBody?.samples ?? []), ...(nowBody?.samples ?? [])].map((it) => [it.sample_key, it]),
+  );
+  const wasAt = bySlot(wasBody?.cells ?? []);
+  const nowAt = bySlot(nowBody?.cells ?? []);
   return (
-    <ul className="subject-flip-list">
-      {keys.map((key) => {
-        const it = item.get(key);
-        return (
-          <li key={key}>
-            <span className="subject-flip-id">
-              {it === undefined ? "#—" : fmtSampleTag(it.position)}
-            </span>
-            <span className="subject-flip-was">{(it && wasAt.get(it.position)?.predicted) || "∅"}</span>
-            <span aria-hidden="true">→</span>
-            <span className="subject-flip-now">{(it && nowAt.get(it.position)?.predicted) || "∅"}</span>
-            <span className="subject-flip-gt">want {it?.ground_truth ?? "—"}</span>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <FailureLine
+        failure={failureOf(was.read) ?? failureOf(now.read)}
+        lead="Could not read the flipped cells."
+      />
+      <ul className="subject-flip-list">
+        {keys.map((key) => {
+          const it = item.get(key);
+          return (
+            <li key={key}>
+              <span className="subject-flip-id">
+                {it === undefined ? "#—" : fmtSampleTag(it.position)}
+              </span>
+              <span className="subject-flip-was">{(it && wasAt.get(it.position)?.predicted) || "∅"}</span>
+              <span aria-hidden="true">→</span>
+              <span className="subject-flip-now">{(it && nowAt.get(it.position)?.predicted) || "∅"}</span>
+              <span className="subject-flip-gt">want {it?.ground_truth ?? "—"}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import type { DatasetItem } from "@/lib/api";
-import { HIT_SPREAD_LABELS } from "@/lib/api/types.generated";
-import { useHardSamples } from "@/lib/hard-samples";
-import { useCycleStream } from "@/lib/poll";
+import { type DatasetItem, HIT_SPREAD_LABELS } from "@/lib/api/types";
+import { useCells } from "@/lib/hooks/useCells";
+import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { RosterNote } from "@/components/measurements/RosterNote";
 import { Said } from "@/components/ui";
@@ -10,12 +10,16 @@ import { fmtSampleTag, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
 const ROWS = 3;
+const NO_SAMPLES: DatasetItem[] = [];
 
 type SampleBucket = Exclude<DatasetItem["hit_spread"], "unmeasured">;
 
 export function HardSamplesPreview() {
-  const { items, measuredCount, totals, failure } = useHardSamples();
-  const { dash, isLive } = useCycleStream();
+  const { read } = useCells({});
+  const body = shownData(read);
+  const items = useMemo(() => body?.samples ?? NO_SAMPLES, [body]);
+  const measured = body?.measured_samples ?? 0;
+  const { dash, isLive } = useViewedDashboard();
   const { open } = useWorkspace();
   const ranked = useMemo(() => items.map((it) => it.position), [items]);
 
@@ -34,7 +38,7 @@ export function HardSamplesPreview() {
 
   const byId = useMemo(() => new Map(items.map((it) => [it.position, it])), [items]);
 
-  if (failure !== null || items.length === 0) return <RosterNote />;
+  if (failureOf(read) !== null || items.length === 0) return <RosterNote />;
 
   const maxStart = Math.max(0, ids.length - ROWS);
   const follow = Math.min(maxStart, Math.max(0, cursor - 1));
@@ -116,21 +120,21 @@ export function HardSamplesPreview() {
           className="hsp-spread"
           onClick={() => open("samples")}
           title={
-            measuredCount > 0
-              ? `${measuredCount} of ${items.length} rows measured in this scope - open Samples`
+            measured > 0
+              ? `${measured} of ${items.length} rows measured in this scope - open Samples`
               : `${items.length} rows - open Samples`
           }
         >
-          {totals && measuredCount > 0 ? (
+          {body && measured > 0 ? (
             <>
-              <SpreadLine bucket="never" n={totals.never_hit} />
-              <SpreadLine bucket="partly" n={totals.partly_hit} />
-              <SpreadLine bucket="always" n={totals.always_hit} />
+              <SpreadLine bucket="never" n={body.never_hit} />
+              <SpreadLine bucket="partly" n={body.partly_hit} />
+              <SpreadLine bucket="always" n={body.always_hit} />
             </>
           ) : (
             <span className="hsp-of">
               {items.length} rows, none measured here yet
-              {totals?.mean_fitness != null ? ` · ${fmtUnit("rate", totals.mean_fitness)} elsewhere` : ""}
+              {body?.mean_fitness != null ? ` · ${fmtUnit("rate", body.mean_fitness)} elsewhere` : ""}
             </span>
           )}
         </button>

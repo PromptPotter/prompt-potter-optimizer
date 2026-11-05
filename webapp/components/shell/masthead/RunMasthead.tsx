@@ -6,8 +6,7 @@ import type { FamilyId } from "@/lib/address";
 import { StageFigures } from "@/components/shell/masthead/StageFigures";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
-import type { HierarchyCampaign } from "@/lib/api";
-import type { Figure as FigureType } from "@/lib/api/types.generated";
+import type { HierarchyCampaign, Figure as FigureType } from "@/lib/api/types";
 import { BRAND } from "@/lib/brand";
 import { cx } from "@/lib/cx";
 import { tagValue, type FigureKey } from "@/lib/derivations";
@@ -15,9 +14,9 @@ import { fmtAgo } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import { useStageView } from "@/lib/prefs/stage";
-import { useRegistry } from "@/lib/state/registry";
+import { useRegistry } from "@/lib/hooks/useRegistry";
 import { TERMS } from "@/lib/terms";
 import { useViewedListing, useWorkspace } from "@/lib/workspace";
 
@@ -102,7 +101,7 @@ function SubjectDoors() {
 }
 
 function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCampaign | null }) {
-  const { dash } = useCycleStream();
+  const { dash } = useViewedDashboard();
   const course = useViewedCourse();
   const served = useServedCriterion();
   const innerLeaf = path.length > 1 ? pathLeaf(path) : null;

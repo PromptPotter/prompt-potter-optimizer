@@ -8,20 +8,12 @@ import {
 } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
-import type { NodePrompt, ParamIntent } from "@/lib/api/types";
+import { type NodePrompt, type ParamIntent, STEER_OUTSIDE_INFO } from "@/lib/api/types";
 import { useRound } from "@/lib/hooks/useRound";
 import { useAuth } from "@/lib/state/auth";
 import { encodeCyclePath, pathRoot, type CyclePath } from "@/lib/ids";
-import { useDashboardAt } from "@/lib/poll";
-import { useEntry } from "@/lib/state/registry";
-import {
-  candidateSearchPoint,
-  phaseWalks,
-  liveCandidateSearchPoint,
-  permittedModels as permittedModelsOf,
-  searchPoint,
-} from "@/lib/derivations";
-import { STEER_OUTSIDE_INFO } from "@/lib/api/types.generated";
+import { useEntry } from "@/lib/hooks/useRegistry";
+import { phaseWalks, permittedModels as permittedModelsOf, searchPoint } from "@/lib/derivations";
 import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { Empty, FailureLine, ReadState, Said } from "@/components/ui";
@@ -40,15 +32,12 @@ export function SteerForkPanel({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const { dash } = useDashboardAt(path);
   const root = pathRoot(path);
   const rootCourse = useEntry(encodeCyclePath([root]));
   const isLive = phaseWalks(rootCourse?.level === "course" ? rootCourse.state.status.run_phase : undefined);
-  const { unfiled, doc } = useRound(path, candidate.round);
+  const round = useRound(path, candidate.round);
   const { me } = useAuth();
-  const seed = unfiled
-    ? liveCandidateSearchPoint(dash, candidate.arm)
-    : candidateSearchPoint(doc, candidate.arm);
+  const seed = round.seed(candidate.arm);
   const seedPrompts = seed?.origin_prompts ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
   // For the EDITOR only: the verdict reads the campaign's frozen narrowing, not these rows.
@@ -101,12 +90,15 @@ export function SteerForkPanel({
         then fork-continue optimizing from it. Edits are optional.
       </p>
 
-      {!seed && (
-        <Empty>
-          This searchpoint isn&apos;t loaded yet — its prompt appears here once it is, and
-          seeds the fork&apos;s origin.
-        </Empty>
-      )}
+      {!seed &&
+        (round.read.status === "failed" ? (
+          <FailureLine failure={round.read.failure} lead="Could not read this searchpoint." />
+        ) : (
+          <Empty>
+            This searchpoint isn&apos;t loaded yet — its prompt appears here once it is, and
+            seeds the fork&apos;s origin.
+          </Empty>
+        ))}
 
       <ReadState read={preview} subject="what the campaign permits for this steer">
         {(verdict) => {

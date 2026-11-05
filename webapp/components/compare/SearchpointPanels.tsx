@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
-import { CardFrame, DataTable, Empty, Loading, ReadState, type Column } from "@/components/ui";
+import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api/types";
+import { CardFrame, DataTable, Empty, ReadState, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { indexLineage } from "@/lib/derivations";
+import type { LineageIndex } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import { shortId } from "@/lib/format";
 import { shownData } from "@/lib/hooks/useRead";
-import { useLineageTree } from "@/lib/lineage";
+import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
 import { ChannelRestore, ConfigCell, pointKeyOf } from "./config-edit";
 
@@ -14,7 +14,7 @@ function configured(evidence: Evidence): SubjectReading[] {
   return evidence.subjects.filter((s) => s.config !== null);
 }
 
-function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: boolean }) {
+function ConfigPanels({ evidence }: { evidence: Evidence }) {
   const rows = configured(evidence);
 
   const differs = evidence.config_keys?.differs ?? [];
@@ -24,9 +24,7 @@ function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: bool
   const withoutConfig = evidence.subjects.filter((s) => s.config === null);
 
   if (rows.length === 0) {
-    return loading ? (
-      <Loading>Reading the searchpoints…</Loading>
-    ) : (
+    return (
       <Empty>
         None of these searchpoints recorded a configuration. A proposed arm resolves none, and
         nothing here reconstructs one.
@@ -177,7 +175,7 @@ function CampaignSpines({
 }) {
   const read = useLineageTree(campaignId, true);
   const root = shownData(read);
-  const index = useMemo(() => indexLineage(root), [root]);
+  const index = lineageIndexOf(root);
 
   const spines = useMemo(() => buildSpines(index, subjects), [index, subjects]);
 
@@ -238,7 +236,7 @@ function CampaignSpines({
 }
 
 function buildSpines(
-  index: ReturnType<typeof indexLineage>,
+  index: LineageIndex,
   subjects: readonly SubjectReading[],
 ): Spine[] {
   const nodes = new Map<string, HierarchyCandidate>();
@@ -279,17 +277,11 @@ function buildSpines(
   });
 }
 
-export function SearchpointCards({
-  evidence,
-  loading,
-}: {
-  evidence: Evidence;
-  loading: boolean;
-}) {
+export function SearchpointCards({ evidence }: { evidence: Evidence }) {
   return (
     <>
       <CardFrame title="How these searchpoints are configured" headingTag="h2">
-        <ConfigPanels evidence={evidence} loading={loading} />
+        <ConfigPanels evidence={evidence} />
       </CardFrame>
       <CardFrame title="How we got here" headingTag="h2">
         <p className="note-lede">

@@ -1,41 +1,30 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
 import {
   NEW_CHECKIN,
   useIngestFlow,
   type CheckinSubject,
   type IngestFlow,
 } from "@/lib/hooks/useIngestFlow";
-import type { DraftCampaignWire } from "@/lib/api";
+import type { DraftCampaignWire } from "@/lib/api/types";
 import { useWorkspace } from "@/lib/workspace";
 
-// ONE instance app-wide: a second `useIngestFlow` mints a second live server-side draft.
-interface IngestFlowValue {
-  flow: IngestFlow;
-  // The viewed check-in: a draft id, `NEW_CHECKIN` before one is minted, null while a run is viewed.
-  subject: CheckinSubject;
-  // The viewed check-in's draft once it is ready to author; null off one.
-  draft: DraftCampaignWire | null;
-  // `+ New campaign`: a fresh check-in's address.
-  compose: () => void;
-  // An unstarted campaign's address: the flow reads its draft in.
-  openDraft: (draftId: string) => void;
+// The viewed check-in: a draft id, `NEW_CHECKIN` before one is minted, null while a run is viewed.
+// Nothing viewed at all (no run yet, or none followed) is a fresh check-in too.
+export function useCheckinSubject(): CheckinSubject {
+  const { checkin, viewedPath } = useWorkspace();
+  return checkin !== null
+    ? (checkin.draftId ?? NEW_CHECKIN)
+    : viewedPath === null
+      ? NEW_CHECKIN
+      : null;
 }
 
-const IngestFlowContext = createContext<IngestFlowValue | null>(null);
+// ONE instance app-wide: a second `useIngestFlow` mints a second live server-side draft.
+const IngestFlowContext = createContext<IngestFlow | null>(null);
 
 export function IngestFlowProvider({ children }: { children: ReactNode }) {
-  const { checkin, viewedPath, navigate } = useWorkspace();
-  // Nothing viewed at all (no run yet, or none followed) is a fresh check-in too.
-  const subject: CheckinSubject =
-    checkin !== null ? (checkin.draftId ?? NEW_CHECKIN) : viewedPath === null ? NEW_CHECKIN : null;
+  const { navigate } = useWorkspace();
+  const subject = useCheckinSubject();
   // Read by the flow's continuations, which outlive the render that started them.
   const subjectRef = useRef(subject);
   useEffect(() => {
@@ -53,20 +42,18 @@ export function IngestFlowProvider({ children }: { children: ReactNode }) {
     },
     onCompose: () => navigate({ draftId: null }),
   });
-
-  const compose = useCallback(() => navigate({ draftId: null }), [navigate]);
-  const openDraft = useCallback((draftId: string) => navigate({ draftId }), [navigate]);
-
-  const draft = subject !== null && flow.phase.stage === "ready" ? flow.phase.draft : null;
-  const value = useMemo(
-    () => ({ flow, subject, draft, compose, openDraft }),
-    [flow, subject, draft, compose, openDraft],
-  );
-  return <IngestFlowContext.Provider value={value}>{children}</IngestFlowContext.Provider>;
+  return <IngestFlowContext.Provider value={flow}>{children}</IngestFlowContext.Provider>;
 }
 
-export function useIngest(): IngestFlowValue {
+export function useIngest(): IngestFlow {
   const v = useContext(IngestFlowContext);
   if (!v) throw new Error("useIngest must be used inside IngestFlowProvider");
   return v;
+}
+
+// The viewed check-in's draft once it is ready to author; null off one.
+export function useCheckinDraft(): DraftCampaignWire | null {
+  const flow = useIngest();
+  const subject = useCheckinSubject();
+  return subject !== null && flow.phase.stage === "ready" ? flow.phase.draft : null;
 }

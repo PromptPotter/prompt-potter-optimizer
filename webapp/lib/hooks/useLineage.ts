@@ -1,13 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import { postCommand } from "@/lib/api";
-import type { HierarchyCourse, SubtreeCampaign } from "@/lib/api";
+import type { HierarchyCourse, SubtreeCampaign, DisplayMetric } from "@/lib/api/types";
 import {
   candidatesAtPath,
   courseAt,
   nodeOverlays,
   primaryMetric,
 } from "@/lib/derivations";
-import type { DisplayMetric } from "@/lib/api/types.generated";
 import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";

@@ -1,4 +1,4 @@
-import { WORD_ORDER } from "./types.generated";
+import { WORD_ORDER } from "@/lib/api/types";
 
 // A served word table's keys in its display order, as scripts/build_ts_types.py exports it beside
 // each `shared/worded.py::Worded` (`WORD_ORDER`): an object's own order would put integer-like keys
