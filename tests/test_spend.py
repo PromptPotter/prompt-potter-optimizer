@@ -3600,7 +3600,6 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         return draft_dir
 
     draft = new_draft(
-        tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug="drafted",
         basis=DatasetBasis(dataset="drafted"),
@@ -3608,7 +3607,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         sample_preview=[],
         headers=[],
     )
-    stores.drafts.write_draft(draft.draft_id, draft.to_disk())
+    stores.drafts.write_draft(draft)
     undrafted = account_usd()
     draft_dir = spent_draft(draft.draft_id, 0.04)
     with_draft = account_usd()

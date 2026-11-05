@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { connectorReachability } from "../connector-state";
+import { connectorReachability, oneCallNode } from "../connector-state";
 import type { BackendHealthResponse } from "@/lib/api";
+import type { PipelineView } from "@/lib/types";
 import { BACKEND_REACHABILITY_INFO } from "@/lib/api/types.generated";
 
 const health = (status: BackendHealthResponse["status"]): BackendHealthResponse => ({
@@ -32,5 +33,24 @@ describe("connectorReachability", () => {
         stateLabel: BACKEND_REACHABILITY_INFO[s].label,
       });
     }
+  });
+});
+
+// A phase is drawn ahead of the chain: the one-call editor opens the served node, never the first.
+const PHASED: PipelineView = {
+  nodes: [
+    { id: "input", description: "", kind: "io", tier: 0, rank: -1 },
+    { id: "ph", description: "", kind: "llm", tier: 0, rank: 0 },
+    { id: "llm_only", description: "", kind: "llm", tier: 0, rank: 1 },
+    { id: "output", description: "", kind: "io", tier: 0, rank: 2 },
+  ],
+  edges: [],
+  cycle: [],
+};
+
+describe("oneCallNode", () => {
+  it("opens the served one node past a phase drawn first, and none on a longer chain", () => {
+    expect(oneCallNode({ single_node: "llm_only", view: PHASED })?.id).toBe("llm_only");
+    expect(oneCallNode({ single_node: null, view: PHASED })).toBeUndefined();
   });
 });

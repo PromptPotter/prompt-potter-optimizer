@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.mint import ConfigDriftError
-from promptpotter.application.pipeline_resolve import fork_preview, recorded_schema
+from promptpotter.application.pipeline_resolve import admit_steer, fork_preview
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
     ForkCyclePayload,
@@ -44,8 +44,8 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine
 
     from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -131,18 +131,20 @@ async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> He
     return held
 
 
-def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[str, Any]]:
+def _steer_overlay(specs: list[str], stores: Stores, hop: CycleHop) -> dict[str, dict[str, Any]]:
     """A value is read in the param's DECLARED type, as the browser coerces (`node-config.ts::coerce`): a string stays text, anything else is JSON."""
-    overlay: dict[str, dict[str, Any]] = {}
+    steers: list[tuple[str, str, str]] = []
     for spec in specs:
         key, sep, raw = spec.partition("=")
         node, dot, param = key.strip().partition(".")
         if not sep or not dot or not node or not param:
             raise SystemExit(f"ERROR: --steer expects NODE.PARAM=VALUE, got {spec!r}")
+        steers.append((node, param, raw))
+    schema = admit_steer(stores, hop, [node for node, _param, _raw in steers])
+    overlay: dict[str, dict[str, Any]] = {}
+    for node, param, raw in steers:
         declared_node = schema.get_node(node)
-        if declared_node is None:
-            names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
-            raise SystemExit(f"ERROR: --steer names no node called {node!r}; nodes: {names}")
+        assert declared_node is not None, "admit_steer admits only a node the run holds"
         kind = declared_node.param_types.get(param)
         if kind is None:
             known = ", ".join(sorted(declared_node.param_types)) or "(none)"
@@ -162,7 +164,7 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
 
 async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
-    overlay = _steer_overlay(args.steer, recorded_schema(ctx.store, ctx.hop))
+    overlay = _steer_overlay(args.steer, ctx.store, ctx.hop)
     preview = fork_preview(ctx.store, ctx.campaign_id, overlay)
     disallowed = preview.steer != "clean"
     if disallowed:

@@ -27,6 +27,7 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     ManifestNodeOverlay,
@@ -412,7 +413,8 @@ class InnerCells:
 
     @property
     def chain(self) -> list[str]:
-        return list(dict.fromkeys(n for inner in self.optimizers for n in _chain(inner)))
+        """The outer chain `pipeline` serves, read off its parsed schema, never re-derived."""
+        return list(parse_pipeline_response(self.pipeline()).active_steps)
 
     def terminal(self, cell: Seat) -> str:
         return _terminal(self.held(cell).optimizer)
@@ -432,6 +434,8 @@ class InnerCells:
             nests.setdefault(cell.optimizer.plan.measurement, []).append(name)
         nodes: dict[str, dict[str, Any]] = {}
         walks: dict[str, list[str]] = {}
+        # Every inner call is a lever: a walk ahead of `default`, or an escalation's own phase.
+        phases: list[str] = []
         for inner in self.optimizers:
             for node in inner.schema.declared_nodes:
                 if owners[node.name] is not inner:
@@ -459,13 +463,20 @@ class InnerCells:
                 else:
                     continue
                 nodes[node.name] = declared
-            for name, steps in inner.schema.pipelines.items():
+            escalations = {
+                phase: [node for node, of in inner.phase_of.items() if of == phase]
+                for phase in inner.phase_of.values()
+            }
+            for name, steps in {**inner.schema.pipelines, **escalations}.items():
                 walk = walks.setdefault(name, [])
                 walk += [n for n in steps if n in nodes and n not in walk]
+            phases += [p for p in (*inner.schema.phase_pipelines, *escalations) if p not in phases]
+        pipelines = {k: v for k, v in walks.items() if v}
         return {
             "name": "+".join(inner.name for inner in self.optimizers),
             "nodes": nodes,
-            "pipelines": {k: v for k, v in walks.items() if v},
+            "pipelines": pipelines,
+            "phase_pipelines": [p for p in phases if p in pipelines],
         }
 
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import Field, JsonValue
 
 from promptpotter.application.datasets.authored import with_optimization
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
+from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.free_tier import free_fence
@@ -47,7 +47,7 @@ from promptpotter.application.pipeline_resolve import (
     draft_served,
 )
 from promptpotter.domain.campaign import Optimize
-from promptpotter.domain.checkin_draft import DatasetBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt
@@ -81,7 +81,7 @@ class CheckinStart:
     verb: ClassVar[str] = "start-checkin"
 
     claim: DraftClaim
-    # The queue's label alone (`DraftCampaign.dataset_name`); every decision reads the draft.
+    # The queue's label alone (`DraftFile.dataset_name`); every decision reads the draft.
     dataset_name: str
     budget: Budget
 
@@ -109,7 +109,7 @@ class CheckinStart:
 
 def _land_draft(
     stores: Stores,
-    draft: DraftCampaign,
+    draft: DraftFile,
     pipeline: DraftPipeline,
     overlays: Sequence[Mapping[str, JsonValue]],
 ) -> dict[str, NodePrompt] | None:
@@ -148,7 +148,7 @@ def _land_draft(
             fence=free_fence(stores, basis.connector),
             shelf=stores.block_packs,
         )
-    commit_upload_definition(stores, draft, basis, source=source, chain=chain)
+    commit_upload_definition(stores, draft, source=source, pipeline=pipeline)
     return None
 
 
@@ -156,7 +156,7 @@ def _land_draft(
 class OpenedCheckin:
     """A Start's draft past its landing, with the session and config every arm of it declares on."""
 
-    draft: DraftCampaign
+    draft: DraftFile
     session: Session
     declared: CampaignConfig
     origin_override: dict[str, NodePrompt] | None

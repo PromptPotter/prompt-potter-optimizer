@@ -17,7 +17,8 @@ import {
   type ConfigMode,
   type ConfigRow,
 } from "@/lib/derivations";
-import type { NodeSchemaReading, PipelineStatus } from "@/lib/types";
+import { readGap, type ReadResult } from "@/lib/hooks/useRead";
+import type { NodeSchemaReading } from "@/lib/types";
 
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
@@ -38,7 +39,7 @@ export function NodeConfigEditor(props: {
 }) {
   const {
     mode,
-    schema: { status, config: declared, isSingleNode },
+    schema: { read, config: declared, singleNode },
     overlay,
     node,
     readOnly,
@@ -68,11 +69,11 @@ export function NodeConfigEditor(props: {
 
   const drawn = (r: ConfigRow) => r.kind !== "prompt" && !keysAskedElsewhere?.includes(r.key);
   if (!rows.some(drawn)) {
-    return <EmptyConfig status={status} schema={declared} node={node} />;
+    return <EmptyConfig read={read} schema={declared} node={node} />;
   }
 
   const persist = (next: ConfigRow[], marks: ReadonlySet<string>) => {
-    onApply?.(nodeOverlayPatch(overlay, nodeId, next));
+    onApply?.(nodeOverlayPatch(nodeId, next));
     for (const n of new Set(next.map((r) => r.node))) {
       onNarrowing?.(n, rowIntents(next.filter((r) => r.node === n)));
     }
@@ -176,7 +177,7 @@ export function NodeConfigEditor(props: {
         );
       })}
 
-      {!isSingleNode && freeValued.length > 0 ? (
+      {singleNode === null && freeValued.length > 0 ? (
         <div className="config-row config-node-row">
           <span className="config-label">Tuning</span>
           <button
@@ -208,31 +209,32 @@ export function NodeConfigEditor(props: {
 }
 
 function EmptyConfig({
-  status,
+  read,
   schema,
   node,
 }: {
-  status: PipelineStatus;
+  read: ReadResult<unknown>;
   schema: Record<string, NodeConfigParam[]> | null;
   node: string | undefined;
 }) {
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
   const declared = node !== undefined ? scoped : Object.values(schema ?? {}).flat();
   const subject = node !== undefined ? "node" : "pipeline";
-  if (typeof status === "object") {
+  const gap = readGap(read);
+  if (gap?.status === "failed") {
     return (
       <div className="config-editor">
         <FailureLine
-          failure={status}
+          failure={gap.failure}
           lead="The campaign's pipeline could not be read, so what this node runs is unknown — not empty."
         />
       </div>
     );
   }
   const said =
-    status === "loading"
+    gap?.status === "loading"
       ? "Resolving what this campaign runs…"
-      : status === "unbound"
+      : gap?.status === "idle"
           ? "No campaign bound, so there is no resolved pipeline to read this node from."
           : node !== undefined && schema !== null && scoped === undefined
             ? `The served pipeline declares no node called ${node}.`

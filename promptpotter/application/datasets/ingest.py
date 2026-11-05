@@ -5,17 +5,11 @@ from typing import Any
 
 from promptpotter.application.account import record_upload
 from promptpotter.application.datasets.authored import read_authored_dataset
-from promptpotter.application.datasets.draft_build import (
-    DraftCampaignWire,
-    draft_wire,
-    overlay_from_campaign_config,
-)
+from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
-    DraftCampaign,
     default_slug_from_filename,
     new_draft,
-    scoring_choice,
 )
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.prompts import origin_prompts
@@ -31,16 +25,19 @@ from promptpotter.application.datasets.tabular_ingest import (
     read_tabular,
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
-from promptpotter.application.pipeline_resolve import cycle_config, draft_served
+from promptpotter.application.pipeline_resolve import (
+    ServedPipeline,
+    cycle_config,
+    draft_pipeline,
+    draft_served,
+)
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
+from promptpotter.domain.campaign_config import merge_config_layers
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.dataset_name import validate_dataset_name
-from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.pipeline_parsing import merge_node_blocks
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import ConflictError, NotFoundError
@@ -77,8 +74,8 @@ def _first_blank_rows(headers: list[str], rows: list[dict[str, str]]) -> dict[st
     return blank
 
 
-async def _kept(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
-    wire = draft_wire(stores, draft, await draft_served(stores, draft))
+def _kept(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftCampaignWire:
+    wire = draft_wire(stores, draft, served)
     save_checkin_draft(stores, draft)
     return wire
 
@@ -116,7 +113,6 @@ async def ingest_draft(
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
-        tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=base_slug,
         basis=UploadBasis(connector=DEFAULT_CONNECTOR, kept=kept.name),
@@ -127,7 +123,7 @@ async def ingest_draft(
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
         first_blank_row=_first_blank_rows(list(table.headers), list(table.rows)),
     )
-    return await _kept(stores, draft)
+    return _kept(stores, draft, await draft_served(stores, draft))
 
 
 async def draft_from_dataset(
@@ -145,19 +141,19 @@ async def draft_from_dataset(
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description or None
-    matcher, dials = scoring_choice(cc.scoring)
-    pipeline_overlay = authored.pipeline_nodes
+    # The dataset's block is the draft's basis: a reopened origin sets only what its root cycle
+    # ran its nodes with, its Mode, overlay and narrowing as the root's seed laid them.
+    config: dict[str, Any] = {}
     if origin_campaign is not None:
-        # A merge, not a replacement: the origin's declaration names only what its layers set.
-        pipeline_overlay = merge_node_blocks(
-            pipeline_overlay,
-            overlay_from_campaign_config(cycle_config(stores, origin_campaign, None).config),
+        root = cycle_config(stores, origin_campaign, origin_campaign.root_hop)
+        config = merge_config_layers(
+            root.config.model_dump(
+                mode="json",
+                exclude_unset=True,
+                include={"exclude_nodes", "pipeline_overlay", "optimizer_narrowing"},
+            ),
+            {"pipeline_overlay": root.seed_overlay} if root.seed_overlay else {},
         )
-
-    authored_prompts = {
-        node: dict(prompt.fields)
-        for node, prompt in origin_prompts(dataset_dir, authored.active_steps).items()
-    }
 
     slug = dataset_name.lower()
     # The check-in model reads the preview's labels, so no bench row may reach it.
@@ -167,7 +163,6 @@ async def draft_from_dataset(
     ]
 
     draft = new_draft(
-        tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug=slug,
         basis=DatasetBasis(dataset=dataset_name),
@@ -179,34 +174,27 @@ async def draft_from_dataset(
     draft = draft.apply_resolution(
         values={
             "raw_task_description": task,
-            "scoring_matcher": matcher,
-            "scoring_dials": dials,
-            # Not validated: a dataset's ceiling may exceed the bound on the operator edit path.
-            "optimization_overrides": {
-                **OptimizationOverrides().model_dump(mode="json"),
-                "budget": Budget(rounds=cc.optimization.budget.rounds).model_dump(mode="json"),
-                "halt_at_accuracy": cc.optimization.halt_at_accuracy,
-                "optimizer": cc.optimization.optimizer,
-                "arm_gate": cc.optimization.arm_gate,
-                "nodes": {n: o.model_dump(mode="json") for n, o in cc.optimization.nodes.items()},
-            },
-            "pipeline_overlay": pipeline_overlay,
-            "origin_prompts": authored_prompts,
-            "pipeline_steps": authored.active_steps,
+            "config": config,
             "candidate_library": authored.candidate_library,
         },
         provenance={} if task is None else {"task_description": Provenance.CONFIRMED},
     )
-    if overrides:
-        draft = draft.patch(**overrides)
-    return await _kept(stores, draft)
+    # The origin prompts of the chain the draft runs, as run init lays them on its served chain.
+    served = await draft_served(stores, draft)
+    chain = draft_pipeline(stores, draft, served).chain.active_steps
+    on_file = {
+        node: dict(prompt.fields) for node, prompt in origin_prompts(dataset_dir, chain).items()
+    }
+    # One patch, the overrides winning: an origin's seed stands over the dataset's `origin.yaml`.
+    draft = draft.patch(**{"origin_prompts": on_file, **(overrides or {})})
+    return _kept(stores, draft, served)
 
 
 async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignWire:
     campaign = canonical_origin_campaign(stores, origin_id)
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
-    overrides: dict[str, Any] = {"reused_origin_id": origin_id}
+    overrides: dict[str, Any] = {}
     seed = cycle_config(stores, campaign, campaign.root_hop).origin
     if seed is not None:
         overrides["origin_prompts"] = {

@@ -13,7 +13,7 @@ acting.
 - **Left by the upload check-in's 422** (`25be69eac` cut rows on every draft read; fixed 2026-11-02 by
   gating `startability.py::draft_samples` on `origin_readiness.py::columns_confirmed`):
   - **"Run the resolver now" lives three times**: webapp `useIngestFlow` (`advance`, `land`,
-    `submitContext`), CLI `new.py::_hold_checkin`, `DraftCampaign.resolution_pending`. Action: the served flag
+    `submitContext`), CLI `new.py::_hold_checkin`, `DraftFile.resolution_pending`. Action: the served flag
     alone. **Rides with:** the host assistant ([`host-assistant.md`](host-assistant.md)).
   **Re-test:** `git grep -n "void runCheckin" -- webapp/lib/hooks/useIngestFlow.ts` is one line, under `resolution_pending`.
   - **A Start's check-in stops at `queued` / `starting`**: the mint closes the draft, so its read
@@ -110,23 +110,6 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   names; `useChannelModel`'s bag and the providers go; one type door. The selection half
   (`SelectionContext.tsx`, `useCandidatesModel`, the workspace's keying) is U5's, `useRemoteModel` B's.
   **Re-test:** `git grep -c "Provider value=" -- webapp/lib`.
-- **EN: a draft spells its config flat; the pipeline answer is flattened, re-packed and edited twice.**
-  `domain/checkin_draft.py::DraftFile`, `domain/draft_edit.py::EditDraftPatch` and `draft_campaign.py::DraftCampaign`
-  each hold the declaration as five flat fields (`scoring_matcher`, `scoring_dials`, `pipeline_overlay`,
-  `pipeline_steps`, `optimization_overrides`). Two functions rebuild a `CampaignConfig` from them, one per
-  basis; the scoring conversion loses a pinned formula's anchors both ways; one bag holds node config and
-  narrowing, split by `isinstance`; the kept steps are a list turned into exclusions. Nothing varies:
-  `authored.py::with_optimization` already lays a delta over a config. `draft_build.py::draft_wire`
-  flattens it into the draft; `useConnector.ts::draftConnector` re-packs it into
-  `types/connector.ts::ConnectorView` beside a second read-state vocabulary, `types/connector.ts::PipelineStatus`.
-  Two editors edit one config row with two parsers (`node-config.ts::parseKnob` beside
-  `node-config.ts::coerce`), behind `NodeSurface`, `NodeConfigEditor` and `PromptWithLibrary` forwarding
-  to each other. Action: the draft holds one partial `CampaignConfig` laid over its basis, and the patch
-  addresses config paths; the five fields and their converters go, absorbing the `DraftCampaign` twin and
-  the optimizer-switch row of `draft_patch.py`; `draft.json` is run data, so it is wiped. The draft carries
-  the pipeline response whole; `ConnectorView` and `PipelineStatus` go and `useConnector` returns the read
-  result. The one node editor, with the strict parser, is U1b's. **Re-test:**
-  `git grep -c "scoring_dials" -- promptpotter`; `git grep -n "interface ConnectorView" -- webapp`.
 - **ED: nothing says who a dataset or a word is for.** The wheel ships every definition under
   `assets/datasets/` though only `email-tagging` and the hub-backed `justlogic` cuts are startable product;
   `promptpotter-self` (the L4 panel and the browser-walk fixture) is research and test tooling, and an
@@ -736,9 +719,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   model's `TypeAdapter`. **Rides with:** § The engine swept by shape B for `evidence/read.py` (its
   `campaign.json` reads, already an entry there), D for the three `llm/` and `tracing/` readers.
   **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
-- **`draft_campaign.py::DraftCampaign` is a dataclass twin of `domain/checkin_draft.py::DraftFile`**
-  plus its address, held equal by an import-time assert. Action: one frozen model that `draft.json`
-  holds, the address beside it. **Re-test:** `git grep -n "class DraftCampaign" -- promptpotter`.
 - **`cycle_addressing.py::ActiveSessionResponse` serves two nullable ids for `CycleHop | None`**, so
   the webapp re-tests a pair. Action: one nullable `hop`. **Rides with:** the next webapp pass.
   **Re-test:** `git grep -n "class ActiveSessionResponse" -A4 -- promptpotter`.
@@ -1036,7 +1016,7 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 word's `git grep -c` for that sense is 0.
 
 - **`candidate_library` → `answer_terms`** (the target's answer-term list, beside
-  `DraftCampaign.answer_space`), and `PoolSource.LIBRARY` → `PACKS`: the route
+  `DraftFile.answer_space`), and `PoolSource.LIBRARY` → `PACKS`: the route
   `/datasets/draft/candidate-library`, `EditDraftPatch` and the dataset file move, and
   `shared/hashing.py::content_hash`'s key re-keys root ids.
 - **"course" → "cycle" in the served and doc layer** (`HierarchyCourse`, `level: "course"`,
@@ -1057,7 +1037,7 @@ word's `git grep -c` for that sense is 0.
 - **The READING node → reader node** in `resolved_schemas.json`'s layout prose: prompt text, so a
   re-measure.
 - **draft vs check-in, by rule, no rename**: "check-in" is the resolver-and-gates process, "draft" the
-  object (`DraftCampaign`); owed to root `CLAUDE.md`'s Vocabulary row.
+  object (`DraftFile`); owed to root `CLAUDE.md`'s Vocabulary row.
 
 ## Open — from the structure pass
 
@@ -1141,8 +1121,6 @@ word's `git grep -c` for that sense is 0.
 - **A member knob's `NodeConfigParam` serves no estimand**, which the config map shows for every campaign
   knob (`application/knobs.py`), so the setup screen cannot say what moving one moves.
 - **Seen building the setup screen**:
-  - `OptimizerSetupInner` reads the optimizer from the draft and from `useConnector().optimizer`, which
-    are one value through two doors.
   - An edited optimizer-prompt field cannot be reset: `OptimizerNodePrompt` serves no template text and
     `campaign_config._merge_dicts` keeps a null as a value.
   - Smaller: `title=` used as teaching prose in `NodeDetail` and `OptimizerCard`;
@@ -1183,9 +1161,6 @@ word's `git grep -c` for that sense is 0.
     `routers/datasets/ingest.py` (`candidate-library`, `from-column`), so `catalogue.py::bind_surface`
     admits N routes per command where a read gets one. Action: one route per kind, the form doors a
     form body on it, as `ingest-upload` is. **Re-test:** `git grep -n "name=CommandKind.EDIT_DRAFT_CAMPAIGN" -- promptpotter`.
-  - `application/datasets/draft_patch.py` drops `nodes` on an optimizer switch, the rule
-    `domain/campaign_config.py::merge_config_layers` already applies: one rule spelled twice. Action:
-    the merge alone. **Re-test:** `git grep -n 'pop("nodes"' -- promptpotter/application/datasets`.
 - **Seen building the host coupon** (2026-10-29):
   - Every connector declares its cells the box's to pay (`Connector.cell_payer`): none can send on the
     account's key, so an own-key account past its coupon is refused any run with a backend. Action: a

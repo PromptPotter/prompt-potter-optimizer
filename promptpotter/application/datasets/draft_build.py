@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    default_campaign_config,
+    DraftCriterion,
+    draft_criterion,
     owned_draft,
 )
 from promptpotter.application.datasets.origin_readiness import (
@@ -31,22 +31,17 @@ from promptpotter.application.pipeline_resolve import (
     draft_served,
     resolve_pipeline_for_draft,
 )
-from promptpotter.application.pipeline_responses import OptimizerSetup
+from promptpotter.application.pipeline_responses import CampaignPipelineResponse
 from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.checkin_draft import OriginResolution, SetupStep, UploadBasis
-from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
+from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep
+from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
-    CapabilityMenu,
-    ManifestNodeOverlay,
-    NodeConfigParam,
-    NodeOutputSchema,
-    NodeReach,
+    ONE_CALL_NODE,
     PipelineDependency,
-    PipelineView,
     dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
@@ -62,6 +57,31 @@ class DraftDependency(PipelineDependency):
     fulfilled: bool
 
 
+class DraftChains(StrictModel):
+    """The Modes a check-in picks between out of the chain its basis OFFERS, each as the
+    `config.exclude_nodes` that runs it: an edit sends one back whole, deriving none."""
+
+    running: Literal["one_call", "research"] = Field(
+        description=f"The Mode the active chain is: `one_call` where it runs `{ONE_CALL_NODE}` alone."
+    )
+    one_call: list[str] | None = Field(
+        description=f"Runs `{ONE_CALL_NODE}` alone; null where the basis offers no such node."
+    )
+    research: list[str] | None = Field(
+        description=f"Runs the offered chain less `{ONE_CALL_NODE}`; null where that runs no step."
+    )
+
+
+def draft_chains(offered: list[str], single_node: str | None) -> DraftChains:
+    """*offered* is `DraftPipeline.offered`, the one Mode offer; *single_node* the chain's one."""
+    research = [n for n in offered if n != ONE_CALL_NODE]
+    return DraftChains(
+        running="one_call" if single_node == ONE_CALL_NODE else "research",
+        one_call=research if ONE_CALL_NODE in offered else None,
+        research=[n for n in offered if n == ONE_CALL_NODE] if research else None,
+    )
+
+
 class DraftCampaignWire(StrictModel):
     """A check-in's draft as every check-in route answers it; Start mints its campaign.
 
@@ -75,23 +95,24 @@ class DraftCampaignWire(StrictModel):
         "the column mapping, which is empty until confirmed: render against `headers`."
     )
     n_samples: int
-    connector: str
-    scoring_matcher: str
     scoring_matchers: list[str] = Field(
         description="The matchers a check-in may pick between — the compiler's own set."
     )
-    scoring_dials: str = Field(
-        description="`term=weight` dials joined by commas; empty scores correctness alone."
+    criterion: DraftCriterion = Field(
+        description="`config.scoring` read as the matcher and dials a check-in picks; no client "
+        "rebuilds a scoring block from them."
     )
-    optimization_overrides: OptimizationOverrides = Field(
-        description="The draft's overrides, its `budget` the one Start declares: "
-        "`pipeline_resolve.draft_pipeline`'s config, a free account's tier laid last."
+    config: CampaignConfig = Field(
+        description="What Start declares: the draft's partial config laid over its basis "
+        "(`pipeline_resolve.draft_pipeline`'s config, a free account's tier laid last). An "
+        "`EditDraftPatch.config` addresses it by the same paths; an upload's `pipeline_overlay` "
+        "is its definition's, read in `pipeline`, never here."
     )
-    optimizer_setup: OptimizerSetup = Field(
-        description="The optimizer as this draft's config runs it, as a campaign serves it."
+    pipeline: CampaignPipelineResponse = Field(
+        description="`GET /campaigns/{id}/pipeline`'s answer, computed from the draft: a "
+        "pre-commit check-in has no dataset dir, so its pipeline is never fetched by slug."
     )
     raw_task_description: str | None = Field(description="The task; null until one is set.")
-    pipeline_overlay: dict[str, Any]
     headers: list[str]
     column_query: str | None = Field(description="The input header; null until one is set.")
     column_ground_truth: str | None = Field(description="The target header; null until one is set.")
@@ -108,19 +129,9 @@ class DraftCampaignWire(StrictModel):
     created_at: str
     active_steps: list[str] = Field(
         description="The pipeline this draft runs. Who may move a node's axes is "
-        "`node_config_schema`'s answer alone."
+        "`pipeline.node_config_schema`'s answer alone."
     )
-    pipeline_view: PipelineView | None = Field(
-        description="`GET /campaigns/{id}/pipeline`'s answer, computed from the draft: a "
-        "pre-commit check-in has no dataset dir, so its pipeline is never fetched by slug."
-    )
-    node_config_schema: dict[str, list[NodeConfigParam]]
-    node_output_schema: dict[str, NodeOutputSchema | None]
-    reach: dict[str, NodeReach]
-    is_single_node: bool
-    model_capabilities: CapabilityMenu = Field(
-        description="A null `reasoning_efforts` is UNKNOWN, never unsupported."
-    )
+    chains: DraftChains
     dependencies: list[DraftDependency]
     readiness: OriginReadiness = Field(
         description="The server's mint gate, recomputed on every draft response."
@@ -139,51 +150,16 @@ class DraftCampaignWire(StrictModel):
     )
 
 
-def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
-    """The INVERSE of ``draft_campaign.split_overlay``: the pair must lose nothing."""
-    overlay: dict[str, Any] = {}
-    for node, block in config.pipeline_overlay.items():
-        if isinstance(block, dict) and block:
-            overlay.setdefault(node, {})["config"] = dict(block)
-    for node, narrowing in config.optimizer_narrowing.items():
-        optimizer: dict[str, Any] = {}
-        # `[]` is a real answer (every axis closed), so `is not None`, never truthiness.
-        if narrowing.param_keys is not None:
-            optimizer["param_keys"] = list(narrowing.param_keys)
-        if narrowing.prompt_fields_held:
-            optimizer["prompt_fields_held"] = list(narrowing.prompt_fields_held)
-        if narrowing.param_allowed_values:
-            optimizer["param_allowed_values"] = {
-                k: list(v) for k, v in narrowing.param_allowed_values.items()
-            }
-        if optimizer:
-            overlay.setdefault(node, {})["optimizer"] = optimizer
-    return overlay
-
-
-def _dependencies(connector: str, active: list[str]) -> tuple[PipelineDependency, ...]:
+def _dependencies(connector: str, running: set[str]) -> tuple[PipelineDependency, ...]:
+    """Off the draft's running set: a phase's input is needed as a chain node's is."""
     roles = connectors.CONNECTORS.get(connector).node_roles
-    return dependencies_from_node_roles({n: r for n, r in roles.items() if n in active})
+    return dependencies_from_node_roles({n: r for n, r in roles.items() if n in running})
 
 
-def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool:
+def _dependency_fulfilled(dep: PipelineDependency, draft: DraftFile) -> bool:
     if dep.kind == CANDIDATE_LIBRARY:
         return bool(draft.candidate_library)
     return False
-
-
-def _wire_overrides(draft: DraftCampaign, declared: Budget) -> OptimizationOverrides:
-    """Constructed, not validated: a reused dataset's ``budget.rounds`` may exceed the edit bound."""
-    held = draft.optimization_overrides
-    return OptimizationOverrides.model_construct(
-        budget=declared,
-        halt_at_accuracy=held["halt_at_accuracy"],
-        optimizer=held["optimizer"],
-        nodes={
-            node: ManifestNodeOverlay.model_validate(overlay)
-            for node, overlay in held["nodes"].items()
-        },
-    )
 
 
 _TITLE_MAX_CHARS = 72
@@ -197,7 +173,10 @@ def _task_title(task: str | None) -> str | None:
     return title if 0 < len(title) <= _TITLE_MAX_CHARS else None
 
 
-def _recap(draft: DraftCampaign, connector: str, rounds: int | None) -> str:
+def _recap(
+    draft: DraftFile, connector: str, config: CampaignConfig, criterion: DraftCriterion
+) -> str:
+    rounds = config.optimization.budget.rounds
     title = _task_title(draft.raw_task_description)
     lead = (
         f"evolve a prompt for “{title}”"
@@ -213,12 +192,12 @@ def _recap(draft: DraftCampaign, connector: str, rounds: int | None) -> str:
     return (
         f"PromptPotter will {lead} — "
         f"running {connector}, "
-        f"scoring by {draft.scoring_matcher}, "
+        f"scoring by {criterion.matcher or 'its formula'}, "
         f"{over}."
     )
 
 
-async def read_draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
+async def read_draft_wire(stores: Stores, draft: DraftFile) -> DraftCampaignWire:
     return draft_wire(stores, draft, await draft_served(stores, draft))
 
 
@@ -231,7 +210,7 @@ class DraftReopenResponse(StrictModel):
     )
     resolution_pending: bool = Field(
         description="Its task is on file but no resolver turn ever set it up "
-        "(`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
+        "(`checkin_draft.py::DraftFile.resolution_pending`): the one case a reopen sends `resolve-origin`, so a "
         "revisit never re-buys a turn or re-proposes over authored prompts."
     )
     start: LaunchStage | None = Field(
@@ -252,25 +231,22 @@ async def reopen_draft(stores: Stores, draft_id: str) -> DraftReopenResponse:
     )
 
 
-def draft_wire(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> DraftCampaignWire:
-    resolution = resolve_pipeline_for_draft(stores, draft, served)
+def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftCampaignWire:
     pipeline = draft_pipeline(stores, draft, served)
     declared = pipeline.config.optimization.budget
     active = list(pipeline.chain.active_steps)
     refusal, launch = _launch(stores, draft, declared)
+    criterion = draft_criterion(pipeline.config.scoring)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,
         sample_preview=[dict(row) for row in draft.sample_preview],
         n_samples=draft.n_samples,
-        connector=served.connector,
-        scoring_matcher=draft.scoring_matcher,
         scoring_matchers=sorted(MATCHERS),
-        scoring_dials=draft.scoring_dials,
-        optimization_overrides=_wire_overrides(draft, declared),
-        optimizer_setup=resolution.optimizer_setup,
+        criterion=criterion,
+        config=pipeline.config,
+        pipeline=resolve_pipeline_for_draft(stores, draft, served),
         raw_task_description=draft.raw_task_description,
-        pipeline_overlay=dict(draft.pipeline_overlay),
         headers=list(draft.headers),
         column_query=draft.column_query,
         column_ground_truth=draft.column_ground_truth,
@@ -279,25 +255,22 @@ def draft_wire(stores: Stores, draft: DraftCampaign, served: ServedPipeline) -> 
         candidate_library_size=len(draft.candidate_library),
         created_at=draft.created_at,
         active_steps=active,
-        pipeline_view=resolution.view,
-        node_config_schema=resolution.node_config_schema,
-        node_output_schema=resolution.node_output_schema,
-        reach=resolution.reach,
-        is_single_node=resolution.is_single_node,
-        model_capabilities=resolution.model_capabilities,
+        chains=draft_chains(pipeline.offered, pipeline.chain.single_node),
         dependencies=[
             DraftDependency(**dep.model_dump(), fulfilled=_dependency_fulfilled(dep, draft))
-            for dep in _dependencies(served.connector, active)
+            for dep in _dependencies(
+                served.connector, {n.name for n in pipeline.chain.declared_nodes}
+            )
         ],
         readiness=origin_readiness(draft, pipeline),
         launch_refusal=refusal,
-        recap=_recap(draft, served.connector, declared.rounds),
+        recap=_recap(draft, served.connector, pipeline.config, criterion),
         setup_schema=setup_schema(draft, launch=launch, declared=declared),
     )
 
 
 def _launch(
-    stores: Stores, draft: DraftCampaign, declared: Budget
+    stores: Stores, draft: DraftFile, declared: Budget
 ) -> tuple[LaunchRefusal | None, Budget]:
     """``admit_launch``'s refusal of this Start, then the most it may declare."""
     wallet = account_wallet(stores)
@@ -320,7 +293,7 @@ def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
     return {**prop, "title": title}
 
 
-def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
+def _column(draft: DraftFile, field_key: str, title: str) -> dict[str, Any]:
     said = draft.field_provenance.get(field_key, Provenance.UNSET)
     return {
         "type": "string",
@@ -345,9 +318,9 @@ def _blank_binds(declared: Budget) -> str:
     return f"Blank: the campaign's {money_text(declared)} ceiling binds this launch."
 
 
-def setup_schema(draft: DraftCampaign, *, launch: Budget, declared: Budget) -> dict[str, Any]:
+def setup_schema(draft: DraftFile, *, launch: Budget, declared: Budget) -> dict[str, Any]:
     patch = EditDraftPatch.model_json_schema()
-    overrides = OptimizationOverrides.model_json_schema()
+    optimization = OptimizationConfig.model_json_schema()
     budget = Budget.model_json_schema()
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -367,19 +340,24 @@ def setup_schema(draft: DraftCampaign, *, launch: Budget, declared: Budget) -> d
                 "type": "object",
                 "title": SETUP_STEP_TITLES[SetupStep.RUN],
                 "properties": {
-                    "optimization_overrides": {
+                    "config": {
                         "type": "object",
                         "title": "This campaign",
                         "properties": {
-                            "budget": {
+                            "optimization": {
                                 "type": "object",
                                 "properties": {
-                                    "rounds": _cap(budget, "rounds", MAX_EDITED_ROUNDS),
+                                    "budget": {
+                                        "type": "object",
+                                        "properties": {
+                                            "rounds": _cap(budget, "rounds", MAX_EDITED_ROUNDS),
+                                        },
+                                    },
+                                    "halt_at_accuracy": _field(
+                                        optimization, "halt_at_accuracy", "Halt at accuracy"
+                                    ),
                                 },
                             },
-                            "halt_at_accuracy": _field(
-                                overrides, "halt_at_accuracy", "Halt at accuracy"
-                            ),
                         },
                     },
                     "budget": {
@@ -399,12 +377,7 @@ def setup_schema(draft: DraftCampaign, *, launch: Budget, declared: Budget) -> d
     }
 
 
-def default_campaign_block(draft: DraftCampaign, upload: UploadBasis) -> dict[str, Any]:
-    """Without the node overlay: the mint splits that onto the per-campaign snapshot."""
-    return default_campaign_config(draft, upload).model_dump(mode="json", exclude_defaults=True)
-
-
-def draft_task_context(draft: DraftCampaign) -> TaskDecomposition:
+def draft_task_context(draft: DraftFile) -> TaskDecomposition:
     return TaskDecomposition.from_dict(
         {**draft.decomposed_task_context, "raw_description": draft.confirmed_task()}
     )

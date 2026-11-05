@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import owned_draft
+from promptpotter.application.datasets.authored import scorer_of
+from promptpotter.application.datasets.draft_campaign import draft_criterion, owned_draft
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.free_tier import (
@@ -15,12 +16,13 @@ from promptpotter.application.free_tier import (
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
     ServedPipeline,
+    admit_running,
     draft_pipeline,
     draft_served,
     resolved_output_schemas,
 )
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
-from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
+from promptpotter.application.scoring.formula.compiler import DIALS_KEY, parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import merge_config_layers
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
@@ -38,7 +40,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.domain.checkin_draft import DraftFile
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -52,7 +54,7 @@ class DraftPatchPlan(NamedTuple):
 
 
 async def plan_draft_patch(
-    stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
+    stores: Stores, draft: DraftFile, patch: EditDraftPatch
 ) -> DraftPatchPlan:
     changes: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
@@ -66,11 +68,6 @@ async def plan_draft_patch(
             )
         changes["slug"] = patch.slug
 
-    if patch.scoring_matcher is not None and patch.scoring_matcher not in MATCHERS:
-        raise PayloadInvalidError(
-            f"patch.scoring_matcher {patch.scoring_matcher!r} is not one of the matchers "
-            f"{sorted(MATCHERS)}."
-        )
     if patch.connector is not None and not (
         (chosen := connectors.CONNECTORS.table.get(patch.connector)) and chosen.serves_uploads
     ):
@@ -94,56 +91,50 @@ async def plan_draft_patch(
         if "basis" in changes
         else held
     )
-    if patch.scoring_dials is not None:
-        # Canonical spelling, so two drafts declaring the same criterion mint the same block.
-        changes["scoring_dials"] = spell_dials(parse_dials(patch.scoring_dials))
 
     for patch_val, draft_attr in (
-        (patch.scoring_matcher, "scoring_matcher"),
         (patch.origin_prompts, "origin_prompts"),
-        (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
 
-    overlay = patch.pipeline_overlay
-    if patch.node_output is not None:
-        overlay = _authored_contract(
-            draft.pipeline_overlay if overlay is None else overlay, patch.node_output
+    config = dict(draft.config)
+    was = draft_pipeline(stores, draft, held)
+    if patch.config is not None:
+        if "optimization" in patch.config:
+            PayloadInvalidError.validating(
+                OptimizationOverrides,
+                patch.config["optimization"],
+                under=("patch", "config", "optimization"),
+            )
+        config = _stamp_optimizer(
+            merge_config_layers(config, patch.config), was.config.optimization.optimizer
         )
+        if "scoring" in patch.config:
+            config["scoring"] = _folded_scoring(was.config.scoring, patch.config["scoring"])
+    if named := _named_nodes(patch):
+        # Over the running set this edit leaves, its own Mode pick laid: in a fork's words.
+        running = draft_pipeline(stores, draft.patch(**changes, config=config), served).chain
+        admit_running(running, named, of=f"draft {draft.draft_id}")
+    if patch.node_output is not None:
+        config = _authored_contract(config, was.params, patch.node_output)
     if patch.node_narrowing is not None:
-        rows = draft_pipeline(stores, draft, held).rows
-        overlay = dict(draft.pipeline_overlay if overlay is None else overlay)
+        narrowed = _block(config.get("optimizer_narrowing"))
         for node, intents in patch.node_narrowing.items():
             try:
-                narrowing = narrowing_of(rows.get(node, []), intents)
+                narrowed[node] = narrowing_of(was.rows.get(node, []), intents).model_dump()
             except ValueError as exc:
                 raise PayloadInvalidError(f"patch.node_narrowing.{node}: {exc}") from exc
-            overlay[node] = {**_block(overlay.get(node)), "optimizer": narrowing.model_dump()}
-    if overlay is not None:
-        before = _description_keys(draft_pipeline(stores, draft, held))
-        patched = draft.patch(pipeline_overlay=overlay, **changes)
-        after = _description_keys(draft_pipeline(stores, patched, served))
-        changes["pipeline_overlay"] = _narrowing_follows_schema(overlay, before, after)
-
-    if patch.optimization_overrides is not None:
-        prior = dict(draft.optimization_overrides)
-        # A node knob is its optimizer's: a switch starts the new one at its own defaults.
-        if patch.optimization_overrides.get("optimizer", prior.get("optimizer")) != prior.get(
-            "optimizer"
-        ):
-            prior.pop("nodes", None)
-        merged = merge_config_layers(
-            {"optimization": prior},
-            {"optimization": patch.optimization_overrides},
+        config["optimizer_narrowing"] = narrowed
+    if config != draft.config:
+        laid = draft_pipeline(stores, draft.patch(**changes, config=config), served)
+        if patch.config is not None and "scoring" in patch.config:
+            # Compiled here, so a criterion no cell could be graded by is refused, never stored.
+            scorer_of(laid.config, verifier_graded=False)
+        changes["config"] = _narrowing_follows_schema(
+            config, _description_keys(was), _description_keys(laid)
         )
-        overrides = PayloadInvalidError.validating(
-            OptimizationOverrides,
-            merged["optimization"],
-            under=("patch", "optimization_overrides"),
-        )
-        changes["optimization_overrides"] = overrides.model_dump(mode="json")
 
     if patch.raw_task_description is not None:
         changes["raw_task_description"] = patch.raw_task_description
@@ -158,11 +149,9 @@ async def plan_draft_patch(
                 f"patch.{label} {col!r} is not one of the uploaded headers {list(draft.headers)}."
             )
 
-    if changes.keys() & {"pipeline_overlay", "optimization_overrides"}:
+    if "config" in changes:
         # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
-        was_unpriced, was_outside = _refusals(
-            draft_pipeline(stores, draft, held), fence=free_fence(stores, held.connector)
-        )
+        was_unpriced, was_outside = _refusals(was, fence=free_fence(stores, held.connector))
         unpriced, outside = _refusals(
             draft_pipeline(stores, draft.patch(**changes), served),
             fence=free_fence(stores, served.connector),
@@ -177,6 +166,18 @@ async def plan_draft_patch(
         column_ground_truth=patch.column_ground_truth,
         served=served,
     )
+
+
+def _named_nodes(patch: EditDraftPatch) -> set[str]:
+    """Every node an edit names: each door into a node's config, narrowing or prompt."""
+    config = patch.config or {}
+    return {
+        *(patch.node_narrowing or {}),
+        *(() if patch.node_output is None else (patch.node_output.node,)),
+        *_block(config.get("pipeline_overlay")),
+        *_block(config.get("optimizer_narrowing")),
+        *(patch.origin_prompts or {}),
+    }
 
 
 def _description_keys(pipeline: DraftPipeline) -> dict[str, list[str]]:
@@ -203,55 +204,107 @@ def _block(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _authored_contract(overlay: dict[str, Any], edit: NodeOutputEdit) -> dict[str, Any]:
-    prev = _block(overlay.get(edit.node))
-    config = _block(prev.get("config"))
+def _stamp_optimizer(config: dict[str, Any], running: str) -> dict[str, Any]:
+    """The one stamp `DraftFile`'s invariant asks for: an edit's ``optimization.nodes`` naming no
+    optimizer addressed *running*, the one the draft ran before it."""
+    optimization = _block(config.get("optimization"))
+    if "nodes" not in optimization or "optimizer" in optimization:
+        return config
+    return {**config, "optimization": {**optimization, "optimizer": running}}
+
+
+_SCORING_EDIT_KEYS = frozenset({"matcher", DIALS_KEY, "per_sample", "per_cell"})
+
+
+def _folded_scoring(running: str | dict[str, str] | None, edit: object) -> object:
+    """A string *edit* is the criterion whole; a mapping folds into *running*, the criterion the
+    draft runs. Dials re-sent as the running criterion reads them move nothing, so a pinned
+    formula's anchors survive a round trip; other dials replace it, to be anchored on the origin."""
+    if not isinstance(edit, dict):
+        return edit
+    if unknown := sorted(set(edit) - _SCORING_EDIT_KEYS):
+        raise PayloadInvalidError(
+            f"patch.config.scoring names {unknown}; a scoring edit takes {sorted(_SCORING_EDIT_KEYS)}."
+        )
+    block = dict(running) if isinstance(running, dict) else {"per_sample": running}
+    if "matcher" in edit:
+        if edit["matcher"] not in MATCHERS:
+            raise PayloadInvalidError(
+                f"patch.config.scoring.matcher {edit['matcher']!r} is none of {sorted(MATCHERS)}."
+            )
+        block["per_sample"] = f"{edit['matcher']}(predicted, ground_truth)"
+    if "per_sample" in edit:
+        block["per_sample"] = edit["per_sample"]
+    if "per_cell" in edit:
+        block.pop(DIALS_KEY, None)
+        block["per_cell"] = edit["per_cell"]
+    if DIALS_KEY in edit:
+        dials = spell_dials(parse_dials(str(edit[DIALS_KEY])))
+        if dials != draft_criterion(running).dials:
+            block.pop("per_cell", None)
+            block[DIALS_KEY] = dials
+    # Canonical: two drafts declaring one criterion mint one block; empty dials are none.
+    kept = {k: v for k, v in block.items() if v}
+    return kept.get("per_sample") if set(kept) <= {"per_sample"} else kept
+
+
+def _authored_contract(
+    config: dict[str, Any], params: dict[str, Any], edit: NodeOutputEdit
+) -> dict[str, Any]:
+    """*params*, what the node runs before this edit, says whether it already declares a contract:
+    a reused dataset's own counts."""
+    overlay = _block(config.get("pipeline_overlay"))
+    node = _block(overlay.get(edit.node))
+    running = _block(params.get(edit.node))
     fields = list(_block(edit.output_schema.get("properties")))
-    first = not _block(config.get(OUTPUT_SCHEMA_KEY))
+    first = not _block(running.get(OUTPUT_SCHEMA_KEY))
     authored = [f for f in edit.answer_fields or () if f in fields]
-    kept = [f for f in config.get(ANSWER_FIELDS_KEY) or () if f in fields]
+    kept = [f for f in running.get(ANSWER_FIELDS_KEY) or () if f in fields]
     # The LAST field: fields generate in order, reasoning first.
     fallback = ["answer"] if "answer" in fields else fields[-1:]
-    config[OUTPUT_SCHEMA_KEY] = edit.output_schema
-    config.pop(ANSWER_FIELDS_KEY, None)
+    node[OUTPUT_SCHEMA_KEY] = edit.output_schema
+    node.pop(ANSWER_FIELDS_KEY, None)
     if answers := authored or kept or fallback:
-        config[ANSWER_FIELDS_KEY] = answers
-    block = {**prev, "config": config}
-    if first:
-        # A narrowing written before any schema existed could only tick `text`: re-open the axis.
-        config[SCHEMA_TOGGLE_PARAM] = "json"
-        if "optimizer" in prev:
-            optimizer = _block(prev["optimizer"])
-            allowed = _block(optimizer.get("param_allowed_values"))
-            allowed.pop(SCHEMA_TOGGLE_PARAM, None)
-            optimizer["param_allowed_values"] = allowed
-            keys = optimizer.get("param_keys")
-            if isinstance(keys, list) and SCHEMA_TOGGLE_PARAM not in keys:
-                optimizer["param_keys"] = [*keys, SCHEMA_TOGGLE_PARAM]
-            block["optimizer"] = optimizer
-    return {**overlay, edit.node: block}
+        node[ANSWER_FIELDS_KEY] = answers
+    out = {**config, "pipeline_overlay": {**overlay, edit.node: node}}
+    if not first:
+        return out
+    # A narrowing written before any schema existed could only tick `text`: re-open the axis.
+    node[SCHEMA_TOGGLE_PARAM] = "json"
+    narrowed = _block(config.get("optimizer_narrowing"))
+    if edit.node in narrowed:
+        narrowing = _block(narrowed[edit.node])
+        allowed = _block(narrowing.get("param_allowed_values"))
+        allowed.pop(SCHEMA_TOGGLE_PARAM, None)
+        narrowing["param_allowed_values"] = allowed
+        keys = narrowing.get("param_keys")
+        if isinstance(keys, list) and SCHEMA_TOGGLE_PARAM not in keys:
+            narrowing["param_keys"] = [*keys, SCHEMA_TOGGLE_PARAM]
+        out["optimizer_narrowing"] = {**narrowed, edit.node: narrowing}
+    return out
 
 
 def _narrowing_follows_schema(
-    overlay: dict[str, Any], before: dict[str, list[str]], after: dict[str, list[str]]
+    config: dict[str, Any], before: dict[str, list[str]], after: dict[str, list[str]]
 ) -> dict[str, Any]:
     """A stored ``param_keys`` names description keys by PATH, so it follows an edited schema."""
-    out = dict(overlay)
-    for name, block in overlay.items():
-        opt = block.get("optimizer") if isinstance(block, dict) else None
-        if not isinstance(opt, dict) or not isinstance(opt.get("param_keys"), list):
+    narrowed = _block(config.get("optimizer_narrowing"))
+    out = dict(narrowed)
+    for name, narrowing in narrowed.items():
+        keys = narrowing.get("param_keys") if isinstance(narrowing, dict) else None
+        if not isinstance(keys, list):
             continue
         old = set(before.get(name, []))
         new = after.get(name, [])
         if set(new) == old:
             continue
-        kept = [k for k in opt["param_keys"] if description_path(k) is None or k in new]
+        kept = [k for k in keys if description_path(k) is None or k in new]
         for key in new:
             parent = (description_path(key) or "").rpartition(".")[0]
             if key not in old and (not parent or description_key(parent) in kept):
                 kept.append(key)
-        out[name] = {**block, "optimizer": {**opt, "param_keys": kept}}
-    return out
+        out[name] = {**narrowing, "param_keys": kept}
+    return {**config, "optimizer_narrowing": out} if out != narrowed else config
 
 
 def candidate_library_from_column(stores: Stores, draft_id: str, column: str) -> tuple[str, ...]:
@@ -270,7 +323,7 @@ def candidate_library_from_column(stores: Stores, draft_id: str, column: str) ->
     return terms
 
 
-def apply_draft_patch(draft: DraftCampaign, plan: DraftPatchPlan) -> DraftCampaign:
+def apply_draft_patch(draft: DraftFile, plan: DraftPatchPlan) -> DraftFile:
     updated = draft.apply_resolution(values=plan.changes, provenance=plan.provenance)
     if plan.column_query is not None or plan.column_ground_truth is not None:
         updated = updated.confirm_columns(

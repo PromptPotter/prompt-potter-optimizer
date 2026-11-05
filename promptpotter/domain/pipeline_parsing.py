@@ -19,14 +19,9 @@ from promptpotter.domain.pipeline_schema import (
     NodeKind,
     NodeOutputSchema,
     NodePromptInfo,
-    NodeRole,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
-    PipelineView,
-    PipelineViewEdge,
-    PipelineViewNode,
-    ViewKind,
     description_key,
     description_paths,
 )
@@ -158,101 +153,6 @@ def _node_kind(name: str, raw: object) -> NodeKind | None:
         code="pipeline_config_invalid",
         details={"node": name, "declared_type": str(raw)},
     )
-
-
-def _derive_node_kind(node: PipelineNode) -> ViewKind:
-    if node.role is NodeRole.CACHE:
-        return "cache"
-    kind = node.kind
-    if kind is None:
-        return "tool"
-    if kind in THINKING_KINDS:
-        return "llm"
-    if kind in MEMBER_KINDS:
-        return "member"
-    match kind:
-        case NodeKind.GATEWAY:
-            return "measurement"
-        case NodeKind.RETRIEVER:
-            return "retriever"
-        case NodeKind.TOOL | NodeKind.CACHE:
-            return "tool"
-        case _:  # pragma: no cover — THINKING_KINDS covers the rest, and the assert pins that
-            raise AssertionError(f"NodeKind {kind!r} has no view kind")
-
-
-def derive_pipeline_view(
-    nodes: Mapping[str, PipelineNode],
-    pipelines: Mapping[str, Sequence[str]],
-    descriptions: Mapping[str, str],
-) -> PipelineView:
-    declared = list(nodes)
-    chain = [n for n in (pipelines.get(DEFAULT_PIPELINE) or declared) if n in nodes]
-    in_chain = set(chain)
-    others = sorted(
-        (name, [s for s in seq if s in nodes])
-        for name, seq in pipelines.items()
-        if name != DEFAULT_PIPELINE
-    )
-    # Sharing no step with the chain makes a pipeline a PHASE, drawn ahead of it; sharing steps, an ALTERNATIVE.
-    spine = [*(s for _n, seq in others if not (set(seq) & in_chain) for s in seq), *chain]
-    rank_of = {name: i for i, name in enumerate(spine)}
-    placed: dict[str, tuple[int, int]] = {n: (0, i) for i, n in enumerate(spine)}
-
-    # Shortest first: an alternative re-running another's steps is the deeper, so length is containment.
-    ordered = sorted(
-        ((name, seq) for name, seq in others if set(seq) & in_chain),
-        key=lambda kv: (len(kv[1]), kv[0]),
-    )
-    depth = 0
-    introduced: list[tuple[list[str], list[str]]] = []
-    for _name, seq in ordered:
-        fresh = [s for s in seq if s not in placed]
-        if not fresh:
-            continue
-        depth += 1
-        for step in fresh:
-            following = seq[seq.index(step) + 1 :]
-            placed[step] = (
-                depth,
-                next((rank_of[t] for t in following if t in rank_of), max(len(spine) - 1, 0)),
-            )
-        introduced.append((fresh, seq))
-
-    view_nodes = [PipelineViewNode(id="input", kind="io", rank=-1)]
-    for name, (tier, rank) in placed.items():
-        view_nodes.append(
-            PipelineViewNode(
-                id=name,
-                description=descriptions[name],
-                kind=_derive_node_kind(nodes[name]),
-                tier=tier,
-                rank=rank,
-            )
-        )
-    view_nodes.append(PipelineViewNode(id="output", kind="io", rank=len(spine)))
-
-    edges: list[PipelineViewEdge] = []
-
-    def _edge(source: str, target: str, kind: str) -> None:
-        edges.append(PipelineViewEdge.model_validate({"from": source, "to": target, "kind": kind}))
-
-    sequence = ["input", *spine, "output"]
-    for i in range(len(sequence) - 1):
-        _edge(sequence[i], sequence[i + 1], "forward")
-    repeats = bool(introduced) or any(n.kind in MEMBER_KINDS for n in nodes.values())
-    cycle = chain if repeats else []
-    if cycle:
-        _edge(cycle[-1], cycle[0], "loop")
-    for fresh, seq in introduced:
-        for step in fresh:
-            if chain:
-                _edge(chain[-1], step, "alternative")
-            after = seq[seq.index(step) + 1 :]
-            if after:
-                _edge(step, after[0], "directive")
-
-    return PipelineView(nodes=view_nodes, edges=edges, cycle=cycle)
 
 
 def parse_resolved_schema(resolved: Mapping[str, Any]) -> NodeOutputSchema:
@@ -387,6 +287,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "name": name,
             "kind": kind,
             "role": node.get("node_role") or None,
+            "description": str(node.get("description") or ""),
             "param_keys": pk,
             "param_descriptions": dict(
                 _block(opt.get("param_descriptions"), f"{where}.optimizer.param_descriptions")
@@ -512,7 +413,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     logger.debug("Parsed pipeline '%s' with %d nodes", pipeline_name, len(parsed))
 
     _check_member_structure(parsed, pipelines)
-    schema = _built(
+    return _built(
         PipelineSchema,
         "pipeline",
         name=pipeline_name.lower(),
@@ -520,11 +421,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         description=_text(config, "description"),
         declared_nodes=list(parsed.values()),
         pipelines=pipelines,
+        phase_pipelines=_names(config.get("phase_pipelines"), "phase_pipelines"),
         available_models=_names(config.get("available_models"), "available_models"),
     )
-
-    # Derived, never read off the manifest: a declared ``view`` is a second roster beside `nodes`.
-    descriptions = {name: str(nodes[name].get("description") or "") for name in parsed}
-    view = derive_pipeline_view(parsed, pipelines, descriptions) if parsed else None
-
-    return schema.model_copy(update={"view": view})

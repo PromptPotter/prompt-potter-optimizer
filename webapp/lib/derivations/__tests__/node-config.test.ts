@@ -5,7 +5,7 @@ import {
   descriptionSubtree,
   effortLadder,
   nodeLockPatch,
-  parseKnob,
+  parseParam,
   nodeOverlayPatch,
   overlayEdits,
   permittedModels,
@@ -16,9 +16,15 @@ import type { ModelCapability, NodeConfigParam } from "@/lib/api";
 import { SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
 import { configParam as param } from "@/lib/test-fixtures";
 
-function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRow {
+function row(over: Partial<ConfigRow> & { key: string; kind: ConfigRow["kind"] }): ConfigRow {
   return {
     node: "n",
+    integer: false,
+    nullable: false,
+    minimum: null,
+    exclusive_minimum: null,
+    maximum: null,
+    exclusive_maximum: null,
     options: [],
     value: "",
     baseValue: "",
@@ -36,7 +42,7 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
 
 describe("nodeOverlayPatch (search-space emit)", () => {
   it("sends each row as drawn — its padlock and its ticks — and decides nothing about them", () => {
-    const patch = nodeOverlayPatch({}, "web_search", [
+    const patch = nodeOverlayPatch("web_search", [
       row({ key: "max_sites", kind: "number" }),
       row({ key: "num_results", kind: "number", locked: true }),
       row({ key: "scorer", kind: "enum", allowed: ["t"], options: ["t", "j"] }),
@@ -48,11 +54,11 @@ describe("nodeOverlayPatch (search-space emit)", () => {
         { key: "scorer", open: true, allowed: ["t"] },
       ],
     });
-    expect(patch.pipeline_overlay).toBeUndefined();
+    expect(patch.config).toBeUndefined();
   });
 
   it("carries a changed origin value into config; model is an axis like any other", () => {
-    const patch = nodeOverlayPatch({}, "entity_profiling", [
+    const patch = nodeOverlayPatch("entity_profiling", [
       row({ key: "temperature", kind: "number", value: "0.2", baseValue: "0.3" }),
       row({
         key: "model",
@@ -63,28 +69,13 @@ describe("nodeOverlayPatch (search-space emit)", () => {
         options: ["m1", "m2"],
       }),
     ]);
-    const node = patch.pipeline_overlay!.entity_profiling as Record<string, unknown>;
-    expect(node.config).toEqual({ temperature: 0.2, model: "m2" });
+    expect(patch.config).toEqual({
+      pipeline_overlay: { entity_profiling: { temperature: 0.2, model: "m2" } },
+    });
     expect(patch.node_narrowing!.entity_profiling!.map((r) => r.key)).toEqual([
       "temperature",
       "model",
     ]);
-  });
-
-  it("merges onto an existing overlay without clobbering other nodes or the node's own block", () => {
-    const kept = { param_keys: ["max_sites"], param_allowed_values: {} };
-    const base = {
-      other_node: { config: { x: 1 } },
-      web_search: { optimizer: kept, config: { depth: 2 } },
-    };
-    const patch = nodeOverlayPatch(base, "web_search", [
-      row({ key: "max_sites", kind: "number", value: "3", baseValue: "5" }),
-    ]);
-    expect(patch.pipeline_overlay!.other_node).toEqual({ config: { x: 1 } });
-    expect(patch.pipeline_overlay!.web_search).toEqual({
-      optimizer: kept,
-      config: { depth: 2, max_sites: 3 },
-    });
   });
 });
 
@@ -149,7 +140,7 @@ describe("configRows (search-space mode)", () => {
 
   it("value and baseValue start equal, so an untouched row emits nothing", () => {
     const rows = configRows({ n: [param({ key: "temperature", value: 0.4 })] }, {}, "search-space");
-    expect(nodeOverlayPatch({}, "n", rows).pipeline_overlay).toBeUndefined();
+    expect(nodeOverlayPatch("n", rows).config).toBeUndefined();
   });
 });
 
@@ -221,14 +212,13 @@ describe("configRows (values mode)", () => {
     });
 
     const patch = nodeOverlayPatch(
-      {},
       "llm_only",
       configRows(withOwned, {}, "search-space", "llm_only").map((r) =>
         r.key === "answer_fields" ? { ...r, value: '["reasoning", "answer"]' } : r,
       ),
     );
-    expect(patch.pipeline_overlay!.llm_only).toHaveProperty("config", {
-      answer_fields: ["reasoning", "answer"],
+    expect(patch.config).toEqual({
+      pipeline_overlay: { llm_only: { answer_fields: ["reasoning", "answer"] } },
     });
     expect(patch.node_narrowing!.llm_only!.find((r) => r.key === "answer_fields")!.open).toBe(false);
   });
@@ -250,11 +240,11 @@ describe("configRows (values mode)", () => {
     const keysOf = (p: ReturnType<typeof nodeOverlayPatch>) =>
       p.node_narrowing!.llm_only!.filter((r) => r.open).map((r) => r.key);
     const emitted = keysOf(
-      nodeOverlayPatch({}, "llm_only", configRows(withPrompt, {}, "search-space", "llm_only")),
+      nodeOverlayPatch("llm_only", configRows(withPrompt, {}, "search-space", "llm_only")),
     );
     expect(emitted).toContain("instruction");
     expect(emitted).not.toContain("persona");
-    expect(keysOf(nodeLockPatch(withPrompt, {}, "llm_only", ["instruction"], true))).not.toContain(
+    expect(keysOf(nodeLockPatch(withPrompt, "llm_only", ["instruction"], true))).not.toContain(
       "instruction",
     );
     const seed = configRows(withPrompt, { llm_only: { instruction: "evolved" } }, "values");
@@ -401,22 +391,31 @@ describe("descriptionSubtree (one click on a schema-tree row)", () => {
   });
 });
 
-describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
+describe("parseParam (a value typed in, read by its served row)", () => {
   const knob = (over: Partial<NodeConfigParam>): NodeConfigParam =>
     param({ key: "k", integer: true, declared: 10, value: 10, ...over });
 
   it("commits only what the served type reads as the typed value", () => {
-    expect(parseKnob(knob({}), "4")).toBe(4);
-    expect(parseKnob(knob({}), "1.5")).toBeUndefined();
-    expect(parseKnob(knob({}), "")).toBeUndefined();
-    expect(parseKnob(knob({ integer: false }), "0.05")).toBe(0.05);
-    expect(parseKnob(knob({ integer: false, nullable: true }), " ")).toBeNull();
-    expect(parseKnob(knob({ kind: "nested" }), "[0.3, 1.2]")).toEqual([0.3, 1.2]);
-    expect(parseKnob(knob({ kind: "nested" }), "[0.3,")).toBeUndefined();
+    expect(parseParam(knob({}), "4")).toBe(4);
+    expect(parseParam(knob({}), "1.5")).toBeUndefined();
+    expect(parseParam(knob({}), "")).toBeUndefined();
+    expect(parseParam(knob({ integer: false }), "0.05")).toBe(0.05);
+    expect(parseParam(knob({ integer: false, nullable: true }), " ")).toBeNull();
+    expect(parseParam(knob({ kind: "nested" }), "[0.3, 1.2]")).toEqual([0.3, 1.2]);
+    expect(parseParam(knob({ kind: "nested" }), "[0.3,")).toBeUndefined();
     const epsilon = knob({ integer: false, exclusive_minimum: 0, exclusive_maximum: 1 });
-    expect(parseKnob(epsilon, "0")).toBeUndefined();
-    expect(parseKnob(epsilon, "0.3")).toBe(0.3);
-    expect(parseKnob(knob({ minimum: 1 }), "1")).toBe(1);
+    expect(parseParam(epsilon, "0")).toBeUndefined();
+    expect(parseParam(epsilon, "0.3")).toBe(0.3);
+    expect(parseParam(knob({ minimum: 1 }), "1")).toBe(1);
+    expect(parseParam(knob({ kind: "bool" }), "true")).toBe(true);
+    expect(parseParam(knob({ kind: "model" }), "m")).toBe("m");
+  });
+
+  it("is the node editor's reading too: an edit off the row's bounds is never sent", () => {
+    const patch = nodeOverlayPatch("n", [
+      row({ key: "max_tokens", kind: "number", integer: true, value: "1.5", baseValue: "64" }),
+    ]);
+    expect(patch.config).toBeUndefined();
   });
 });
 

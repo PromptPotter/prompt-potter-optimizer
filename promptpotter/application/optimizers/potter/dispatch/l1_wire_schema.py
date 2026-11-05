@@ -135,12 +135,11 @@ def build_l1_response_schema(
     pipeline_overlay["additionalProperties"] = False
     pp_properties = pipeline_overlay["properties"]
 
-    # The nodes the GRAPH reaches, never `active_steps`: an off-chain escalation node is what L4 tunes.
-    # No view means no projection to narrow by, never "narrow to nothing".
-    reachable = {n.id for n in pipeline_schema.view.nodes} if pipeline_schema.view else None
+    # Every node the run holds (`PipelineSchema.running`), never `active_steps` alone: a phase's
+    # escalation node is what L4 tunes, and the catalogue (`node_param_keys`) offers the same set.
     for node_name, keys in pipeline_schema.node_param_keys().items():
         node = pipeline_schema.get_node(node_name)
-        if node is None or (reachable is not None and node_name not in reachable):
+        if node is None:
             continue
         # Field ORDER is what this schema teaches, so the groups emit in a fixed sequence, never one sort.
         nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}

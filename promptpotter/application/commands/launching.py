@@ -43,6 +43,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
+    admit_steer,
     cycle_config,
     draft_pipeline,
     draft_served,
@@ -89,6 +90,8 @@ logger = logging.getLogger(__name__)
 def parse_cycle_seed(
     sent: ForkSeed, campaign: CampaignConfig, stores: Stores, of: Campaign, hop: CycleHop
 ) -> CycleSeed:
+    steered = [node for node, _cfg in node_config_items(sent.pipeline_overlay)]
+    admit_steer(stores, hop, [*steered, *sent.node_narrowing])
     narrowing: dict[str, NodeSearchNarrowing] = {}
     if sent.node_narrowing:
         # The rows served at *hop*, not the root's: a row's menu is its cycle's own declaration.

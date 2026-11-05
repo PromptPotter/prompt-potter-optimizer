@@ -14,12 +14,10 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
-from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     DatasetDefinition,
-    declared_pipelines,
     read_dataset_definition,
     read_dataset_framing,
 )
@@ -38,17 +36,6 @@ class AuthoredDataset:
 
     task_description: str
     """``task.md``'s body, stripped; ``""`` when the definition has none."""
-
-    pipeline_nodes: dict[str, Any]
-    """The WHOLE ``pipeline.nodes.{name}`` dicts (config + optimizer + …),
-    not just ``nodes.*.config``. Every sub-block is carried, so dropping to
-    ``nodes.*.config`` (as ``pipeline_node_overlay`` does) would silently lose
-    ``optimizer.param_allowed_values`` locks."""
-
-    active_steps: list[str]
-    """``dataset_access.py::declared_pipelines``' default; ``[]`` only with no nodes, when the
-    connector's ``default_pipeline`` applies. The draft path carries this so reusing a dataset
-    PRESERVES its pipeline instead of resetting to the connector default."""
 
     candidate_library: tuple[str, ...]
     """``candidate_library.txt`` — the per-pipeline origin's target list, part of
@@ -103,19 +90,24 @@ def load_dataset_campaign_config(dataset_dir: Path) -> CampaignConfig:
     )
 
 
-def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
-    """Laid over the keys *config*'s layers SET, so a declaration off it restates no default."""
-    merged = merge_config_layers(
-        config.model_dump(mode="json", exclude_unset=True), {"optimization": dict(overrides)}
-    )
+def campaign_config_over(block: dict[str, Any], over: Mapping[str, Any]) -> CampaignConfig:
+    """*over*, a partial config, laid over *block*, the keys a config's layers SET; the optimizer
+    it names must select."""
     try:
-        out = CampaignConfig.model_validate(merged)
+        out = CampaignConfig.model_validate(merge_config_layers(block, over))
     except ValidationError as exc:
         raise PayloadInvalidError(
-            validation_reason(exc, shown=1), code="optimization_invalid"
+            validation_reason(exc, shown=1), code="campaign_config_invalid"
         ) from exc
     select_optimizer(out.optimization)
     return out
+
+
+def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
+    """Laid over the keys *config*'s layers SET, so a declaration off it restates no default."""
+    return campaign_config_over(
+        config.model_dump(mode="json", exclude_unset=True), {"optimization": dict(overrides)}
+    )
 
 
 def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
@@ -135,13 +127,10 @@ def dataset_scorer(dataset_dir: Path) -> Scorer:
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     definition = _definition(dataset_dir)
-    pipeline: dict[str, Any] = {} if definition is None else definition.pipeline
     return AuthoredDataset(
         campaign_config=validated_campaign_config(
             _campaign_block(definition), path=dataset_dir / DEFINITION_FILE
         ),
         task_description=read_dataset_framing(dataset_dir).description,
-        pipeline_nodes=dict(pipeline.get("nodes") or {}),
-        active_steps=declared_pipelines(pipeline).get(DEFAULT_PIPELINE, []),
         candidate_library=read_candidate_library_file(dataset_dir),
     )

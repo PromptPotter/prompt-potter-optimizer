@@ -91,7 +91,7 @@ export function NodeSurface({
   const lockKeys =
     author && nodeId
       ? (keys: readonly string[], locked: boolean) =>
-          author(nodeLockPatch(schema.config, overlay, nodeId, keys, locked))
+          author(nodeLockPatch(schema.config, nodeId, keys, locked))
       : undefined;
   const ofKind = (kind: string) => (rows ?? []).filter((p) => p.kind === kind);
   const locksOf = (kind: string, prefix = "") =>

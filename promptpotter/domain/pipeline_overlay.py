@@ -86,7 +86,7 @@ def merge_pipeline_params(
         return base
     merged = apply_node_overlay(base or {}, overrides, schema)
     if schema:
-        # DECLARED, not the running chain: a node reached only by escalating exists.
+        # Every node the schema holds, not its chain alone: a phase's node runs, on escalation too.
         _declared = {n.name for n in schema.declared_nodes}
         for k, _cfg in list(node_config_items(merged)):
             if k not in _declared:

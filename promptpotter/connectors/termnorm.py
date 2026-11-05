@@ -8,7 +8,7 @@ import httpx
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, cell_envelope_of
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import NodeRole
+from promptpotter.domain.pipeline_schema import ONE_CALL_NODE, NodeRole
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
@@ -153,7 +153,7 @@ CONNECTOR = Connector(
     # The knee on `llm_only`: past it the wall clock stops falling and the call tail grows.
     max_cells_in_flight=16,
     # A fresh CSV upload skips the retrieval nodes: no Brave Search billing in round 1.
-    default_pipeline=("llm_only",),
+    default_pipeline=(ONE_CALL_NODE,),
     node_roles={
         "token_matching": NodeRole.CANDIDATE_SOURCE,
         "fuzzy_matching": NodeRole.CANDIDATE_SOURCE,
@@ -167,7 +167,7 @@ CONNECTOR = Connector(
     ),
     # No `reasoning_effort`: a rung named here follows no model the tenant swaps in.
     default_node_config={
-        "llm_only": {
+        ONE_CALL_NODE: {
             "config": {
                 "provider": "openrouter",
                 "model": "openai/gpt-oss-20b",

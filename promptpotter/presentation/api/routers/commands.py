@@ -54,7 +54,7 @@ commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 async def edit_draft_campaign(
     stores: StoresDep, payload: EditDraftCampaignPayload, key: IdempotencyKeyDep
 ) -> DraftCampaignWire:
-    """Sparse-patch a `DraftCampaign` and return its full post-mutation shape."""
+    """Sparse-patch a `DraftFile` and return its full post-mutation shape."""
     return await dispatch_draft_patch(stores, CommandCall(payload, key))
 
 

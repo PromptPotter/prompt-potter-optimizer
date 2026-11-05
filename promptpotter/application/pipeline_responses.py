@@ -217,7 +217,10 @@ class CampaignPipelineResponse(StrictModel):
         description="The inner pipelines this chain nests, one per dataset its cells measure — "
         "the L4 drill-in, on this read"
     )
-    is_single_node: bool
+    single_node: str | None = Field(
+        description="The chain's one node where it runs one, a phase beside it not counted: the "
+        "node a one-call editor opens; null on a longer chain"
+    )
 
 
 SteerOutside = Literal["babysat", "refused"]

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { FailureLine } from "@/components/ui";
-import type { ObserveConfig } from "@/lib/derivations";
+import { nodeSchemaReading, type ObserveConfig } from "@/lib/derivations";
 import type { OriginChanges } from "@/lib/hooks/useOriginEvidence";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { promptFieldLabel } from "@/lib/prompt-fields";
@@ -15,7 +15,8 @@ export function SubjectDiff({
   changes: OriginChanges;
   verdict: ReactNode;
 }) {
-  const cv = useConnector();
+  const read = useConnector();
+  const schema = nodeSchemaReading(read);
   return (
     <details className="subject-diff">
       <summary>
@@ -29,7 +30,7 @@ export function SubjectDiff({
         node={null}
         point={{ origin_prompts: cfg.prompts, pipeline_overlay: {} }}
         overlay={cfg.config}
-        schema={cv.schema}
+        schema={schema}
         mode="values"
         compact
       />

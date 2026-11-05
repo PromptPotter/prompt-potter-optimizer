@@ -1,6 +1,6 @@
 import enum
 import re
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -236,7 +236,7 @@ class NodePromptInfo(FrozenModel):
         return fields
 
 
-# Exactly what `pipeline_parsing.py::_derive_node_kind` can emit, plus the two `io` ends.
+# Exactly what `_derive_node_kind` can emit, plus the two `io` ends.
 ViewKind = Literal["io", "llm", "tool", "retriever", "cache", "measurement", "member"]
 
 
@@ -276,7 +276,9 @@ ParamKind = Literal["model", "enum", "number", "bool", "string", "prompt", "desc
 class PipelineViewNode(FrozenModel):
     """One node's place in the flow, as a tier and a rank rather than as pixels.
 
-    Tier 0 is the chain a sample runs, tier n>0 the n-th nested alternative pipeline; rank is the tier-0 position it acts on.
+    Tier 0 is the chain a sample runs, its phases ahead of it; tier n>0 the n-th nested alternative
+    pipeline, and the tier past the last alternative the declared nodes no pipeline names; rank is
+    the tier-0 position it acts on.
     """
 
     id: str
@@ -348,6 +350,7 @@ class PipelineNode(FrozenModel):
     # `None` is "the producer declared no type" — a real state, never read as a default kind.
     kind: NodeKind | None = None
     role: NodeRole | None = None
+    description: str = ""
     param_keys: set[str] = Field(default_factory=set)
     # The config axes ``narrow`` TOOK AWAY — a lock — as against axes the dataset never offered.
     param_keys_held: set[str] = Field(default_factory=set)
@@ -716,6 +719,115 @@ class ManifestNodeOverlay(FrozenModel):
 DEFAULT_PIPELINE = "default"
 """The chain a schema runs: a backend's per cell, an optimizer manifest's per round."""
 
+ONE_CALL_NODE = "llm_only"
+"""The generic node that answers a query in one LLM call: run alone, it is a check-in's LLM-only
+Mode; every other node of a chain is research ahead of it."""
+
+
+def _derive_node_kind(node: "PipelineNode") -> ViewKind:
+    if node.role is NodeRole.CACHE:
+        return "cache"
+    kind = node.kind
+    if kind is None:
+        return "tool"
+    if kind in THINKING_KINDS:
+        return "llm"
+    if kind in MEMBER_KINDS:
+        return "member"
+    match kind:
+        case NodeKind.GATEWAY:
+            return "measurement"
+        case NodeKind.RETRIEVER:
+            return "retriever"
+        case NodeKind.TOOL | NodeKind.CACHE:
+            return "tool"
+        case _:  # pragma: no cover — THINKING_KINDS covers the rest, and the assert pins that
+            raise AssertionError(f"NodeKind {kind!r} has no view kind")
+
+
+def derive_pipeline_view(
+    nodes: Mapping[str, "PipelineNode"],
+    pipelines: Mapping[str, Sequence[str]],
+    phases: Collection[str],
+) -> PipelineView:
+    chain = [n for n in pipelines[DEFAULT_PIPELINE] if n in nodes]
+    # A declared PHASE is drawn ahead of the chain, in the order declared; any other pipeline is
+    # an ALTERNATIVE.
+    spine = list(
+        dict.fromkeys(
+            [
+                *(s for name in phases if name in pipelines for s in pipelines[name] if s in nodes),
+                *chain,
+            ]
+        )
+    )
+    rank_of = {name: i for i, name in enumerate(spine)}
+    placed: dict[str, tuple[int, int]] = {n: (0, i) for i, n in enumerate(spine)}
+
+    # Shortest first: an alternative re-running another's steps is the deeper, so length is containment.
+    ordered = sorted(
+        (
+            (name, [s for s in seq if s in nodes])
+            for name, seq in pipelines.items()
+            if name != DEFAULT_PIPELINE and name not in phases
+        ),
+        key=lambda kv: (len(kv[1]), kv[0]),
+    )
+    depth = 0
+    introduced: list[tuple[list[str], list[str]]] = []
+    for _name, seq in ordered:
+        fresh = [s for s in seq if s not in placed]
+        if not fresh:
+            continue
+        depth += 1
+        for step in fresh:
+            following = seq[seq.index(step) + 1 :]
+            placed[step] = (
+                depth,
+                next((rank_of[t] for t in following if t in rank_of), max(len(spine) - 1, 0)),
+            )
+        introduced.append((fresh, seq))
+    # A node declared on no chain is held all the same (`PipelineSchema.running`): drawn OFF-CHAIN,
+    # the tier past the alternatives, unjoined.
+    off_chain = [n for n in nodes if n not in placed]
+    for i, name in enumerate(off_chain):
+        placed[name] = (depth + 1, i)
+
+    view_nodes = [PipelineViewNode(id="input", kind="io", rank=-1)]
+    for name, (tier, rank) in placed.items():
+        view_nodes.append(
+            PipelineViewNode(
+                id=name,
+                description=nodes[name].description,
+                kind=_derive_node_kind(nodes[name]),
+                tier=tier,
+                rank=rank,
+            )
+        )
+    view_nodes.append(PipelineViewNode(id="output", kind="io", rank=len(spine)))
+
+    edges: list[PipelineViewEdge] = []
+
+    def _edge(source: str, target: str, kind: str) -> None:
+        edges.append(PipelineViewEdge.model_validate({"from": source, "to": target, "kind": kind}))
+
+    sequence = ["input", *spine, "output"]
+    for i in range(len(sequence) - 1):
+        _edge(sequence[i], sequence[i + 1], "forward")
+    repeats = bool(introduced) or any(n.kind in MEMBER_KINDS for n in nodes.values())
+    cycle = chain if repeats else []
+    if cycle:
+        _edge(cycle[-1], cycle[0], "loop")
+    for fresh, seq in introduced:
+        for step in fresh:
+            if chain:
+                _edge(chain[-1], step, "alternative")
+            after = seq[seq.index(step) + 1 :]
+            if after:
+                _edge(step, after[0], "directive")
+
+    return PipelineView(nodes=view_nodes, edges=edges, cycle=cycle)
+
 
 class PipelineSchema(FrozenModel):
     name: str = ""
@@ -725,8 +837,10 @@ class PipelineSchema(FrozenModel):
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
     # `default` is the chain a round runs; the manifest digest folds the others.
     pipelines: dict[str, list[str]] = Field(default_factory=lambda: {DEFAULT_PIPELINE: list[str]()})
+    # The pipelines every call runs beside `default`, as the doc serving them names them; any other
+    # is an ALTERNATIVE a definition or a controller picks.
+    phase_pipelines: list[str] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
-    view: PipelineView | None = None
     # Rides the schema, NOT the identity. Empty is UNKNOWN, never "accepts nothing".
     model_capabilities: CapabilityMenu = Field(default_factory=dict)
     # Per gateway provider, each model's default host order — written into a node naming no
@@ -739,9 +853,15 @@ class PipelineSchema(FrozenModel):
             raise ValueError(
                 f"pipelines declares {sorted(self.pipelines)} and no `default`, the chain a round runs"
             )
+        if stray := [
+            p for p in self.phase_pipelines if p == DEFAULT_PIPELINE or p not in self.pipelines
+        ]:
+            raise ValueError(
+                f"phase_pipelines names {stray}: a phase is a declared pipeline other than `default`"
+            )
         return self
 
-    # Derived on read, never cached: `model_copy` (`narrow`, `filter_to_steps`) skips init hooks.
+    # Derived on read, never cached: `model_copy` (`narrow`, `running`) skips init hooks.
 
     @property
     def _node_map(self) -> dict[str, "PipelineNode"]:
@@ -755,17 +875,47 @@ class PipelineSchema(FrozenModel):
         return [declared[name] for name in self.pipelines[DEFAULT_PIPELINE] if name in declared]
 
     @property
+    def view(self) -> PipelineView | None:
+        """The flow over ``declared_nodes``, each drawn: its phases, then its chain, then any node
+        on no pipeline; an optimizer manifest's draws its alternatives too, a target's
+        (``running``) holds none."""
+        if not self.declared_nodes:
+            return None
+        return derive_pipeline_view(self._node_map, self.pipelines, self.phase_pipelines)
+
+    @property
     def active_steps(self) -> tuple[str, ...]:
         return tuple(n.name for n in self.nodes)
 
-    def active_steps_excluding(self, exclude: Iterable[str]) -> list[str]:
+    def running(self, exclude: Iterable[str], *, declared: Collection[str]) -> "PipelineSchema":
+        """The schema a run holds, its RUNNING SET (``declared_nodes``): its chain, its phases, and
+        the nodes its definition declares (*declared*) on no pipeline at all, less *exclude*. Its
+        other pipelines are alternatives a definition picks (`draft_campaign.py::upload_chain`) and
+        go, with every node only they name, so the schema cannot still resolve a node its run
+        never reaches. Every read of WHICH nodes takes this set; a read of ORDER, the chain."""
         dropped = set(exclude)
-        return [n for n in self.active_steps if n not in dropped]
+        chain = [n for n in self.active_steps if n not in dropped]
+        phases = {
+            name: steps
+            for name in self.phase_pipelines
+            if (steps := [n for n in self.pipelines[name] if n not in dropped])
+        }
+        named = {n for steps in self.pipelines.values() for n in steps}
+        off_chain = set(declared) - named - dropped
+        kept = {*chain, *(n for steps in phases.values() for n in steps), *off_chain}
+        return self.model_copy(
+            update={
+                "declared_nodes": [n for n in self.declared_nodes if n.name in kept],
+                "pipelines": {DEFAULT_PIPELINE: chain, **phases},
+                "phase_pipelines": list(phases),
+            },
+        )
 
     @property
-    def is_single_node(self) -> bool:
-        """The acute case for the lock invariant and the node-row UI guard."""
-        return len(self.nodes) == 1
+    def single_node(self) -> str | None:
+        """The chain's one node, where it runs one: the acute case for the lock invariant, the
+        one-call editor and a lone prompt's seeding. A phase beside it is not counted."""
+        return self.nodes[0].name if len(self.nodes) == 1 else None
 
     @property
     def observation_keys(self) -> frozenset[str]:
@@ -999,19 +1149,6 @@ class PipelineSchema(FrozenModel):
 
     def get_node(self, name: str) -> PipelineNode | None:
         return self._node_map.get(name)
-
-    def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
-        # The declaration too, so a filtered schema cannot still resolve a node it just excluded.
-        active = set(steps)
-        return self.model_copy(
-            update={
-                "declared_nodes": [n for n in self.declared_nodes if n.name in active],
-                "pipelines": {
-                    **self.pipelines,
-                    DEFAULT_PIPELINE: [n for n in self.pipelines[DEFAULT_PIPELINE] if n in active],
-                },
-            },
-        )
 
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
         """Keys SUBSET, values REPLACE (:class:`NodeSearchNarrowing`)."""

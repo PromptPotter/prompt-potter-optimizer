@@ -1338,7 +1338,6 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     # A reset's plan carries its refusal, so a dry run shows it: a draft a Start holds, or a cycle
     # its producer holds, refuses it whole.
     held_draft = new_draft(
-        tenant_id=built_stores.tenant_id,
         owner_user_id="u",
         slug="held",
         basis=DatasetBasis(dataset="held"),
@@ -1346,13 +1345,13 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         sample_preview=[],
         headers=[],
     )
-    built_stores.drafts.write_draft("held-draft", held_draft.to_disk())
+    built_stores.drafts.write_draft(held_draft)
     data_root = built_stores.projects_root.parent
     written = plan_landing(built_stores.projects_root, reset=False)
     assert not written.refused and not written.caches and not written.staged, (
         f"a writer files what no data-root row names, or what its reader refuses: {written}"
     )
-    with built_stores.drafts.hold("held-draft"):
+    with built_stores.drafts.hold(held_draft.draft_id):
         held = plan_reset(built_stores.projects_root, tenant_id=None, staged={})
     assert held.refusal is not None, "a reset's plan missed a held draft"
     hold_cycle(cycle_dir)
@@ -1589,6 +1588,9 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         reopened = await answered("draft", {"draft_id": draft["draft_id"]})
         assert reopened["draft"] == draft, "the stdio draft is not the one a read reopens"
         beside = await answered("ingest-upload", keyed(upload))
+        # The pipeline answers for its subject, the draft, by its id.
+        for opened_draft in (draft, beside):
+            assert opened_draft["pipeline"].pop("campaign_id") == opened_draft["draft_id"]
         moved = {key for key in draft if draft[key] != beside[key]}
         assert moved == {"draft_id", "created_at"}, f"the two doors parsed one file apart: {moved}"
 

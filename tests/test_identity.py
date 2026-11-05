@@ -36,9 +36,9 @@ from factories import (
     seat,
     set_cycle,
 )
-from offline_world import Router
+from offline_world import LLM_ONLY_NODE, Router
 
-from promptpotter.application import optimizer_manifest, optimizers
+from promptpotter.application import optimizer_manifest, optimizers, pipeline_resolve
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -47,19 +47,35 @@ from promptpotter.application.bench.children import (
 )
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import declare_steered_values
-from promptpotter.application.bench.task_context import campaign_framing
+from promptpotter.application.bench.task_context import (
+    CheckinOutput,
+    OriginFinding,
+    campaign_framing,
+)
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.datasets import ingest, loaders, tabular_ingest
-from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
+from promptpotter.application.datasets.draft_build import draft_wire
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCriterion,
+    draft_criterion,
+    new_draft,
+    owned_draft,
+)
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
-from promptpotter.application.datasets.origin_resolve import build_origin_consultation
+from promptpotter.application.datasets.origin_resolve import (
+    build_origin_consultation,
+    raised_commands,
+)
+from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
+from promptpotter.application.free_tier import FreeFence
 from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
+from promptpotter.application.jobs.launcher.mint_and_start import commit_upload_definition
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
@@ -101,15 +117,18 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
 from promptpotter.application.pipeline_resolve import (
     ParamLayers,
+    ServedPipeline,
+    _resolve_active_schema,
     campaign_admits,
     cycle_config,
     dataset_pipeline,
     defaults_drift,
-    draft_config,
+    draft_declared,
     draft_pipeline,
     draft_served,
     experiment_outside_run,
     identity_layer,
+    resolve_pipeline_for_draft,
     resolved_output_schemas,
 )
 from promptpotter.application.run_observers import declare_run_wiring
@@ -138,7 +157,7 @@ from promptpotter.domain.campaign_config import (
     effective_config,
 )
 from promptpotter.domain.cells import Seat
-from promptpotter.domain.checkin_draft import DatasetBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     ForkSeed,
@@ -160,6 +179,7 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
+    node_config_items,
     normalize_model_id,
     permitted_models_from_narrowing,
     steers_disallowed_model,
@@ -190,6 +210,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
+    OriginSource,
     PipelineRead,
     ScoringLockedRecord,
 )
@@ -204,13 +225,15 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import fo
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
+    ORIGIN_FILE,
     ResolvedDataset,
     read_dataset_pipeline,
     resolve_dataset,
 )
-from promptpotter.infrastructure.store.io import write_json, write_yaml
+from promptpotter.infrastructure.store.io import read_yaml, write_json, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.presentation.cli.commands.resume_command import _steer_overlay
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 from promptpotter.shared.hashing import dataset_hash, source_facts, stable_hash
 from promptpotter.shared.identity import default_identity
@@ -299,7 +322,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             )
         ]
     )
-    active = schema.active_steps_excluding([])
+    active = list(schema.active_steps)
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
         identity = identity_layer(None, None, None, judges, active)
@@ -906,10 +929,13 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
 
 def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
-    tmp_path: Path, built_stores: Stores, offline: Router
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
 ) -> None:
     # The draft's CHAIN reaches the mint on a reused dataset.
-    pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
+    pinned = {
+        "per_sample": "label_match(predicted, ground_truth)",
+        "per_cell": "fitness * (0.92 + 0.08 * 120.0 / max(120.0, tokens))",
+    }
     root = built_stores.tenant_datasets.dataset_dir("ds")
     optimization = dict(CONNECTORS.get(DEFAULT_CONNECTOR).default_optimization)
     schema = pipeline_schema(
@@ -926,29 +952,69 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     draft = new_draft(
-        tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="ds",
         basis=DatasetBasis(dataset="ds"),
         n_samples=1,
         sample_preview=[],
         headers=[],
-    ).patch(optimization_overrides={"optimizer": "capo"})
-    picked = draft.patch(pipeline_steps=["llm_only"])
-    chosen = draft_config(built_stores, picked, schema)
-    assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"], "a picked chain ran whole"
-    assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"], (
+    ).patch(config={"optimization": {"optimizer": "capo"}})
+    picked = draft.patch(config={**draft.config, "exclude_nodes": ["rerank", "web_search"]})
+    chosen = draft_declared(built_stores, picked)
+    assert schema.running(chosen.exclude_nodes, declared=()).active_steps == ("llm_only",), (
         "the excluded complement runs another chain than was picked"
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
-    assert chosen.scoring == pinned, "the pinned criterion did not reach the mint"
-    dialled = draft_config(built_stores, picked.patch(scoring_dials="cost=0.1"), schema)
-    assert dialled.scoring == {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}, (
+    assert chosen.scoring == pinned, "a pinned criterion lost its anchors under another edit"
+    assert draft_declared(built_stores, draft).exclude_nodes == [], (
+        "an untouched chain excluded a node"
+    )
+
+    def planned(on: DraftFile, **patch: Any) -> CampaignConfig:
+        plan = asyncio.run(plan_draft_patch(built_stores, on, EditDraftPatch.model_validate(patch)))
+        return draft_declared(built_stores, apply_draft_patch(on, plan))
+
+    # A check-in picks the criterion as the server reads it; sent back, a pinned formula's own
+    # dials move nothing, and a matcher pick keeps the composite.
+    assert draft_criterion(chosen.scoring) == DraftCriterion(
+        matcher="label_match", dials="tokens=0.08"
+    ), "the served criterion is not the pinned formula's"
+    assert planned(draft, config={"scoring": {"dials": "tokens=0.08"}}).scoring == pinned, (
+        "a pinned formula's anchors did not survive a round trip"
+    )
+    assert planned(draft, config={"scoring": {"matcher": "em_match"}}).scoring == {
+        **pinned,
+        "per_sample": "em_match(predicted, ground_truth)",
+    }, "a matcher pick dropped the composite"
+    dials = {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}
+    assert planned(draft, config={"scoring": {"dials": "cost=0.1"}}).scoring == dials, (
         "dials froze another criterion than they spell"
     )
-    untouched = draft_config(built_stores, draft, schema)
-    assert untouched.exclude_nodes == [], (
-        "`pipeline_steps=[]` is untouched: excluding its complement would close the whole pipeline"
+    # A knob edit on the basis's optimizer, then a switch: the knob addressed the old one.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("cap") / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": DEFAULT_CONNECTOR, "pipelines": dict(schema.pipelines)},
+            "campaign": {"optimization": {**optimization, "optimizer": "capo"}, "scoring": pinned},
+        },
+    )
+    on_capo = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="cap",
+        basis=DatasetBasis(dataset="cap"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    capo_knob = EditDraftPatch(
+        config={"optimization": {"nodes": {"blocks": {"config": {"block_size": 20}}}}}
+    )
+    knobbed = apply_draft_patch(
+        on_capo, asyncio.run(plan_draft_patch(built_stores, on_capo, capo_knob))
+    )
+    switched = planned(knobbed, config={"optimization": {"optimizer": "potter"}}).optimization
+    assert switched.optimizer == "potter" and "blocks" not in switched.nodes, (
+        "a switch kept the old optimizer's knobs"
     )
     # A draft edit sent as rows freezes the search space the overlay spelled. A REUSED dataset:
     # its file is not the check-in's to write, so the overlay rides the config.
@@ -969,7 +1035,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         },
     )
     edited = new_draft(
-        tenant_id=built_stores.identity.tenant_id,
         owner_user_id=str(built_stores.identity.user_id),
         slug="d",
         basis=DatasetBasis(dataset="d"),
@@ -996,7 +1061,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     assert as_rows == {"llm_only": NodeSearchNarrowing.model_validate(spelled)}, (
         "rows froze another space"
     )
-    as_overlay = frozen(pipeline_overlay={"llm_only": {"optimizer": spelled}})
+    as_overlay = frozen(config={"optimizer_narrowing": {"llm_only": spelled}})
     assert as_rows == as_overlay.optimizer_narrowing, "rows and the overlay froze two spaces"
     # No field named `answer`, none named by the operator: the slot is the LAST, reasoning first.
     answer_schema = {"type": "object", "properties": {"reasoning": {}, "code": {}}}
@@ -1009,15 +1074,476 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "response_format": "json",
     }
     assert (
-        authored == frozen(pipeline_overlay={"llm_only": {"config": contract}}).pipeline_overlay
+        authored == frozen(config={"pipeline_overlay": {"llm_only": contract}}).pipeline_overlay
     ), "an authored output froze another contract than the overlay spells"
     assert authored["llm_only"]["answer_fields"] == ["code"], (
         "the answer slot is not the last field"
+    )
+    # A reused dataset's own contract is authored already: editing it reopens no axis.
+    contracted = {"model": "m", "output_schema": answer_schema, "answer_fields": ["reasoning"]}
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("dj") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "backend_type": "termnorm",
+                "nodes": {"llm_only": {**declared_node, "config": contracted}},
+            },
+            "campaign": _connector_config().model_dump(mode="json"),
+        },
+    )
+    reused_contract = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="dj",
+        basis=DatasetBasis(dataset="dj"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    contract_edit = EditDraftPatch.model_validate(
+        {"node_output": {"node": "llm_only", "output_schema": answer_schema}}
+    )
+    edited_node = asyncio.run(
+        plan_draft_patch(built_stores, reused_contract, contract_edit)
+    ).changes["config"]["pipeline_overlay"]["llm_only"]
+    assert "response_format" not in edited_node and edited_node["answer_fields"] == ["reasoning"], (
+        "a reused dataset's declared contract read as unauthored"
     )
     # A check-in names only a connector that runs its upload; a container one is never chosen there.
     for foreign in ("dbllmbench", "harbor", "dspy", "no-such"):
         with pytest.raises(PayloadInvalidError):
             frozen(connector=foreign)
+
+    # An upload's draft splits once: its node edit is the definition's, which its Start writes, so
+    # the campaign it mints declares none, as one named off that definition does not.
+    landed = asyncio.run(
+        ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\nz,1\n", filename="up.csv")
+    )
+    upload = owned_draft(built_stores, landed.draft_id).patch(
+        raw_task_description="Map q to a.", column_query="q", column_ground_truth="a"
+    )
+    upload_knob = {"config": {"pipeline_overlay": {"llm_only": {"temperature": 0.3}}}}
+    knob_plan = asyncio.run(
+        plan_draft_patch(built_stores, upload, EditDraftPatch.model_validate(upload_knob))
+    )
+    knobbed = apply_draft_patch(upload, knob_plan)
+    upload_laid = draft_pipeline(built_stores, knobbed, knob_plan.served)
+    assert "pipeline_overlay" not in upload_laid.config.model_dump(exclude_defaults=True), (
+        "an upload's check-in declares its definition's half into the campaign"
+    )
+    temperature = next(r for r in upload_laid.rows["llm_only"] if r.key == "temperature")
+    assert (temperature.value, temperature.source) == (0.3, "dataset"), (
+        "an upload's node edit reads as another layer than the definition its Start writes"
+    )
+    assert isinstance(knobbed.basis, UploadBasis)
+    commit_upload_definition(
+        built_stores,
+        knobbed,
+        source=upload_source(knobbed, knobbed.basis),
+        pipeline=upload_laid,
+    )
+    named = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name=knobbed.slug))
+    by_name = owned_draft(built_stores, named.draft_id)
+    again = draft_pipeline(built_stores, by_name, asyncio.run(draft_served(built_stores, by_name)))
+    assert (again.config, again.params) == (upload_laid.config, upload_laid.params), (
+        "a dataset named off an upload's Start declares or runs another config than its check-in"
+    )
+    # A resolver's model proposal is the one edit at its node's config path, applied as any edit.
+    menu = next(r for r in upload_laid.rows["llm_only"] if r.key == "model").options
+    model_found = OriginFinding(
+        field="node.llm_only.model", proposed_value=menu[-1], confidence="high", evidence="row 1"
+    )
+    (proposal,) = raised_commands(
+        knobbed, CheckinOutput(task_intent="map", answer_format="a label", findings=[model_found])
+    )
+    proposed = asyncio.run(plan_draft_patch(built_stores, knobbed, proposal.patch))
+    assert (
+        draft_pipeline(built_stores, apply_draft_patch(knobbed, proposed), proposed.served).params[
+            "llm_only"
+        ]["model"]
+        == menu[-1]
+    ), "a resolver's model proposal was dropped"
+    # Each basis offers its whole chain apart from the one it starts on: an upload starts on its
+    # connector's one call, a dataset on its own chain; either Mode runs out of what is offered.
+    # An upload's offered chain is the backend's declared ones: a node no chain names is served
+    # (TermNorm's `direct_prompt`) but never offered, run or written.
+    research = {**LLM_ONLY_NODE, "description": "Research ahead of the call."}
+    served_nodes = {
+        "direct_prompt": LLM_ONLY_NODE,
+        "web_search": research,
+        "rerank": research,
+        "llm_only": LLM_ONLY_NODE,
+    }
+    wide = ServedPipeline(
+        DEFAULT_CONNECTOR,
+        {
+            "nodes": served_nodes,
+            "pipelines": {
+                "default": ["web_search", "rerank", "llm_only"],
+                "llm_only": ["llm_only"],
+            },
+        },
+    )
+    on_dataset = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="ds",
+        basis=DatasetBasis(dataset="ds"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+
+    def view_of(draft: DraftFile) -> tuple[list[str], bool]:
+        # What the dashboard rail and the one-call editor draw: the served view, never the menu.
+        response = resolve_pipeline_for_draft(built_stores, draft, wide)
+        assert response.view is not None
+        nodes = [n.id for n in response.view.nodes if n.kind != "io"]
+        return nodes, response.single_node is not None
+
+    for basis, starts in (
+        (knobbed, ["llm_only"]),
+        (on_dataset, ["web_search", "rerank", "llm_only"]),
+    ):
+        unpicked = draft_wire(built_stores, basis, wide)
+        assert unpicked.active_steps == starts, "a basis starts on another chain than its own"
+        assert view_of(basis) == (starts, len(starts) == 1), (
+            "the view draws a chain that never runs"
+        )
+        for mode, runs in (("one_call", ["llm_only"]), ("research", ["web_search", "rerank"])):
+            exclude = getattr(unpicked.chains, mode)
+            assert exclude is not None, f"the {mode} Mode is not offered"
+            picked = basis.patch(config={**basis.config, "exclude_nodes": exclude})
+            reread = draft_wire(built_stores, picked, wide)
+            assert (reread.active_steps, reread.chains.running) == (runs, mode), (
+                f"picking the {mode} Mode runs another chain"
+            )
+            started = draft_pipeline(built_stores, picked, wide)
+            assert list(started.chain.active_steps) == runs, (
+                f"a Start on the {mode} Mode mints another chain than its check-in read"
+            )
+            assert set(started.rows) == set(runs), (
+                f"the {mode} Mode serves a row for a node it never runs"
+            )
+            assert view_of(picked) == (runs, len(runs) == 1), (
+                f"the {mode} Mode's view draws a node it never runs"
+            )
+            assert "direct_prompt" not in started.local.get("pipelines", {}).get("default", []), (
+                "a Start writes a node no served chain names"
+            )
+    # Every door reads WHICH nodes off one running set: the chain the Mode runs, the phases served
+    # beside it, and a node the definition declares on no chain; a node only an alternative names
+    # runs nowhere. A free account's tier binds that set and no other.
+    free_llm = {
+        **LLM_ONLY_NODE,
+        "config": {
+            **{k: v for k, v in LLM_ONLY_NODE["config"].items() if k != "reasoning_effort"},
+            "model": "openai/gpt-oss-20b:nitro",
+        },
+    }
+    researched = ["web_search", "gw", "rerank", "llm_only"]
+    phased = ServedPipeline(
+        DEFAULT_CONNECTOR,
+        {
+            "nodes": {
+                **dict.fromkeys(("web_search", "rerank", "llm_only", "ph", "oc", "al"), free_llm),
+                "gw": {"type": "measurement", "config": {}, "nested_datasets": ["inner"]},
+            },
+            "pipelines": {"default": researched, "llm_only": ["llm_only"], "ph": ["ph"]},
+            "phase_pipelines": ["ph"],
+        },
+    )
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("oc") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "backend_type": DEFAULT_CONNECTOR,
+                "nodes": {n: {"config": {"temperature": 0.1}} for n in ("oc", "al")},
+                "pipelines": {"default": researched, "alt": ["al"]},
+            },
+            "campaign": {"optimization": optimization, "scoring": pinned},
+        },
+    )
+    on_oc = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="oc",
+        basis=DatasetBasis(dataset="oc"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    tier_fence = FreeFence(task=True, providers=frozenset())
+    phase_model = "qwen/qwen3.7-flash"
+    for basis, off_chain in ((knobbed, set()), (on_dataset, set()), (on_oc, {"oc"})):
+        offer = draft_wire(built_stores, basis, phased).chains
+        assert "ph" not in {*(offer.one_call or ()), *(offer.research or ())}, (
+            "a Mode offers a phase, which runs on every call"
+        )
+        for exclude in (offer.one_call, offer.research, [*(offer.research or ()), "gw"]):
+            assert exclude is not None
+            # Every node laid, so each one the run reaches folds a config and floors its effort.
+            laid_overlay = {
+                **{
+                    n: {"temperature": 0.1}
+                    for n in ("web_search", "rerank", "llm_only", *off_chain)
+                },
+                "ph": {"model": phase_model},
+            }
+            picked = basis.patch(
+                config={**basis.config, "exclude_nodes": exclude, "pipeline_overlay": laid_overlay}
+            )
+            started = draft_pipeline(built_stores, picked, phased)
+            response = resolve_pipeline_for_draft(built_stores, picked, phased)
+            run_set = {*started.chain.active_steps, "ph", *off_chain}
+            llm = run_set - {"gw"}
+            wire = build_l1_response_schema(
+                started.chain, citable_fields=["critique"], inner_cells=None
+            )
+            levers = wire["properties"]["variants"]["items"]["properties"]["pipeline_overlay"]
+            effort_floored = {
+                node
+                for node, rows in started.rows.items()
+                for row in rows
+                if row.key == "reasoning_effort" and row.source == "model_floor"
+            }
+            ran_with = {
+                n: {**node.current_config, **started.params.get(n, {})}
+                for n in llm
+                if (node := started.chain.get_node(n)) is not None
+            }
+            routed = {
+                n
+                for n, node_cfg in ran_with.items()
+                if node_cfg.get("model")
+                in response.model_capabilities.get(str(node_cfg.get("provider")), {})
+            }
+            with monkeypatch.context() as on_tier:
+                on_tier.setattr(pipeline_resolve, "free_fence", lambda *_: tier_fence)
+                bound = set(draft_pipeline(built_stores, picked, phased).config.optimizer_narrowing)
+            assert response.view is not None
+            for holds, what, of in (
+                ({n for n, _ in node_config_items(started.params)}, "params", llm),
+                (set(started.chain.node_param_keys()), "param keys", llm),
+                (set(started.rows), "rows", run_set),
+                ({n.id for n in response.view.nodes if n.kind != "io"}, "view", run_set),
+                (set(levers["properties"]), "L1 wire", llm),
+                ({r.node for r in response.nests}, "nests", run_set & {"gw"}),
+                (effort_floored, "effort floors", llm),
+                (routed, "routed capabilities", llm),
+                (bound, "free-tier binding", llm),
+            ):
+                assert holds == of, f"{basis.slug} less {exclude}: the {what} hold another set"
+            assert "al" not in started.params, "a node only an alternative names ran"
+    # A dataset's own chains keep the served phases in view and rows; the served doc owns them,
+    # so a definition re-spelling a phase's chain moves nothing.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("rp") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "backend_type": DEFAULT_CONNECTOR,
+                "pipelines": {"default": researched, "ph": ["llm_only"]},
+                "phase_pipelines": [],
+            },
+            "campaign": {"optimization": optimization, "scoring": pinned},
+        },
+    )
+    respelled = resolve_pipeline_for_draft(
+        built_stores,
+        new_draft(
+            owner_user_id=str(built_stores.identity.user_id),
+            slug="rp",
+            basis=DatasetBasis(dataset="rp"),
+            n_samples=1,
+            sample_preview=[],
+            headers=[],
+        ),
+        phased,
+    )
+    assert respelled.view is not None and "ph" in {n.id for n in respelled.view.nodes}, (
+        "a definition's chains dropped a served phase"
+    )
+    assert "ph" in respelled.node_config_schema, "a served phase lost its rows"
+    # A one-node chain beside a phase: the response names the chain's node, which the one-call
+    # editor opens, never the phase drawn ahead of it.
+    one_and_phase = resolve_pipeline_for_draft(
+        built_stores, on_oc.patch(config={"exclude_nodes": researched[:-1]}), phased
+    )
+    assert one_and_phase.single_node == "llm_only", "the one node served is not the chain's"
+    # A dataset declaring neither nodes nor chains over TermNorm's served shape runs its `default`;
+    # the `llm_only` chain is a Mode offer, never a phase, and `direct_prompt` runs on no chain.
+    six = ["cache", "token_matching", "fuzzy_matching", "web_search", "rerank", "llm_ranking"]
+    termnorm_doc = ServedPipeline(
+        DEFAULT_CONNECTOR,
+        {
+            "nodes": {**dict.fromkeys(six, research), **served_nodes},
+            "pipelines": {"default": six, "llm_only": ["llm_only"]},
+        },
+    )
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("tn") / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": DEFAULT_CONNECTOR},
+            "campaign": {"optimization": optimization, "scoring": pinned},
+        },
+    )
+    over_termnorm = resolve_pipeline_for_draft(
+        built_stores,
+        new_draft(
+            owner_user_id=str(built_stores.identity.user_id),
+            slug="tn",
+            basis=DatasetBasis(dataset="tn"),
+            n_samples=1,
+            sample_preview=[],
+            headers=[],
+        ),
+        termnorm_doc,
+    )
+    assert over_termnorm.view is not None
+    assert [n.id for n in over_termnorm.view.nodes if n.kind != "io"] == six, (
+        "the view draws a served chain that never runs"
+    )
+    assert set(over_termnorm.node_config_schema) == set(six), "a row serves a node that never runs"
+    # The recursion connector's phases run beside its chain on every call, so a promptpotter-self
+    # campaign, which declares no node, keeps each as a lever: its view, rows and L1 wire.
+    for inner, phase_nodes in (("potter", {"l2_context", "l3_plan"}), ("levi", {"levi_seed"})):
+        cells = inner_cells(inner)
+        inner_doc = cells.pipeline()
+        local = {"pipelines": {"default": inner_doc["pipelines"]["default"]}}
+        _, l4_schema = _resolve_active_schema(
+            parse_pipeline_response(ServedPipeline(CONNECTOR.name, inner_doc).over(local)),
+            exclude=[],
+            narrowing={},
+            declared=frozenset(),
+            workspace=built_stores.base_dir,
+        )
+        l4_running = {n.name for n in l4_schema.declared_nodes}
+        l4_llm = {n.name for n in l4_schema.declared_nodes if n.kind is NodeKind.LLM}
+        assert phase_nodes <= l4_running, f"{inner}'s served phase left the running set"
+        assert l4_schema.view is not None
+        wire = build_l1_response_schema(l4_schema, citable_fields=["critique"], inner_cells=cells)
+        levers = wire["properties"]["variants"]["items"]["properties"]["pipeline_overlay"]
+        for holds, what, of in (
+            ({n.id for n in l4_schema.view.nodes if n.kind != "io"}, "view", l4_running),
+            (set(l4_schema.node_config_schema()), "rows", l4_running),
+            (set(l4_schema.node_param_keys()), "param keys", l4_llm),
+            (set(levers["properties"]), "L1 wire", l4_llm),
+        ):
+            assert holds == of, f"{inner}: the {what} hold another set than the run reaches"
+    # Reopened, an upload's dataset seeds the origin prompts of the chain its Start ran, never
+    # the whole union it offered.
+    one_call = owned_draft(
+        built_stores,
+        asyncio.run(
+            ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\n", filename="wide.csv")
+        ).draft_id,
+    ).patch(raw_task_description="Map q to a.", column_query="q", column_ground_truth="a")
+    assert isinstance(one_call.basis, UploadBasis)
+    commit_upload_definition(
+        built_stores,
+        one_call,
+        source=upload_source(one_call, one_call.basis),
+        pipeline=draft_pipeline(built_stores, one_call, wide),
+    )
+    reopened = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug=one_call.slug,
+        basis=DatasetBasis(dataset=one_call.slug),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    assert draft_wire(built_stores, reopened, wide).active_steps == ["llm_only"], (
+        "a reopened upload seeds another chain than its Start ran"
+    )
+    # A dataset declaring no node runs its backend's served chain, and reopens seeding the origin
+    # prompt run init lays there.
+    bare_dir = built_stores.tenant_datasets.dataset_dir(one_call.slug)
+    committed = read_yaml(bare_dir / DEFINITION_FILE)
+    write_yaml(
+        bare_dir / DEFINITION_FILE,
+        {**committed, "pipeline": {"backend_type": DEFAULT_CONNECTOR}},
+    )
+    write_yaml(bare_dir / ORIGIN_FILE, {"llm_only": {"instruction": "Map q to a."}})
+    bare = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name=one_call.slug))
+    assert bare.origin_prompts == {"llm_only": {"instruction": "Map q to a."}}, (
+        "a no-node dataset reopens without the origin prompt its run lays"
+    )
+    # A reopened origin runs the origin's Mode and starts from the prompts its root seed carried,
+    # which stand over the dataset's `origin.yaml`.
+    write_yaml(
+        bare_dir / DEFINITION_FILE,
+        {
+            **committed,
+            "pipeline": {
+                "backend_type": DEFAULT_CONNECTOR,
+                "nodes": {"extra": LLM_ONLY_NODE, "llm_only": {"config": {"temperature": 0.0}}},
+                "pipelines": {"default": ["extra", "llm_only"]},
+            },
+        },
+    )
+    write_yaml(
+        bare_dir / ORIGIN_FILE,
+        {"extra": {"instruction": "Look it up."}, "llm_only": {"instruction": "Map q to a."}},
+    )
+    root_seeded = {"llm_only": NodePrompt(fields={"instruction": "Seeded by the origin."})}
+    reopened_origin = minted_campaign(
+        CycleHop(campaign_id=f"{one_call.slug}__000001", cycle_id="cycle_root"),
+        config=_connector_config(exclude_nodes=["extra"]),
+        dataset_name=one_call.slug,
+        owner_user_id=str(built_stores.identity.user_id),
+        root_content_hash="reopened-reopened_origin",
+    )
+    built_stores.campaigns.create_campaign(reopened_origin)
+    built_stores.campaigns.mint_cycle(reopened_origin.root_hop)
+    built_stores.campaigns.write_cycle_seed(
+        reopened_origin.root_hop,
+        CycleSeed(origin_prompts=root_seeded, origin_source=OriginSource.CAMPAIGN_ORIGIN),
+    )
+    reopened_wire = asyncio.run(
+        ingest.draft_from_origin(stores=built_stores, origin_id=reopened_origin.origin_id)
+    )
+    reopened_draft = owned_draft(built_stores, reopened_wire.draft_id)
+    reopened_chain = draft_pipeline(
+        built_stores, reopened_draft, asyncio.run(draft_served(built_stores, reopened_draft))
+    ).chain
+    assert reopened_wire.origin_prompts == {"llm_only": {"instruction": "Seeded by the origin."}}, (
+        "a reopened origin starts from other prompts than its root seed carried"
+    )
+    assert reopened_wire.active_steps == ["llm_only"], "a reopened origin runs another Mode"
+    assert reopened_draft.patch(raw_task_description="Map q to a.").committed_prompts(
+        reopened_chain
+    ) == {"llm_only": {"instruction": "Seeded by the origin."}}, (
+        "a reopened origin's Start commits other prompts than its seed"
+    )
+
+    # An upload reads its backend's chains as a dataset over it does (`declared_pipelines`): on a
+    # doc declaring no `pipelines` every node is the `default`, so Research is offered; with no
+    # connector default, an upload starts on that `default`, where a dataset over it starts.
+    termnorm = CONNECTORS.get(DEFAULT_CONNECTOR)
+    registered = CONNECTORS.get
+    undeclared = ServedPipeline(DEFAULT_CONNECTOR, {"nodes": served_nodes})
+    research_default = ServedPipeline(
+        DEFAULT_CONNECTOR,
+        {
+            "nodes": served_nodes,
+            "pipelines": {"default": ["web_search", "rerank"], "llm_only": ["llm_only"]},
+        },
+    )
+    for connector, doc, starts in (
+        (replace(termnorm, default_pipeline=()), research_default, ["web_search", "rerank"]),
+        (replace(termnorm, default_pipeline=()), undeclared, list(served_nodes)),
+        (termnorm, undeclared, ["llm_only"]),
+    ):
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                CONNECTORS,
+                "get",
+                lambda name, c=connector: c if name == DEFAULT_CONNECTOR else registered(name),
+            )
+            fresh_upload = draft_wire(built_stores, knobbed, doc)
+            assert fresh_upload.active_steps == starts, "an upload starts off its backend's default"
+            assert list(draft_pipeline(built_stores, knobbed, doc).chain.active_steps) == starts
+            assert fresh_upload.chains.research is not None, (
+                "an upload withholds Research a dataset over its backend runs"
+            )
 
     # A row reads as the search space its ticks and padlock drew.
     params = [
@@ -1155,7 +1681,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 "param_allowed_values": {"reasoning_effort": rungs},
             },
         }
-        return {"backend_name": "termnorm", "nodes": {"a": node}, "pipelines": {"default": ["a"]}}
+        # `b` is served on no chain, so no run reaches it.
+        return {
+            "backend_name": "termnorm",
+            "nodes": {"a": node, "b": node},
+            "pipelines": {"default": ["a"]},
+        }
 
     write_yaml(
         stores.tenant_datasets.dataset_dir("fk") / DEFINITION_FILE,
@@ -1206,6 +1737,47 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             steered,
             fork,
         )
+    # Both fork doors admit what the hop runs: a steer on a node no run reaches, which no layer
+    # would lay, is refused by each in the same words.
+    door_refusals: list[str] = []
+
+    def rest_door() -> object:
+        return parse_cycle_seed(
+            ForkSeed(pipeline_overlay={"b": {"temperature": 0.5}}),
+            cycle_config(stores, steered, None).config,
+            stores,
+            steered,
+            fork,
+        )
+
+    def cli_door() -> object:
+        return _steer_overlay(["b.temperature=0.5"], stores, fork)
+
+    for fork_door in (rest_door, cli_door):
+        with pytest.raises(PayloadInvalidError) as door_refused:
+            fork_door()
+        door_refusals.append(str(door_refused.value))
+    assert door_refusals[0] == door_refusals[1], "the fork doors admit different nodes"
+    # A draft edit naming a node the draft never runs is refused in the fork doors' words, by
+    # every edit that names one, an empty narrowing included.
+    unrun = {"temperature": 0.5}
+    naming: dict[str, Any]
+    for naming in (
+        {"node_narrowing": {"b": []}},
+        {"node_output": {"node": "b", "output_schema": answer_schema}},
+        {"config": {"pipeline_overlay": {"b": unrun}}},
+        {"config": {"optimizer_narrowing": {"b": {"param_keys": []}}}},
+        {"origin_prompts": {"b": {"instruction": "Never runs."}}},
+    ):
+        with pytest.raises(PayloadInvalidError) as draft_refused:
+            asyncio.run(
+                plan_draft_patch(built_stores, edited, EditDraftPatch.model_validate(naming))
+            )
+        said = str(draft_refused.value)
+        assert said.split(" which ")[0] == door_refusals[0].split(" which ")[0], (
+            f"{sorted(naming)}: a draft edit admits another node set, or in other words"
+        )
+        assert "never runs; it runs ['llm_only']" in said, f"{sorted(naming)}: refused unworded"
     # A steer the campaign never sanctioned cannot pass as a clean fork.
     sanctioning = {
         "l1_generate": NodeSearchNarrowing(param_allowed_values={"model": ["openai/gpt-oss-120b"]})
@@ -1799,6 +2371,50 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="a dataset's Start runs its definition's `default` (run init, `jobs/mint.py` and "
+    "`wiring.py`), so its Mode cannot offer a served alternative an upload's definition writes "
+    "onto its chain; offering it needs run init to run the union the offer reads",
+)
+@pytest.mark.usefixtures("offline")
+def test_a_no_node_dataset_offers_the_modes_an_upload_does(built_stores: Stores) -> None:
+    research = {**LLM_ONLY_NODE, "description": "Research ahead of the call."}
+    six = ["cache", "token_matching", "fuzzy_matching", "web_search", "rerank", "llm_ranking"]
+    served = ServedPipeline(
+        DEFAULT_CONNECTOR,
+        {
+            "nodes": {**dict.fromkeys(six, research), "llm_only": LLM_ONLY_NODE},
+            "pipelines": {"default": six, "llm_only": ["llm_only"]},
+        },
+    )
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("tn") / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": DEFAULT_CONNECTOR},
+            "campaign": _connector_config().model_dump(mode="json"),
+        },
+    )
+    on_dataset = new_draft(
+        owner_user_id=str(built_stores.identity.user_id),
+        slug="tn",
+        basis=DatasetBasis(dataset="tn"),
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+    )
+    upload = owned_draft(
+        built_stores,
+        asyncio.run(
+            ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\n", filename="up.csv")
+        ).draft_id,
+    )
+    offers = [draft_wire(built_stores, d, served).chains for d in (on_dataset, upload)]
+    assert (offers[0].one_call, offers[0].research) == (offers[1].one_call, offers[1].research), (
+        "a dataset over a backend offers other Modes than an upload over it"
+    )
+
+
 # 3. Contamination of a scored prompt
 
 
@@ -2084,12 +2700,11 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     uploaded = owned_draft(built_stores, landed.draft_id)
     starved = {"l1_generate": {"config": {"model": "deepseek/deepseek-v4-flash", "max_tokens": 64}}}
     built_stores.drafts.write_draft(
-        uploaded.draft_id,
         uploaded.patch(
             column_query="q",
             column_ground_truth="a",
-            optimization_overrides={**uploaded.optimization_overrides, "nodes": starved},
-        ).to_disk(),
+            config={"optimization": {"optimizer": "potter", "nodes": starved}},
+        ),
     )
     monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft, _pipeline: None)
     for attempt in ("first", "retry"):
@@ -2107,9 +2722,14 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     opened = asyncio.run(
         checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
     )
-    assert opened.session.pipeline_schema == draft_pipeline(built_stores, draft, served).declared, (
-        "the run inits on another pipeline than the one its Start was checked against"
+    checked = draft_pipeline(built_stores, draft, served)
+    runs = opened.session.pipeline_schema.running(
+        checked.config.exclude_nodes, declared=opened.session.pipeline_read.declared_nodes
     )
+    assert (runs.declared_nodes, runs.active_steps) == (
+        checked.chain.declared_nodes,
+        checked.chain.active_steps,
+    ), "the run inits on another pipeline than the one its Start was checked against"
 
     # Rewriting the prompt panel cannot accumulate the operator framing.
     upstream = "Raw invoice text is provided directly as the input column."

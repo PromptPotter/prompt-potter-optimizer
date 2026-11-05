@@ -1,23 +1,19 @@
 import type { ReactNode } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
-import { useConnector } from "@/lib/hooks/useConnector";
-import { CopyButton } from "@/components/ui";
+import { CopyButton, ReadState } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { interiorNodes, searchPoint } from "@/lib/derivations";
+import { nodeSchemaReading, oneCallNode, searchPoint } from "@/lib/derivations";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { draftPrompts } from "@/lib/prompt-fields";
 
-const LLM_ONLY: string[] = ["llm_only"];
-
-function isLlmOnly(steps: readonly string[]): boolean {
-  return steps.length === LLM_ONLY.length && steps.every((x, i) => x === LLM_ONLY[i]);
-}
-
 export function pipelineLabel(draft: DraftCampaignWire): string {
-  return isLlmOnly(draft.active_steps) ? "LLM only" : `Research + Match · ${draft.active_steps.length} steps`;
+  return draft.chains.running === "one_call"
+    ? "LLM only"
+    : `Research + Match · ${draft.active_steps.length} steps`;
 }
 
-// The draft's pipeline rides the app's `ConnectorProvider`; a node picked here opens the `node` view.
+// A node picked here opens the `node` view; the served Mode is the pick, each sends its served exclusions.
 export function PipelineSetupSection({
   draft,
   onApply,
@@ -28,72 +24,82 @@ export function PipelineSetupSection({
   // What the chosen mode needs, shown under its description and above the node editor.
   children: ReactNode;
 }) {
-  const cv = useConnector();
-  const nodes = interiorNodes(cv.view);
-  // The served view can hold `llm_only` itself, and picking only that is no switch at all.
-  const researchSteps = nodes.map((n) => n.id).filter((id) => !LLM_ONLY.includes(id));
-  const hasResearch = researchSteps.length > 0;
-  const llmOnly = isLlmOnly(draft.active_steps);
-  const llmNode = nodes.find((n) => n.kind === "llm") ?? null;
+  const read = useConnector();
+  const schema = nodeSchemaReading(read);
+  const { chains } = draft;
+  const llmOnly = chains.running === "one_call";
 
   return (
-    <>
-      <p>
-        <label>
-          Mode{" "}
-          <select
-            value={llmOnly ? "llm" : "research"}
-            onChange={(e) =>
-              onApply({ pipeline_steps: e.target.value === "llm" ? LLM_ONLY : researchSteps })
-            }
-          >
-            <option value="llm">LLM only — one call per query</option>
-            <option value="research" disabled={!hasResearch}>
-              Research + Match
-            </option>
-          </select>
-        </label>{" "}
-        <CopyButton
-          data={{
-            pipeline_steps: draft.active_steps,
-            resolved_params: draft.pipeline_overlay,
-            prompts: draft.origin_prompts,
-          }}
-          title="Copy this origin as JSON"
-        />
-      </p>
+    <ReadState read={read} subject="this check-in's pipeline" className="mech-empty">
+      {(pipeline) => {
+        // The served one node of the chain, never the view's first: a phase is drawn ahead of it.
+        const oneCall = oneCallNode(pipeline);
+        // What each node runs, the dataset's own declaration and the draft's edits laid on.
+        const overlay = pipeline.params;
+        return (
+          <>
+            <p>
+              <label>
+                Mode{" "}
+                <select
+                  value={chains.running}
+                  onChange={(e) => {
+                    const exclude = e.target.value === "one_call" ? chains.one_call : chains.research;
+                    if (exclude) onApply({ config: { exclude_nodes: exclude } });
+                  }}
+                >
+                  <option value="one_call" disabled={!chains.one_call}>
+                    LLM only — one call per query
+                  </option>
+                  <option value="research" disabled={!chains.research}>
+                    Research + Match
+                  </option>
+                </select>
+              </label>{" "}
+              <CopyButton
+                data={{
+                  active_steps: draft.active_steps,
+                  resolved_params: overlay,
+                  prompts: draft.origin_prompts,
+                }}
+                title="Copy this origin as JSON"
+              />
+            </p>
 
-      {children}
+            {children}
 
-      {llmOnly ? (
-        llmNode ? (
-          <NodeSurface
-            node={llmNode}
-            point={searchPoint(draftPrompts(draft.origin_prompts), draft.pipeline_overlay)}
-            overlay={draft.pipeline_overlay}
-            schema={cv.schema}
-            mode="search-space"
-            modelCapabilities={draft.model_capabilities}
-            onApply={onApply}
-          />
-        ) : (
-          <small className="config-hint">Loading node…</small>
-        )
-      ) : (
-        <PipelineFlow
-          layer={{
-            view: cv.view,
-            status: cv.schema.status,
-            connector: cv.connector,
-            reach: cv.reach,
-            scope: "target",
-            nestsNode: null,
-            activeNode: null,
-            isLive: false,
-          }}
-          tone="neutral"
-        />
-      )}
-    </>
+            {llmOnly ? (
+              oneCall ? (
+                <NodeSurface
+                  node={oneCall}
+                  point={searchPoint(draftPrompts(draft.origin_prompts), overlay)}
+                  overlay={overlay}
+                  schema={schema}
+                  mode="search-space"
+                  modelCapabilities={pipeline.model_capabilities}
+                  onApply={onApply}
+                />
+              ) : (
+                <small className="config-hint">This Mode runs no single node.</small>
+              )
+            ) : (
+              <PipelineFlow
+                layer={{
+                  view: pipeline.view,
+                  read: schema.read,
+                  connector: pipeline.connector,
+                  reach: pipeline.reach,
+                  scope: "target",
+                  nestsNode: null,
+                  activeNode: null,
+                  isLive: false,
+                }}
+                tone="neutral"
+              />
+            )}
+          </>
+        );
+      }}
+    </ReadState>
   );
 }

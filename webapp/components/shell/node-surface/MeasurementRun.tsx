@@ -9,6 +9,7 @@ import {
   innerPanelIndex,
   liveCandidateSearchPoint,
   liveCandidateVerdicts,
+  nodeSchemaReading,
   panelCellKey,
 } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
@@ -17,7 +18,11 @@ import type { CellRow, HierarchyCourse } from "@/lib/api";
 import { ARM_END_INFO } from "@/lib/api/types.generated";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
-import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
+import {
+  isSelectedCandidate,
+  selectedCandidateOf,
+  type ArmRow,
+} from "@/lib/types";
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { fmtUnit, unitCount, unitPlural } from "@/lib/format";
@@ -40,7 +45,8 @@ export function MeasurementRun({
   round: number;
 }) {
   const { dash, isLive } = useCycleStream();
-  const cv = useConnector();
+  const read = useConnector();
+  const schema = nodeSchemaReading(read);
   const { viewedPath, leafCycleId, navigate } = useWorkspace();
   // The DECLARED backend type, not "the tree found inner runs": minting cells would tally as misses.
   const isL4 = useLeafIsL4();
@@ -268,7 +274,7 @@ export function MeasurementRun({
                       node={null}
                       point={g.spec}
                       overlay={g.spec.pipeline_overlay}
-                      schema={cv.schema}
+                      schema={schema}
                       mode="values"
                       compact
                     />

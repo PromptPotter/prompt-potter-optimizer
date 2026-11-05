@@ -55,6 +55,12 @@ export function shownData<T>(read: ReadResult<T>): T | null {
   return read.status === "idle" ? null : read.kept;
 }
 
+// What a read stands in for while it has nothing to show; null once it shows a body, a kept one
+// included (a failed revalidation keeps the body it painted over).
+export function readGap<T>(read: ReadResult<T>): Exclude<ReadResult<T>, { status: "ready" }> | null {
+  return read.status === "ready" || shownData(read) !== null ? null : read;
+}
+
 function landed<T>(stamp: number, data: T, keep: string | null): Held<T> {
   return { outcome: { stamp, ok: true, data }, last: { stamp, data, keep } };
 }

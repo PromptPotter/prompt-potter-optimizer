@@ -15,7 +15,7 @@
 - Per-call telemetry from deep async chains uses `emit_*`, not `RunCallbacks` — [`adding-a-surface.md`](../../docs/developer/adding-a-surface.md) §1.
 - **`commands/dispatcher.py` is the sole writer of `CommandRecord`** <!-- probe: git grep -cE "emit_command\(" -- promptpotter/application/*.py <= 2 --> **and imports no handler** <!-- probe: git grep -cE "^from promptpotter\.application\.commands\." -- promptpotter/application/commands/dispatcher.py == 0 -->: a `CommandKind` row names its `module:handler`, imported at dispatch.
 
-- **Every ingress edits an origin through an `EditDraftPatch`, and the rules applying it live in `datasets/draft_patch.py`**, never in `api/routers/`. **A pure projection off a draft lives in `datasets/draft_campaign.py`** (`draft_build.py` the served ones, `origin_readiness.py` the gate and write-back): `pipeline_resolve` reads a draft and `jobs/launcher/` calls `pipeline_resolve`, so a projection parked in the launcher closes an import cycle.
+- **Every ingress edits an origin through an `EditDraftPatch`, and the rules applying it live in `datasets/draft_patch.py`**, never in `api/routers/`. **A projection off the draft alone is a `domain/checkin_draft.py::DraftFile` method; one that reads its connector or criterion lives in `datasets/draft_campaign.py`** (`draft_build.py` the served ones, `origin_readiness.py` the gate and write-back): `pipeline_resolve` reads a draft and `jobs/launcher/` calls `pipeline_resolve`, so a projection parked in the launcher closes an import cycle.
 - **A draft is kept only once its response is built** (`datasets/ingest.py::_kept`, the `edit-draft-campaign` and `resolve-origin` handlers): a build that raises keeps nothing.
 
 ## Backend overlay

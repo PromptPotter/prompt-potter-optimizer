@@ -216,7 +216,8 @@ class Connector:
     """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
 
     default_pipeline: tuple[str, ...] = ()
-    """Seeds a fresh upload's ``pipelines.default``; empty: the backend's own default."""
+    """Where a fresh upload starts in the chains it offers (`draft_campaign.py::upload_opening_block`);
+    empty: its backend's declared ``default``, where a dataset over that backend starts."""
 
     default_optimization: tuple[tuple[str, Any], ...] = ()
     """Seeds ``campaign.json::optimization``; ``degradation_threshold`` has no schema default."""

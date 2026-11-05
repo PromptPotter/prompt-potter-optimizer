@@ -3,7 +3,7 @@ import { BACKEND_REACHABILITY_INFO, TONES, type Said as SaidRow } from "@/lib/ap
 import { cycleAddress, postCommand } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useConnector } from "@/lib/hooks/useConnector";
+import { useBackend } from "@/lib/hooks/useConnector";
 import { connectionSaid, useCycleStream, type Connection } from "@/lib/poll";
 import { useActivePointer, useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
@@ -16,7 +16,7 @@ export function CriticalAlertBanner() {
   const { failure: registryFailure } = useRegistry();
   const { failure: pointerFailure } = useActivePointer();
   const pause = useCommand<"pause-cycle">("critical-alert", { scope: cycleId });
-  const { health } = useConnector();
+  const { health } = useBackend();
 
   const netFailure = pointerFailure ?? registryFailure;
   // The workspace's verdict wins: the dashboard has already reset onto another address. With no

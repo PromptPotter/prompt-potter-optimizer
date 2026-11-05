@@ -7,7 +7,8 @@ import { BACKEND_REACHABILITY_INFO, LAUNCH_REFUSAL_LABELS } from "@/lib/api/type
 import { stepAnswer, type FieldSchema } from "@/lib/derivations";
 import { useCollection } from "@/lib/hooks/useCollection";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
-import { readyData, useRead } from "@/lib/hooks/useRead";
+import { useConnector } from "@/lib/hooks/useConnector";
+import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useRegistry } from "@/lib/state/registry";
 import type { BlockItem } from "@/lib/chat/thread";
@@ -181,9 +182,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   // The schema's `writeOnly` subtree, already in `StartCheckinOptions` shape.
   const [launch, setLaunch] = useState<StartCheckinOptions>({});
   const served = flow.phase.stage === "ready" ? flow.phase.draft : null;
+  // The draft's pipeline as every section under it reads it: the connector read.
+  const pipeline = shownData(useConnector());
   // The probe the run control reads, on the connector this draft would launch.
   const health = readyData(
-    useRead(served ? backendHealthRead(served.connector) : null, {
+    useRead(served ? backendHealthRead(served.pipeline.connector) : null, {
       auth: true,
       intervalMs: CONNECTOR_HEALTH_POLL_MS,
     }),
@@ -215,6 +218,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const gapped = new Set<Step | null>(gaps.map((g) => g.step));
   const steps = (draft.setup_schema as FieldSchema).properties ?? {};
   const runValues = { ...draft, ...launch };
+  const { criterion } = draft;
   const commit: Commit = (path, value, writeOnly) => {
     if (writeOnly) setLaunch((l) => setIn(l, path, value));
     else flow.applyPatch(setIn({}, path, value));
@@ -237,8 +241,8 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       ) : null}
 
       {/* The backbone leads: its knobs and prompts frame every step after it. */}
-      <SetupStep step="optimizer" answer={draft.optimization_overrides.optimizer} gapped={gapped}>
-        <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
+      <SetupStep step="optimizer" answer={pipeline?.optimizer ?? null} gapped={gapped}>
+        <OptimizerSetupSection onApply={flow.applyPatch} />
       </SetupStep>
 
       <SetupStep
@@ -250,18 +254,21 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         <DatasetPreview draft={draft} />
       </SetupStep>
 
-      <SetupStep step="scoring" answer={draft.scoring_matcher} gapped={gapped}>
+      <SetupStep step="scoring" answer={criterion.matcher} gapped={gapped}>
         <Criterion
           startRung={1}
           dialsOnly
-          mask={{ kind: "dials", weights: dialsOf(draft.scoring_dials) }}
+          mask={{ kind: "dials", weights: dialsOf(criterion.dials) }}
           onMask={(mask) => {
-            if (mask.kind === "dials") flow.applyPatch({ scoring_dials: dialsText(mask.weights) });
+            // The server folds an edit into the criterion it runs: no scoring block is built here.
+            if (mask.kind === "dials") {
+              flow.applyPatch({ config: { scoring: { dials: dialsText(mask.weights) } } });
+            }
           }}
           matcher={{
-            value: draft.scoring_matcher,
+            value: criterion.matcher ?? "",
             options: draft.scoring_matchers,
-            onPick: (scoring_matcher) => flow.applyPatch({ scoring_matcher }),
+            onPick: (matcher) => flow.applyPatch({ config: { scoring: { matcher } } }),
           }}
           note="What this campaign optimizes for. Accuracy always counts; pull a dial up to also reward a faster, shorter or cheaper prompt. Each anchor is measured on the origin and locked there."
         />
@@ -286,12 +293,14 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         answer={h2h.arms.length === 0 ? "one campaign" : h2h.arms.map((a) => a.key).join(" vs ")}
         gapped={gapped}
       >
-        <HeadToHeadSection
-          value={h2h}
-          onChange={setH2h}
-          base={draft.optimization_overrides.optimizer}
-          setup={draft.optimizer_setup}
-        />
+        {pipeline && (
+          <HeadToHeadSection
+            value={h2h}
+            onChange={setH2h}
+            base={pipeline.optimizer}
+            setup={pipeline.optimizer_setup}
+          />
+        )}
       </SetupStep>
 
       <SetupStep step="run" answer={steps.run ? stepAnswer(steps.run, runValues) : null} gapped={gapped}>

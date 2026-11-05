@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
+import type { NestedPipelineRef } from "@/lib/api";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { shownData } from "@/lib/hooks/useRead";
 import { useCycleStream } from "@/lib/poll";
 import { CAMPAIGN_LAYER, useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { ConnectorInspector } from "./ConnectorInspector";
@@ -31,13 +33,16 @@ interface Props {
 }
 
 const CAMPAIGN_LEVEL = 1;
+const NO_NESTS: NestedPipelineRef[] = [];
 
 export function PipelineStack({ datasetName }: Props) {
-  const cv = useConnector();
+  const read = useConnector();
+  const served = shownData(read);
+  const nests = served?.nests ?? NO_NESTS;
   const { dash, isLive } = useCycleStream();
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
   // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
-  const nested = useNestedPipelines(cv.nests, cv.schema.status === "ok");
+  const nested = useNestedPipelines(nests, served !== null);
   const activeNode = dash?.current_round.active_node ?? null;
 
   const layers: Layer[] = [
@@ -45,13 +50,13 @@ export function PipelineStack({ datasetName }: Props) {
       key: "optimizer",
       parent: null,
       level: 0,
-      label: cv.optimizer ? `the ${cv.optimizer} optimization loop` : "the optimization loop",
-      view: cv.optimizerSetup?.view ?? null,
-      status: cv.schema.status,
+      label: served ? `the ${served.optimizer} optimization loop` : "the optimization loop",
+      view: served?.optimizer_setup.view ?? null,
+      read,
       connector: "PromptPotter",
-      reach: cv.optimizerSetup?.reach ?? null,
+      reach: served?.optimizer_setup.reach ?? null,
       scope: "optimizer",
-      nestsNode: cv.optimizerSetup?.measurement_node ?? null,
+      nestsNode: served?.optimizer_setup.measurement_node ?? null,
       activeNode,
       isLive,
     },
@@ -60,12 +65,12 @@ export function PipelineStack({ datasetName }: Props) {
       parent: "optimizer",
       level: CAMPAIGN_LEVEL,
       label: datasetName ?? "this campaign's pipeline",
-      view: cv.view,
-      status: cv.schema.status,
-      connector: cv.connector,
-      reach: cv.reach,
+      view: served?.view ?? null,
+      read,
+      connector: served?.connector ?? null,
+      reach: served?.reach ?? null,
       scope: "target",
-      nestsNode: cv.nests[0]?.node ?? null,
+      nestsNode: nests[0]?.node ?? null,
       activeNode,
       isLive,
     },
@@ -75,7 +80,7 @@ export function PipelineStack({ datasetName }: Props) {
       level: CAMPAIGN_LEVEL + 1 + l.depth,
       label: l.dataset,
       view: l.view,
-      status: l.status,
+      read: l.read,
       connector: l.connector,
       reach: l.reach,
       // Read-only: an id collision in another dataset's namespace would light a node not running.
@@ -121,7 +126,7 @@ export function PipelineStack({ datasetName }: Props) {
       <PipelineFlow
         key={l.key}
         layer={l}
-        inspector={l.key === inspected ? <ConnectorInspector view={cv} /> : undefined}
+        inspector={l.key === inspected ? <ConnectorInspector /> : undefined}
         nested={inner.length > 0 ? inner.map(draw) : undefined}
         tone={(anchor - l.level) % 2 === 0 ? "accent" : "neutral"}
       />

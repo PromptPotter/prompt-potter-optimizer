@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { readyData, useRead } from "@/lib/hooks/useRead";
+import { readGap, readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import {
   optimizerRosterRead,
   type ManifestNodeOverlay,
@@ -11,7 +11,7 @@ import {
   type PoolRow,
 } from "@/lib/api";
 import { POOL_SOURCE_INFO } from "@/lib/api/types.generated";
-import { knobGroups, knobRange, knobText, parseKnob } from "@/lib/derivations";
+import { knobGroups, knobRange, knobText, parseParam } from "@/lib/derivations";
 import { promptField, promptFieldLabel } from "@/lib/prompt-fields";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
@@ -43,31 +43,32 @@ export function NodeKnobsPanel({
   onChange?: (patch: Record<string, ManifestNodeOverlay>) => void;
 } = {}) {
   const editable = onChange != null;
-  const cv = useConnector();
+  const read = useConnector();
+  const served = shownData(read);
   const { campaignId } = useWorkspace();
   const rosterRead = useRead(optimizerRosterRead());
-  const setup = cv.optimizerSetup;
 
   if (!editable && !campaignId) {
     return <Empty className="mech-empty">Select a campaign to see its optimizer&apos;s knobs.</Empty>;
   }
-  if (typeof cv.schema.status === "object") {
+  const gap = readGap(read);
+  if (gap?.status === "failed") {
     return (
       <FailureLine
-        failure={cv.schema.status}
+        failure={gap.failure}
         lead="Could not load the optimizer's knobs."
         className="mech-empty"
       />
     );
   }
-  if (setup === null) {
+  if (served === null) {
     return <Loading className="mech-empty">Reading the optimizer&apos;s knobs…</Loading>;
   }
   return (
     <KnobGroups
-      optimizer={cv.optimizer}
-      setup={setup}
-      entry={readyData(rosterRead)?.optimizers.find((o) => o.name === cv.optimizer)}
+      optimizer={served.optimizer}
+      setup={served.optimizer_setup}
+      entry={readyData(rosterRead)?.optimizers.find((o) => o.name === served.optimizer)}
       onChange={onChange}
     />
   );
@@ -83,7 +84,7 @@ function KnobGroups({
   entry,
   onChange,
 }: {
-  optimizer: string | null;
+  optimizer: string;
   setup: OptimizerSetup;
   entry: OptimizerRoster["optimizers"][number] | undefined;
   onChange: OnChange;
@@ -102,7 +103,7 @@ function KnobGroups({
     .filter((g) => g.knobs.length > 0);
 
   if (groups.length === 0) {
-    return <Empty className="mech-empty">{optimizer ?? "This optimizer"} declares no knobs.</Empty>;
+    return <Empty className="mech-empty">{optimizer} declares no knobs.</Empty>;
   }
   return (
     <div className="mech-groups">
@@ -452,8 +453,8 @@ function KnobControl({
       </select>
     );
   }
-  const commits = (draft: string) => parseKnob(knob, draft) !== undefined;
-  const commit = (draft: string) => onSet(parseKnob(knob, draft));
+  const commits = (draft: string) => parseParam(knob, draft) !== undefined;
+  const commit = (draft: string) => onSet(parseParam(knob, draft));
   if (knob.kind === "number") {
     return (
       <CommitInput

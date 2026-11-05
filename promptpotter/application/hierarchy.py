@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_drafts
+from promptpotter.application.datasets.draft_campaign import owned_drafts
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import LineConfig, campaign_runs_with, line_config
 from promptpotter.application.runner.campaign_result import cycle_bench
@@ -25,6 +25,7 @@ from promptpotter.domain.campaign import (
     LifecycleFilter,
     ceiling_meter,
 )
+from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_index import STATUS_MARK_INFO, CycleIndex, RunStatus
 from promptpotter.domain.cycle_paths import (
     CycleHop,
@@ -502,7 +503,7 @@ def draft_starts(stores: Stores) -> dict[str, LaunchStage]:
 
 
 def unstarted_entry(
-    stores: Stores, draft: DraftCampaign, *, start: LaunchStage | None
+    stores: Stores, draft: DraftFile, *, start: LaunchStage | None
 ) -> UnstartedCampaign:
     """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
     the stage of a Start that holds it."""

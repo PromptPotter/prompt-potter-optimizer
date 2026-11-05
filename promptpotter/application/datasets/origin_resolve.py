@@ -13,17 +13,23 @@ from promptpotter.application.bench.task_context import (
     draft_call_context,
     run_checkin,
 )
-from promptpotter.application.datasets.draft_campaign import DraftCampaign
+from promptpotter.application.datasets.draft_campaign import draft_criterion
 from promptpotter.application.datasets.origin_readiness import (
     ChecklistField,
     checkin_questions,
     checklist_field,
     field_values,
     origin_readiness,
+    patch_at,
 )
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.domain.checkin_draft import OriginLastResolution, OriginResolution, RaisedCommand
+from promptpotter.domain.checkin_draft import (
+    DraftFile,
+    OriginLastResolution,
+    OriginResolution,
+    RaisedCommand,
+)
 from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
@@ -43,16 +49,15 @@ _PREVIEW_ROWS = 10
 class OriginProposal:
     field: str
     row: ChecklistField
-    # Both the ``EditDraftPatch`` key and the ``DraftCampaign`` attribute name.
-    patch_key: str
     value: Any
+    # The one edit writing *value* at the row's path, which the turn applies or raises.
+    patch: EditDraftPatch
     confidence: str
     evidence: str
 
     def command(self, draft_id: str) -> RaisedCommand:
-        patch = EditDraftPatch.model_validate({self.patch_key: self.value})
         return RaisedCommand(
-            payload=EditDraftCampaignPayload(draft_id=draft_id, patch=patch),
+            payload=EditDraftCampaignPayload(draft_id=draft_id, patch=self.patch),
             label=self.row.proposal.format(self.value),
             evidence=self.evidence,
         )
@@ -61,7 +66,7 @@ class OriginProposal:
 @dataclass(frozen=True, slots=True)
 class OriginResolutionResult:
     resolution: OriginResolution
-    draft: DraftCampaign
+    draft: DraftFile
 
 
 class OriginConsultation(NamedTuple):
@@ -71,7 +76,7 @@ class OriginConsultation(NamedTuple):
     response_model: type[CheckinOutput]
 
 
-def build_origin_consultation(draft: DraftCampaign, pipeline: DraftPipeline) -> OriginConsultation:
+def build_origin_consultation(draft: DraftFile, pipeline: DraftPipeline) -> OriginConsultation:
     """Deterministic (no timestamp, no id), so an unchanged turn replays free; adding either re-bills every turn."""
     readiness = origin_readiness(draft, pipeline)
     response_model = checkin_output(
@@ -97,7 +102,8 @@ def build_origin_consultation(draft: DraftCampaign, pipeline: DraftPipeline) -> 
             "target_column": draft.column_ground_truth,
             "labels": list(answer_space),
         }
-    if (matcher := MATCHERS.get(draft.scoring_matcher)) and matcher.note:
+    criterion = draft_criterion(pipeline.config.scoring)
+    if (matcher := MATCHERS.get(criterion.matcher or "")) and matcher.note:
         state["answer_extraction_requirement"] = matcher.note
     user_content = (
         "DRAFT-CAMPAIGN ORIGIN to resolve. Propose values for the OPEN gaps "
@@ -133,7 +139,7 @@ def build_origin_consultation(draft: DraftCampaign, pipeline: DraftPipeline) -> 
 async def resolve_origin_turn(
     *,
     stores: Stores,
-    draft: DraftCampaign,
+    draft: DraftFile,
     pipeline: DraftPipeline,
 ) -> OriginResolutionResult:
     """Keeps no draft: its caller keeps the turn's once the answer is built."""
@@ -190,11 +196,11 @@ def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: in
     return None
 
 
-def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[OriginProposal]:
+def raised_commands(draft: DraftFile, output: CheckinOutput) -> list[OriginProposal]:
     raised: list[OriginProposal] = []
     for finding in output.findings:
         row = checklist_field(finding.field)
-        if row is None or row.patch_key is None or not finding.evidence.strip():
+        if row is None or not finding.evidence.strip():
             continue
         # Drop the finding whole: skipping only its tag strands CONFIRMED on an unvouched value.
         settled = draft.field_provenance.get(finding.field) is Provenance.CONFIRMED
@@ -204,15 +210,15 @@ def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[OriginP
         if coerced is None:
             continue
         try:
-            EditDraftPatch.model_validate({row.patch_key: coerced})
+            patch = EditDraftPatch.model_validate(patch_at(row.patch_path, coerced))
         except ValidationError:
             continue
         raised.append(
             OriginProposal(
                 field=finding.field,
                 row=row,
-                patch_key=row.patch_key,
                 value=coerced,
+                patch=patch,
                 confidence=finding.confidence,
                 evidence=finding.evidence,
             )
@@ -221,15 +227,19 @@ def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[OriginP
 
 
 def _apply_findings(
-    draft: DraftCampaign,
+    draft: DraftFile,
     output: CheckinOutput,
     raised: list[OriginProposal],
     prompt_nodes: Sequence[PipelineNode],
-) -> DraftCampaign:
+) -> DraftFile:
     values: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
     for proposal in raised:
-        values[proposal.patch_key] = proposal.value
+        if proposal.patch.config is not None:
+            # A node's model moves spend: it lands only as its raised edit, through the patch's
+            # pricing and free-tier refusals (`draft_patch.py::plan_draft_patch`).
+            continue
+        values.update(proposal.patch.model_dump(exclude_unset=True))
         provenance[proposal.field] = (
             Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
@@ -258,7 +268,7 @@ def _apply_findings(
     return draft.apply_resolution(values=values, provenance=provenance)
 
 
-def _coerce(row: ChecklistField, proposed: str, draft: DraftCampaign) -> Any | None:
+def _coerce(row: ChecklistField, proposed: str, draft: DraftFile) -> Any | None:
     proposed = proposed.strip()
     if not proposed or (row.of_headers and proposed not in draft.headers):
         return None

@@ -74,11 +74,14 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 _NODES = "nodes"
 _BUDGET = "budget"
+# A check-in's criterion, by `EditDraftPatch.config.scoring`'s keys: the server folds each in.
+_SCORING = "scoring"
+_SET_SCORING = (f"{_SCORING}.matcher", f"{_SCORING}.dials")
 _SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES, _BUDGET}
 
 # A checklist field is set by the name the check-in spells it, never its patch key.
 _PATCH_KEY_OF: dict[str, str] = {
-    field: row.patch_key for field, row in CHECKLIST_FIELDS.items() if row.patch_key is not None
+    field: ".".join(row.patch_path) for field, row in CHECKLIST_FIELDS.items()
 }
 _SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_PATCH_KEY_OF.values())) | set(_PATCH_KEY_OF)
 _KNOB_COMMA = re.compile(r",(?=[\w.]+=)")
@@ -86,7 +89,11 @@ _KNOB_COMMA = re.compile(r",(?=[\w.]+=)")
 
 def _settable() -> str:
     return ", ".join(
-        [*sorted(_SET_FIELDS | _SET_KNOBS), f"{_BUDGET}.<axis>", f"{_NODES}.<node>.<knob>"]
+        [
+            *sorted(_SET_FIELDS | _SET_KNOBS | set(_SET_SCORING)),
+            f"{_BUDGET}.<axis>",
+            f"{_NODES}.<node>.<knob>",
+        ]
     )
 
 
@@ -108,20 +115,24 @@ def _value(raw: str) -> Any:
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
     """Shape only: every bound is the patch model's and ``plan_draft_patch``'s, as for the browser."""
     patch_raw: dict[str, Any] = {}
+    config: dict[str, Any] = {}
     knobs: dict[str, Any] = {}
     for item in sets:
         if "=" not in item:
             raise SystemExit(f"ERROR: --set expects FIELD=VALUE, got {item!r}.")
         field, raw = (part.strip() for part in item.split("=", 1))
-        if field in _SET_KNOBS:
+        if field in _SET_SCORING:
+            config.setdefault(_SCORING, {})[field.split(".", 1)[1]] = raw
+        elif field in _SET_KNOBS:
             knobs[field] = raw
         elif field.startswith(f"{_BUDGET}.") and field.count(".") == 1:
             axis = field.split(".")[1]
             knobs.setdefault(_BUDGET, {})[axis] = None if raw.lower() == "none" else _value(raw)
         elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
             _, node, knob = field.split(".")
-            config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
-            config[knob] = _value(raw)
+            knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"][knob] = _value(
+                raw
+            )
         elif field in _SET_FIELDS:
             patch_raw[_PATCH_KEY_OF.get(field, field)] = raw
         else:
@@ -129,7 +140,9 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
                 f"ERROR: --set field {field!r} is not settable. One of: {_settable()}."
             )
     if knobs:
-        patch_raw["optimization_overrides"] = knobs
+        config["optimization"] = knobs
+    if config:
+        patch_raw["config"] = config
     return PayloadInvalidError.validating(EditDraftPatch, patch_raw)
 
 
@@ -138,16 +151,15 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
         return {}
     patch = _sets_to_patch(sets)
     spelled = {model: cli for cli, model in _PATCH_KEY_OF.items()}
-    fields = patch.model_fields_set - {"optimization_overrides"}
-    if stray := sorted(spelled.get(f, f) for f in fields):
+    config = patch.config or {}
+    stray = sorted(spelled.get(f, f) for f in patch.model_fields_set - {"config"})
+    if stray := [*stray, *sorted(set(config) - {"optimization"})]:
         raise SystemExit(
             f"ERROR: --set {', '.join(stray)} confirms a check-in field, which a dataset name "
             f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, {_BUDGET}.<axis>, "
             f"{_NODES}.<node>.<knob>."
         )
-    knobs = patch.optimization_overrides
-    assert knobs is not None
-    return knobs
+    return dict(config["optimization"])
 
 
 def _draft_kept(draft_id: str) -> str:

@@ -118,8 +118,15 @@ def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSc
     # Every prompt a manifest resolves is an `OptimizerPromptTemplate`, so its loci are that class's.
     fields = list(OptimizerPromptTemplate.RENDER_ORDER)
     prompts = {key: {"fields": fields} for key in manifest.resolved_prompts}
+    # The bench walks these ahead of `default`, each on its own: a manifest's phases.
+    phases = [walk for walk in (RUN_INIT, INITIAL_POPULATION) if walk in manifest.pipelines]
     return parse_pipeline_response(
-        {**authored, "resolved_prompts": prompts, "resolved_schemas": dict(schemas)}
+        {
+            **authored,
+            "phase_pipelines": phases,
+            "resolved_prompts": prompts,
+            "resolved_schemas": dict(schemas),
+        }
     )
 
 
@@ -518,12 +525,17 @@ class SelectedOptimizer:
 
     @property
     def phases(self) -> frozenset[str]:
+        return frozenset(self.phase_of.values())
+
+    @property
+    def phase_of(self) -> dict[str, str]:
+        """The phase each llm node calling outside the manifest's walks runs in, by node."""
         stated = optimizers.llm_nodes()
-        return frozenset(
-            member.phase.phase
+        return {
+            node: str(member.phase.phase)
             for node in self.llm_nodes
             if (member := stated.get(node)) is not None and member.phase is not None
-        )
+        }
 
     @property
     def steered_axes(self) -> dict[str, set[str]]:
@@ -837,7 +849,9 @@ def _select(
     return selected
 
 
-_WALKS = (RUN_INIT, INITIAL_POPULATION, DEFAULT_PIPELINE)
+def _walks(schema: PipelineSchema) -> tuple[str, ...]:
+    """The pipelines the bench walks, in order: the manifest's phases (`_parse`), then `default`."""
+    return (*schema.phase_pipelines, DEFAULT_PIPELINE)
 
 
 def _edges_of(member: NodeMember) -> frozenset[type]:
@@ -849,7 +863,7 @@ def _edges_of(member: NodeMember) -> frozenset[type]:
 def _roster(schema: PipelineSchema) -> tuple[str, ...]:
     table = optimizers.NODE_MEMBERS.table
     declared = [n.name for n in schema.declared_nodes if n.name in table]
-    reached = {n for walk in _WALKS for n in schema.pipelines.get(walk, ()) if n in table}
+    reached = {n for walk in _walks(schema) for n in schema.pipelines[walk] if n in table}
     frontier = list(reached)
     while frontier:
         for edge in _edges_of(table[frontier.pop()]):
@@ -863,7 +877,7 @@ def _roster(schema: PipelineSchema) -> tuple[str, ...]:
 def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
     """Every member in the order the first rounds walk it, then the members only a walked one reaches."""
     plan = selected.plan
-    named = {n for walk in _WALKS for n in selected.schema.pipelines.get(walk, ())}
+    named = {n for walk in _walks(selected.schema) for n in selected.schema.pipelines[walk]}
     reached = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
     return (
         *plan.initializers,

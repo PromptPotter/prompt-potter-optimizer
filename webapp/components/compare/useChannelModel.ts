@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
 import type { HierarchyCandidate, SubjectReading } from "@/lib/api";
-import type { NodeSchemaReading } from "@/lib/types";
 import { useCampaignPipeline } from "@/lib/hooks/useConnector";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
@@ -10,14 +9,14 @@ import {
   descendantsOf,
   indexLineage,
   mainLineOf,
-  pipelineReadStatus,
   scoreboardReading,
   type CompareItem,
   type LineageIndex,
+  nodeSchemaReading,
 } from "@/lib/derivations";
 import type { HierarchyCampaign } from "@/lib/api";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
-import { readyData, shownData } from "@/lib/hooks/useRead";
+import { shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { useLineageTree } from "@/lib/lineage";
 import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
@@ -122,17 +121,7 @@ export function useChannelModel(
   );
   const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
   const pipelineRead = useCampaignPipeline(folds.detail && at ? pickedCampaign || null : null, at);
-  const pipeline = readyData(pipelineRead);
-  const pipelineStatus = pipelineReadStatus(pipelineRead);
-  const schema = useMemo<NodeSchemaReading>(
-    () => ({
-      status: pipelineStatus,
-      config: pipeline?.node_config_schema ?? null,
-      output: pipeline?.node_output_schema ?? null,
-      isSingleNode: !!pipeline?.is_single_node,
-    }),
-    [pipelineStatus, pipeline],
-  );
+  const schema = useMemo(() => nodeSchemaReading(pipelineRead), [pipelineRead]);
   const line = useMemo(() => (selected ? mainLineOf(index, selected) : []), [index, selected]);
   const docId = selected?.facts.individual ?? null;
   const pickedReading = docId ? scoreboardReading(doc, docId) : null;

@@ -7,7 +7,6 @@ from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
@@ -88,14 +87,6 @@ def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
 
 def caller_owns(stores: Stores, campaign: Campaign) -> bool:
     return campaign.owner_user_id == str(stores.identity.user_id)
-
-
-def owned_draft_data(stores: Stores, draft_id: str) -> DraftFile:
-    """Asked before a draft's claim is taken: a claim another user holds answers as their draft does."""
-    data = stores.drafts.read_draft(draft_id)
-    if data is None or data.owner_user_id != str(stores.identity.user_id):
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
-    return data
 
 
 def build_stores(

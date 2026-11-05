@@ -7,6 +7,7 @@ import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
   searchpointCopyChoices,
+  nodeSchemaReading,
 } from "@/lib/derivations";
 import { CopyButton, Toolbar, ToolbarSpacer } from "@/components/ui";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -28,7 +29,8 @@ export function ScoringInspector({ selected, onClose }: Props) {
 
 function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose: () => void }) {
   const { dash } = useCycleStream();
-  const cv = useConnector();
+  const read = useConnector();
+  const schema = nodeSchemaReading(read);
   const { viewedPath } = useWorkspace();
   const round = useRound(viewedPath, selected.round);
   const row = round.row(selected.arm);
@@ -65,7 +67,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
         cfg={cfg}
         benchPass={benchPass?.state === "done" ? null : benchPass}
         measurements={<MeasurementsPane preset={{ ...preset, groupBy: "none" }} />}
-        schema={cv.schema}
+        schema={schema}
         pending={
           round.unfiled
             ? `Scoring in progress for R${selected.round} — the spec and its numbers appear as this candidate's samples land.`
@@ -79,7 +81,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
             <SteerForkAction
               candidate={selected}
               path={viewedPath}
-              schema={cv.schema}
+              schema={schema}
             />
           </>
         }
