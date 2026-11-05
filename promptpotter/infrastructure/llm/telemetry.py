@@ -50,6 +50,23 @@ def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
     _CYCLE_LEDGER.reset(token)
 
 
+_ACTING_COMMAND: ContextVar[str | None] = ContextVar("acting_command", default=None)
+
+
+def set_acting_command(command_id: str) -> Token[str | None]:
+    """Bound beside the ledger its record went on, for the act's whole run."""
+    return _ACTING_COMMAND.set(command_id)
+
+
+def reset_acting_command(token: Token[str | None]) -> None:
+    _ACTING_COMMAND.reset(token)
+
+
+def acting_command() -> str | None:
+    """The id of the command whose act runs here; ``None`` outside every recorded act."""
+    return _ACTING_COMMAND.get()
+
+
 def active_cycle_ledger() -> CycleEventLog | None:
     """Ask before OPENING one: a second handle is a second appender, and ``append`` is not atomic."""
     return _CYCLE_LEDGER.get(None)

@@ -56,7 +56,7 @@ def _unreadable_row(tenant_dir: WorkspaceDir, why: str) -> AccountUsage:
 
 
 def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
-    campaigns = CampaignStore(tenant_dir)
+    campaigns = CampaignStore.of_account(tenant_dir)
     return AccountUsage(
         user_id=user.user_id,
         email=user.email,

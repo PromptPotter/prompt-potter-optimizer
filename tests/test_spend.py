@@ -52,6 +52,7 @@ from factories import (
     spend_book,
     workspace,
 )
+from fastapi import Response
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completion
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
@@ -273,6 +274,7 @@ from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.infrastructure.store.wallet_store import BilledCharge, CouponGrant
+from promptpotter.presentation.api.deps import COMMAND_ID_HEADER
 from promptpotter.presentation.api.routers import commands as commands_api
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
@@ -3410,11 +3412,17 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     # A retry under the act's key, at the REST door, answers the arms its act minted.
     registry = JobRegistry.attach(stores.jobs_dir)
     funded = asked("duel-2", pair, Budget(usd=50.0, rounds=1))
+    sent = [Response(), Response()]
     answers = [
-        asyncio.run(commands_api.mint_head_to_head(registry, stores, funded, "duel-2-once"))
-        for _ in range(2)
+        asyncio.run(
+            commands_api.mint_head_to_head(registry, stores, funded, "duel-2-once", "", response)
+        )
+        for response in sent
     ]
     assert answers[0] == answers[1], "a retry under the act's key answered other arms"
+    assert len({response.headers[COMMAND_ID_HEADER] for response in sent}) == 1, (
+        "a retry under the act's key named another act than the one its stop addresses"
+    )
     assert len(campaigns()) == len(minted) + 2 and len(detached) == 4, (
         "a retry under the act's key minted or launched its arms again"
     )

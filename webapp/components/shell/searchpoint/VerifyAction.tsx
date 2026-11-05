@@ -22,6 +22,7 @@ import {
   MenuRadioGroup,
   MenuSep,
 } from "@/components/ui";
+import { StopCommand } from "./StopCommand";
 import { VerifyReading } from "./VerifyReading";
 
 // The answer of a verify that bought nothing: every fresh cell was already measured.
@@ -43,6 +44,7 @@ export function VerifyAction({
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
   const [saturated, setSaturated] = useState<Saturated | null>(null);
+  const [commandId, setCommandId] = useState<string | null>(null);
   const [prevArm, setPrevArm] = useState(candidate.arm);
   if (candidate.arm !== prevArm) {
     setPrevArm(candidate.arm);
@@ -61,16 +63,22 @@ export function VerifyAction({
   function run() {
     if (!path) return;
     setSaturated(null);
+    const id = crypto.randomUUID();
+    setCommandId(id);
     void cmd.run(
       "verify-candidate",
       () =>
         // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
-        postCommand("verify-candidate", {
-          ...cycleAddress(path),
-          candidate_id: candidate.arm,
-          strategy,
-          ...(samples === "" ? {} : { samples: Number(samples) }),
-        }),
+        postCommand(
+          "verify-candidate",
+          {
+            ...cycleAddress(path),
+            candidate_id: candidate.arm,
+            strategy,
+            ...(samples === "" ? {} : { samples: Number(samples) }),
+          },
+          id,
+        ),
       (answer) => setSaturated(answer.kind === "verify_saturated" ? answer : null),
     );
   }
@@ -130,6 +138,7 @@ export function VerifyAction({
             </>
           )}
         </Menu>
+        {sending && commandId && <StopCommand commandId={commandId} />}
       </div>
       {busy && (
         <p className="verify-action-note">

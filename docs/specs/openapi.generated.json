@@ -2648,6 +2648,24 @@
         "title": "CampaignRunsWith",
         "type": "object"
       },
+      "CancelCommandPayload": {
+        "additionalProperties": false,
+        "description": "Stop the act a command asked for: each queued launch it made is withdrawn, each running run\nhas its cycle paused, and a paid pass in flight is paused under its hold; a command another\nprincipal issued is not found.",
+        "properties": {
+          "command_id": {
+            "description": "The command's id, as its caller named it or its door answered it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Command Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id"
+        ],
+        "title": "CancelCommandPayload",
+        "type": "object"
+      },
       "CancelQueuedRunPayload": {
         "additionalProperties": false,
         "description": "Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent.",
@@ -3694,6 +3712,55 @@
         "title": "CommandAcceptedBody",
         "type": "object"
       },
+      "CommandState": {
+        "enum": [
+          "working",
+          "input_required",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "CommandStatus": {
+        "additionalProperties": false,
+        "description": "A command's state as it reads now, worded job by job where it launched any.",
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_updated_at": {
+            "title": "Last Updated At",
+            "type": "string"
+          },
+          "said": {
+            "title": "Said",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CommandState"
+          }
+        },
+        "required": [
+          "command_id",
+          "kind",
+          "status",
+          "said",
+          "created_at",
+          "last_updated_at"
+        ],
+        "title": "CommandStatus",
+        "type": "object"
+      },
       "CompactArchivePayload": {
         "additionalProperties": false,
         "description": "``apply`` defaults to False on every mode, including the destructive one: a preview is what\nthe operator consents on, so the write has to be asked for rather than defaulted into.",
@@ -4395,12 +4462,6 @@
             "description": "The optimizer node every scoring pass of the run runs as — origin, round, bench and verify alike — as its wiring declares it.",
             "title": "Measurement Node",
             "type": "string"
-          },
-          "measuring": {
-            "default": false,
-            "description": "Whether `measurement_node` is the node at work now: `measuring_arm` is served only while it is.",
-            "title": "Measuring",
-            "type": "boolean"
           },
           "nodes": {
             "additionalProperties": {
@@ -18068,7 +18129,7 @@
         },
         "summary": "Activity",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18142,7 +18203,7 @@
         },
         "summary": "Coupon",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18245,7 +18306,7 @@
         },
         "summary": "Me",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18277,7 +18338,7 @@
         },
         "summary": "Quota-Status",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18309,7 +18370,7 @@
         },
         "summary": "User-Settings",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18345,7 +18406,7 @@
         },
         "summary": "Backends",
         "tags": [
-          "Backends"
+          "Reads"
         ]
       }
     },
@@ -18390,7 +18451,7 @@
         },
         "summary": "Backend-Health",
         "tags": [
-          "Backends"
+          "Reads"
         ]
       }
     },
@@ -18435,7 +18496,7 @@
         },
         "summary": "Config-Map",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18535,7 +18596,7 @@
         },
         "summary": "Cycle-Dashboard",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18602,8 +18663,7 @@
         },
         "summary": "Cycle-Events",
         "tags": [
-          "Campaigns",
-          "Stream"
+          "Reads"
         ]
       }
     },
@@ -18683,7 +18743,7 @@
         },
         "summary": "Cycle-Export",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18781,7 +18841,7 @@
         },
         "summary": "Cycle-File",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18855,7 +18915,7 @@
         },
         "summary": "Cycle-Files",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18957,7 +19017,7 @@
         },
         "summary": "Cycle-Round",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19049,7 +19109,7 @@
         },
         "summary": "Cycle-Round-Audit",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19104,7 +19164,7 @@
         },
         "summary": "Fork-Preview",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19130,7 +19190,7 @@
             "required": false,
             "schema": {
               "default": "",
-              "description": "Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
+              "description": "Searchpoint subject (`Subject.parse` grammar); defaults to the campaign root",
               "title": "At",
               "type": "string"
             }
@@ -19160,7 +19220,7 @@
         },
         "summary": "Campaign-Pipeline",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19205,7 +19265,7 @@
         },
         "summary": "Campaign-Storage",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19222,6 +19282,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19279,6 +19350,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19334,6 +19416,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19374,6 +19467,72 @@
         ]
       }
     },
+    "/api/v1/commands/cancel-command": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "operationId": "cancel_command_api_v1_commands_cancel_command_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelCommandPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Cancel-Command",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/cancel-queued-run": {
       "post": {
         "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
@@ -19387,6 +19546,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19444,6 +19614,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19497,6 +19678,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19554,6 +19746,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19607,6 +19810,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19664,6 +19878,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19717,6 +19942,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19774,6 +20010,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19827,6 +20074,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19884,6 +20142,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -19937,6 +20206,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -19994,6 +20274,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20047,6 +20338,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20104,6 +20406,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20157,6 +20470,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20214,6 +20538,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20267,6 +20602,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20324,6 +20670,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20377,6 +20734,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20434,6 +20802,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20487,6 +20866,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20544,6 +20934,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20597,6 +20998,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20654,6 +21066,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20709,6 +21132,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20762,6 +21196,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20827,6 +21272,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20880,6 +21336,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -20937,6 +21404,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -20990,6 +21468,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -21047,6 +21536,17 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -21095,6 +21595,52 @@
         ]
       }
     },
+    "/api/v1/commands/{command_id}/status": {
+      "get": {
+        "description": "A command read by its id, as its caller named it or its door answered it: in flight until\nits ack, then as the ack left it; where it launched jobs, each as its registry reads it and the\nstate of the most open one. A host's task is this read.",
+        "operationId": "command_status_api_v1_commands__command_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "description": "The command's id.",
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Command-Status",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
     "/api/v1/datasets": {
       "get": {
         "description": "Every dataset this identity may read: its own tenant origins, then install content.",
@@ -21123,7 +21669,7 @@
         },
         "summary": "Datasets",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21140,6 +21686,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -21195,6 +21752,17 @@
               "default": "",
               "maxLength": 256,
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Command-Id",
               "type": "string"
             }
           }
@@ -21476,7 +22044,7 @@
         },
         "summary": "Dataset-Cells",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21532,7 +22100,7 @@
         },
         "summary": "Dataset-Cell",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21577,7 +22145,7 @@
         },
         "summary": "Dataset-Pipeline",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21622,7 +22190,7 @@
         },
         "summary": "Draft",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21737,7 +22305,7 @@
         },
         "summary": "Evidence",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21779,7 +22347,7 @@
         },
         "summary": "Head-To-Head-Price",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21930,7 +22498,7 @@
         },
         "summary": "Hierarchy",
         "tags": [
-          "Hierarchy"
+          "Reads"
         ]
       }
     },
@@ -22067,7 +22635,7 @@
         },
         "summary": "Hierarchy-Subtree",
         "tags": [
-          "Hierarchy"
+          "Reads"
         ]
       }
     },
@@ -22141,7 +22709,7 @@
         },
         "summary": "Hierarchy-Steps",
         "tags": [
-          "Hierarchy"
+          "Reads"
         ]
       }
     },
@@ -22173,7 +22741,7 @@
         },
         "summary": "Library",
         "tags": [
-          "Optimizer"
+          "Reads"
         ]
       }
     },
@@ -22205,7 +22773,7 @@
         },
         "summary": "Machine-Status",
         "tags": [
-          "Sessions"
+          "Reads"
         ]
       }
     },
@@ -22237,7 +22805,7 @@
         },
         "summary": "Optimizers",
         "tags": [
-          "Optimizer"
+          "Reads"
         ]
       }
     },
@@ -22269,7 +22837,7 @@
         },
         "summary": "Origins",
         "tags": [
-          "Origins"
+          "Reads"
         ]
       }
     },
@@ -22301,7 +22869,7 @@
         },
         "summary": "Active-Session",
         "tags": [
-          "Sessions"
+          "Reads"
         ]
       }
     },
@@ -22487,7 +23055,7 @@
         },
         "summary": "Workspace-Storage",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     }

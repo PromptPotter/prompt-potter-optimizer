@@ -2014,7 +2014,8 @@
             "enum": [
               "accepted",
               "applied",
-              "rejected"
+              "rejected",
+              "stopped"
             ],
             "title": "Status",
             "type": "string"

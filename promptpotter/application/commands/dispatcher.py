@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import threading
 import types
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, NamedTuple, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel, SecretStr
 
+from promptpotter.application.cycle_addressing import resolve_subject
+from promptpotter.application.jobs.interlock import this_producer
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_kinds import (
+    MAX_COMMAND_ID_CHARS,
     CampaignPayload,
     CommandAcceptedBody,
     CommandKind,
@@ -21,24 +27,29 @@ from promptpotter.domain.command_kinds import (
     LinePayload,
     PauseCyclePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
-from promptpotter.domain.run_records import (
-    CommandAckRecord,
-    CommandAckStatus,
-    CommandEffect,
-    CommandRecord,
-    NoEffect,
-)
-from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
+from promptpotter.domain.run_records import CommandAckStatus, CommandEffect, NoEffect
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
+    active_cycle_ledger,
     emit_command,
     emit_command_ack,
+    reset_acting_command,
     reset_cycle_ledger,
+    set_acting_command,
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.store.command_index import (
+    AskedCommand,
+    CommandIndex,
+    LedgerOwner,
+    OwnerKind,
+    Unrecorded,
+    ledger_commands,
+)
 from promptpotter.infrastructure.store.draft_store import DraftClaim
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import (
     Stores,
     owned_campaign,
@@ -46,13 +57,15 @@ from promptpotter.infrastructure.store.stores import (
     resolve_cycle_path,
 )
 from promptpotter.shared.errors import (
+    ActStoppedError,
     BadRequestError,
+    CommandIdReusedError,
     ConflictError,
     IdempotencyKeyReusedError,
     NotFoundError,
     PayloadInvalidError,
 )
-from promptpotter.shared.identity import acting_principal, require_capability
+from promptpotter.shared.identity import Principal, acting_principal, require_capability
 from promptpotter.shared.named_rows import imported, returned
 
 if TYPE_CHECKING:
@@ -67,38 +80,56 @@ class RejectedError(Exception):
         self.reason = reason
 
 
-class _IdempotentMatch(FrozenModel):
-    command_id: str
-    offset: int
-    ack: CommandAckStatus
-    effect: CommandEffect
+# What an act's ack says when no retry may answer from it: refused, or stopped mid-way.
+_UNSETTLING: frozenset[CommandAckStatus] = frozenset({"rejected", "stopped"})
 
 
-def _find_idempotent_command(
-    ledger: CycleEventLog, kind: CommandKind, act_digest: str, idempotency_key: str
-) -> _IdempotentMatch | None:
-    """Matched on (kind, act, key), the act its retry names — the whole validated act, by its
-    digest; a key the ledger holds for another act is refused, never replayed. A REJECTED attempt
-    satisfies no key."""
-    keyed: dict[str, int] = {}
-    applied: _IdempotentMatch | None = None
-    # The ledger's OWN offset, never a fork-chain position: the client aligns the SSE tail on it.
-    for offset, record in ledger.iter():
-        if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
-            if record.kind != kind or record.act_digest != act_digest:
-                raise IdempotencyKeyReusedError(
-                    f"Key {idempotency_key!r} already names a {record.kind} command with another "
-                    f"payload on this ledger; send this {kind} under a key of its own.",
-                    details={"command_id": record.command_id},
-                )
-            keyed[record.command_id] = offset
-        elif isinstance(record, CommandAckRecord) and record.status != "rejected":
-            at = keyed.get(record.command_id)
-            if at is not None:
-                applied = _IdempotentMatch(
-                    command_id=record.command_id, offset=at, ack=record.status, effect=record.effect
-                )
-    return applied
+def _retried(
+    index: CommandIndex,
+    ledger: CycleEventLog,
+    call: CommandCall[Any],
+    act_digest: str,
+    *,
+    replays: bool,
+) -> AskedCommand | None:
+    """The first act a retry names, matched on (kind, act, key) — the whole validated act, by its
+    digest; a key the ledger holds for another act is refused, never replayed. A named id the
+    index files is that act's retry, under its key, or refused: one id names one act, recorded
+    once. An attempt refused or stopped satisfies no key."""
+    kind, idempotency_key = call.kind, call.idempotency_key
+    if call.id_named and (named := index.asked(call.command_id)) is not None:
+        if isinstance(named, Unrecorded):
+            raise CommandIdReusedError(
+                f"Command id {call.command_id!r} is filed for a {named.filed.kind} act whose record "
+                "is not on its ledger, so no act writes one under it: read its status, and send "
+                "this under an id of its own.",
+            )
+        record = named.asked.record
+        if record.idempotency_key != idempotency_key or record.act_digest != act_digest:
+            raise CommandIdReusedError(
+                f"Command id {call.command_id!r} already names a {record.kind} command; send "
+                f"this {kind} under an id of its own.",
+            )
+        return named.asked
+    if not replays:
+        return None
+    keyed = [
+        asked
+        for asked in ledger_commands(ledger.path).values()
+        if asked.record.idempotency_key == idempotency_key
+    ]
+    for asked in keyed:
+        if asked.record.kind != kind or asked.record.act_digest != act_digest:
+            raise IdempotencyKeyReusedError(
+                f"Key {idempotency_key!r} already names a {asked.record.kind} command with another "
+                f"payload on this ledger; send this {kind} under a key of its own.",
+                details={"command_id": asked.record.command_id},
+            )
+    return next((asked for asked in reversed(keyed) if asked.acks and _answers_retry(asked)), None)
+
+
+def _answers_retry(asked: AskedCommand) -> bool:
+    return not any(ack.status in _UNSETTLING for ack in asked.acks)
 
 
 _HANDLER_PACKAGE = "promptpotter.application.commands"
@@ -109,10 +140,19 @@ MAX_IDEMPOTENCY_KEY_CHARS = 256
 @dataclass(frozen=True, slots=True)
 class CommandCall[P: CommandPayload]:
     """A remote door passes the key its caller retries under, and a retry under it answers the
-    first act; an in-process sender sends once, under a fresh one."""
+    first act; an in-process sender sends once, under a fresh one. `command_id` is the id its
+    record takes, which a caller addresses the act by while it runs (its status, its stop): a
+    door's caller may name it, else it is minted. A retry answering the first act answers that
+    act's id."""
 
     payload: P
     idempotency_key: str = field(default_factory=lambda: uuid.uuid4().hex)
+    # The id its caller named, which the index may file already; unnamed, the id is `minted_id`,
+    # which it cannot. Each is set once, where it is named or minted, and copied as is.
+    named_id: str = ""
+    # Set once its record lands: an in-process sender leaving the act to run learns it here.
+    recorded: asyncio.Event = field(default_factory=asyncio.Event, compare=False, repr=False)
+    minted_id: str = field(default_factory=lambda: str(uuid.uuid4()), repr=False)
 
     def __post_init__(self) -> None:
         key = self.idempotency_key.strip()
@@ -127,6 +167,21 @@ class CommandCall[P: CommandPayload]:
                 code="idempotency_key_too_long",
             )
         object.__setattr__(self, "idempotency_key", key)
+        named = self.named_id.strip()
+        if len(named) > MAX_COMMAND_ID_CHARS:
+            raise BadRequestError(
+                f"A command id is at most {MAX_COMMAND_ID_CHARS} characters.",
+                code="command_id_too_long",
+            )
+        object.__setattr__(self, "named_id", named)
+
+    @property
+    def command_id(self) -> str:
+        return self.named_id or self.minted_id
+
+    @property
+    def id_named(self) -> bool:
+        return bool(self.named_id)
 
     @property
     def kind(self) -> CommandKind:
@@ -207,8 +262,8 @@ def handler_of(kind: CommandKind) -> Handler[Any]:
 
 def command_answer(kind: CommandKind) -> object | None:
     """The modelled `R` of the kind's handler's `Applier[R]`, what every door answers; `None` where
-    it answers the record instead: an `R` of `object`, or a launch's handle, which a task kind's
-    doors track as its task. Any other `R` no wire model carries is refused here."""
+    it answers the record instead: an `R` of `object`, or a launch's handle, which a startable
+    kind's doors track by its command id. Any other `R` no wire model carries is refused here."""
     (applied,) = get_args(returned(handler_of(kind)))
     if applied is object:
         return None
@@ -217,9 +272,84 @@ def command_answer(kind: CommandKind) -> object | None:
         arm is type(None) or (isinstance(arm, type) and issubclass(arm, BaseModel)) for arm in arms
     ):
         return cast(object, applied)
-    if kind.answering == "task":
+    if kind.answering == "started":
         return None
     raise TypeError(f"{kind} applies {applied!r}, which no wire model carries")
+
+
+class OwnedLedger(NamedTuple):
+    log: CycleEventLog
+    owner: LedgerOwner
+
+
+def _land(
+    stores: Stores,
+    owner: LedgerOwner,
+    *,
+    command_id: str,
+    kind: CommandKind,
+    payload: dict[str, Any],
+    idempotency_key: str,
+    act_digest: str,
+    issued_by: Principal,
+) -> None:
+    """Files the id on its ledger's owner, stamped with this process's producer id, then writes
+    its record on the bound ledger: one step with no await inside, so an id filed without its
+    record reads as landing only while this step runs. A record that raises voids the filing, so
+    its status reads that it never landed."""
+    stores.command_index.file(
+        command_id,
+        owner,
+        kind=kind,
+        issued_by=issued_by.id,
+        filer=this_producer(stores.jobs_dir),
+    )
+    try:
+        emit_command(
+            command_id=command_id,
+            kind=kind,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            act_digest=act_digest,
+            issued_by=issued_by,
+        )
+    except BaseException:
+        stores.command_index.void(command_id)
+        raise
+
+
+# The ack of an act whose caller was cancelled: before its act applied, or mid-way through it.
+_CALL_CANCELLED = "call cancelled"
+
+
+class _Landing:
+    """A record's landing met with its caller's cancel: the stopped ack is written once both
+    happened, by whichever came second, so it rides no await of the cancelled caller (a second
+    cancel, a shutdown's) and lands where that caller runs no more."""
+
+    def __init__(self, command_id: str) -> None:
+        self._command_id = command_id
+        self._lock = threading.Lock()
+        self._landed = self._cancelled = False
+
+    def _met(self, *, landed: bool = False, cancelled: bool = False) -> None:
+        with self._lock:
+            before = self._landed and self._cancelled
+            self._landed |= landed
+            self._cancelled |= cancelled
+            if not before and self._landed and self._cancelled:
+                emit_command_ack(
+                    command_id=self._command_id,
+                    status="stopped",
+                    detail=_CALL_CANCELLED,
+                    effect=NoEffect(),
+                )
+
+    def landed(self) -> None:
+        self._met(landed=True)
+
+    def cancelled(self) -> None:
+        self._met(cancelled=True)
 
 
 class CommandDispatcher:
@@ -259,7 +389,20 @@ class CommandDispatcher:
         return cast(CommandOutcome[R], await self.dispatch(call))
 
     async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[object]:
-        """The payload's address base IS its target ledger; `answer` types what it answers."""
+        """The payload's address base IS its target ledger, its addressed campaign id — a cycle
+        command's leaf, below its ``descend`` chain — resolved from the prefix any door sent by the
+        one rule every read takes (`resolve_subject`); `answer` types what it answers."""
+        if isinstance(payload := call.payload, CampaignPayload):
+            if isinstance(payload, CyclePayload):
+                subject = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend)
+                resolved = await asyncio.to_thread(resolve_subject, self.stores, subject)
+                fields: dict[str, str | None] = {"descend": None, **resolved.command_fields}
+            else:
+                subject = Subject(payload.campaign_id)
+                resolved = await asyncio.to_thread(resolve_subject, self.stores, subject)
+                fields = {"campaign_id": resolved.campaign_id}
+            if resolved != subject:
+                call = replace(call, payload=payload.model_copy(update=fields))
         match call.payload:
             case CyclePayload():
                 return await self._on_cycle(call)
@@ -270,38 +413,42 @@ class CommandDispatcher:
             case DraftPayload():
                 return await self._on_draft(call)
             case _:
-                ledger = CycleEventLog.open_workspace(self.stores.base_dir)
+                ledger = self._ledger("workspace", self.stores.base_dir)
                 applier = await self._applier(Dispatched(self, call.payload))
                 return await self._record_and_apply(ledger, call, applier)
 
     async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
         owned_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
-        ledger = CycleEventLog.open_workspace(self.stores.base_dir)
+        ledger = self._ledger("workspace", self.stores.base_dir)
         applier = await self._applier(Dispatched(self, call.payload))
         return await self._record_and_apply(ledger, call, applier)
 
     async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
-        ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(hop)))
+        ledger = self._ledger("cycle", self.stores.campaigns.cycle_dir(hop))
         applier = await self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
         return await self._record_and_apply(ledger, call, applier)
 
     async def _on_cycle(self, call: CommandCall[CyclePayload]) -> CommandOutcome[object]:
+        """The act lands on its leaf's ledger and applies to that leaf, its record keeping the
+        address it was sent to (root hop and ``descend``): a reader of the record resolves the leaf
+        as this did, by `Subject.below`."""
         payload = call.payload
-        hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
-        tail = decode_cycle_path(payload.descend)
-        if tail and payload.inner_refusal is not None:
+        path = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend).path
+        if len(path) > 1 and payload.inner_refusal is not None:
             raise PayloadInvalidError(payload.inner_refusal, code="inner_cycle_unaddressed")
-        leaf_stores, leaf = resolve_cycle_path(self.stores, (hop, *tail))
-        if tail:
-            inner = payload.model_copy(
-                update={"campaign_id": leaf.campaign_id, "cycle_id": leaf.cycle_id, "descend": None}
-            )
-            return await CommandDispatcher(
-                leaf_stores, job_registry=self._attached, inline=self.inline
-            )._on_cycle(CommandCall(inner, call.idempotency_key))
+        leaf_stores, hop = resolve_cycle_path(self.stores, path)
+        if len(path) > 1:
+            leaf = CommandDispatcher(leaf_stores, job_registry=self._attached, inline=self.inline)
+            return await leaf._on_leaf(call, hop)
+        return await self._on_leaf(call, hop)
+
+    async def _on_leaf(
+        self, call: CommandCall[CyclePayload], hop: CycleHop
+    ) -> CommandOutcome[object]:
+        payload = call.payload
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         if self.stores.campaigns.load(hop, moment=None) is None:
@@ -310,7 +457,7 @@ class CommandDispatcher:
             )
         # Its apply removes the dir AND its ledger, so the record and ack go on the campaign root's.
         recorded_on = campaign.root_hop if isinstance(payload, DeleteCyclePayload) else hop
-        ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(recorded_on)))
+        ledger = self._ledger("cycle", self.stores.campaigns.cycle_dir(recorded_on))
         applier = await self._applier(DispatchedToCycle(self, payload, campaign, hop))
         return await self._record_and_apply(ledger, call, applier)
 
@@ -321,10 +468,8 @@ class CommandDispatcher:
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
             applier = await self._applier(DispatchedToDraft(self, call.payload, claim))
-            draft_dir = self.stores.drafts.draft_dir(call.payload.draft_id)
-            outcome = await self._record_and_apply(
-                CycleEventLog.open(CycleDir(draft_dir)), call, applier
-            )
+            ledger = self._ledger("draft", self.stores.drafts.draft_dir(call.payload.draft_id))
+            outcome = await self._record_and_apply(ledger, call, applier)
         except BaseException:
             claim.release()
             raise
@@ -332,36 +477,80 @@ class CommandDispatcher:
             claim.release()
         return outcome
 
+    def _ledger(self, kind: OwnerKind, directory: Path) -> OwnedLedger:
+        log = (
+            CycleEventLog.open_workspace(WorkspaceDir(directory))
+            if kind == "workspace"
+            else CycleEventLog.open(CycleDir(directory))
+        )
+        return OwnedLedger(log, self.stores.command_index.owner(kind, directory))
+
     async def _record_and_apply[P: CommandPayload, R](
-        self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]
+        self, owned: OwnedLedger, call: CommandCall[P], applier: Applier[R]
     ) -> CommandOutcome[R]:
+        ledger = owned.log
         kind, idempotency_key = call.kind, call.idempotency_key
         # Off the loop: an upload's act hashes its bytes.
         payload, act_digest = await asyncio.to_thread(call.payload.recorded)
-        if applier.replay is not None:
-            # The digest holds no secret's text, so a retry would match two secrets as one act.
-            if any(isinstance(value, SecretStr) for value in dict(call.payload).values()):
-                raise TypeError(f"{kind} replays, yet carries a secret its digest cannot name")
-            existing = _find_idempotent_command(ledger, kind, act_digest, idempotency_key)
+        # The digest holds no secret's text, so a retry would match two secrets as one act.
+        if applier.replay is not None and any(
+            isinstance(value, SecretStr) for value in dict(call.payload).values()
+        ):
+            raise TypeError(f"{kind} replays, yet carries a secret its digest cannot name")
+        # A minted id names nothing yet, so only a replaying kind or a named id reads the ledger.
+        if applier.replay is not None or call.id_named:
+            existing = await asyncio.to_thread(
+                functools.partial(_retried, replays=applier.replay is not None),
+                self.stores.command_index,
+                ledger,
+                call,
+                act_digest,
+            )
             if existing is not None:
+                if applier.replay is None or not existing.acks or not _answers_retry(existing):
+                    raise CommandIdReusedError(
+                        f"Command id {call.command_id!r} names a {kind} act already, which a "
+                        "retry does not answer: read its status by that id.",
+                    )
+                last = existing.acks[-1]
                 return CommandOutcome(
-                    accepted=CommandAcceptedBody(command_id=existing.command_id),
-                    result=await applier.replay(existing.effect),
-                    ack=existing.ack,
+                    accepted=CommandAcceptedBody(command_id=existing.record.command_id),
+                    result=await applier.replay(last.effect),
+                    ack=last.status,
                 )
 
-        command_id = str(uuid.uuid4())
+        command_id, issued_by = call.command_id, acting_principal(self.stores.identity)
         token = set_cycle_ledger(ledger)
+        acting = set_acting_command(command_id)
         applied: list[R] = []
         try:
-            emit_command(
+            # Off the loop, under the bound ledger (`to_thread` carries the context). A cancel at
+            # this await leaves the step running: its completion meets the cancel (`_Landing`).
+            landing = _Landing(command_id)
+            land = functools.partial(
+                _land,
+                self.stores,
+                owned.owner,
                 command_id=command_id,
                 kind=kind,
                 payload=payload,
                 idempotency_key=idempotency_key,
                 act_digest=act_digest,
-                issued_by=acting_principal(self.stores.identity),
+                issued_by=issued_by,
             )
+
+            def landed() -> None:
+                land()
+                landing.landed()
+
+            step = asyncio.ensure_future(asyncio.to_thread(landed))
+            step.add_done_callback(lambda done: done.cancelled() or done.exception())
+            try:
+                await asyncio.shield(step)
+            except asyncio.CancelledError:
+                landing.cancelled()
+                raise
+            call.recorded.set()
             ack_status: CommandAckStatus = applier.ack
             ack_detail = ""
             try:
@@ -369,9 +558,15 @@ class CommandDispatcher:
             except RejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
-            except Exception as exc:
+            except BaseException as exc:
+                # A cancel, an interrupt or an exit stops the act; any other raise rejects it.
+                stopped = isinstance(exc, ActStoppedError) or not isinstance(exc, Exception)
+                cancel = _CALL_CANCELLED if isinstance(exc, asyncio.CancelledError) else ""
                 emit_command_ack(
-                    command_id=command_id, status="rejected", detail=str(exc), effect=NoEffect()
+                    command_id=command_id,
+                    status="stopped" if stopped else "rejected",
+                    detail=str(exc) or cancel or type(exc).__name__,
+                    effect=NoEffect(),
                 )
                 raise
             try:
@@ -389,6 +584,7 @@ class CommandDispatcher:
                     applier.rides(applied[0], exc)
                 raise
         finally:
+            reset_acting_command(acting)
             reset_cycle_ledger(token)
 
         if not applied:
@@ -401,20 +597,28 @@ class CommandDispatcher:
             accepted=CommandAcceptedBody(command_id=command_id), result=applied[0], ack=ack_status
         )
 
-    def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:
-        """Rides the ledger bound by the fork command being recorded, which is the parent's."""
-        command_id = str(uuid.uuid4())
+    def pause_superseded(self, parent: CyclePayload, by: CycleHop) -> None:
+        """Rides the ledger bound by the fork command being recorded, which is the parent's, and
+        addresses the parent as that fork's record does."""
+        command_id, issued_by = str(uuid.uuid4()), acting_principal(self.stores.identity)
+        bound = active_cycle_ledger()
+        assert bound is not None, "a fork records its parent's pause on the ledger it binds"
+        index = self.stores.command_index
+        owner = index.owner("cycle", CycleLayout.of_ledger(bound.path).cycle_dir)
         payload, act_digest = PauseCyclePayload(
             campaign_id=parent.campaign_id,
             cycle_id=parent.cycle_id,
+            descend=parent.descend,
             reason=f"superseded by fork {by.cycle_id}",
         ).recorded()
-        emit_command(
+        _land(
+            self.stores,
+            owner,
             command_id=command_id,
             kind=CommandKind.PAUSE_CYCLE,
             payload=payload,
             idempotency_key=command_id,
             act_digest=act_digest,
-            issued_by=acting_principal(self.stores.identity),
+            issued_by=issued_by,
         )
         emit_command_ack(command_id=command_id, status="accepted", effect=NoEffect())

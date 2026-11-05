@@ -25,7 +25,7 @@ One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which `OWNER_CO
 
 **Isolation is structural.** `build_stores` (`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id` and the caches at `Stores.archive_home`; the served API builds only from the session (`deps.py::resolve_identity`). `SHARED_ARCHIVE` is the one deliberate crossing ([`../decisions.md`](../decisions.md) § 0008), the host's alone to compact or purge. Today `tenant_id == user_id`.
 
-**Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it exists and is the caller's, else `NotFoundError`; `routers/origins.py` alone is tenant-scoped (a CLI-minted campaign's owner differs from a browser session's `user_id`).
+**Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it exists and is the caller's, else `NotFoundError`; `read_params.py::OriginsParams` alone is tenant-scoped (a CLI-minted campaign's owner differs from a browser session's `user_id`).
 
 **A block pack is the install's or one account's, and only an account's is written** (`config/paths.py::block_packs_root` read-only; `Stores.block_packs` per account; a name both hold is refused). **All writes** flow through one `CommandDispatcher`, stamping `issued_by` (`shared/identity.py::Principal`) on a `CommandRecord`.
 
@@ -59,6 +59,6 @@ The scarce things — the provider's rate limit and the host's wallet — are ex
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | no |
 | What the box's keys may ever pay for an account | the host coupon, both units; its own keys are not metered | no |
 | Accounts the box holds | `Settings.MAX_ACCOUNTS` (`accounts_full`) | no |
-| Requests one principal may send, a free verb's included | `quota.py::refuse_request_rate` at each request's one entry (`deps.py::open_caller` on a session mount, `host_surface.py::HostSession` for a host): a `command_kinds.py::ReadKind` row draws a read bucket sized above the webapp's polls, every other row the write one; the host exempt (429 `rate_limited`) | no |
+| Requests one principal may send, a free verb's included | `quota.py::refuse_request_rate` at each request's one entry (`deps.py::open_caller` on a session mount, `host_surface.py::HostSession._admit` for a host): a `command_kinds.py::ReadKind` row draws a read bucket sized above the webapp's polls, every other row the write one; the host exempt (429 `rate_limited`) | no |
 
 A throttle is logged, never banked (`quota.py::RateLimitedError`). **The first gate WAITS; the third refuses.** A full machine queues the launch (`JobRegistry.request_slot`), drained least-served-first, bounded by `Settings.QUEUE_MAX_WAIT_S`; `cancel-queued-run` withdraws a launch, only by the principal that launched it (`shared/identity.py::acting_principal`). `machine-status` names only the caller's slots unless `MACHINE_STATUS_SCOPE=all`. The memory guard is the unit's `MemoryMax`.

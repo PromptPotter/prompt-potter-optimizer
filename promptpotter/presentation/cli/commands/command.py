@@ -8,10 +8,8 @@ from pydantic import BaseModel
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.loop_commands import read_payload_file
-from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
-    CampaignPayload,
     CommandKind,
     CyclePayload,
 )
@@ -38,8 +36,6 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
     if issubclass(model, CyclePayload):
         hop = resolve_target(args, stores)
         fields["campaign_id"], fields["cycle_id"] = hop.campaign_id, hop.cycle_id
-    elif issubclass(model, CampaignPayload):
-        fields["campaign_id"] = resolve_campaign_id_hint(stores, args.campaign_id)
     payload = PayloadInvalidError.validating(model, fields)
     # The address, else the one field a workspace command names its subject by.
     named = [name for name in _ADDRESS if name in model.model_fields] or [next(iter(fields))]

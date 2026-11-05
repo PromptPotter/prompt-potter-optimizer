@@ -13,11 +13,14 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
 
-from promptpotter.application.commands import launching, workspace_edits
+from promptpotter.application.commands import (
+    draft_editing,
+    launching,
+    origin_resolving,
+    workspace_edits,
+)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
-from promptpotter.application.commands.origin_resolving import dispatch_origin_resolution
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
     validated_campaign_config,
@@ -38,15 +41,15 @@ from promptpotter.domain.command_kinds import (
     IngestUploadPayload,
     MintCampaignPayload,
     MintHeadToHeadPayload,
-    PauseCyclePayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
 from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
+    HeldLaunch,
     backend_reach_line,
-    ctrl_c_pauses,
+    ctrl_c_cancels,
     cycle_result_command,
     held_run,
     inline_launch,
@@ -65,7 +68,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.datasets.origin_readiness import FieldGap
     from promptpotter.application.jobs.launcher.launch import Inline
-    from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.checkin_draft import OriginResolution
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -213,11 +215,11 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
 
 async def _hold_checkin(
     args: argparse.Namespace, stores: Stores, draft_id: str, patch: EditDraftPatch | None
-) -> HeldRun:
+) -> HeldLaunch:
     # Dispatched, as the browser's: a direct draft write records nothing and re-bills every retry.
     if patch is not None:
-        await dispatch_draft_patch(
-            stores,
+        await CommandDispatcher(stores).answer(
+            draft_editing.edit_draft_campaign,
             CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch)),
         )
     draft = owned_draft(stores, draft_id)
@@ -228,10 +230,10 @@ async def _hold_checkin(
     if not origin_readiness(draft, draft_pipeline(stores, draft, served)).complete:
         _checkin_line("origin resolver", "running AI check-in")
         # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
-        turn = await dispatch_origin_resolution(
-            stores, CommandCall(ResolveOriginPayload(draft_id=draft_id))
+        turn = await CommandDispatcher(stores).answer(
+            origin_resolving.resolve_origin, CommandCall(ResolveOriginPayload(draft_id=draft_id))
         )
-        last_turn = turn.resolution
+        last_turn = turn.result.resolution
         draft = owned_draft(stores, draft_id)
 
     readiness = origin_readiness(draft, draft_pipeline(stores, draft, served))
@@ -239,15 +241,15 @@ async def _hold_checkin(
         _raise_incomplete(readiness.gaps, last_turn, draft_id)
 
     _checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
-    launched = await dispatch_start_checkin(
+    outcome = await dispatch_start_checkin(
         stores,
         CommandCall(
             StartCheckinPayload(draft_id=draft_id, diag=args.diag, budget=budget_from_args(args))
         ),
         inline=inline_launch(args),
     )
-    held = held_run(launched)
-    _checkin_line("campaign", f"minted {held.session.campaign_id} from check-in {draft_id}")
+    held = held_run(outcome)
+    _checkin_line("campaign", f"minted {held.run.session.campaign_id} from check-in {draft_id}")
     return held
 
 
@@ -316,9 +318,9 @@ def _named_dataset(
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
     dispatcher = CommandDispatcher(stores, inline=inline)
     with _named_dataset(stores, mint):
-        launched = (await dispatcher.dispatch(CommandCall(mint))).result
-    held = held_run(launched)
-    _checkin_line("campaign", f"minted {held.session.campaign_id}")
+        outcome = await dispatcher.dispatch(CommandCall(mint))
+    held = held_run(outcome)
+    _checkin_line("campaign", f"minted {held.run.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)
 
 
@@ -402,21 +404,15 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
     payload = _head_to_head_payload(args)
-    dispatcher = CommandDispatcher(stores)
+    dispatcher, call = CommandDispatcher(stores), CommandCall(payload)
     with _named_dataset(stores, payload):
-        launched = (
-            await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload))
-        ).result
+        launched = (await dispatcher.answer(launching.mint_head_to_head, call)).result
     started = launched.started
     for arm in started.arms:
         cycle_dir = stores.campaigns.cycle_dir(arm.hop).absolute()
         _checkin_line(f"arm {arm.arm_key}", f"{arm.hop.campaign_id} → {cycle_dir}")
     logger.info("Each arm writes readout.log in its cycle; Ctrl+C pauses every arm.")
-    pauses = [
-        PauseCyclePayload(campaign_id=a.hop.campaign_id, cycle_id=a.hop.cycle_id, reason="Ctrl+C")
-        for a in started.arms
-    ]
-    with ctrl_c_pauses(stores, pauses):
+    with ctrl_c_cancels(stores, call.command_id):
         await asyncio.gather(*launched.exits)
     ended = [
         f"  {arm.arm_key}: {arm.hop.campaign_id} — {dispatcher.run_state(arm.hop).run_phase.value}"
@@ -436,8 +432,8 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
-    session = held.session
+async def _run_origin(held: HeldLaunch, *, diag: bool) -> CommandResult:
+    session = held.run.session
     dataset_name = session.dataset_name or "?"
     _checkin_line(
         "backend", backend_reach_line(session.backend_id, session.backend_client.base_url)

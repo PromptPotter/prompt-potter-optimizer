@@ -38,6 +38,7 @@ from factories import (
     election_knobs,
     filed,
     filed_under,
+    inner_sandbox,
     jumping_clock,
     level_series,
     loop_session,
@@ -70,24 +71,18 @@ from promptpotter.application.bench.difficulty import ruler_clock, session_ruler
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
+from promptpotter.application.command_status import CommandStatus
+from promptpotter.application.commands import cancelling, measuring
+from promptpotter.application.commands.cancelling import stop_pass
 from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
-    CommandOutcome,
 )
-from promptpotter.application.commands.measuring import stop_pass
+from promptpotter.application.diagnostics import verify as verify_diagnostics
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
-from promptpotter.application.evidence.subjects import SubjectSpec
-from promptpotter.application.host_surface import (
-    CancelTask,
-    HostSession,
-    HostTask,
-    TaskStatusOf,
-    _Tracked,
-    host_tool,
-)
+from promptpotter.application.host_surface import HostSession
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
@@ -95,7 +90,6 @@ from promptpotter.application.intelligence.rasch import (
     theta_lift_over_parent,
 )
 from promptpotter.application.jobs.launcher.admission import (
-    PassHold,
     PassStoppedError,
     paid_pass,
 )
@@ -222,15 +216,18 @@ from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimiz
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.command_kinds import (
+    CancelCommandPayload,
     CommandKind,
     CommandPayload,
+    GradeBenchPayload,
     OriginGateDecisionPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
     SubmitArmsPayload,
     SubmittedArm,
+    VerifyCandidatePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
@@ -259,6 +256,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.phase_views import BenchGradedView
 from promptpotter.domain.phases import (
+    INNER_PAUSE_REFUSAL,
     CampaignPhase,
     PauseCause,
     RunPhase,
@@ -328,15 +326,16 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands import launch as launch_cli
-from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
+from promptpotter.presentation.cli.commands.launch import ctrl_c_cancels, ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import (
+    CommandIdReusedError,
+    CommandUncancellableError,
     ConflictError,
     ErrorCategory,
     SendRefusedError,
-    TaskUncancellableError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
@@ -1714,7 +1713,11 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
         async def _bench_pick() -> BenchPasses:
             async with paid_pass(
-                stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
+                stores=stores,
+                verb="bench",
+                hop=_PEER_HOP,
+                declared=Budget(),
+                sends=(),
             ):
                 return await bench_selection(
                     session,
@@ -1749,8 +1752,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             "the pass left its pause unapplied, or kept the cycle after it stopped"
         )
         # Every other door stops the pass by its own hold, in one step: the host's cancel and the
-        # terminal's Ctrl+C each pause it while it holds its cycle, and once it let go the stop
-        # answers that it ended, leaving no pause for whatever holds the cycle next.
+        # terminal's Ctrl+C each pause it while it holds its cycle; a stop where no pass holds it,
+        # or asked after the pass took it, is refused, leaving no pause for whatever holds it next.
         host = HostSession(Caller(stores))
 
         def paused_by() -> list[str]:
@@ -1770,25 +1773,141 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     raise asyncio.CancelledError("aborted")
                 raise AssertionError("a stop left the pass running")
 
-        async def _host_cancel() -> HostTask:
-            hold = PassHold()
+        def _graded_under(command_id: str, stop: Callable[[], Awaitable[object]]) -> Any:
+            """The pass as the `grade-bench` act *command_id* runs it, *stop* pressed inside it."""
 
-            async def _pass() -> tuple[CommandOutcome[Any], None]:
-                with hold.bound():
-                    await _held_pass(lambda: host.answer(CancelTask("held")))
-                raise AssertionError("a host cancel left the pass running")
+            async def _graded(**_: object) -> None:
+                await _held_pass(stop)
 
-            running = asyncio.create_task(_pass())
-            host._tasks["held"] = _Tracked(
-                host_tool("verify-candidate"), CommandCall(pause), hold, running
-            )
-            await asyncio.wait([running])
-            return await host.answer(TaskStatusOf("held"))
+            async def _dispatched() -> None:
+                with monkeypatch.context() as patched:
+                    patched.setattr(measuring, "grade_line_bench", _graded)
+                    await CommandDispatcher(stores).dispatch(
+                        CommandCall(
+                            GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id),
+                            command_id,
+                            command_id,
+                        )
+                    )
+
+            return _dispatched()
+
+        async def _host_cancel() -> CommandStatus:
+            # The pass's own command is what the host's cancel names: `cancel-command`.
+            with pytest.raises(PassStoppedError):
+                await _graded_under("held", lambda: host.cancel_command("held"))
+            return await host.command_status("held")
 
         before = len(paused_by())
         cancelled = asyncio.run(_host_cancel())
+        assert cancelled.status == "cancelled", "a stopped pass read as anything but cancelled"
+        # An id the workspace files names that act alone: a second act under it, on another
+        # cycle's ledger, is refused unsent.
+        other = CycleHop(campaign_id="other", cycle_id="cycle_other")
+        stores.campaigns.create_campaign(minted_campaign(other))
+        stores.campaigns.mint_cycle(other)
+        elsewhere = PauseCyclePayload(campaign_id=other.campaign_id, cycle_id=other.cycle_id)
+        with pytest.raises(CommandIdReusedError):
+            asyncio.run(
+                CommandDispatcher(stores).dispatch(CommandCall(elsewhere, "reused", "held"))
+            )
+        # A cancel retried under its id and key acts once: one record names it.
+        once = CancelCommandPayload(command_id="held")
+        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(once, "stop-once", "stop-1")))
+        with pytest.raises(CommandIdReusedError):
+            asyncio.run(
+                CommandDispatcher(stores).dispatch(CommandCall(once, "stop-once", "stop-1"))
+            )
+        workspace_log = CycleEventLog.open_workspace(stores.base_dir)
+        assert (
+            sum(
+                isinstance(r, CommandRecord) and r.command_id == "stop-1"
+                for _, r in workspace_log.iter()
+            )
+            == 1
+        ), "a retried cancel recorded a second act under its id"
+        # A command addresses an L4 leaf by the id prefix a read takes, below its chain: one rule
+        # resolves both, so the act reaches the leaf's campaign under its full id.
+        leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+        sandbox = inner_sandbox(stores, _PEER_HOP.campaign_id, _PEER_HOP.cycle_id)
+        (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+        inner = descend_store(stores, (_PEER_HOP,))
+        inner.campaigns.create_campaign(
+            minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
+        )
+        inner.campaigns.mint_cycle(leaf)
+        reached: list[CycleHop] = []
 
-        async def _ctrl_c() -> str:
+        async def _verify_reached(dispatched: Any) -> Any:
+            reached.append(dispatched.hop)
+            raise CommandUncancellableError("reached")
+
+        addressed = Subject.parse(
+            f"candidate:innerds/{leaf.cycle_id}/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
+        )
+        verify = VerifyCandidatePayload.model_validate(
+            {**addressed.command_fields, "candidate_id": addressed.candidate_id}
+        )
+        with monkeypatch.context() as patched:
+            patched.setattr(measuring, "verify_candidate", _verify_reached)
+            with pytest.raises(CommandUncancellableError):
+                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(verify)))
+        assert reached == [leaf], "a command resolved its leaf by another rule than a read's"
+
+        # A stop reaches an act addressed into a sandbox: its record keeps the address it was sent
+        # to, so the cancel resolves the leaf as the act did, and the pass on it pauses.
+        async def _stopped_in_leaf(**_: object) -> None:
+            await host.cancel_command("in-leaf")
+            if (abort := get_abort_check()) is not None and abort():
+                raise asyncio.CancelledError("aborted")
+            raise AssertionError("a stop left the leaf's pass running")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(verify_diagnostics, "verify_candidate", _stopped_in_leaf)
+            with pytest.raises(PassStoppedError):
+                asyncio.run(
+                    CommandDispatcher(stores).dispatch(CommandCall(verify, "in-leaf", "in-leaf"))
+                )
+        assert asyncio.run(host.command_status("in-leaf")).status == "cancelled", (
+            "a stop never reached a pass on a leaf inside a chain"
+        )
+        # An inner cycle's run control reads whether a pass holds it: idle, a pause is refused in
+        # the inner run's words; held, the control offers the pause, and a second stop sent once
+        # the first stands is still the pass's to take.
+        leaf_dir = inner.campaigns.cycle_dir(leaf)
+        into_leaf = PauseCyclePayload(**addressed.command_fields, reason="stop")
+        with pytest.raises(ConflictError) as idle_refused:
+            asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(into_leaf)))
+        assert INNER_PAUSE_REFUSAL in str(idle_refused.value), (
+            "a pause into an idle inner run was taken, or refused without the inner run's words"
+        )
+
+        offered: list[tuple[str | None, str]] = []
+        inner_acks: list[str] = []
+
+        async def _inner_pass_stopped() -> None:
+            async with paid_pass(stores=inner, verb="bench", hop=leaf, declared=Budget(), sends=()):
+                admission = derive_run_state(leaf_dir).admission
+                offered.append((admission.offers, admission.refusal))
+                for _ in range(2):
+                    sent = await CommandDispatcher(stores).dispatch(CommandCall(into_leaf))
+                    inner_acks.append(sent.ack)
+                if (abort := get_abort_check()) is not None and abort():
+                    raise asyncio.CancelledError("aborted")
+                raise AssertionError("a stop left the inner cycle's pass running")
+
+        with pytest.raises(PassStoppedError):
+            asyncio.run(_inner_pass_stopped())
+        assert offered == [("pause", "")], (
+            "an inner cycle's held pass offered no stop, or no reason"
+        )
+        assert inner_acks == ["accepted", "accepted"], (
+            "a stop into an inner cycle's pass was refused, once its first pause stood or before"
+        )
+
+        async def _ctrl_c(command_id: str | None) -> str:
+            """The terminal's Ctrl+C: a command's (`ctrl_c_cancels` on its id) or, *command_id*
+            unset, a pass no command records (`ctrl_c_stops_pass`)."""
             stopped = asyncio.Event()
 
             async def _stop(*args: Any) -> None:
@@ -1803,44 +1922,61 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 await stopped.wait()
 
             with monkeypatch.context() as patched:
+                patched.setattr(cancelling, "stop_pass", _stop)
                 patched.setattr(launch_cli, "stop_pass", _stop)
-                with pytest.raises(PassStoppedError) as ended, ctrl_c_stops_pass(stores, pause):
-                    await _held_pass(_press)
+                if command_id is None:
+                    with (
+                        pytest.raises(PassStoppedError) as ended,
+                        ctrl_c_stops_pass(stores, (_PEER_HOP,)),
+                    ):
+                        await _held_pass(_press)
+                else:
+                    with (
+                        pytest.raises(PassStoppedError) as ended,
+                        ctrl_c_cancels(stores, command_id),
+                    ):
+                        await _graded_under(command_id, _press)
             return str(ended.value)
 
-        pressed = asyncio.run(_ctrl_c())
-        assert cancelled.status == "cancelled" and "pass stopped" in cancelled.status_message, (
-            "a host cancel left the pass running"
+        pressed = asyncio.run(_ctrl_c(None))
+        cancelled_by_key = asyncio.run(_ctrl_c("pressed"))
+        assert asyncio.run(host.command_status("pressed")).status == "cancelled", (
+            "a command's Ctrl+C left its act reading anything but cancelled"
         )
-        assert "pass stopped" in pressed, "a Ctrl+C left the pass running"
-        assert len(paused_by()) == before + 2 and paused_by()[-1] == pause.reason, (
+        assert "pass stopped" in cancelled.said, "a host cancel left the pass running"
+        assert "pass stopped" in pressed and "pass stopped" in cancelled_by_key, (
+            "a Ctrl+C left the pass running"
+        )
+        assert len(paused_by()) == before + 3 and paused_by()[-1] == "command cancelled", (
             "a host cancel or a Ctrl+C ended the pass without its pause"
         )
         assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
             "a door's stop left its pause standing, or the pass kept its cycle"
         )
 
-        async def _stop_after(hold: PassHold) -> str:
-            with pytest.raises(TaskUncancellableError) as refused:
-                await stop_pass(stores, hold, CommandCall(pause))
+        async def _stop_of(command_id: str | None) -> str:
+            with pytest.raises(CommandUncancellableError) as refused:
+                await stop_pass(CommandDispatcher(stores), (_PEER_HOP,), command_id)
             return str(refused.value)
 
-        async def _let_go() -> str:
-            hold = PassHold()
-            with hold.bound():
-                async with paid_pass(
-                    stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget(), sends=()
-                ):
-                    pass
-            return await _stop_after(hold)
+        async def _race() -> str:
+            # Stop A, read unsettled, lands once B's act holds the cycle: refused, B runs on.
+            refused: list[str] = []
 
-        assert asyncio.run(_let_go()).startswith("the pass ended"), (
-            "a stop after the let-go still asked to be sent again"
+            async def _ask() -> None:
+                refused.append(await _stop_of("verify-a"))
+
+            with pytest.raises(AssertionError):
+                await _graded_under("verify-b", _ask)
+            return refused[0]
+
+        assert "no pass holds" in asyncio.run(_stop_of(None)), (
+            "a stop with no pass holding the cycle sent a pause"
         )
-        assert standing_controls(cycle_dir).pause is None, "a stop after the let-go left a pause"
-        assert "not yet" in asyncio.run(_stop_after(PassHold())), (
-            "a stop before the pass held its cycle sent a pause"
+        assert "another command's" in asyncio.run(_race()), (
+            "a stop of one command's act reached another command's pass"
         )
+        assert standing_controls(cycle_dir).pause is None, "a refused stop left a pause"
         # A spent budget stops the pass and names the bound; the held passes beside it stand.
         earlier = origin_pass.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
         book = require_spend_book("the bench journey")
@@ -3248,9 +3384,9 @@ def _evidence_campaign(
     tilt: float = 0.0,
     elects_on: DisplayMetric = "ability",
     fit: ArmFit | None = None,
-) -> SubjectSpec:
+) -> Subject:
     if stores.campaigns.load_campaign(cid) is not None:
-        return SubjectSpec("campaign", cid)
+        return Subject(cid)
     split = DatasetSplit(bench=6)
     partition = partition_bank(_H2H_BANK, split, seed=seed)
     root = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
@@ -3393,7 +3529,7 @@ def _evidence_campaign(
     )
     campaign = stores.campaigns.load_campaign(cid)
     assert campaign is not None and len(line_launches(stores, campaign)) == 1
-    return SubjectSpec("campaign", cid)
+    return Subject(cid)
 
 
 def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_it_is_none(
@@ -3956,8 +4092,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
 
     # A head-to-head pairs two optimizers only on one bench under one grader.
     h2h_stores = workspace(tmp_path / "h2h")
-    potter_a, capo_b = SubjectSpec("campaign", "potter_a"), SubjectSpec("campaign", "capo_b")
-    potter_course = SubjectSpec("course", "potter_a", "cycle_potter_a_fork_r1")
+    potter_a, capo_b = Subject("potter_a"), Subject("capo_b")
+    potter_course = Subject("potter_a", "cycle_potter_a_fork_r1")
     _evidence_campaign(h2h_stores, "potter_a", 1, selected=0.5, rebased=True)
     _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
@@ -3982,7 +4118,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             )
         )
     h2h_cases: tuple[
-        tuple[tuple[SubjectSpec, ...], dict[str, Any] | None, bool | None, list[str], int, int],
+        tuple[tuple[Subject, ...], dict[str, Any] | None, bool | None, list[str], int, int],
         ...,
     ] = (
         ((potter_a, capo_b), None, True, [], 1, 1),

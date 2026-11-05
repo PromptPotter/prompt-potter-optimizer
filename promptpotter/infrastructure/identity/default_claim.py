@@ -34,7 +34,7 @@ def maybe_claim_default(
     claim = DefaultClaim(user_id=user_id, claimed_at=utcnow_iso(), renamed=renamed)
     write_json(marker_path, claim.model_dump())
     if user_dir.is_dir():
-        _rebind_campaigns(CampaignStore(WorkspaceDir(user_dir)), user_id)
+        _rebind_campaigns(CampaignStore.of_account(WorkspaceDir(user_dir)), user_id)
 
 
 def registered_user_id(marker_path: Path) -> str | None:

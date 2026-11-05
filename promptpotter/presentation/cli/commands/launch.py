@@ -7,14 +7,17 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Awaitable, Callable, Coroutine, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, get_args
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from typing import TYPE_CHECKING, Any, NamedTuple, get_args
 
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.measuring import stop_pass
-from promptpotter.application.jobs.launcher.admission import PassHold
+from promptpotter.application.commands.cancelling import stop_pass
+from promptpotter.application.commands.dispatcher import (
+    CommandCall,
+    CommandDispatcher,
+    CommandOutcome,
+)
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.views.render.phase import render_completion
@@ -22,9 +25,9 @@ from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
+    CancelCommandPayload,
     CyclePayload,
     OriginGateDecisionPayload,
-    PauseCyclePayload,
 )
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.phases import GateDecision, stop_reason_outcome
@@ -36,6 +39,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.launcher.run_job import HeldRun
+    from promptpotter.domain.cycle_paths import CyclePath
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.run_mode import RunMode
     from promptpotter.infrastructure.store.stores import Stores
@@ -86,40 +90,48 @@ def inline_launch(args: argparse.Namespace) -> Inline:
     return Inline(no_wait=args.no_wait)
 
 
-def held_run(launched: object) -> HeldRun:
+class HeldLaunch(NamedTuple):
+    """An inline launch's run and the id of the command that launched it, which its Ctrl+C
+    cancels as every door's stop does."""
+
+    run: HeldRun
+    command_id: str
+
+
+def held_run(outcome: CommandOutcome[Any]) -> HeldLaunch:
+    launched = outcome.result
     assert isinstance(launched, Launched), "a launching command answers its launch"
     assert launched.held is not None, "an inline launch is held, never detached"
-    return launched.held
+    return HeldLaunch(launched.held, outcome.accepted.command_id)
 
 
-def ctrl_c_pauses(
-    stores: Stores, pauses: Sequence[PauseCyclePayload]
-) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
-    """The first Ctrl+C sends *pauses* as the browser's press does, then cancels this task; the second force-quits."""
-
-    async def _pause_each() -> None:
-        for pause in pauses:
-            with contextlib.suppress(PotterError):
-                await CommandDispatcher(stores).dispatch(CommandCall(pause))
-
-    return _ctrl_c(stores, _pause_each)
-
-
-@contextlib.contextmanager
 def ctrl_c_stops_pass(
-    stores: Stores, pause: PauseCyclePayload
-) -> Iterator[Callable[[CyclePayload], None]]:
-    """A paid pass's Ctrl+C: *pause*, under the hold of the pass this task runs (`stop_pass`);
-    before it holds its cycle, or once it let go, the cancel alone ends it."""
-
-    hold = PassHold()
+    stores: Stores, path: CyclePath
+) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
+    """A terminal-only pass's Ctrl+C, which no command id names: the pass on *path* stopped as
+    `cancel-command` stops one (`stop_pass`), then this task's cancel."""
 
     async def _stop() -> None:
         with contextlib.suppress(PotterError):
-            await stop_pass(stores, hold, CommandCall(pause))
+            await stop_pass(CommandDispatcher(stores), path, None)
 
-    with hold.bound(), _ctrl_c(stores, _stop) as dispatch:
-        yield dispatch
+    return _ctrl_c(stores, _stop)
+
+
+def ctrl_c_cancels(
+    stores: Stores, command_id: str
+) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
+    """Every command's Ctrl+C, the first one: the `cancel-command` every door sends on its id
+    (a launch's jobs each stopped by their own act), then this task's cancel; where nothing of it
+    can be stopped yet, the cancel alone ends it. The second force-quits."""
+
+    async def _cancel() -> None:
+        with contextlib.suppress(PotterError):
+            await CommandDispatcher(stores).dispatch(
+                CommandCall(CancelCommandPayload(command_id=command_id))
+            )
+
+    return _ctrl_c(stores, _cancel)
 
 
 @contextlib.contextmanager
@@ -167,10 +179,9 @@ def _ctrl_c(
 
 
 @contextlib.contextmanager
-def _terminal_inputs(session: Session) -> Iterator[None]:
+def _terminal_inputs(session: Session, command_id: str) -> Iterator[None]:
     loop, hop = asyncio.get_running_loop(), session.hop
-    pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
-    with ctrl_c_pauses(session.store, [pause]) as dispatch:
+    with ctrl_c_cancels(session.store, command_id) as dispatch:
 
         def read_decisions() -> None:
             spelled: dict[str, GateDecision] = {
@@ -194,9 +205,9 @@ def _terminal_inputs(session: Session) -> Iterator[None]:
         yield
 
 
-async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:
-    with _terminal_inputs(held.session):
-        result, _observers = await held.run_inline(
+async def run_inline(launch: HeldLaunch, *, mode: RunMode) -> CycleResult:
+    with _terminal_inputs(launch.run.session, launch.command_id):
+        result, _observers = await launch.run.run_inline(
             mode=mode, readout_sink=functools.partial(print, flush=True)
         )
     return result

@@ -51,6 +51,7 @@ from promptpotter.domain.run_records import (
     LaunchClockRecord,
     LaunchReleasedRecord,
     LeftComparisonRecord,
+    NoEffect,
     PhaseRecord,
     PipelineRead,
     PricedKeyRecord,
@@ -83,6 +84,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verify_pass import VerifyPass, VerifyReading
+from promptpotter.infrastructure.store.command_index import CommandsFold
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
@@ -294,6 +296,34 @@ class Controls(NamedTuple):
     gate_decisions: tuple[tuple[str, str], ...] = ()
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
 
+    def standing(self) -> frozenset[str]:
+        """Every command id the inbox holds for its loop to take."""
+        return frozenset(
+            {
+                *(() if self.pause is None else (self.pause.command_id,)),
+                *self.skips,
+                *(() if self.lookahead is None else (self.lookahead.command_id,)),
+                *(command_id for command_id, _ in self.gate_decisions),
+                *(command_id for command_id, _ in self.submissions),
+            }
+        )
+
+    def dropped(self, after: Controls) -> list[CommandAckRecord]:
+        """The ``stopped`` ack of each control this inbox held and *after* no longer does."""
+        return [
+            CommandAckRecord(
+                command_id=command_id,
+                status="stopped",
+                detail=LOOP_ENDED_UNTAKEN,
+                effect=NoEffect(),
+            )
+            for command_id in sorted(self.standing() - after.standing())
+        ]
+
+
+# What a loop command reads once its loop ended without taking it.
+LOOP_ENDED_UNTAKEN = "its loop ended before taking it"
+
 
 _LOOP_TAKEN = frozenset(
     kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items() if issubclass(model, LoopPayload)
@@ -305,22 +335,33 @@ class _Controls:
 
     def __init__(self) -> None:
         self._held = Controls()
-        self._asked: dict[str, CommandRecord] = {}
+        # The record↔ack join is the commands fold's; a loop command is pending until its first ack.
+        self._commands = CommandsFold()
+        self._pending: set[str] = set()
         self._kinds: dict[str, type[LoopPayload]] = {}
         self._declared: RunPhase | None = None
 
+    def _first_ack(self, command_id: str) -> CommandRecord | None:
+        if command_id not in self._pending:
+            return None
+        self._pending.discard(command_id)
+        asked = self._commands.get(command_id)
+        return None if asked is None else asked.record
+
     def feed(self, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
+        if not isinstance(record, RunPhaseRecord):
+            self._commands.feed(record)
         match record:
             case CommandRecord():
                 if record.kind in _LOOP_TAKEN:
-                    self._asked[record.command_id] = record
+                    self._pending.add(record.command_id)
             case CommandAckRecord(command_id=command_id, status="accepted"):
-                if asked := self._asked.pop(command_id, None):
+                if asked := self._first_ack(command_id):
                     self._arm(asked)
-            case CommandAckRecord(command_id=command_id, status="rejected"):
-                self._asked.pop(command_id, None)
+            case CommandAckRecord(command_id=command_id, status="rejected" | "stopped"):
+                self._first_ack(command_id)
             case CommandAckRecord(command_id=command_id):
-                if asked := self._asked.pop(command_id, None):
+                if asked := self._first_ack(command_id):
                     # Applied with no accept before it: a look-ahead DISARM, nothing to take.
                     self._arm(asked)
                 elif kind := self._kinds.pop(command_id, None):

@@ -26,7 +26,7 @@ step     := course "/@" offset                       bbeh__20261024-091500::cycl
 inside   := course ("~" course)*                     the L4 sandbox chain, the `?descend=` wire byte-exact
 ```
 
-One minter, `domain/cycle_paths.py::hierarchy_address`; a course's address IS its encoded `CyclePath` (`webapp/lib/ids.ts::encodeCyclePath`), a step's offset the line index in its course's own ledger. A fork is stored as a sibling cycle, served as a child course; its `facts.spawn` is its `domain/run_records.py::ForkSpec`.
+One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_address`); a course's address IS its encoded `CyclePath` (`webapp/lib/ids.ts::encodeCyclePath`), a step's offset the line index in its course's own ledger. A fork is stored as a sibling cycle, served as a child course; its `facts.spawn` is its `domain/run_records.py::ForkSpec`.
 
 ## Active session pointer
 
@@ -48,7 +48,7 @@ One minter, `domain/cycle_paths.py::hierarchy_address`; a course's address IS it
 | `compact-archive <inventory \| compact \| restore \| purge-cold> [--apply]` | the only verb that can destroy a measurement: `compact` moves `domain/scoring.py::UNREAD_PIPELINE_KEYS` off `panel` answers into `measurements/cold/`, `restore` puts them back, `purge-cold` is irreversible; `origin`/`parent` answers are never eligible |
 | `reset`, `land-data`, `close-admission` | the data-root verbs — [`../decisions.md`](../decisions.md) § 0011 |
 | `reindex`, `pin-roster`, `offer-extras`, `health` | rebuild `measurements/index.jsonl`; pin a Harbor roster; list the extras the offered datasets need; check backends and sign-in providers |
-| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `step-cycle`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
+| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `step-cycle`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `cancel <command_id>`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
 
 Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`). Nothing the loop decides reads a diagnostic. A paid diagnostic or `bench` holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued (`application/jobs/launcher/admission.py::paid_pass`).
 
@@ -69,6 +69,7 @@ Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only 
     .workspace/                         # run data: `reset` drops it with the campaigns
       active_session.json
       events.jsonl                      # workspace ledger — commands with no cycle, uploads, refusals
+      command_ids.jsonl                 # the account's one command-id index, sandboxes' ledgers included (`store/command_index.py`)
     head_to_heads/{id}.json             # `domain/campaign.py::HeadToHeadRecord`
     drafts/{draft_id}/                  # an open check-in, until Start or Discard
     ruler.jsonl                         # the tenant's δ ruler, `store/ruler_store.py`

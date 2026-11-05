@@ -1,23 +1,32 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
+from typing import TYPE_CHECKING
 
 from promptpotter.application import health
 from promptpotter.application.jobs.capacity import SLOT_BOUND_WORDS
-from promptpotter.application.jobs.machine_status import machine_status
-from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.read_params import QuotaStatusParams
 from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
+if TYPE_CHECKING:
+    import argparse
 
-async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
-    stores = open_stores(args)
-    jobs = JobRegistry.attach(stores.jobs_dir)
-    status = machine_status(jobs, identity=stores.identity)
-    account = quota_status(stores=stores, job_registry=jobs)
+    from promptpotter.application.caller import Caller
+    from promptpotter.application.jobs.machine_status import MachineStatusResponse
+    from promptpotter.application.read_params import MachineStatusParams
+
+
+def machine_status_human(
+    _params: MachineStatusParams,
+    status: MachineStatusResponse,
+    _args: argparse.Namespace,
+    caller: Caller,
+) -> CommandResult:
+    # The caller's own bound beside the machine's: the `quota-status` row, read on the same caller.
+    account = QuotaStatusParams().answer(caller)
     lines = [
         f"running {status.occupied} of {status.capacity} (ceiling {status.ceiling}), "
         f"{status.queued} queued"

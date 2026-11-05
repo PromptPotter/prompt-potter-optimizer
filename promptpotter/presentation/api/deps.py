@@ -2,21 +2,30 @@ from __future__ import annotations
 
 import hmac
 import inspect
+import re
 from typing import Annotated, Any, get_origin
 
-from fastapi import Depends, Header, Query, Request, UploadFile
-from pydantic import BaseModel, Field, create_model
+from fastapi import Depends, Header, Query, Request, Response, UploadFile
+from pydantic import Field, create_model
 from pydantic.fields import FieldInfo
 
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands.dispatcher import MAX_IDEMPOTENCY_KEY_CHARS
+from promptpotter.application.commands.dispatcher import (
+    MAX_IDEMPOTENCY_KEY_CHARS,
+    CommandOutcome,
+)
 from promptpotter.application.jobs.quota import refuse_request_rate
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.read_params import ReadParams
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import MAX_UPLOAD_BYTES, CommandKind, ReadKind
+from promptpotter.domain.command_kinds import (
+    MAX_COMMAND_ID_CHARS,
+    MAX_UPLOAD_BYTES,
+    CommandKind,
+    ReadKind,
+)
 from promptpotter.domain.strict_model import RequestBody
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -76,7 +85,7 @@ def require_identity_bundle(request: Request) -> IdentityBundle:
 
 def _drawn(request: Request, identity: IdentityDep) -> None:
     """The request drawn on its principal's rate, read or write as the kind its route is named by
-    (`api/catalogue.py::bind_surface` names every one), before anything is built for it."""
+    (every session route is named by one), before anything is built for it."""
     route = request.scope.get("route")
     refuse_request_rate(identity, read=isinstance(_NAMED[getattr(route, "name", "")], ReadKind))
 
@@ -99,24 +108,16 @@ _NAMED: dict[str, CommandKind | ReadKind] = {k.value: k for k in (*CommandKind, 
 CallerDep = Annotated[Caller, Depends(open_caller)]
 
 
-def _carried(field: FieldInfo) -> bool:
-    """A mapping or a model rides the JSON body; anything else rides the URL."""
-    annotation = field.annotation
-    return get_origin(annotation) is dict or (
-        isinstance(annotation, type) and issubclass(annotation, BaseModel)
-    )
-
-
 def read_input(model: type[ReadParams]) -> Any:
-    """A read route's one input: its row's `ReadParams` model, each URL field a path parameter
-    where the route's path names it, else a query one (a list repeats), and the fields the body
-    carries one `RequestBody` named for the model. Each keeps its field's own constraints and
-    description, so a value the model refuses is refused before the route runs. The dependency's
-    signature returns *model*, which `api/catalogue.py::bind_surface` matches to the route's row."""
+    """A read route's one input: its row's `ReadParams` model, each field a path parameter where
+    the model's `route` names it, else a query one on a GET (a list repeats) and a field of one
+    `RequestBody` named for the model on a POST. Each keeps its field's own constraints and
+    description, so a value the model refuses is refused before the route runs."""
+    in_path = set(re.findall(r"\{(\w+)", model.route))
     params: list[inspect.Parameter] = []
     carried: dict[str, Any] = {}
     for name, field in model.model_fields.items():
-        if _carried(field):
+        if model.method == "POST" and (field.alias or name) not in in_path:
             carried[name] = (field.annotation, field)
             continue
         spec: FieldInfo = (
@@ -178,3 +179,26 @@ def sent_idempotency_key(
 
 
 IdempotencyKeyDep = Annotated[str, Depends(sent_idempotency_key)]
+
+
+COMMAND_ID_HEADER = "Command-Id"
+
+
+def sent_command_id(
+    command_id: Annotated[
+        str, Header(alias=COMMAND_ID_HEADER, max_length=MAX_COMMAND_ID_CHARS)
+    ] = "",
+) -> str:
+    """The id the caller addresses the act by while it runs (its status, its stop); `CommandCall`
+    mints one where none is sent, and every command route answers the act's id in this header."""
+    return command_id
+
+
+CommandIdDep = Annotated[str, Depends(sent_command_id)]
+
+
+def command_answered[R](response: Response, outcome: CommandOutcome[R]) -> R:
+    """Every command route's answer, the act's id beside it in `COMMAND_ID_HEADER`: a retry its
+    key answered names the first act's."""
+    response.headers[COMMAND_ID_HEADER] = outcome.accepted.command_id
+    return outcome.result

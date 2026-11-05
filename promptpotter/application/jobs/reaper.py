@@ -8,6 +8,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.command_index import CommandIndex
 from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
     read_sandbox_owner,
@@ -26,8 +27,12 @@ def _tenant_root_of(cycle_dir: Path) -> WorkspaceDir:
     return WorkspaceDir(cycle_dir.parents[3])
 
 
-def _store_for(cycle_dir: Path) -> CampaignStore:
-    return CampaignStore(_tenant_root_of(cycle_dir))
+def _store_for(projects_root: Path, cycle_dir: Path) -> CampaignStore:
+    """A sandbox's tenant dir is named by its account, whose workspace holds the index."""
+    tenant_root = _tenant_root_of(cycle_dir)
+    return CampaignStore(
+        tenant_root, CommandIndex(tenant_workspace(projects_root, tenant_root.name))
+    )
 
 
 def _sweep_roots(projects_root: Path) -> list[Path]:
@@ -54,10 +59,11 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
             continue
         workspace = tenant_workspace(projects_root, owner.tenant_id)
         owner_hop = CycleHop(campaign_id=owner.campaign_id, cycle_id=owner.cycle_id)
-        if CampaignStore(workspace).load(owner_hop, moment=None) is not None:
+        owners = CampaignStore.of_account(workspace)
+        if owners.load(owner_hop, moment=None) is not None:
             continue
         try:
-            CampaignStore(workspace).delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
+            owners.delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
         except OSError as exc:
             logger.warning("could not reclaim orphan inner sandbox %s: %s", sandbox, exc)
             continue
@@ -72,7 +78,7 @@ def sweep_dead_cycles(projects_root: Path) -> int:
         for ledger_path in root.glob("*/campaigns/*/cycles/*/.runtime/ledger.jsonl"):
             cycle_dir = ledger_path.parent.parent
             try:
-                vanished = _store_for(cycle_dir).mark_producer_vanished(
+                vanished = _store_for(projects_root, cycle_dir).mark_producer_vanished(
                     CycleHop(campaign_id=cycle_dir.parents[1].name, cycle_id=cycle_dir.name)
                 )
             except LedgerUnreadableError as refused:

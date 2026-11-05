@@ -315,7 +315,7 @@ def _scanned(
     """A ledger that will not scan costs its own workspace and no other: it is named, then skipped."""
     for account in accounts:
         try:
-            found = list(workspace_lines(CampaignStore(account.workspace)))
+            found = list(workspace_lines(CampaignStore.of_account(account.workspace)))
         except (OSError, ValueError, LedgerUnreadableError):
             if (who := _who(account)) not in unreadable:
                 unreadable.append(who)
@@ -380,7 +380,7 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     for account, found in _scanned(accounts, unreadable):
         recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
         if recent and not isinstance(account.user, Torn):
-            store = CampaignStore(account.workspace)
+            store = CampaignStore.of_account(account.workspace)
             campaigns = {
                 campaign_id: store.load_campaign(campaign_id)
                 for campaign_id in {line.campaign_id for line in recent if line.campaign_id}

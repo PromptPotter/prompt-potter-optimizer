@@ -243,7 +243,8 @@ class ProducerReading(FrozenModel):
         return self.open_for_s is not None and self.open_for_s >= CALL_HOLDS_AFTER_S
 
 
-# Read by the served admission and the refusing command alike (``CyclePayload.inner_refusal``).
+# An inner run's own words, read by its `RunState` refusals; a kind no inner address admits
+# answers with its own as its ``CyclePayload.inner_refusal``, before its act.
 INNER_LAUNCH_REFUSAL = "An inner run is launched by the outer cell that measures it."
 INNER_PAUSE_REFUSAL = (
     "An inner run stops with the outer run that spawned it. Pause the outer run instead."
@@ -259,12 +260,15 @@ INNER_SKIP_REFUSAL = (
 class RunState(NamedTuple):
     """``inner``: the cycle is an L4 inner run, which answers every run verb for itself.
 
-    ``gate`` and ``drafts`` are the standing hold's own, set only while the phase is ``gate``."""
+    ``scoring``: a paid pass holds the cycle (its phase ``scoring``, or ``paused`` once a pause is
+    asked of the pass); ``gate`` and ``drafts`` are the standing hold's own, set only while the
+    phase is ``gate``."""
 
     run_phase: RunPhase
     producer: ProducerReading
     pause: PauseReading | None = None
     inner: bool = False
+    scoring: bool = False
     gate: GateKind | None = None
     drafts: int = 0
 
@@ -284,8 +288,9 @@ class RunState(NamedTuple):
 
     @property
     def pause_refusal(self) -> str:
-        """Why `pause-cycle` is refused; empty where it is admitted."""
-        if self.inner:
+        """Why `pause-cycle` is refused; empty where it is admitted. A pass holding the cycle is the
+        operator's own act on it, inner or not, and its pause stops it."""
+        if self.inner and not self.scoring:
             return INNER_PAUSE_REFUSAL
         if self.producer.state is ProducerState.CLAIMED:
             # No loop exists yet to take a pause: one accepted here would be dropped.
@@ -435,7 +440,9 @@ class RunAdmission(FrozenModel):
         declined = run.pause_refusal if info.action == "pause" else run.launch_refusal
         if info.action is None:
             offers, refusal = None, info.no_action
-        elif run.inner:
+        elif run.inner and not run.scoring and declined:
+            # An inner run's own refusal names why, where the outer run answers for it; a pass
+            # holding it is the operator's own act, read as any cycle's.
             offers, refusal = None, declined
         elif declined:
             # The phase names a verb its producer does not admit yet.

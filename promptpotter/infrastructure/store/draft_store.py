@@ -6,6 +6,7 @@ from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import BankedSubject
 from promptpotter.infrastructure.store.account_trail import bank_trail
+from promptpotter.infrastructure.store.command_index import CommandIndex
 from promptpotter.infrastructure.store.io import HeldLock, rmtree_robust, take_lock, write_bytes
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -39,10 +40,18 @@ class DraftClaim:
 
 
 class DraftStore:
-    """A draft's one owner is its CLAIM: a write, a discard and a second Start refuse while it is held."""
+    """A draft's one owner is its CLAIM: a write, a discard and a second Start refuse while it is
+    held. *commands* is the account's command-id index, which every close and discard files into
+    before the draft goes."""
 
-    def __init__(self, base_dir: WorkspaceDir):
+    def __init__(self, base_dir: WorkspaceDir, commands: CommandIndex):
         self._base_dir = base_dir
+        self._commands = commands
+
+    @classmethod
+    def of_account(cls, account: WorkspaceDir) -> DraftStore:
+        """An account's own drafts: its workspace holds its index."""
+        return cls(account, CommandIndex(account))
 
     def draft_dir(self, draft_id: str) -> Path:
         return draft_dir_for(self._base_dir, draft_id)
@@ -97,16 +106,18 @@ class DraftStore:
         return read_file(path, OriginResolution.model_validate_json)
 
     def close(self, draft_id: str) -> None:
-        """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing reads."""
-        rmtree_robust(self.draft_dir(draft_id))
+        """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing
+        reads. A destroyer too: what it files reads deleted unless its ledger moved before."""
+        draft_dir = self.draft_dir(draft_id)
+        self._commands.removing(draft_dir)
+        rmtree_robust(draft_dir)
 
     def discard(self, claim: DraftClaim) -> None:
         """A destroyer, under the claim it releases: what was commanded on it outlives it, under its id."""
         with claim:
-            draft_dir = self.draft_dir(claim.draft_id)
             bank_trail(
                 workspace=self._base_dir,
-                cycle_dirs=[draft_dir],
+                cycle_dirs=[self.draft_dir(claim.draft_id)],
                 subject=BankedSubject(draft_id=claim.draft_id),
             )
-            rmtree_robust(draft_dir)
+            self.close(claim.draft_id)

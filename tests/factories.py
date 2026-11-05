@@ -684,7 +684,7 @@ def inner_sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -
             "cycle_id": owner_cycle_id,
         },
     )
-    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
+    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"), stores.command_index)
     inner.mint_cycle(CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"))
     return sandbox
 

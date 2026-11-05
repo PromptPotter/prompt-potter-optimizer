@@ -5,7 +5,6 @@ import argparse
 from promptpotter.application.cycle_addressing import resolve_campaign_id, resolve_cycle_id
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.command_kinds import PauseCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult
@@ -16,20 +15,17 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
     campaign_id = resolve_campaign_id(stores, args.campaign)
-    cycle_id = resolve_cycle_id(stores, campaign_id, args.cycle)
-    pause = PauseCyclePayload(campaign_id=campaign_id, cycle_id=cycle_id, reason="Ctrl+C")
+    hop = CycleHop(
+        campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, args.cycle)
+    )
 
-    with ctrl_c_stops_pass(stores, pause):
-        outcome = await measure_noise_floor(
-            stores=stores,
-            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
-            k=args.k,
-        )
+    with ctrl_c_stops_pass(stores, (hop,)):
+        outcome = await measure_noise_floor(stores=stores, hop=hop, k=args.k)
 
     record = outcome.record
     raw = ", ".join(f"{v:.4f}" for v in record.noise_floor_raw)
     human = (
-        f"noise-floor {campaign_id}/{cycle_id} C0: k={record.noise_floor_k} "
+        f"noise-floor {hop.campaign_id}/{hop.cycle_id} C0: k={record.noise_floor_k} "
         f"composite {record.noise_floor_mean:.4f} "
         f"[{record.noise_floor_ci_lo:.4f}, {record.noise_floor_ci_hi:.4f}] "
         f"on {record.workspace_n} samples (raw: {raw}). "

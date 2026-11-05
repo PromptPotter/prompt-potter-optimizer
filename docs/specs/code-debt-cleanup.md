@@ -67,9 +67,10 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   context holding node, config, round and index only. A `ContextVar` that stays propagates within one
   task. U2 binds `RunScope`, S fills its sender, the potter arc deletes the bundle. **Re-test:**
   `git grep -c "ContextVar(" -- promptpotter`.
-- **One subject.** A `Subject` (path, candidate, at, mask) in `domain/cycle_paths.py`; the hash,
-  `?descend=`, the evidence string (`read_params.py::EvidenceParams`, rebuilt by `api/reads.ts::subjectKey`)
-  and the hierarchy addresses are its encodings. EA owns it; EW and U5 read it.
+- **One subject.** `domain/cycle_paths.py::Subject` (path, candidate, round, at, mask): `?descend=`
+  (`Subject.below`), the evidence string (`Subject.parse`, rebuilt by `api/reads.ts::subjectKey`) and the
+  hierarchy addresses (`Subject.parse_address`) are its encodings, and `cycle_addressing.py::resolve_subject`
+  its one id-prefix resolution. The webapp's hash is not one yet: EW moves it onto the same grammar.
 - **View state.** Whatever names the viewed thing (subject, candidate, at, view keys, round pick, sample
   set) lives in the hash; a module store holds only transient state.
 - **One fold vocabulary**: a `Projection` on `read_model.py::LedgerIndex`. `LedgerFold.feed`, the tracing
@@ -79,19 +80,6 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   host task is a command id (EA).
 
 **Batch E: each cut lands final.**
-- **EA: each read is spelled three times**: a `command_kinds.py::ReadKind` row, a params class and a
-  hand-written route, which `catalogue.py::bind_surface` asserts agree; most routes only forward, and the
-  CLI reads past the catalogue (`cycles` keeps its own lifecycle default; `application/views/evidence.py`,
-  the largest view, has the CLI as its only reader; six CLI sites resolve a campaign-id hint each). A
-  running act's status and stop live only in MCP memory (`host_surface.py::_cancel_task`,
-  `host_surface.py::cancel_acts`): REST serves no job read and the webapp has no stop for verify or bench.
-  Action: each read's params declare its path and method, one loop mounts every row and `bind_surface`
-  goes; the CLI read verbs derive from the rows and resolve their `Subject` once; MCP's double dispatch and
-  second rate draw fold into one admit; a task is a command id, its status a read row over the jobs
-  `run_records.py::LaunchedEffect` already names, its cancel one command on every entry point. The
-  hand-typed launch routes stay for U2. **Re-test:**
-  `git grep -cE "^\s+return (await )?read\.answer\(caller\)$" -- promptpotter/presentation`;
-  `git grep -n "def _cancel_task" -- promptpotter`.
 - **EW: the webapp's providers re-store the read cache.** `lib/read-cache.ts` keeps one body and one flight
   per id, yet the registry, cycle-stream, lineage, hard-samples and connector providers mirror it, and other
   callers need second doors (`poll.tsx::useDashboardAt`, `hard-samples.tsx::usePresetCells`). Read hooks
@@ -1180,8 +1168,8 @@ word's `git grep -c` for that sense is 0.
     `account.py::account_read`, which writes nothing; the route alone arrives, since an open box has
     no sign-in callback to arrive at.
   - Three routes are named `edit-draft-campaign`: its `/commands/` route and the two form doors in
-    `routers/datasets/ingest.py` (`candidate-library`, `from-column`), so `catalogue.py::bind_surface`
-    admits N routes per command where a read gets one. Action: one route per kind, the form doors a
+    `routers/datasets/ingest.py` (`candidate-library`, `from-column`): N routes per command where a
+    read gets one. Action: one route per kind, the form doors a
     form body on it, as `ingest-upload` is. **Re-test:** `git grep -n "name=CommandKind.EDIT_DRAFT_CAMPAIGN" -- promptpotter`.
   - `application/datasets/draft_patch.py` drops `nodes` on an optimizer switch, the rule
     `domain/campaign_config.py::merge_config_layers` already applies: one rule spelled twice. Action:

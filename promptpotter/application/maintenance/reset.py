@@ -146,7 +146,7 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
         claims: set[Path] = set()
         for workspace in plan.workspaces:
             for draft in draft_dirs(workspace):
-                held.enter_context(DraftStore(workspace).hold(draft.name))
+                held.enter_context(DraftStore.of_account(workspace).hold(draft.name))
                 claims.add(draft_claim_path(workspace, draft.name))
         if (live := _live(plan.projects_root, plan.roots, plan.drops, plan.staged)) is not None:
             raise ConflictError(f"refusing to reset: {live}")

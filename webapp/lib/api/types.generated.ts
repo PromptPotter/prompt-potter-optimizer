@@ -21,6 +21,401 @@ export interface HealthResponse {
   version: string;
 }
 
+/** The caller's identity envelope, with the provider and consent state the account and consent gates read. */
+export interface MeResponse {
+  user_id: string;
+  tenant_id: string;
+  issuer: string | null;
+  email: string | null;
+  name: string | null;
+  provider: string | null;
+  connected_accounts: ConnectedAccount[];
+  available_providers: string[];
+  capabilities: string[];
+  access_state: 'active' | 'blocked';
+  terms_version: string;
+  terms_accepted_version: string | null;
+}
+
+/** One OIDC provider bound to the active session. */
+export interface ConnectedAccount {
+  provider: string;
+  email: string | null;
+}
+
+/** The caller's per-user preferences. */
+export interface UserSettings {
+  demo_mode_enabled: boolean;
+}
+
+/** Usage against the next launch's machine gates; the money is `/auth/coupon`'s. */
+export interface QuotaStatus {
+  concurrent_running: number;
+  /** This account's launches waiting for a machine slot. They count against
+   * `max_concurrent_cycles` exactly as running ones do. */
+  concurrent_queued: number;
+  max_concurrent_cycles: number;
+  /** Whether this caller may move `max_concurrent_cycles` through `set-concurrent-
+   * cycles`. False on the host's key, where the host sets it. */
+  max_concurrent_cycles_writable: boolean;
+  /** The machine's `MACHINE_RUN_CAPACITY`. */
+  ceiling: number;
+  /** `machine` while `max_concurrent_cycles` is above `ceiling`; null where the
+   * account's own limit is the one that binds. */
+  bound: 'throttle' | 'machine' | null;
+  campaigns_today: number;
+  max_campaigns_per_day: number;
+}
+
+/** The host's allowance for this account, and who pays a send on each provider. */
+export interface CouponStatus {
+  state: 'unmetered' | 'used_up' | 'held' | 'open';
+  /** The allowance in one line: its state's label, what the box's keys drew of the
+   * face on the unit drawn nearest it (else the state's word), and the
+   * providers the account's own keys pay. */
+  headline: Said;
+  /** What this account's running campaigns reserve of the face. */
+  held: Budget;
+  /** What a new launch may still hold: the face less what is drawn and `held`, at
+   * most the unpriced grace while a bill is a floor. */
+  left: Budget;
+  /** What is drawn over the face on the unit drawn nearest it, at most 1; null
+   * where no unit is bounded. */
+  used_share: number | null;
+  /** What the box's keys paid for this account. */
+  host_key_spend: LifetimeSpend;
+  /** What this account's own keys paid. */
+  own_key_spend: LifetimeSpend;
+  /** Every provider a node may name. */
+  routes: ProviderRoute[];
+}
+
+/** One line composed once for a person: every medium renders it as served, none rewords it. */
+export interface Said {
+  /** What the line is about, for code to branch on; never shown. */
+  key: string;
+  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  label: string;
+  value: string | null;
+  sub: string | null;
+  /** The longer reading, a tap away. */
+  detail: string | null;
+}
+
+/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits. */
+export interface Budget {
+  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
+  usd?: number | null;
+  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
+   * where a model has no rate on file. */
+  tokens?: number | null;
+  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
+   * measures the origin only. */
+  rounds?: number | null;
+  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
+   * open at the edge is cut and the run stops `wall_clock`. */
+  wall_clock_s?: number | null;
+}
+
+/** What an account, or one campaign's share of it, was billed over its whole life. */
+export interface LifetimeSpend {
+  /** What the providers REPORTED they billed, over every cycle, fork and forwarded
+   * inner run, plus what a deleted cycle banked. Never an estimate: a call
+   * priced off our rate table is `rate_priced_usd`, a send whose bill never
+   * came `unreported_usd`. */
+  billed_usd: number;
+  /** What our rate table prices the calls no provider reported a cost for. Not
+   * spent — an estimate, shown beside `billed_usd` and never added into it.
+   * It binds the ceiling beside `billed_usd`. */
+  rate_priced_usd: number;
+  /** Some call was priced at our rate, so there is a `rate_priced_usd` to show
+   * beside the bill. */
+  calls_rate_priced: boolean;
+  /** `billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost;
+   * the token ceiling is then the binding one. */
+  bill_is_floor: boolean;
+  /** Tokens no provider billed and no rate on file prices. */
+  unpriced_tokens: number;
+  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
+   * account than `billed_usd` says. */
+  sends_unreported: boolean;
+  /** The most that sends which ended with no bill (cancelled, timed out, killed
+   * with a run) may have cost, at the bounds they were admitted on. Not spent
+   * — unknown. It binds the ceiling beside `billed_usd`. */
+  unreported_usd: number;
+}
+
+/** Who pays this account's sends on one provider. */
+export interface ProviderRoute {
+  provider: string;
+  /** `user` where the account holds a key for it, else `host` where the box does,
+   * under the allowance; null where neither does, so a send on it is refused. */
+  payer: 'host' | 'user' | null;
+  /** The account's own key for it, if it holds one. */
+  key: AccountKey | null;
+}
+
+export interface AccountKey {
+  provider: string;
+  /** The key's last four characters: all that is ever served back. */
+  last4: string;
+  added_at: string;
+}
+
+/** Time-bucketed spend / requests / tokens over the requested window. */
+export interface ActivityResponse {
+  window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
+  /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
+   * the provider that billed the call, and whether the host's key under the
+   * coupon or the account's own sent it (`BilledCharge.key_source`). */
+  group_by: 'model' | 'api_key';
+  buckets: ActivityBucket[];
+  /** Every series in the window, in first-seen order — one colour per label, stable
+   * across the buckets. A call outside the optimizer's own carries its kind. */
+  series_labels: string[];
+  /** What providers reported they billed. */
+  total_spend_usd: number;
+  /** What our rate table prices the window's calls no provider billed. Never spent,
+   * and in no series. */
+  total_rate_priced_usd: number;
+  /** Some call in the window was priced at our rate, so there is a
+   * `total_rate_priced_usd` to show beside the bill. */
+  calls_rate_priced: boolean;
+  /** The two totals understate: a call in the window carries neither a bill nor a
+   * rate's price. */
+  bill_is_floor: boolean;
+  total_tokens: number;
+  total_requests: number;
+  /** The tallest bucket's billed USD — the scale the spend bars are drawn against.
+   * Null where no bucket was billed anything, so there is no bar to scale. */
+  peak_spend_usd: number | null;
+  /** `peak_spend_usd`'s twin over a bucket's tokens. */
+  peak_tokens: number | null;
+  /** `peak_spend_usd`'s twin over a bucket's requests. */
+  peak_requests: number | null;
+}
+
+/** One time bucket of the Activity pane's three stacked bar charts. */
+export interface ActivityBucket {
+  /** Billed USD per `series_labels` entry. A call no provider billed adds nothing
+   * here and still counts in the other two; one no rate prices either sets
+   * the response's `bill_is_floor`. */
+  series_spend: Record<string, number>;
+  series_tokens: Record<string, number>;
+  series_requests: Record<string, number>;
+}
+
+/** The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`. */
+export interface ActiveSessionResponse {
+  /** Tenant the pointer belongs to — the caller's own, always known */
+  tenant_id: string;
+  /** Campaign of the latest launch; null when no session is active. */
+  campaign_id: string | null;
+  /** Cycle of the latest launch; null when no session is active. */
+  cycle_id: string | null;
+}
+
+export interface MachineStatusResponse {
+  /** Campaigns the machine admits right now. Resolved per read against the same
+   * rule a launch is admitted on, and lowered from the operator's ceiling
+   * while the shared provider throttle is saturated. */
+  capacity: number;
+  /** The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and
+   * writable nowhere else. `capacity` never exceeds it, and neither may an
+   * account's limit. */
+  ceiling: number;
+  /** `throttle` while `capacity` is below `ceiling`; null where the machine admits
+   * its whole ceiling. */
+  bound: 'throttle' | 'machine' | null;
+  /** Slots held machine-wide, whoever holds them — the occupancy figure, which
+   * `running` may list fewer of. */
+  occupied: number;
+  /** The held slots this caller may see, oldest first — live campaigns and paid
+   * scoring passes alike. Every slot under `MACHINE_STATUS_SCOPE=all` or to
+   * the host; otherwise the caller's own, another account's being counted in
+   * `occupied` alone. */
+  running: MachineSlot[];
+  /** Launches waiting for a slot, machine-wide — a count, not a list. Who they
+   * belong to is deliberately not served; `queue` carries the caller's own. */
+  queued: number;
+  /** True iff `occupied` reaches `capacity` — no slot free for anyone, the caller
+   * included. A launch is then QUEUED rather than refused, so this reads as
+   * 'you will wait', not 'you cannot start'. */
+  busy: boolean;
+  /** The CALLER's own waiting launches, oldest first — everything a client needs to
+   * say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that
+   * launched them, the test `cancel-queued-run` applies. Other entries are
+   * counted in `queued` and never listed. */
+  queue: MachineQueueEntry[];
+  /** The CALLER's own launches refused today, newest first. A launch that queued
+   * was answered before it was refused, so this is where its refusal is read. */
+  refused: MachineRefusal[];
+  /** A landing in progress, `busy` and the caller's place in `queue` — a fact about
+   * the NEXT launch, never about a run in view; null where a slot is free and
+   * nothing of theirs waits. */
+  notice: Said | null;
+}
+
+/** One held slot, whoever holds it: a campaign run or a paid verb's scoring pass. */
+export interface MachineSlot {
+  job_id: string;
+  /** The job in words (`Job.what`), worded once for every surface: a run's
+   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
+   * cycle or workspace it scores. */
+  what: string;
+  /** WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a
+   * paid verb outside any run). */
+  holder: CampaignLaunch | ScoringPass;
+  /** The cycle the job holds, which `/hierarchy` serves as a course entry with its
+   * run phase — `scoring` for a pass on it; null for a fresh mint and a pass
+   * scoring no cycle. */
+  cycle: CycleHop | null;
+  /** user_id of the account whose job holds the slot */
+  user: string;
+  /** The CALLER's account holds it — a delegate's job is its owner's. The test a
+   * surface listing the account's own jobs filters on. */
+  mine: boolean;
+  /** ISO time the holder started running; null while it is still starting */
+  started_at: string | null;
+}
+
+/** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
+export interface CampaignLaunch {
+  dataset_name: string;
+  draft_id: string | null;
+  kind: 'campaign_launch';
+}
+
+/** A paid verb scoring outside any run: its hop is the cycle it scores, or none at all. */
+export interface ScoringPass {
+  verb: 'bench' | 'noise-floor' | 'probe-reasoning' | 'seed-screen' | 'verify';
+  kind: 'scoring_pass';
+}
+
+/** One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone. */
+export interface CycleHop {
+  campaign_id: string;
+  cycle_id: string;
+}
+
+/** Always a launch: a scoring pass finding no slot is refused, never queued. */
+export interface MachineQueueEntry {
+  job_id: string;
+  /** The job in words (`Job.what`), worded once for every surface: a run's
+   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
+   * cycle or workspace it scores. */
+  what: string;
+  created_at: string;
+  /** 1-based place in the machine-wide drain order at the moment of this read.
+   * Least-served-first, so it moves as other accounts start and finish — it
+   * is where this launch stands now, not a countdown. */
+  position: number;
+}
+
+export interface MachineRefusal {
+  job_id: string;
+  /** The job in words (`Job.what`), worded once for every surface: a run's
+   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
+   * cycle or workspace it scores. */
+  what: string;
+  /** When the launch was refused */
+  released_at: string;
+  /** The refusal, in the words the launch's own error carried */
+  reason: string;
+}
+
+/** The optimizers this install can run, the default first: one per manifest the registry holds. */
+export interface OptimizerRoster {
+  /** What a campaign naming no `optimization.optimizer` runs */
+  default: string;
+  /** The roster, the default first */
+  optimizers: OptimizerEntry[];
+}
+
+/** One optimizer this install can run, as a picker offers it. */
+export interface OptimizerEntry {
+  /** The manifest name, as `optimization.optimizer` names it */
+  name: string;
+  /** The manifest's own version */
+  version: string;
+  /** The citation a paper preset reproduces; its declared knob values are that
+   * paper's configuration. Null for an optimizer reproducing none */
+  paper: string | null;
+  /** The installed package that registered it, as `<distribution>: <entry point>`;
+   * null for one shipped with PromptPotter */
+  origin: string | null;
+}
+
+/** Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike. */
+export interface LibraryResponse {
+  /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
+  parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** Every work a cited snippet names, once, in first-named order */
+  sources: LibrarySource[];
+  /** The install's packs by name, then the account's, each in its own order */
+  snippets: LibrarySnippet[];
+  /** Each pack held but served none of, then each snippet of the account's skipped
+   * as an install pack's, and why: the rest serve on */
+  refused: PackRefusal[];
+}
+
+/** One cited work a snippet names, as its pack declares it; an authored snippet names none. */
+export interface LibrarySource {
+  /** The work's arXiv id, a cited snippet's `source` */
+  id: string;
+  title: string;
+  /** The title up to its first colon, for a chip */
+  short_title: string;
+  first_author: string;
+  year: number;
+}
+
+/** One snippet of one pack the account reads, as a library surface lists it. */
+export interface LibrarySnippet {
+  /** Its content id, the suffix of each pool entry `{part}.{id}` it expands into;
+   * one on the shelf, since a pack repeating another's text is refused */
+  id: string;
+  text: string;
+  /** The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part
+   * is allowed and shown as such */
+  suits: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** What it takes for granted of the run it lands in: a run whose chain or matcher
+   * lacks one never draws it into a pool */
+  presumes: ('ranking' | 'last_line_answer')[];
+  /** Free labels for search alone; nothing else reads them */
+  tags: string[];
+  /** A `sources` id for a cited snippet; `authored` for one an account wrote, which
+   * no work names */
+  source: string;
+  /** The cited technique's family as its pack records it; absent for an authored
+   * snippet */
+  method: string | null;
+  /** The pack holding it, as a `packs` knob names it */
+  pack: string;
+  /** 0 for a cited snippet; an authored one's is one past the snippet it supersedes */
+  version: number;
+  /** The `id` of the snippet it was edited from; absent for a cited snippet and one
+   * written from nothing */
+  supersedes: string | null;
+  /** Who wrote an authored snippet; absent for a cited one */
+  author: string | null;
+}
+
+/** What the shelf holds but does not serve, a whole pack or one snippet of the account's: the */
+export interface PackRefusal {
+  /** Its directory name, as a `packs` knob names it */
+  name: string;
+  /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
+   * install and this account both hold the name; `block_pack_repeats`: an
+   * install pack holding a text an install pack before it in name order
+   * holds; `block_snippet_held`: one snippet of the account's pack whose text
+   * an install pack holds, which serves as that snippet while the rest of the
+   * account's pack serves on. One text is one snippet */
+  code: 'block_pack_invalid' | 'block_pack_collision' | 'block_pack_repeats' | 'block_snippet_held';
+  /** What to fix, in a sentence */
+  reason: string;
+}
+
 export interface BackendResponse {
   /** The connector's name, as `dataset.yaml::pipeline.backend_type` names it */
   id: string;
@@ -39,6 +434,1096 @@ export interface BackendHealthResponse {
   checked_at: string;
   /** The refusal a launch would get when not 'live' */
   detail: string | null;
+}
+
+/** Every campaign in one store: the unstarted first, then root-major and newest first. */
+export interface HierarchyResponse {
+  /** Unstarted campaigns lead, most recently edited first; then campaigns sharing a
+   * root cycle sit together, the group of the newest first. A `campaign` or
+   * `attached` filter asks after runs, so it serves no unstarted one. */
+  entries: (HierarchyCampaign | UnstartedCampaign)[];
+}
+
+/** A campaign as the listing serves it: its state and line stats are its line course's. */
+export interface HierarchyCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  tags: HierarchyTag[];
+  /** Its figures for a person, each composed once with a value, in the order a row
+   * shows them. */
+  figures: Figure[];
+  /** Its sentences under the figures, without a value; what could not be read is
+   * among them. */
+  lines: Said[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'campaign';
+  facts: CampaignFacts;
+  /** Its courses to `?depth=`, root first; none at depth 0. */
+  children: HierarchyCourse[];
+}
+
+/** One chip an entry wears, worded by the server. */
+export interface HierarchyTag {
+  kind: 'dataset' | 'optimizer' | 'vendor' | 'mint' | 'lifecycle' | 'self_optimization' | 'arm' | 'superseded' | 'verdict';
+  /** What a surface routes or branches on: the dataset slug, the vendor id, the
+   * mint word, the successor's address. */
+  value: string;
+  /** The chip as it reads. */
+  label: string;
+}
+
+/** An entry's figure: a `Said` row keyed by the closed set code looks a figure up by. */
+export interface Figure {
+  /** Which figure, for code to look up; never shown. */
+  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'accuracy' | 'ability';
+  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  label: string;
+  value: string | null;
+  sub: string | null;
+  /** The longer reading, a tap away. */
+  detail: string | null;
+}
+
+/** A run's state as one value: its status, whether it is held, the verbs. */
+export interface HierarchyState {
+  status: RunStatus;
+  /** A process holds this cycle, running or launching it. */
+  attached: boolean;
+  /** Why the run reads paused; null otherwise. */
+  pause: PauseReading | null;
+  admission: RunAdmission;
+  /** An operator intervened by hand, so the run is no longer purely reproducible. */
+  intervened: boolean;
+}
+
+/** How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. */
+export interface RunStatus {
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
+  /** Null while the run has not stopped. */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+}
+
+/** Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach. */
+export interface PauseReading {
+  /** Null on an accepted pause the loop has yet to reach. */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed';
+  /** Who or what asked, in the declarer's own words. */
+  detail: string;
+  at: string;
+}
+
+/** Which run verbs a cycle admits now: the one answer the run control and the dispatcher read. */
+export interface RunAdmission {
+  /** The verb the one run control offers; null where it offers none. */
+  offers: 'pause' | 'resume' | 'start' | null;
+  /** Why the control offers none; empty where it offers one. */
+  refusal: string;
+  /** `skip-searchpoint`. */
+  skip_refusal: string;
+  /** `set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes an
+   * arming, so neither needs a walk and neither is refused here. */
+  lookahead_refusal: string;
+}
+
+/** When an entry opened and last moved. */
+export interface HierarchySpan {
+  opened_at: string;
+  /** The newest activity under the entry. */
+  last_at: string;
+}
+
+/** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CampaignFacts {
+  /** The operator's own name for it; null where none was given, and the envelope's
+   * `label` falls back to the dataset. */
+  label: string | null;
+  /** The root course's address. */
+  root: string;
+  /** The address of the course holding the line now: the root, or the fork a
+   * supersede handed it to. */
+  line: string;
+  lifecycle: 'active' | 'archived' | 'deleted';
+  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
+  spend_lifetime: LifetimeSpend;
+  /** What the root course runs with; null where its pipeline did not resolve. */
+  runs_with: CampaignRunsWith | null;
+}
+
+/** What a campaign's root course runs with — the root's pipeline resolution, cut to settings. */
+export interface CampaignRunsWith {
+  /** Scalar settings in active-step order, `model` included; no prompt text */
+  params: RunsWithParam[];
+  /** Every model in `params`, grouped under its vendor in first-seen order */
+  vendors: VendorModels[];
+  /** The optimizer manifest the root course runs */
+  optimizer: string;
+  /** The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no
+   * rounds axis */
+  budget_rounds: number | null;
+}
+
+/** One setting a campaign's root course runs with, and the layer that chose it. */
+export interface RunsWithParam {
+  node: string;
+  /** The config grid's own param key (`NodeConfigParam.key`) */
+  key: string;
+  value: unknown;
+  source: 'dataset' | 'campaign' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+}
+
+/** The models of one vendor that a campaign's root course runs. */
+export interface VendorModels {
+  /** Who TRAINED them: the namespace of the model id, or the bare id where it names
+   * none. Lowercased, routing suffix dropped. */
+  vendor: string;
+  /** Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names
+   * a different run. */
+  models: string[];
+}
+
+/** A course — one cycle's run, root, fork, diag or inner — as the listing serves it. */
+export interface HierarchyCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  tags: HierarchyTag[];
+  /** Its figures for a person, each composed once with a value, in the order a row
+   * shows them. */
+  figures: Figure[];
+  /** Its sentences under the figures, without a value; what could not be read is
+   * among them. */
+  lines: Said[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'course';
+  facts: CourseFacts;
+  /** Null until the lift vs origin is read. */
+  climb: CourseClimb | null;
+  /** The run's pinned line from what no clock reads (`run_said`): a producer's row
+   * is its dashboard's alone. Null where nothing needs the operator. */
+  said: Said | null;
+}
+
+/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CourseFacts {
+  /** How the course was minted; the `mint` tag renders it. */
+  mint: 'root' | 'fork' | 'diag' | 'inner';
+  /** Null on a root, and on a cycle cut from another tree. */
+  spawn: CourseSpawn | null;
+  /** The outer panel cell an L4 inner course measures. */
+  task: string | null;
+  /** Null before round 0 closes. */
+  standing: RunStanding | null;
+  /** Rounds closed AFTER the origin. */
+  rounds_closed: number;
+  /** The column the course's newest election elected on; null before its first.
+   * `ability`: its rounds are won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** This course's own ledger's bill, at the moment. */
+  spend: MeteredSpend;
+  /** The campaign's bench, on the course holding the line, read whole at the head;
+   * null on every other course (the line's reads `held_elsewhere` there) and
+   * under a moment. */
+  bench: BenchScore | null;
+}
+
+/** Where a fork was born on its parent's time line: the cut, as an event. */
+export interface CourseSpawn {
+  /** The address of the course it branched from. */
+  parent: string;
+  /** The first round it ran itself: every round below it is its parent line's. */
+  cut_round: number;
+  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
+  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
+  direction: 'offshoot' | 'supersede' | 'equivalent';
+  /** Who cut it, as its fork record names them. */
+  issued_by: string;
+}
+
+/** Where the run stands after a round: its selection, over whom, and how it reads against C0. */
+export interface RunStanding {
+  rounds_without_advance: number;
+  /** The life bank after this round. Null where the campaign banks no lives
+   * (`optimization.lives`). */
+  lives: LivesReading | null;
+  /** The optimizer's declared pick (`declared_selection`), as the arm it was first
+   * measured as: the origin until a round selects. Null before round 0
+   * closes. */
+  selection: ArmName | null;
+  /** The pick `selection` was promoted over. Null while it is the origin. */
+  parent: ArmName | null;
+  /** What `selection` changed, in its proposer's words (its lineage's
+   * `changes_description`). Empty while it is the origin, which changed
+   * nothing. */
+  changes: string;
+  /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
+   * reading of that pair. The state says why where there is none:
+   * `same_individual` while the selection is the origin. */
+  vs_origin: PairedReading;
+  /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
+  rounds_closed: number;
+  /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
+   * interval), so it is the promotion clock and never a result; read
+   * `advanced`. */
+  improved: number;
+  /** Of those, how many closed `advanced`: their pick separated from C0 on the
+   * origin panel — the verdict clock. Never summed with `improved`. */
+  advanced: number;
+  /** Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader
+   * once per read. */
+  candidates: number;
+  /** USD the SEARCH had incurred at this close, every cycle of the line read whole
+   * (`SpendRollup.search_incurred_usd`); null on unpriced search tokens. */
+  search_usd: number | null;
+  /** Worked seconds of the line's launches to this close
+   * (`domain/campaign.py::worked_seconds`), the closing launch's to now; null
+   * where no launch's endpoints parsed. */
+  worked_s: number | null;
+}
+
+/** A run's life bank: what is left of it, and its cap. */
+export interface LivesReading {
+  left: number;
+  /** Null where the bank has no cap. */
+  cap: number | null;
+}
+
+/** One arm of the run: its key, and where it was walked (a re-read: its latest walk). */
+export interface ArmName {
+  /** THE join: the individual's content id, or the slot hash of a proposal rejected
+   * before it cost a cell. */
+  key: string;
+  /** The round the arm was walked in; 0 is the origin. */
+  round: number;
+  /** `C0` or `C{round}.{n}`, off the slot it was walked in: a display name, never a
+   * join. */
+  label: string;
+}
+
+/** One pair of addressed individuals read on one cell set. */
+export interface PairedReading {
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  a: PairMember | null;
+  b: PairMember | null;
+  cell_set: CellSet | null;
+  /** What measured both members' cells: their dataset, and on the recursion the
+   * inner origin. Null where the reading names no pair. */
+  instrument_id: string | null;
+  scope: 'decision' | 'report' | 'bench';
+  spec: EstimatorSpec;
+  coverage: Coverage | null;
+  headline: MeasuredLift | null;
+  /** Other measurands over the SAME scored cells as `headline`. */
+  beside: MeasuredLift[];
+}
+
+/** One side of a pair, and what it holds on the pair's cell set. */
+export interface PairMember {
+  address: MemberAddress;
+  /** Cells of the set this member holds a scoreable row on. */
+  n: number;
+  /** Cells the round that took this reading measured fresh on this member; a
+   * replayed cell is not one. */
+  bought: number;
+}
+
+/** Where one member of a pair was read: the cycle, the individual, and the pass. */
+export interface MemberAddress {
+  /** The cycle the member was read in, root to leaf. */
+  path: CycleHop[];
+  /** The individual's content id. */
+  individual_id: string;
+  /** The arm the individual was measured as; null for a pass that is no arm. */
+  arm: ArmName | null;
+  /** Which pass, where the same individual is read by more than one. */
+  pass_role: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | null;
+}
+
+/** The cells a pair is read on, as an identity two readings can be compared by. */
+export interface CellSet {
+  name: 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
+  basis: 'declared' | 'incidental' | 'masked';
+  /** Digest of the sorted sample keys the set names. */
+  id: string;
+  dataset_hash: string | null;
+  /** How many cells the set names — the N of `n of N`. */
+  size: number;
+}
+
+/** How a lift's two-sided interval and test were taken; the estimate is the mean paired difference. */
+export interface EstimatorSpec {
+  alpha: number;
+  /** The difference the test and `side` are read against. */
+  null_value: number;
+}
+
+/** How much of the cell set a lift stands on. */
+export interface Coverage {
+  state: 'complete' | 'partial' | 'selected_by_stop' | 'incidental';
+  /** Cells of the set both members hold a row on. */
+  shared: number;
+  /** Shared cells both scored — the n of every lift here. */
+  scored: number;
+  /** Shared cells dropped because the formula could not grade a member's row. */
+  excluded_unscored: number;
+  /** Shared cells dropped because a member's row errored. */
+  excluded_faulted: number;
+}
+
+/** One measurand's lift of member `b` over member `a`, on the cells both scored. */
+export interface MeasuredLift {
+  measurand: Measurand;
+  /** `a`'s mean over the cells BOTH scored, never its own level. */
+  rate_a: number;
+  rate_b: number;
+  estimate: LiftEstimate;
+  flips: FlipCounts | null;
+  family: TestFamily | null;
+}
+
+/** What is read off each cell, and under which scorer. */
+export interface Measurand {
+  kind: 'grade' | 'channel' | 'expr';
+  /** The grade, the channel name or the expression text. */
+  key: string;
+  scorer_id: string;
+  /** DECLARED, never inferred from the values: every cell is 0 or 1, so a cell can
+   * flip. */
+  binary: boolean;
+  unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
+}
+
+/** A mean paired difference with its interval and test. */
+export interface LiftEstimate {
+  value: number;
+  ci_lo: number;
+  ci_hi: number;
+  side: 'above' | 'below' | 'spans';
+  /** The Student-t p, never below `p_floor`: where the two are equal the floor
+   * binds, and the cells that differ are what limits the claim. */
+  p_value: number;
+  /** The smallest p an exact sign test can reach on the cells that differ from the
+   * null. Above the spec's `alpha`, `side` is `spans` whatever the interval
+   * says. */
+  p_floor: number;
+}
+
+/** What moving from member `a` to member `b` did cell by cell, on a binary measurand. */
+export interface FlipCounts {
+  /** Cells `a` missed and `b` hit. */
+  gained: number;
+  /** Cells `a` hit and `b` missed. */
+  lost: number;
+  unchanged: number;
+}
+
+/** The set of tests one multiple-comparison correction was taken across. */
+export interface TestFamily {
+  id: string;
+  n_tests: number;
+  method: 'holm';
+  p_adjusted: number;
+}
+
+/** What a run's spend caps have counted, in the units they meter, by kind. */
+export interface MeteredSpend {
+  meter: 'bill' | 'search_incurred';
+  metered_usd: number;
+  metered_tokens: number;
+  billed_usd: number;
+  rate_priced_usd: number;
+  calls_rate_priced: boolean;
+  rate_known: boolean;
+  bill_is_floor: boolean;
+  incurred_usd: number;
+  billed_tokens: number;
+  unpriced_tokens: number;
+  kinds: Record<string, KindSpend>;
+  replay_share: number | null;
+}
+
+/** One spend kind as every surface reads it: metered, billed, rate-priced and incurred. */
+export interface KindSpend {
+  counted: boolean;
+  sent: boolean;
+  metered_usd: number;
+  billed_usd: number;
+  rate_priced_usd: number;
+  incurred_usd: number;
+  tokens: number;
+  prefix: PrefixReading;
+}
+
+/** A provider's prefix-cache discount as every surface reads it, served whole. */
+export interface PrefixReading {
+  state: 'discounted' | 'cold' | 'unreported' | 'replayed';
+  /** Null on `unreported` and `replayed`. */
+  share: number | null;
+  /** `c39%` / `c0%` / `c?`, and empty on a replay, whose line already carries 📖. */
+  badge: string;
+}
+
+/** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
+export interface BenchScore {
+  bench_size: number;
+  /** The grader every number here was read under. A stored copy is a cache of that
+   * reading: a reader under another grader reads the passes again, never
+   * this. */
+  scorer_id: string;
+  /** Which column the headline reads; `vs_origin.headline` is its lift. */
+  headline: 'accuracy' | 'composite';
+  status: BenchStatus;
+  /** The origin's own level; `None` where its pass read nothing. */
+  origin: BenchReading | null;
+  /** The selection's own level — the headline. `None` where its pass read nothing. */
+  selected: BenchReading | null;
+  /** `selected` over `origin`, paired on the bench rows both scored.
+   * `same_individual` where the origin is the selection: nothing was
+   * compared. */
+  vs_origin: PairedReading;
+  cost: LiftCost;
+  /** Per dataset, where the bench rows measure several; empty on one. The two
+   * levels above then read no column, since two datasets' levels never
+   * average, while `vs_origin` still pairs every row. */
+  scopes: BenchScope[];
+}
+
+/** Where a campaign's bench stands, and whether asking for its pass would be admitted. */
+export interface BenchStatus {
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  trigger: 'manual' | 'at_end' | 'each_round';
+  /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
+   * one answer. */
+  can_grade: boolean;
+  /** Why not, exactly where `can_grade` is false. */
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
+  /** Whether the grade control shows: admitted, or a pass still waited on. Never on
+   * an inner run, whose line no command grades. */
+  offered: boolean;
+  /** Whose pass `state` names, where one pass decides it. */
+  subject: 'origin' | 'selected' | null;
+  /** The cycle holding the campaign's line, where that is another one. */
+  held_by: string | null;
+  stop: PassStop | null;
+  scored: number | null;
+  expected: number | null;
+  /** Individuals the archive had graded on these held-out rows when the selection's
+   * pass was sent: each one chosen off a headline spent the holdout. `None`
+   * where no pass of the selection stands. */
+  reads_before: number | null;
+}
+
+/** Why a bench pass holds fewer rows than it was sent on. */
+export interface PassStop {
+  /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
+   * spent budget before it was sent. */
+  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
+  /** The backend's dominant warning, where errors ended the pass. */
+  warning: string | null;
+}
+
+/** One individual's bench pass, read under a named scorer. */
+export interface BenchReading {
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
+   * 1. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
+  /** Rows carrying a verdict — a miss the prompt caused included: the population
+   * both columns are read over. */
+  n: number;
+  /** The round whose selection this is; 0 is the origin. */
+  round: number;
+  /** The searchpoint scored — the archive's `prompt_fields_id`. */
+  sp_hash: string;
+  /** Which column the headline reads. */
+  headline: 'accuracy' | 'composite';
+  /** The headline: this reading in its `headline` column, chosen here so no surface
+   * selects a column of its own. Stamped by :meth:`read` alone. */
+  level: BandedValue | null;
+}
+
+export interface BandedValue {
+  value: number;
+  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
+   * `None` below two rows, which have no spread. */
+  ci_lo: number | null;
+  ci_hi: number | null;
+}
+
+/** The headline lift per USD its SEARCH incurred, or why there is none. */
+export interface LiftCost {
+  /** Priced on INCURRED spend, never the bill — a replayed cell is billed nothing,
+   * which would price arriving second — and never on the bench's own pass. */
+  lift_per_usd: number | null;
+  absent: 'no_lift' | 'unpriced_tokens' | 'zero_spend' | null;
+}
+
+/** One dataset's rows of a bench spanning several, read apart: a level is never averaged */
+export interface BenchScope {
+  /** The dataset these rows measure; `None` is the one the cycle is filed under. */
+  dataset: string | null;
+  rows: number;
+  /** `None` where the origin's pass read nothing. */
+  origin: OwnLevel | null;
+  /** `None` where the selection's read nothing. */
+  selected: OwnLevel | null;
+  /** `selected` over `origin` on this dataset's rows alone; `None` where either
+   * read nothing. */
+  vs_origin: PairedReading | null;
+}
+
+/** One individual's own level on one set of rows, in both columns; never one side of a pair. */
+export interface OwnLevel {
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
+   * 1. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
+  /** Rows carrying a verdict — a miss the prompt caused included: the population
+   * both columns are read over. */
+  n: number;
+}
+
+/** What the lift vs origin cost, and the one caveat it and its rates share. */
+export interface CourseClimb {
+  /** Per search dollar, per candidate tested and in worked time per unit of lift,
+   * in that order; each sub names only its own denominator. */
+  rates: Figure[];
+  /** What the lift and every rate read in: the measurand and, under an ability
+   * election, that rounds are won on θ. Said once, under the rates. */
+  note: Said;
+}
+
+/** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
+export interface UnstartedCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  tags: HierarchyTag[];
+  /** Its figures for a person, each composed once with a value, in the order a row
+   * shows them. */
+  figures: Figure[];
+  /** Its sentences under the figures, without a value; what could not be read is
+   * among them. */
+  lines: Said[];
+  level: 'unstarted';
+  span: HierarchySpan;
+  facts: UnstartedFacts;
+}
+
+/** An open check-in's typed facts: it has no cycle, so no course, line or run. */
+export interface UnstartedFacts {
+  /** What its check-in has cost so far. */
+  spend_lifetime: LifetimeSpend;
+}
+
+/** One window of a family's chronology, oldest-first: a course, its forks and inner runs. */
+export interface HierarchySteps {
+  steps: HierarchyStep[];
+  /** Opaque cursor for the window immediately older than this one; null when this
+   * window already reaches the family's beginning. */
+  cursor_prev: string | null;
+}
+
+/** One ledger record that reads as a line, under its own course; served in a window only. */
+export interface HierarchyStep {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The course whose own ledger holds the record. */
+  parent: string;
+  level: 'step';
+  facts: StepFacts;
+}
+
+export interface StepFacts {
+  /** The line index in its course's OWN ledger — the space `?at=` and
+   * `ProjectionEnvelope.sequence` speak, so a live frame de-duplicates
+   * against a step on (course, offset). SPARSE: a record no line is made of
+   * is no step. */
+  offset: number;
+  /** The record's own time, raised to its file predecessor's when the two invert
+   * (records are stamped at construction but appended later). */
+  ts: string;
+  /** Seconds of silence before it: since the newest step or heartbeat anywhere in
+   * the family that the window knows of; 0 where none. A heartbeat takes no
+   * slot of a window, so a long open call never serves one empty. */
+  gap_before_s: number;
+  /** The record's reading. A `running` step with no later step on its course is a
+   * call still open. */
+  activity: ActivityItem;
+}
+
+/** One record's reading: a line to show, and the round and candidate it is about. */
+export interface ActivityItem {
+  /** The record's kind and ledger offset; one record, one id. */
+  id: string;
+  kind: 'running' | 'done' | 'candidate' | 'round' | 'warning' | 'error' | 'progress';
+  icon: string;
+  label: string;
+  /** The quieter half of the line. */
+  detail: string | null;
+  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
+  /** The round the record names. */
+  round: number | null;
+  /** The arm the record is about, by its key; `label` renders it. */
+  arm: string | null;
+  /** The self-heal a round warning reports; null on every other item. */
+  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | null;
+}
+
+/** A campaign as the subtree read serves it: every level under it. */
+export interface SubtreeCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  tags: HierarchyTag[];
+  /** Its figures for a person, each composed once with a value, in the order a row
+   * shows them. */
+  figures: Figure[];
+  /** Its sentences under the figures, without a value; what could not be read is
+   * among them. */
+  lines: Said[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'campaign';
+  facts: SubtreeCampaignFacts;
+  /** Its courses, root first. */
+  children: SubtreeCourse[];
+}
+
+/** What only the subtree read knows: it scans every sibling's ledger. */
+export interface SubtreeCampaignFacts {
+  /** The operator's own name for it; null where none was given, and the envelope's
+   * `label` falls back to the dataset. */
+  label: string | null;
+  /** The root course's address. */
+  root: string;
+  /** The address of the course holding the line now: the root, or the fork a
+   * supersede handed it to. */
+  line: string;
+  lifecycle: 'active' | 'archived' | 'deleted';
+  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
+  spend_lifetime: LifetimeSpend;
+  /** What the root course runs with; null where its pipeline did not resolve. */
+  runs_with: CampaignRunsWith | null;
+  /** How many cycles `cleanup-empty-cycles` deletes here now
+   * (`CampaignStore.deletable_stubs`, the command's own list). */
+  deletable_stubs: number;
+}
+
+/** A course as the subtree read serves it: its rounds under it. */
+export interface SubtreeCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  tags: HierarchyTag[];
+  /** Its figures for a person, each composed once with a value, in the order a row
+   * shows them. */
+  figures: Figure[];
+  /** Its sentences under the figures, without a value; what could not be read is
+   * among them. */
+  lines: Said[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'course';
+  facts: SubtreeCourseFacts;
+  /** Null until the lift vs origin is read. */
+  climb: CourseClimb | null;
+  /** The run's pinned line from what no clock reads (`run_said`): a producer's row
+   * is its dashboard's alone. Null where nothing needs the operator. */
+  said: Said | null;
+  /** Its rounds in round order, then any inner campaign its sandbox holds that no
+   * candidate's spawn stamp names — that one says so among its `lines`. */
+  children: (HierarchyRound | SubtreeCampaign)[];
+}
+
+/** What only the subtree read knows: it reads every candidate, under the request's lens. */
+export interface SubtreeCourseFacts {
+  /** How the course was minted; the `mint` tag renders it. */
+  mint: 'root' | 'fork' | 'diag' | 'inner';
+  /** Null on a root, and on a cycle cut from another tree. */
+  spawn: CourseSpawn | null;
+  /** The outer panel cell an L4 inner course measures. */
+  task: string | null;
+  /** Null before round 0 closes. */
+  standing: RunStanding | null;
+  /** Rounds closed AFTER the origin. */
+  rounds_closed: number;
+  /** The column the course's newest election elected on; null before its first.
+   * `ability`: its rounds are won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** This course's own ledger's bill, at the moment. */
+  spend: MeteredSpend;
+  /** The campaign's bench, on the course holding the line, read whole at the head;
+   * null on every other course (the line's reads `held_elsewhere` there) and
+   * under a moment. */
+  bench: BenchScore | null;
+  /** The `per_cell` formula this course was read under for the request's lens — a
+   * `dials:` lens realized against this campaign's anchors, a `score:` one as
+   * given. What a fork applying the lens carries as `scoring.per_cell`. Null
+   * without one. */
+  lens_criterion: string | null;
+  /** How the request's lens reorders this course's candidates. Null without a lens,
+   * and where it ranked none of them. */
+  lens_shift: LensShift | null;
+  /** The address of the arm the course's standing is paired against: the round-0
+   * pick its line holds, whichever course ran it. Null on a branch cut at
+   * round 0 before it measured its own. */
+  origin: string | null;
+  /** The address of the candidate a fork hangs from: the arm its mint record names,
+   * on the course of its parent's line that ran it. Null on a root. */
+  from_candidate: string | null;
+}
+
+/** What the request's lens did to one course's candidate ordering. */
+export interface LensShift {
+  /** The address of the candidate ranked first by composite; null where that
+   * candidate is retired. */
+  top_composite: string | null;
+  /** The same, ranked by `lens_value`. */
+  top_lens: string | null;
+  /** The lens ranks another candidate first. */
+  top_changed: boolean;
+  moved_up: number;
+  moved_down: number;
+  unchanged: number;
+}
+
+/** One round of a course's own ledger; its children are the candidates it proposed. */
+export interface HierarchyRound {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  level: 'round';
+  facts: RoundFacts;
+  /** In slot order. */
+  children: HierarchyCandidate[];
+}
+
+/** A round's typed facts: what its election declared. */
+export interface RoundFacts {
+  round: number;
+  /** The column the round's election elected on (`Election.elects_on`); null on a
+   * round never elected. `ability`: the round is won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+}
+
+/** One candidate a round proposed; its children are the inner campaigns it spawned. */
+export interface HierarchyCandidate {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  tags: HierarchyTag[];
+  /** Its figures for a person, each composed once with a value, in the order a row
+   * shows them. */
+  figures: Figure[];
+  /** Its sentences under the figures, without a value; what could not be read is
+   * among them. */
+  lines: Said[];
+  level: 'candidate';
+  facts: CandidateFacts;
+  children: SubtreeCampaign[];
+}
+
+/** One arm a round proposed; everything measured or decided about it is its `reading`. */
+export interface CandidateFacts {
+  /** `OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one
+   * individual again. */
+  individual: string;
+  /** Every individual this one derives from — one for a mutation, several for a
+   * crossover; empty only at an origin. */
+  parent_ids: string[];
+  /** The variation nodes that wrote this individual, in the order they ran. Empty
+   * on an origin. */
+  variations: Variation[];
+  standing: 'origin' | 'proposed' | 'rewound' | 'rewound_stood_on' | 'retired';
+  /** `reading.arm` is the key every per-cycle document of this course speaks;
+   * `reading.sp_hash` joins to the archive rows. A retired candidate's
+   * election wears no crown: the course that took its place re-asks it. */
+  reading: ArmReading;
+  /** The newest crowned live candidate of its course — the parent the next round
+   * mutates from. At most one per course. */
+  stands: boolean;
+  /** The newest candidate its course proposed. */
+  course_latest: boolean;
+  /** The ONE candidate across the subtree a remembered individual id resolves to:
+   * the live one where a supersede left the individual on two, the first
+   * where several stand. */
+  answers_for_id: boolean;
+  /** The main line to THIS candidate, origin first: the line of the candidate its
+   * course hangs from (a fork's from-candidate, an inner course's host) up to
+   * the cut, each elected round of its course before it with the candidates
+   * crowned, then this candidate, then any later round that crowned nobody up
+   * to the next crown. Read off crowns, never `parent_ids`. */
+  main_line: MainLineStep[];
+  /** The address of the candidate its first parent, its main, was last measured as
+   * before it: the ONE edge a lineage view draws it from. Null at an origin,
+   * and where no candidate of its campaign measured that parent. */
+  descends_from: string | null;
+  /** The address of the candidate its second parent, the donor of a crossover, was
+   * last measured as before it, of any round. Null without a second parent or
+   * a main, and where no candidate of its campaign measured it. */
+  donor: string | null;
+  /** The loci, as `node.key`, its lineage records the donor gave and no later
+   * variation rewrote. Empty without a donor. */
+  donated_loci: string[];
+  /** Per other locus it moved off its main, the earlier candidates whose value
+   * there is closer to its own than the main's: most similar first, then most
+   * recently measured. */
+  gene_sources: GeneSource[];
+  /** This candidate's composite fitness under the request's `score:` lens. Null
+   * without a lens, or where no row carries a verdict under it. */
+  lens_value: number | null;
+  /** Which way the lens moved this candidate among its course's: its position by
+   * `lens_value` against its position by the reading's composite. Null
+   * without a lens, or where either value is. */
+  lens_rank_move: 'up' | 'down' | 'unchanged' | null;
+  /** Accuracy over the request's `samples=` subset, served only where this
+   * candidate carries a scoreable verdict for ALL of it. Null without a
+   * `samples=` mask. */
+  sample_set_accuracy: number | null;
+  /** How many of the `samples=` subset this candidate carries a scoreable verdict
+   * for. Null without a `samples=` mask. */
+  sample_set_n: number | null;
+  /** Set on a closed round's crowned candidate where the request's lens would have
+   * elected someone else. */
+  divergence: LineageDivergence | null;
+  /** Inside the counterfactual below a divergence — the client dims it. */
+  divergent: boolean;
+}
+
+/** One variation node's act: which node ran, whether it asked a model, and the loci it wrote. */
+export interface Variation {
+  /** `{manifest}:{node}` of the variation node that ran; `operator` where a person
+   * wrote it. */
+  node: string;
+  /** `deterministic`: a function of its inputs and the run's seed. `llm`: a model's
+   * reply. `operator`: a person's own edit, submitted at the arm gate. */
+  mode: 'deterministic' | 'llm' | 'operator';
+  /** The loci it left different from what it was handed, as `node.key`: the first
+   * one's against the first parent, a later one's against the variation
+   * before it. */
+  loci: string[];
+  /** Of `loci`, those it wrote with the donor's value by its recombination `take`,
+   * as `node.key`: what the donor gave, recorded as the act, never read off a
+   * value that happens to equal the donor's. */
+  donated: string[];
+}
+
+/** One arm of one round, read: the one carrier every surface that lists or ranks arms embeds. */
+export interface ArmReading {
+  /** THE key, and where the arm was walked. */
+  arm: ArmName;
+  /** What the arm IS in this round: its origin, one of its proposals, or a `parent`
+   * re-read on its cells as a reference — never one of the round's proposals,
+   * whatever round `arm` names. */
+  role: 'origin' | 'panel' | 'parent';
+  /** The archive address of this arm's measurements (`prompt_fields_id`). Not a
+   * key: a re-proposed configuration shares it across rounds. Empty before it
+   * is measured. */
+  sp_hash: string;
+  changes_description: string;
+  /** Where the arm's walk stands: proposed, being measured, or ended — cut short
+   * against it, or measured. */
+  state: 'proposed' | 'measuring' | 'cut' | 'measured';
+  /** How its walk ended short of its panel: cut against it (`invalid` refused it
+   * before a cell), or `locked_in` — settled FOR it by the eliminator. Null
+   * on a walk still running and one that ran its panel. */
+  end: 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
+  /** `end` names a stop of its walk, for it or against it: false on an `invalid`
+   * arm, which never started one. */
+  walked_short: boolean;
+  /** The arm's own level on its round's cells: accuracy with the band the gateway
+   * folds per cell, the composite beside it, over `n` rows carrying a
+   * verdict. Null before the first row is graded, and on an `invalid` arm,
+   * which holds no cell. */
+  own: OwnLevel | null;
+  panel: ArmPanel;
+  /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
+   * null until its score report folds an account. */
+  tokens: TokenAccount | null;
+  /** The provider's prefix-cache reading of `tokens.input`; null beside a null
+   * `tokens`. */
+  prefix: PrefixReading | null;
+  /** Null outside the round's election fit. */
+  ability: ArmAbility | null;
+  /** This arm (`b`) over the individual it was judged against (`a`), on the cells
+   * both scored. Null on the origin and until the election stamps it. */
+  vs_reference: PairedReading | null;
+  election: ArmElection;
+  /** This arm's individual on the held-out bench set; null unless a pass graded it. */
+  bench: BenchReading | null;
+  /** Its last `verify` pass, on search cells its rounds never bought. */
+  verify: VerifyReading | null;
+  /** Its individual's rate on the origin panel, as the newest overlap reading holds
+   * it: the one level two arms of different rounds may be differenced on.
+   * Null for an arm neither on the best-so-far line nor triggered, and where
+   * it does not hold the whole panel. */
+  on_origin_panel: LineRate | null;
+}
+
+/** The cells one arm's walk holds of the panel its round asked of it. */
+export interface ArmPanel {
+  /** Cells the walk holds. Null on an arm with no score report — never measured,
+   * which is not a walk of zero cells. */
+  scored: number | null;
+  /** The walk's length; null until its first cell announces it. */
+  expected: number | null;
+  /** Of `scored`, how many were replayed from the archive rather than measured.
+   * Null on an arm never measured. */
+  cached: number | null;
+  /** `cached` over `scored`. Null where either is, and on a walk holding no cell. */
+  cached_share: number | null;
+  /** Stopped short of its round's panel (`panel_cuts`): under its own `expected`,
+   * or, for a panel arm, under the fullest panel a panel arm of its round
+   * reached. */
+  cut: boolean;
+}
+
+/** What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint. */
+export interface TokenAccount {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache_read: number | null;
+  cache_write: number;
+}
+
+/** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
+export interface ArmAbility {
+  theta: number | null;
+  se: number | null;
+  /** Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null
+   * where `theta` or `se` is. */
+  ci_lo: number | null;
+  /** Upper bound of the same interval. */
+  ci_hi: number | null;
+  /** Why `theta` is not this arm's ability, of the ARM's own scope. */
+  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+}
+
+/** What one arm's round decided about it. Built by :meth:`of` alone. */
+export interface ArmElection {
+  /** The arm's round has held its election. `selected: false` reads the same on a
+   * round still scoring and on one that crowned nobody; only this tells them
+   * apart. */
+  held: boolean;
+  selected: boolean;
+  /** The ONE arm its round is read off, as the selector named it
+   * (`Election.leading`); false until the election. */
+  leading: boolean;
+  /** How a selected arm advanced, read off the election's electable count; null on
+   * every arm the election did not select. */
+  crown: 'elected' | 'uncontested' | null;
+}
+
+/** A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones. */
+export interface VerifyReading {
+  label: string;
+  /** The grader every number here was read under. A stored copy is a cache of that
+   * reading: a reader under another grader reads the pass again, never this. */
+  scorer_id: string;
+  /** How the fresh cells were picked: `random` from the unmeasured search split, or
+   * `hard` — its highest-δ cells first, which read BELOW the level by
+   * construction. */
+  strategy: 'random' | 'hard';
+  /** The level on the fresh cells alone, with its band. */
+  fresh: OwnLevel;
+  /** The level on every cell a round's decision read this candidate on — its own
+   * walk and each re-score as a parent — re-read under this scorer: the
+   * number the fresh cells are a check on. */
+  recorded: OwnLevel;
+  /** `fresh` minus `recorded`, hit rate. Unpaired — the two are different cells. */
+  accuracy_increment: number | null;
+  composite_increment: number | null;
+  /** This candidate over the campaign origin, on every cell the cycle measured both
+   * on outside the bench — the fresh ones and the overlap pass's included.
+   * `same_individual` on the origin itself. */
+  vs_origin: PairedReading;
+  /** Whether the fresh cells leave the recorded hit rate standing: its level sits
+   * at or below the fresh band's upper bound. `None` exactly where
+   * `held_absent` says why. */
+  held: boolean | null;
+  /** Why the fresh cells make no held / dropped call: `hard_picks` sit below the
+   * level whatever the candidate is worth, and `under_two_fresh` cells have
+   * no band. Read `vs_origin` there. */
+  held_absent: 'hard_picks' | 'under_two_fresh' | null;
+}
+
+/** One member of the best-so-far line as an overlap reading holds it. */
+export interface LineRate {
+  arm: ArmName;
+  /** Its rate over the panel cells it and C0 both scored. */
+  rate: number;
+  /** How many of the panel's cells it holds scoreable. */
+  n: number;
+}
+
+/** One round on the main line to a candidate. */
+export interface MainLineStep {
+  round: number;
+  /** The addresses of the candidates the round's election crowned; at the
+   * candidate's own round, the candidate. Empty: the election crowned nobody. */
+  candidates: string[];
+}
+
+/** A candidate one locus of a child may have come from, other than the parent it descends from. */
+export interface GeneSource {
+  /** The locus the child moved off its parent, as `node.key`. */
+  locus: string;
+  /** The address of the candidate whose value it resembles. */
+  source: string;
+  /** How alike the child's value and the source's are, 0 to 1: a verbatim copy is
+   * 1. Always above the child's similarity to its parent on that locus. */
+  similarity: number;
+}
+
+/** Where an alternative criterion would have elected someone else, on the candidate it names. */
+export interface LineageDivergence {
+  /** The individual the masked criterion would have elected instead (measured, so
+   * nameable); null when the round would simply have held on origin. */
+  alternative_candidate_id: string | null;
 }
 
 /** A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the */
@@ -143,18 +1628,6 @@ export interface ServedDashboard {
   said: Said | null;
 }
 
-/** One arm of the run: its key, and where it was walked (a re-read: its latest walk). */
-export interface ArmName {
-  /** THE join: the individual's content id, or the slot hash of a proposal rejected
-   * before it cost a cell. */
-  key: string;
-  /** The round the arm was walked in; 0 is the origin. */
-  round: number;
-  /** `C0` or `C{round}.{n}`, off the slot it was walked in: a display name, never a
-   * join. */
-  label: string;
-}
-
 /** A closed round as a dashboard serves it: the banked summary plus every reading derived from it. */
 export interface ServedRound {
   round: number;
@@ -190,338 +1663,6 @@ export interface ServedRound {
 /** One candidate as `dashboard.json` serves it, the same shape live or closed. */
 export interface DashboardCandidate {
   reading: ArmReading;
-}
-
-/** One arm of one round, read: the one carrier every surface that lists or ranks arms embeds. */
-export interface ArmReading {
-  /** THE key, and where the arm was walked. */
-  arm: ArmName;
-  /** What the arm IS in this round: its origin, one of its proposals, or a `parent`
-   * re-read on its cells as a reference — never one of the round's proposals,
-   * whatever round `arm` names. */
-  role: 'origin' | 'panel' | 'parent';
-  /** The archive address of this arm's measurements (`prompt_fields_id`). Not a
-   * key: a re-proposed configuration shares it across rounds. Empty before it
-   * is measured. */
-  sp_hash: string;
-  changes_description: string;
-  /** Where the arm's walk stands: proposed, being measured, or ended — cut short
-   * against it, or measured. */
-  state: 'proposed' | 'measuring' | 'cut' | 'measured';
-  /** How its walk ended short of its panel: cut against it (`invalid` refused it
-   * before a cell), or `locked_in` — settled FOR it by the eliminator. Null
-   * on a walk still running and one that ran its panel. */
-  end: 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
-  /** `end` names a stop of its walk, for it or against it: false on an `invalid`
-   * arm, which never started one. */
-  walked_short: boolean;
-  /** The arm's own level on its round's cells: accuracy with the band the gateway
-   * folds per cell, the composite beside it, over `n` rows carrying a
-   * verdict. Null before the first row is graded, and on an `invalid` arm,
-   * which holds no cell. */
-  own: OwnLevel | null;
-  panel: ArmPanel;
-  /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
-   * null until its score report folds an account. */
-  tokens: TokenAccount | null;
-  /** The provider's prefix-cache reading of `tokens.input`; null beside a null
-   * `tokens`. */
-  prefix: PrefixReading | null;
-  /** Null outside the round's election fit. */
-  ability: ArmAbility | null;
-  /** This arm (`b`) over the individual it was judged against (`a`), on the cells
-   * both scored. Null on the origin and until the election stamps it. */
-  vs_reference: PairedReading | null;
-  election: ArmElection;
-  /** This arm's individual on the held-out bench set; null unless a pass graded it. */
-  bench: BenchReading | null;
-  /** Its last `verify` pass, on search cells its rounds never bought. */
-  verify: VerifyReading | null;
-  /** Its individual's rate on the origin panel, as the newest overlap reading holds
-   * it: the one level two arms of different rounds may be differenced on.
-   * Null for an arm neither on the best-so-far line nor triggered, and where
-   * it does not hold the whole panel. */
-  on_origin_panel: LineRate | null;
-}
-
-/** One individual's own level on one set of rows, in both columns; never one side of a pair. */
-export interface OwnLevel {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  accuracy: BandedValue | null;
-  /** Under the reading scorer's formula, which charges cost and length — so it is
-   * never the change in the hit rate. */
-  composite: BandedValue | null;
-  /** Rows carrying a verdict — a miss the prompt caused included: the population
-   * both columns are read over. */
-  n: number;
-}
-
-export interface BandedValue {
-  value: number;
-  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
-   * `None` below two rows, which have no spread. */
-  ci_lo: number | null;
-  ci_hi: number | null;
-}
-
-/** The cells one arm's walk holds of the panel its round asked of it. */
-export interface ArmPanel {
-  /** Cells the walk holds. Null on an arm with no score report — never measured,
-   * which is not a walk of zero cells. */
-  scored: number | null;
-  /** The walk's length; null until its first cell announces it. */
-  expected: number | null;
-  /** Of `scored`, how many were replayed from the archive rather than measured.
-   * Null on an arm never measured. */
-  cached: number | null;
-  /** `cached` over `scored`. Null where either is, and on a walk holding no cell. */
-  cached_share: number | null;
-  /** Stopped short of its round's panel (`panel_cuts`): under its own `expected`,
-   * or, for a panel arm, under the fullest panel a panel arm of its round
-   * reached. */
-  cut: boolean;
-}
-
-/** What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint. */
-export interface TokenAccount {
-  input: number;
-  output: number;
-  reasoning: number;
-  cache_read: number | null;
-  cache_write: number;
-}
-
-/** A provider's prefix-cache discount as every surface reads it, served whole. */
-export interface PrefixReading {
-  state: 'discounted' | 'cold' | 'unreported' | 'replayed';
-  /** Null on `unreported` and `replayed`. */
-  share: number | null;
-  /** `c39%` / `c0%` / `c?`, and empty on a replay, whose line already carries 📖. */
-  badge: string;
-}
-
-/** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
-export interface ArmAbility {
-  theta: number | null;
-  se: number | null;
-  /** Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null
-   * where `theta` or `se` is. */
-  ci_lo: number | null;
-  /** Upper bound of the same interval. */
-  ci_hi: number | null;
-  /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
-}
-
-/** One pair of addressed individuals read on one cell set. */
-export interface PairedReading {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  a: PairMember | null;
-  b: PairMember | null;
-  cell_set: CellSet | null;
-  /** What measured both members' cells: their dataset, and on the recursion the
-   * inner origin. Null where the reading names no pair. */
-  instrument_id: string | null;
-  scope: 'decision' | 'report' | 'bench';
-  spec: EstimatorSpec;
-  coverage: Coverage | null;
-  headline: MeasuredLift | null;
-  /** Other measurands over the SAME scored cells as `headline`. */
-  beside: MeasuredLift[];
-}
-
-/** One side of a pair, and what it holds on the pair's cell set. */
-export interface PairMember {
-  address: MemberAddress;
-  /** Cells of the set this member holds a scoreable row on. */
-  n: number;
-  /** Cells the round that took this reading measured fresh on this member; a
-   * replayed cell is not one. */
-  bought: number;
-}
-
-/** Where one member of a pair was read: the cycle, the individual, and the pass. */
-export interface MemberAddress {
-  /** The cycle the member was read in, root to leaf. */
-  path: CycleHop[];
-  /** The individual's content id. */
-  individual_id: string;
-  /** The arm the individual was measured as; null for a pass that is no arm. */
-  arm: ArmName | null;
-  /** Which pass, where the same individual is read by more than one. */
-  pass_role: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | null;
-}
-
-/** One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone. */
-export interface CycleHop {
-  campaign_id: string;
-  cycle_id: string;
-}
-
-/** The cells a pair is read on, as an identity two readings can be compared by. */
-export interface CellSet {
-  name: 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
-  basis: 'declared' | 'incidental' | 'masked';
-  /** Digest of the sorted sample keys the set names. */
-  id: string;
-  dataset_hash: string | null;
-  /** How many cells the set names — the N of `n of N`. */
-  size: number;
-}
-
-/** How a lift's two-sided interval and test were taken; the estimate is the mean paired difference. */
-export interface EstimatorSpec {
-  alpha: number;
-  /** The difference the test and `side` are read against. */
-  null_value: number;
-}
-
-/** How much of the cell set a lift stands on. */
-export interface Coverage {
-  state: 'complete' | 'partial' | 'selected_by_stop' | 'incidental';
-  /** Cells of the set both members hold a row on. */
-  shared: number;
-  /** Shared cells both scored — the n of every lift here. */
-  scored: number;
-  /** Shared cells dropped because the formula could not grade a member's row. */
-  excluded_unscored: number;
-  /** Shared cells dropped because a member's row errored. */
-  excluded_faulted: number;
-}
-
-/** One measurand's lift of member `b` over member `a`, on the cells both scored. */
-export interface MeasuredLift {
-  measurand: Measurand;
-  /** `a`'s mean over the cells BOTH scored, never its own level. */
-  rate_a: number;
-  rate_b: number;
-  estimate: LiftEstimate;
-  flips: FlipCounts | null;
-  family: TestFamily | null;
-}
-
-/** What is read off each cell, and under which scorer. */
-export interface Measurand {
-  kind: 'grade' | 'channel' | 'expr';
-  /** The grade, the channel name or the expression text. */
-  key: string;
-  scorer_id: string;
-  /** DECLARED, never inferred from the values: every cell is 0 or 1, so a cell can
-   * flip. */
-  binary: boolean;
-  unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
-}
-
-/** A mean paired difference with its interval and test. */
-export interface LiftEstimate {
-  value: number;
-  ci_lo: number;
-  ci_hi: number;
-  side: 'above' | 'below' | 'spans';
-  /** The Student-t p, never below `p_floor`: where the two are equal the floor
-   * binds, and the cells that differ are what limits the claim. */
-  p_value: number;
-  /** The smallest p an exact sign test can reach on the cells that differ from the
-   * null. Above the spec's `alpha`, `side` is `spans` whatever the interval
-   * says. */
-  p_floor: number;
-}
-
-/** What moving from member `a` to member `b` did cell by cell, on a binary measurand. */
-export interface FlipCounts {
-  /** Cells `a` missed and `b` hit. */
-  gained: number;
-  /** Cells `a` hit and `b` missed. */
-  lost: number;
-  unchanged: number;
-}
-
-/** The set of tests one multiple-comparison correction was taken across. */
-export interface TestFamily {
-  id: string;
-  n_tests: number;
-  method: 'holm';
-  p_adjusted: number;
-}
-
-/** What one arm's round decided about it. Built by :meth:`of` alone. */
-export interface ArmElection {
-  /** The arm's round has held its election. `selected: false` reads the same on a
-   * round still scoring and on one that crowned nobody; only this tells them
-   * apart. */
-  held: boolean;
-  selected: boolean;
-  /** The ONE arm its round is read off, as the selector named it
-   * (`Election.leading`); false until the election. */
-  leading: boolean;
-  /** How a selected arm advanced, read off the election's electable count; null on
-   * every arm the election did not select. */
-  crown: 'elected' | 'uncontested' | null;
-}
-
-/** One individual's bench pass, read under a named scorer. */
-export interface BenchReading {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  accuracy: BandedValue | null;
-  /** Under the reading scorer's formula, which charges cost and length — so it is
-   * never the change in the hit rate. */
-  composite: BandedValue | null;
-  /** Rows carrying a verdict — a miss the prompt caused included: the population
-   * both columns are read over. */
-  n: number;
-  /** The round whose selection this is; 0 is the origin. */
-  round: number;
-  /** The searchpoint scored — the archive's `prompt_fields_id`. */
-  sp_hash: string;
-  /** Which column the headline reads. */
-  headline: 'accuracy' | 'composite';
-  /** The headline: this reading in its `headline` column, chosen here so no surface
-   * selects a column of its own. Stamped by :meth:`read` alone. */
-  level: BandedValue | null;
-}
-
-/** A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones. */
-export interface VerifyReading {
-  label: string;
-  /** The grader every number here was read under. A stored copy is a cache of that
-   * reading: a reader under another grader reads the pass again, never this. */
-  scorer_id: string;
-  /** How the fresh cells were picked: `random` from the unmeasured search split, or
-   * `hard` — its highest-δ cells first, which read BELOW the level by
-   * construction. */
-  strategy: 'random' | 'hard';
-  /** The level on the fresh cells alone, with its band. */
-  fresh: OwnLevel;
-  /** The level on every cell a round's decision read this candidate on — its own
-   * walk and each re-score as a parent — re-read under this scorer: the
-   * number the fresh cells are a check on. */
-  recorded: OwnLevel;
-  /** `fresh` minus `recorded`, hit rate. Unpaired — the two are different cells. */
-  accuracy_increment: number | null;
-  composite_increment: number | null;
-  /** This candidate over the campaign origin, on every cell the cycle measured both
-   * on outside the bench — the fresh ones and the overlap pass's included.
-   * `same_individual` on the origin itself. */
-  vs_origin: PairedReading;
-  /** Whether the fresh cells leave the recorded hit rate standing: its level sits
-   * at or below the fresh band's upper bound. `None` exactly where
-   * `held_absent` says why. */
-  held: boolean | null;
-  /** Why the fresh cells make no held / dropped call: `hard_picks` sit below the
-   * level whatever the candidate is worth, and `under_two_fresh` cells have
-   * no band. Read `vs_origin` there. */
-  held_absent: 'hard_picks' | 'under_two_fresh' | null;
-}
-
-/** One member of the best-so-far line as an overlap reading holds it. */
-export interface LineRate {
-  arm: ArmName;
-  /** Its rate over the panel cells it and C0 both scored. */
-  rate: number;
-  /** How many of the panel's cells it holds scoreable. */
-  n: number;
 }
 
 /** A round's degradation grade as a surface reads it, worded now off the facts its close stamped. */
@@ -683,21 +1824,6 @@ export interface RunLimits {
   optimizer: OptimizerLimit[];
 }
 
-/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits. */
-export interface Budget {
-  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
-  usd?: number | null;
-  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
-   * where a model has no rate on file. */
-  tokens?: number | null;
-  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
-   * measures the origin only. */
-  rounds?: number | null;
-  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
-   * open at the edge is cut and the run stops `wall_clock`. */
-  wall_clock_s?: number | null;
-}
-
 /** One knob an optimizer declares as bounding its run, which a fork may reconcile. */
 export interface OptimizerLimit {
   node: string;
@@ -752,9 +1878,6 @@ export interface CurrentRound {
   /** The optimizer node every scoring pass of the run runs as — origin, round,
    * bench and verify alike — as its wiring declares it. */
   measurement_node: string;
-  /** Whether `measurement_node` is the node at work now: `measuring_arm` is served
-   * only while it is. */
-  measuring: boolean;
   /** The inner cycle an open cell runs, where a cell is a whole campaign (L4), in
    * this cycle's sandbox; null where no open cell has named one. */
   inner: CycleHop | null;
@@ -931,29 +2054,6 @@ export interface ProducerReading {
   silent_for_s: number | null;
 }
 
-/** Which run verbs a cycle admits now: the one answer the run control and the dispatcher read. */
-export interface RunAdmission {
-  /** The verb the one run control offers; null where it offers none. */
-  offers: 'pause' | 'resume' | 'start' | null;
-  /** Why the control offers none; empty where it offers one. */
-  refusal: string;
-  /** `skip-searchpoint`. */
-  skip_refusal: string;
-  /** `set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes an
-   * arming, so neither needs a walk and neither is refused here. */
-  lookahead_refusal: string;
-}
-
-/** Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach. */
-export interface PauseReading {
-  /** Null on an accepted pause the loop has yet to reach. */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed';
-  /** Who or what asked, in the declarer's own words. */
-  detail: string;
-  at: string;
-}
-
 /** The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its */
 export interface SampleLookahead {
   /** The depth IN FORCE — how many cells the walk holds in flight: the armed
@@ -1001,35 +2101,6 @@ export interface LookaheadDepth {
   pickable: boolean;
 }
 
-/** What a run's spend caps have counted, in the units they meter, by kind. */
-export interface MeteredSpend {
-  meter: 'bill' | 'search_incurred';
-  metered_usd: number;
-  metered_tokens: number;
-  billed_usd: number;
-  rate_priced_usd: number;
-  calls_rate_priced: boolean;
-  rate_known: boolean;
-  bill_is_floor: boolean;
-  incurred_usd: number;
-  billed_tokens: number;
-  unpriced_tokens: number;
-  kinds: Record<string, KindSpend>;
-  replay_share: number | null;
-}
-
-/** One spend kind as every surface reads it: metered, billed, rate-priced and incurred. */
-export interface KindSpend {
-  counted: boolean;
-  sent: boolean;
-  metered_usd: number;
-  billed_usd: number;
-  rate_priced_usd: number;
-  incurred_usd: number;
-  tokens: number;
-  prefix: PrefixReading;
-}
-
 /** What a cycle's rounds cap has left, which an offshoot takes as its own. Spend is no */
 export interface ForkRemainder {
   /** Rounds closed AFTER the origin — what `budget.rounds` counts */
@@ -1063,18 +2134,6 @@ export interface RoundAxis {
   /** The round the run stands at: `live`, else the newest of `completed`. Null
    * before any round measured. */
   position: number | null;
-}
-
-/** One line composed once for a person: every medium renders it as served, none rewords it. */
-export interface Said {
-  /** What the line is about, for code to branch on; never shown. */
-  key: string;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
-  label: string;
-  value: string | null;
-  sub: string | null;
-  /** The longer reading, a tap away. */
-  detail: string | null;
 }
 
 /** What a cycle with no dashboard state serves, at 200 rather than 404 so a surface renders */
@@ -1137,24 +2196,6 @@ export interface IndividualLineage {
    * and rewrites none. */
   variations: Variation[];
   evidence_grounding: EvidenceGrounding | null;
-}
-
-/** One variation node's act: which node ran, whether it asked a model, and the loci it wrote. */
-export interface Variation {
-  /** `{manifest}:{node}` of the variation node that ran; `operator` where a person
-   * wrote it. */
-  node: string;
-  /** `deterministic`: a function of its inputs and the run's seed. `llm`: a model's
-   * reply. `operator`: a person's own edit, submitted at the arm gate. */
-  mode: 'deterministic' | 'llm' | 'operator';
-  /** The loci it left different from what it was handed, as `node.key`: the first
-   * one's against the first parent, a later one's against the variation
-   * before it. */
-  loci: string[];
-  /** Of `loci`, those it wrote with the donor's value by its recombination `take`,
-   * as `node.key`: what the donor gave, recorded as the act, never read off a
-   * value that happens to equal the donor's. */
-  donated: string[];
 }
 
 /** The panel field and citation L1 declares to justify a mutation. */
@@ -1384,24 +2425,6 @@ export interface ActivityState {
   decision: ActivityDecision | null;
 }
 
-/** One record's reading: a line to show, and the round and candidate it is about. */
-export interface ActivityItem {
-  /** The record's kind and ledger offset; one record, one id. */
-  id: string;
-  kind: 'running' | 'done' | 'candidate' | 'round' | 'warning' | 'error' | 'progress';
-  icon: string;
-  label: string;
-  /** The quieter half of the line. */
-  detail: string | null;
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
-  /** The round the record names. */
-  round: number | null;
-  /** The arm the record is about, by its key; `label` renders it. */
-  arm: string | null;
-  /** The self-heal a round warning reports; null on every other item. */
-  healed: 'layer_parse_failure' | 'injection_budget_overrun' | 'trace_sink_failed' | null;
-}
-
 /** A choice the run is holding for: what to say about it, and the commands that answer it. */
 export interface ActivityDecision {
   title: string;
@@ -1420,6 +2443,35 @@ export interface DecisionAction {
   variant: 'primary' | 'ghost' | 'danger';
   kind: 'origin-gate-decision';
   decision: 'rescore' | 'proceed' | 'abort';
+}
+
+export interface FilesResponse {
+  campaign_id: string;
+  cycle_id: string;
+  entries: FileEntry[];
+}
+
+export interface FileEntry {
+  /** Path relative to the scope root, forward slashes */
+  path: string;
+  /** Which root the path is under */
+  scope: 'cycle' | 'campaign';
+  /** File size in bytes */
+  size: number;
+  /** ISO 8601 UTC modification time */
+  mtime: string;
+}
+
+export interface FileContentResponse {
+  campaign_id: string;
+  cycle_id: string;
+  scope: 'cycle' | 'campaign';
+  path: string;
+  size: number;
+  mtime: string;
+  content_type: 'json' | 'markdown' | 'log' | 'text' | 'binary';
+  /** UTF-8 text content; None when binary or oversized */
+  content: string | null;
 }
 
 /** The whole read for one selection of subjects — recomputed on every fetch. */
@@ -1643,14 +2695,6 @@ export interface DeterminismClamp {
   route_order: string[] | null;
 }
 
-/** How a run stands on a row: its phase, why it stopped, and the mark drawn beside it. */
-export interface RunStatus {
-  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
-  /** Null while the run has not stopped. */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
-}
-
 /** The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or */
 export interface ElectionColumn {
   /** What the electing round's selector ranked on. */
@@ -1658,87 +2702,6 @@ export interface ElectionColumn {
   /** The pick's θ on its electing round. */
   ability: ArmAbility | null;
   reads_on: 'accuracy' | 'composite' | 'ability';
-}
-
-/** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
-export interface BenchScore {
-  bench_size: number;
-  /** The grader every number here was read under. A stored copy is a cache of that
-   * reading: a reader under another grader reads the passes again, never
-   * this. */
-  scorer_id: string;
-  /** Which column the headline reads; `vs_origin.headline` is its lift. */
-  headline: 'accuracy' | 'composite';
-  status: BenchStatus;
-  /** The origin's own level; `None` where its pass read nothing. */
-  origin: BenchReading | null;
-  /** The selection's own level — the headline. `None` where its pass read nothing. */
-  selected: BenchReading | null;
-  /** `selected` over `origin`, paired on the bench rows both scored.
-   * `same_individual` where the origin is the selection: nothing was
-   * compared. */
-  vs_origin: PairedReading;
-  cost: LiftCost;
-  /** Per dataset, where the bench rows measure several; empty on one. The two
-   * levels above then read no column, since two datasets' levels never
-   * average, while `vs_origin` still pairs every row. */
-  scopes: BenchScope[];
-}
-
-/** Where a campaign's bench stands, and whether asking for its pass would be admitted. */
-export interface BenchStatus {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  trigger: 'manual' | 'at_end' | 'each_round';
-  /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
-   * one answer. */
-  can_grade: boolean;
-  /** Why not, exactly where `can_grade` is false. */
-  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
-  /** Whether the grade control shows: admitted, or a pass still waited on. Never on
-   * an inner run, whose line no command grades. */
-  offered: boolean;
-  /** Whose pass `state` names, where one pass decides it. */
-  subject: 'origin' | 'selected' | null;
-  /** The cycle holding the campaign's line, where that is another one. */
-  held_by: string | null;
-  stop: PassStop | null;
-  scored: number | null;
-  expected: number | null;
-  /** Individuals the archive had graded on these held-out rows when the selection's
-   * pass was sent: each one chosen off a headline spent the holdout. `None`
-   * where no pass of the selection stands. */
-  reads_before: number | null;
-}
-
-/** Why a bench pass holds fewer rows than it was sent on. */
-export interface PassStop {
-  /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
-   * spent budget before it was sent. */
-  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
-  /** The backend's dominant warning, where errors ended the pass. */
-  warning: string | null;
-}
-
-/** The headline lift per USD its SEARCH incurred, or why there is none. */
-export interface LiftCost {
-  /** Priced on INCURRED spend, never the bill — a replayed cell is billed nothing,
-   * which would price arriving second — and never on the bench's own pass. */
-  lift_per_usd: number | null;
-  absent: 'no_lift' | 'unpriced_tokens' | 'zero_spend' | null;
-}
-
-/** One dataset's rows of a bench spanning several, read apart: a level is never averaged */
-export interface BenchScope {
-  /** The dataset these rows measure; `None` is the one the cycle is filed under. */
-  dataset: string | null;
-  rows: number;
-  /** `None` where the origin's pass read nothing. */
-  origin: OwnLevel | null;
-  /** `None` where the selection's read nothing. */
-  selected: OwnLevel | null;
-  /** `selected` over `origin` on this dataset's rows alone; `None` where either
-   * read nothing. */
-  vs_origin: PairedReading | null;
 }
 
 /** The bench set and grader behind a headline; two compare only where every field agrees. */
@@ -2161,35 +3124,6 @@ export interface ArmPrice {
   refused: string | null;
 }
 
-export interface FilesResponse {
-  campaign_id: string;
-  cycle_id: string;
-  entries: FileEntry[];
-}
-
-export interface FileEntry {
-  /** Path relative to the scope root, forward slashes */
-  path: string;
-  /** Which root the path is under */
-  scope: 'cycle' | 'campaign';
-  /** File size in bytes */
-  size: number;
-  /** ISO 8601 UTC modification time */
-  mtime: string;
-}
-
-export interface FileContentResponse {
-  campaign_id: string;
-  cycle_id: string;
-  scope: 'cycle' | 'campaign';
-  path: string;
-  size: number;
-  mtime: string;
-  content_type: 'json' | 'markdown' | 'log' | 'text' | 'binary';
-  /** UTF-8 text content; None when binary or oversized */
-  content: string | null;
-}
-
 /** A re-opened check-in: its draft and what the last resolver turn left. */
 export interface DraftReopenResponse {
   draft: DraftCampaignWire;
@@ -2466,21 +3400,6 @@ export interface PackOffer {
   entries: number;
   /** Whether `packs` names it under this config */
   on: boolean;
-}
-
-/** What the shelf holds but does not serve, a whole pack or one snippet of the account's: the */
-export interface PackRefusal {
-  /** Its directory name, as a `packs` knob names it */
-  name: string;
-  /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
-   * install and this account both hold the name; `block_pack_repeats`: an
-   * install pack holding a text an install pack before it in name order
-   * holds; `block_snippet_held`: one snippet of the account's pack whose text
-   * an install pack holds, which serves as that snippet while the rest of the
-   * account's pack serves on. One text is one snippet */
-  code: 'block_pack_invalid' | 'block_pack_collision' | 'block_pack_repeats' | 'block_snippet_held';
-  /** What to fix, in a sentence */
-  reason: string;
 }
 
 /** One param a node carries, in the COMPLETE per-node list a reader sums `movable_by` over. */
@@ -2783,799 +3702,6 @@ export interface WorkspaceStorageEntry {
   on_disk: LeafBytes;
 }
 
-/** The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`. */
-export interface ActiveSessionResponse {
-  /** Tenant the pointer belongs to — the caller's own, always known */
-  tenant_id: string;
-  /** Campaign of the latest launch; null when no session is active. */
-  campaign_id: string | null;
-  /** Cycle of the latest launch; null when no session is active. */
-  cycle_id: string | null;
-}
-
-export interface MachineStatusResponse {
-  /** Campaigns the machine admits right now. Resolved per read against the same
-   * rule a launch is admitted on, and lowered from the operator's ceiling
-   * while the shared provider throttle is saturated. */
-  capacity: number;
-  /** The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and
-   * writable nowhere else. `capacity` never exceeds it, and neither may an
-   * account's limit. */
-  ceiling: number;
-  /** `throttle` while `capacity` is below `ceiling`; null where the machine admits
-   * its whole ceiling. */
-  bound: 'throttle' | 'machine' | null;
-  /** Slots held machine-wide, whoever holds them — the occupancy figure, which
-   * `running` may list fewer of. */
-  occupied: number;
-  /** The held slots this caller may see, oldest first — live campaigns and paid
-   * scoring passes alike. Every slot under `MACHINE_STATUS_SCOPE=all` or to
-   * the host; otherwise the caller's own, another account's being counted in
-   * `occupied` alone. */
-  running: MachineSlot[];
-  /** Launches waiting for a slot, machine-wide — a count, not a list. Who they
-   * belong to is deliberately not served; `queue` carries the caller's own. */
-  queued: number;
-  /** True iff `occupied` reaches `capacity` — no slot free for anyone, the caller
-   * included. A launch is then QUEUED rather than refused, so this reads as
-   * 'you will wait', not 'you cannot start'. */
-  busy: boolean;
-  /** The CALLER's own waiting launches, oldest first — everything a client needs to
-   * say 'queued, position 3' and to offer a cancel. Own is the PRINCIPAL that
-   * launched them, the test `cancel-queued-run` applies. Other entries are
-   * counted in `queued` and never listed. */
-  queue: MachineQueueEntry[];
-  /** The CALLER's own launches refused today, newest first. A launch that queued
-   * was answered before it was refused, so this is where its refusal is read. */
-  refused: MachineRefusal[];
-  /** A landing in progress, `busy` and the caller's place in `queue` — a fact about
-   * the NEXT launch, never about a run in view; null where a slot is free and
-   * nothing of theirs waits. */
-  notice: Said | null;
-}
-
-/** One held slot, whoever holds it: a campaign run or a paid verb's scoring pass. */
-export interface MachineSlot {
-  job_id: string;
-  /** The job in words (`Job.what`), worded once for every surface: a run's
-   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
-   * cycle or workspace it scores. */
-  what: string;
-  /** WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a
-   * paid verb outside any run). */
-  holder: CampaignLaunch | ScoringPass;
-  /** The cycle the job holds, which `/hierarchy` serves as a course entry with its
-   * run phase — `scoring` for a pass on it; null for a fresh mint and a pass
-   * scoring no cycle. */
-  cycle: CycleHop | null;
-  /** user_id of the account whose job holds the slot */
-  user: string;
-  /** The CALLER's account holds it — a delegate's job is its owner's. The test a
-   * surface listing the account's own jobs filters on. */
-  mine: boolean;
-  /** ISO time the holder started running; null while it is still starting */
-  started_at: string | null;
-}
-
-/** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
-export interface CampaignLaunch {
-  dataset_name: string;
-  draft_id: string | null;
-  kind: 'campaign_launch';
-}
-
-/** A paid verb scoring outside any run: its hop is the cycle it scores, or none at all. */
-export interface ScoringPass {
-  verb: 'bench' | 'noise-floor' | 'probe-reasoning' | 'seed-screen' | 'verify';
-  kind: 'scoring_pass';
-}
-
-/** Always a launch: a scoring pass finding no slot is refused, never queued. */
-export interface MachineQueueEntry {
-  job_id: string;
-  /** The job in words (`Job.what`), worded once for every surface: a run's
-   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
-   * cycle or workspace it scores. */
-  what: string;
-  created_at: string;
-  /** 1-based place in the machine-wide drain order at the moment of this read.
-   * Least-served-first, so it moves as other accounts start and finish — it
-   * is where this launch stands now, not a countdown. */
-  position: number;
-}
-
-export interface MachineRefusal {
-  job_id: string;
-  /** The job in words (`Job.what`), worded once for every surface: a run's
-   * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
-   * cycle or workspace it scores. */
-  what: string;
-  /** When the launch was refused */
-  released_at: string;
-  /** The refusal, in the words the launch's own error carried */
-  reason: string;
-}
-
-/** The optimizers this install can run, the default first: one per manifest the registry holds. */
-export interface OptimizerRoster {
-  /** What a campaign naming no `optimization.optimizer` runs */
-  default: string;
-  /** The roster, the default first */
-  optimizers: OptimizerEntry[];
-}
-
-/** One optimizer this install can run, as a picker offers it. */
-export interface OptimizerEntry {
-  /** The manifest name, as `optimization.optimizer` names it */
-  name: string;
-  /** The manifest's own version */
-  version: string;
-  /** The citation a paper preset reproduces; its declared knob values are that
-   * paper's configuration. Null for an optimizer reproducing none */
-  paper: string | null;
-  /** The installed package that registered it, as `<distribution>: <entry point>`;
-   * null for one shipped with PromptPotter */
-  origin: string | null;
-}
-
-/** Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike. */
-export interface LibraryResponse {
-  /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
-  parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
-  /** Every work a cited snippet names, once, in first-named order */
-  sources: LibrarySource[];
-  /** The install's packs by name, then the account's, each in its own order */
-  snippets: LibrarySnippet[];
-  /** Each pack held but served none of, then each snippet of the account's skipped
-   * as an install pack's, and why: the rest serve on */
-  refused: PackRefusal[];
-}
-
-/** One cited work a snippet names, as its pack declares it; an authored snippet names none. */
-export interface LibrarySource {
-  /** The work's arXiv id, a cited snippet's `source` */
-  id: string;
-  title: string;
-  /** The title up to its first colon, for a chip */
-  short_title: string;
-  first_author: string;
-  year: number;
-}
-
-/** One snippet of one pack the account reads, as a library surface lists it. */
-export interface LibrarySnippet {
-  /** Its content id, the suffix of each pool entry `{part}.{id}` it expands into;
-   * one on the shelf, since a pack repeating another's text is refused */
-  id: string;
-  text: string;
-  /** The prompt parts it suits, in `PROMPT_FIELDS` order: a drop onto another part
-   * is allowed and shown as such */
-  suits: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
-  /** What it takes for granted of the run it lands in: a run whose chain or matcher
-   * lacks one never draws it into a pool */
-  presumes: ('ranking' | 'last_line_answer')[];
-  /** Free labels for search alone; nothing else reads them */
-  tags: string[];
-  /** A `sources` id for a cited snippet; `authored` for one an account wrote, which
-   * no work names */
-  source: string;
-  /** The cited technique's family as its pack records it; absent for an authored
-   * snippet */
-  method: string | null;
-  /** The pack holding it, as a `packs` knob names it */
-  pack: string;
-  /** 0 for a cited snippet; an authored one's is one past the snippet it supersedes */
-  version: number;
-  /** The `id` of the snippet it was edited from; absent for a cited snippet and one
-   * written from nothing */
-  supersedes: string | null;
-  /** Who wrote an authored snippet; absent for a cited one */
-  author: string | null;
-}
-
-/** Every campaign in one store: the unstarted first, then root-major and newest first. */
-export interface HierarchyResponse {
-  /** Unstarted campaigns lead, most recently edited first; then campaigns sharing a
-   * root cycle sit together, the group of the newest first. A `campaign` or
-   * `attached` filter asks after runs, so it serves no unstarted one. */
-  entries: (HierarchyCampaign | UnstartedCampaign)[];
-}
-
-/** A campaign as the listing serves it: its state and line stats are its line course's. */
-export interface HierarchyCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  tags: HierarchyTag[];
-  /** Its figures for a person, each composed once with a value, in the order a row
-   * shows them. */
-  figures: Figure[];
-  /** Its sentences under the figures, without a value; what could not be read is
-   * among them. */
-  lines: Said[];
-  state: HierarchyState;
-  span: HierarchySpan;
-  level: 'campaign';
-  facts: CampaignFacts;
-  /** Its courses to `?depth=`, root first; none at depth 0. */
-  children: HierarchyCourse[];
-}
-
-/** One chip an entry wears, worded by the server. */
-export interface HierarchyTag {
-  kind: 'dataset' | 'optimizer' | 'vendor' | 'mint' | 'lifecycle' | 'self_optimization' | 'arm' | 'superseded' | 'verdict';
-  /** What a surface routes or branches on: the dataset slug, the vendor id, the
-   * mint word, the successor's address. */
-  value: string;
-  /** The chip as it reads. */
-  label: string;
-}
-
-/** An entry's figure: a `Said` row keyed by the closed set code looks a figure up by. */
-export interface Figure {
-  /** Which figure, for code to look up; never shown. */
-  key: 'state' | 'optimizer' | 'spend' | 'spend_lifetime' | 'bench' | 'rounds' | 'candidates' | 'selection' | 'lift' | 'lift_per_usd' | 'lift_per_candidate' | 'time_per_lift' | 'lives' | 'accuracy' | 'ability';
-  tone: 'quiet' | 'success' | 'live' | 'attention' | 'warn' | 'danger';
-  label: string;
-  value: string | null;
-  sub: string | null;
-  /** The longer reading, a tap away. */
-  detail: string | null;
-}
-
-/** A run's state as one value: its status, whether it is held, the verbs. */
-export interface HierarchyState {
-  status: RunStatus;
-  /** A process holds this cycle, running or launching it. */
-  attached: boolean;
-  /** Why the run reads paused; null otherwise. */
-  pause: PauseReading | null;
-  admission: RunAdmission;
-  /** An operator intervened by hand, so the run is no longer purely reproducible. */
-  intervened: boolean;
-}
-
-/** When an entry opened and last moved. */
-export interface HierarchySpan {
-  opened_at: string;
-  /** The newest activity under the entry. */
-  last_at: string;
-}
-
-/** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
-export interface CampaignFacts {
-  /** The operator's own name for it; null where none was given, and the envelope's
-   * `label` falls back to the dataset. */
-  label: string | null;
-  /** The root course's address. */
-  root: string;
-  /** The address of the course holding the line now: the root, or the fork a
-   * supersede handed it to. */
-  line: string;
-  lifecycle: 'active' | 'archived' | 'deleted';
-  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
-  spend_lifetime: LifetimeSpend;
-  /** What the root course runs with; null where its pipeline did not resolve. */
-  runs_with: CampaignRunsWith | null;
-}
-
-/** What an account, or one campaign's share of it, was billed over its whole life. */
-export interface LifetimeSpend {
-  /** What the providers REPORTED they billed, over every cycle, fork and forwarded
-   * inner run, plus what a deleted cycle banked. Never an estimate: a call
-   * priced off our rate table is `rate_priced_usd`, a send whose bill never
-   * came `unreported_usd`. */
-  billed_usd: number;
-  /** What our rate table prices the calls no provider reported a cost for. Not
-   * spent — an estimate, shown beside `billed_usd` and never added into it.
-   * It binds the ceiling beside `billed_usd`. */
-  rate_priced_usd: number;
-  /** Some call was priced at our rate, so there is a `rate_priced_usd` to show
-   * beside the bill. */
-  calls_rate_priced: boolean;
-  /** `billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost;
-   * the token ceiling is then the binding one. */
-  bill_is_floor: boolean;
-  /** Tokens no provider billed and no rate on file prices. */
-  unpriced_tokens: number;
-  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
-   * account than `billed_usd` says. */
-  sends_unreported: boolean;
-  /** The most that sends which ended with no bill (cancelled, timed out, killed
-   * with a run) may have cost, at the bounds they were admitted on. Not spent
-   * — unknown. It binds the ceiling beside `billed_usd`. */
-  unreported_usd: number;
-}
-
-/** What a campaign's root course runs with — the root's pipeline resolution, cut to settings. */
-export interface CampaignRunsWith {
-  /** Scalar settings in active-step order, `model` included; no prompt text */
-  params: RunsWithParam[];
-  /** Every model in `params`, grouped under its vendor in first-seen order */
-  vendors: VendorModels[];
-  /** The optimizer manifest the root course runs */
-  optimizer: string;
-  /** The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no
-   * rounds axis */
-  budget_rounds: number | null;
-}
-
-/** One setting a campaign's root course runs with, and the layer that chose it. */
-export interface RunsWithParam {
-  node: string;
-  /** The config grid's own param key (`NodeConfigParam.key`) */
-  key: string;
-  value: unknown;
-  source: 'dataset' | 'campaign' | 'seed' | 'model_floor' | 'identity' | 'evolved' | 'unset';
-}
-
-/** The models of one vendor that a campaign's root course runs. */
-export interface VendorModels {
-  /** Who TRAINED them: the namespace of the model id, or the bare id where it names
-   * none. Lowercased, routing suffix dropped. */
-  vendor: string;
-  /** Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names
-   * a different run. */
-  models: string[];
-}
-
-/** A course — one cycle's run, root, fork, diag or inner — as the listing serves it. */
-export interface HierarchyCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  tags: HierarchyTag[];
-  /** Its figures for a person, each composed once with a value, in the order a row
-   * shows them. */
-  figures: Figure[];
-  /** Its sentences under the figures, without a value; what could not be read is
-   * among them. */
-  lines: Said[];
-  state: HierarchyState;
-  span: HierarchySpan;
-  level: 'course';
-  facts: CourseFacts;
-  /** Null until the lift vs origin is read. */
-  climb: CourseClimb | null;
-  /** The run's pinned line from what no clock reads (`run_said`): a producer's row
-   * is its dashboard's alone. Null where nothing needs the operator. */
-  said: Said | null;
-}
-
-/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
-export interface CourseFacts {
-  /** How the course was minted; the `mint` tag renders it. */
-  mint: 'root' | 'fork' | 'diag' | 'inner';
-  /** Null on a root, and on a cycle cut from another tree. */
-  spawn: CourseSpawn | null;
-  /** The outer panel cell an L4 inner course measures. */
-  task: string | null;
-  /** Null before round 0 closes. */
-  standing: RunStanding | null;
-  /** Rounds closed AFTER the origin. */
-  rounds_closed: number;
-  /** The column the course's newest election elected on; null before its first.
-   * `ability`: its rounds are won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
-  /** This course's own ledger's bill, at the moment. */
-  spend: MeteredSpend;
-  /** The campaign's bench, on the course holding the line, read whole at the head;
-   * null on every other course (the line's reads `held_elsewhere` there) and
-   * under a moment. */
-  bench: BenchScore | null;
-}
-
-/** Where a fork was born on its parent's time line: the cut, as an event. */
-export interface CourseSpawn {
-  /** The address of the course it branched from. */
-  parent: string;
-  /** The first round it ran itself: every round below it is its parent line's. */
-  cut_round: number;
-  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
-  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
-  direction: 'offshoot' | 'supersede' | 'equivalent';
-  /** Who cut it, as its fork record names them. */
-  issued_by: string;
-}
-
-/** Where the run stands after a round: its selection, over whom, and how it reads against C0. */
-export interface RunStanding {
-  rounds_without_advance: number;
-  /** The life bank after this round. Null where the campaign banks no lives
-   * (`optimization.lives`). */
-  lives: LivesReading | null;
-  /** The optimizer's declared pick (`declared_selection`), as the arm it was first
-   * measured as: the origin until a round selects. Null before round 0
-   * closes. */
-  selection: ArmName | null;
-  /** The pick `selection` was promoted over. Null while it is the origin. */
-  parent: ArmName | null;
-  /** What `selection` changed, in its proposer's words (its lineage's
-   * `changes_description`). Empty while it is the origin, which changed
-   * nothing. */
-  changes: string;
-  /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
-   * reading of that pair. The state says why where there is none:
-   * `same_individual` while the selection is the origin. */
-  vs_origin: PairedReading;
-  /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
-  rounds_closed: number;
-  /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
-   * interval), so it is the promotion clock and never a result; read
-   * `advanced`. */
-  improved: number;
-  /** Of those, how many closed `advanced`: their pick separated from C0 on the
-   * origin panel — the verdict clock. Never summed with `improved`. */
-  advanced: number;
-  /** Arms those rounds scored (`RoundOutcome.candidates_scored`), a re-read leader
-   * once per read. */
-  candidates: number;
-  /** USD the SEARCH had incurred at this close, every cycle of the line read whole
-   * (`SpendRollup.search_incurred_usd`); null on unpriced search tokens. */
-  search_usd: number | null;
-  /** Worked seconds of the line's launches to this close
-   * (`domain/campaign.py::worked_seconds`), the closing launch's to now; null
-   * where no launch's endpoints parsed. */
-  worked_s: number | null;
-}
-
-/** A run's life bank: what is left of it, and its cap. */
-export interface LivesReading {
-  left: number;
-  /** Null where the bank has no cap. */
-  cap: number | null;
-}
-
-/** What the lift vs origin cost, and the one caveat it and its rates share. */
-export interface CourseClimb {
-  /** Per search dollar, per candidate tested and in worked time per unit of lift,
-   * in that order; each sub names only its own denominator. */
-  rates: Figure[];
-  /** What the lift and every rate read in: the measurand and, under an ability
-   * election, that rounds are won on θ. Said once, under the rates. */
-  note: Said;
-}
-
-/** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
-export interface UnstartedCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  tags: HierarchyTag[];
-  /** Its figures for a person, each composed once with a value, in the order a row
-   * shows them. */
-  figures: Figure[];
-  /** Its sentences under the figures, without a value; what could not be read is
-   * among them. */
-  lines: Said[];
-  level: 'unstarted';
-  span: HierarchySpan;
-  facts: UnstartedFacts;
-}
-
-/** An open check-in's typed facts: it has no cycle, so no course, line or run. */
-export interface UnstartedFacts {
-  /** What its check-in has cost so far. */
-  spend_lifetime: LifetimeSpend;
-}
-
-/** One window of a family's chronology, oldest-first: a course, its forks and inner runs. */
-export interface HierarchySteps {
-  steps: HierarchyStep[];
-  /** Opaque cursor for the window immediately older than this one; null when this
-   * window already reaches the family's beginning. */
-  cursor_prev: string | null;
-}
-
-/** One ledger record that reads as a line, under its own course; served in a window only. */
-export interface HierarchyStep {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The course whose own ledger holds the record. */
-  parent: string;
-  level: 'step';
-  facts: StepFacts;
-}
-
-export interface StepFacts {
-  /** The line index in its course's OWN ledger — the space `?at=` and
-   * `ProjectionEnvelope.sequence` speak, so a live frame de-duplicates
-   * against a step on (course, offset). SPARSE: a record no line is made of
-   * is no step. */
-  offset: number;
-  /** The record's own time, raised to its file predecessor's when the two invert
-   * (records are stamped at construction but appended later). */
-  ts: string;
-  /** Seconds of silence before it: since the newest step or heartbeat anywhere in
-   * the family that the window knows of; 0 where none. A heartbeat takes no
-   * slot of a window, so a long open call never serves one empty. */
-  gap_before_s: number;
-  /** The record's reading. A `running` step with no later step on its course is a
-   * call still open. */
-  activity: ActivityItem;
-}
-
-/** A campaign as the subtree read serves it: every level under it. */
-export interface SubtreeCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  tags: HierarchyTag[];
-  /** Its figures for a person, each composed once with a value, in the order a row
-   * shows them. */
-  figures: Figure[];
-  /** Its sentences under the figures, without a value; what could not be read is
-   * among them. */
-  lines: Said[];
-  state: HierarchyState;
-  span: HierarchySpan;
-  level: 'campaign';
-  facts: SubtreeCampaignFacts;
-  /** Its courses, root first. */
-  children: SubtreeCourse[];
-}
-
-/** What only the subtree read knows: it scans every sibling's ledger. */
-export interface SubtreeCampaignFacts {
-  /** The operator's own name for it; null where none was given, and the envelope's
-   * `label` falls back to the dataset. */
-  label: string | null;
-  /** The root course's address. */
-  root: string;
-  /** The address of the course holding the line now: the root, or the fork a
-   * supersede handed it to. */
-  line: string;
-  lifecycle: 'active' | 'archived' | 'deleted';
-  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
-  spend_lifetime: LifetimeSpend;
-  /** What the root course runs with; null where its pipeline did not resolve. */
-  runs_with: CampaignRunsWith | null;
-  /** How many cycles `cleanup-empty-cycles` deletes here now
-   * (`CampaignStore.deletable_stubs`, the command's own list). */
-  deletable_stubs: number;
-}
-
-/** A course as the subtree read serves it: its rounds under it. */
-export interface SubtreeCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  tags: HierarchyTag[];
-  /** Its figures for a person, each composed once with a value, in the order a row
-   * shows them. */
-  figures: Figure[];
-  /** Its sentences under the figures, without a value; what could not be read is
-   * among them. */
-  lines: Said[];
-  state: HierarchyState;
-  span: HierarchySpan;
-  level: 'course';
-  facts: SubtreeCourseFacts;
-  /** Null until the lift vs origin is read. */
-  climb: CourseClimb | null;
-  /** The run's pinned line from what no clock reads (`run_said`): a producer's row
-   * is its dashboard's alone. Null where nothing needs the operator. */
-  said: Said | null;
-  /** Its rounds in round order, then any inner campaign its sandbox holds that no
-   * candidate's spawn stamp names — that one says so among its `lines`. */
-  children: (HierarchyRound | SubtreeCampaign)[];
-}
-
-/** What only the subtree read knows: it reads every candidate, under the request's lens. */
-export interface SubtreeCourseFacts {
-  /** How the course was minted; the `mint` tag renders it. */
-  mint: 'root' | 'fork' | 'diag' | 'inner';
-  /** Null on a root, and on a cycle cut from another tree. */
-  spawn: CourseSpawn | null;
-  /** The outer panel cell an L4 inner course measures. */
-  task: string | null;
-  /** Null before round 0 closes. */
-  standing: RunStanding | null;
-  /** Rounds closed AFTER the origin. */
-  rounds_closed: number;
-  /** The column the course's newest election elected on; null before its first.
-   * `ability`: its rounds are won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
-  /** This course's own ledger's bill, at the moment. */
-  spend: MeteredSpend;
-  /** The campaign's bench, on the course holding the line, read whole at the head;
-   * null on every other course (the line's reads `held_elsewhere` there) and
-   * under a moment. */
-  bench: BenchScore | null;
-  /** The `per_cell` formula this course was read under for the request's lens — a
-   * `dials:` lens realized against this campaign's anchors, a `score:` one as
-   * given. What a fork applying the lens carries as `scoring.per_cell`. Null
-   * without one. */
-  lens_criterion: string | null;
-  /** How the request's lens reorders this course's candidates. Null without a lens,
-   * and where it ranked none of them. */
-  lens_shift: LensShift | null;
-  /** The address of the arm the course's standing is paired against: the round-0
-   * pick its line holds, whichever course ran it. Null on a branch cut at
-   * round 0 before it measured its own. */
-  origin: string | null;
-  /** The address of the candidate a fork hangs from: the arm its mint record names,
-   * on the course of its parent's line that ran it. Null on a root. */
-  from_candidate: string | null;
-}
-
-/** What the request's lens did to one course's candidate ordering. */
-export interface LensShift {
-  /** The address of the candidate ranked first by composite; null where that
-   * candidate is retired. */
-  top_composite: string | null;
-  /** The same, ranked by `lens_value`. */
-  top_lens: string | null;
-  /** The lens ranks another candidate first. */
-  top_changed: boolean;
-  moved_up: number;
-  moved_down: number;
-  unchanged: number;
-}
-
-/** One round of a course's own ledger; its children are the candidates it proposed. */
-export interface HierarchyRound {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  level: 'round';
-  facts: RoundFacts;
-  /** In slot order. */
-  children: HierarchyCandidate[];
-}
-
-/** A round's typed facts: what its election declared. */
-export interface RoundFacts {
-  round: number;
-  /** The column the round's election elected on (`Election.elects_on`); null on a
-   * round never elected. `ability`: the round is won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
-}
-
-/** One candidate a round proposed; its children are the inner campaigns it spawned. */
-export interface HierarchyCandidate {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  tags: HierarchyTag[];
-  /** Its figures for a person, each composed once with a value, in the order a row
-   * shows them. */
-  figures: Figure[];
-  /** Its sentences under the figures, without a value; what could not be read is
-   * among them. */
-  lines: Said[];
-  level: 'candidate';
-  facts: CandidateFacts;
-  children: SubtreeCampaign[];
-}
-
-/** One arm a round proposed; everything measured or decided about it is its `reading`. */
-export interface CandidateFacts {
-  /** `OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one
-   * individual again. */
-  individual: string;
-  /** Every individual this one derives from — one for a mutation, several for a
-   * crossover; empty only at an origin. */
-  parent_ids: string[];
-  /** The variation nodes that wrote this individual, in the order they ran. Empty
-   * on an origin. */
-  variations: Variation[];
-  standing: 'origin' | 'proposed' | 'rewound' | 'rewound_stood_on' | 'retired';
-  /** `reading.arm` is the key every per-cycle document of this course speaks;
-   * `reading.sp_hash` joins to the archive rows. A retired candidate's
-   * election wears no crown: the course that took its place re-asks it. */
-  reading: ArmReading;
-  /** The newest crowned live candidate of its course — the parent the next round
-   * mutates from. At most one per course. */
-  stands: boolean;
-  /** The newest candidate its course proposed. */
-  course_latest: boolean;
-  /** The ONE candidate across the subtree a remembered individual id resolves to:
-   * the live one where a supersede left the individual on two, the first
-   * where several stand. */
-  answers_for_id: boolean;
-  /** The main line to THIS candidate, origin first: the line of the candidate its
-   * course hangs from (a fork's from-candidate, an inner course's host) up to
-   * the cut, each elected round of its course before it with the candidates
-   * crowned, then this candidate, then any later round that crowned nobody up
-   * to the next crown. Read off crowns, never `parent_ids`. */
-  main_line: MainLineStep[];
-  /** The address of the candidate its first parent, its main, was last measured as
-   * before it: the ONE edge a lineage view draws it from. Null at an origin,
-   * and where no candidate of its campaign measured that parent. */
-  descends_from: string | null;
-  /** The address of the candidate its second parent, the donor of a crossover, was
-   * last measured as before it, of any round. Null without a second parent or
-   * a main, and where no candidate of its campaign measured it. */
-  donor: string | null;
-  /** The loci, as `node.key`, its lineage records the donor gave and no later
-   * variation rewrote. Empty without a donor. */
-  donated_loci: string[];
-  /** Per other locus it moved off its main, the earlier candidates whose value
-   * there is closer to its own than the main's: most similar first, then most
-   * recently measured. */
-  gene_sources: GeneSource[];
-  /** This candidate's composite fitness under the request's `score:` lens. Null
-   * without a lens, or where no row carries a verdict under it. */
-  lens_value: number | null;
-  /** Which way the lens moved this candidate among its course's: its position by
-   * `lens_value` against its position by the reading's composite. Null
-   * without a lens, or where either value is. */
-  lens_rank_move: 'up' | 'down' | 'unchanged' | null;
-  /** Accuracy over the request's `samples=` subset, served only where this
-   * candidate carries a scoreable verdict for ALL of it. Null without a
-   * `samples=` mask. */
-  sample_set_accuracy: number | null;
-  /** How many of the `samples=` subset this candidate carries a scoreable verdict
-   * for. Null without a `samples=` mask. */
-  sample_set_n: number | null;
-  /** Set on a closed round's crowned candidate where the request's lens would have
-   * elected someone else. */
-  divergence: LineageDivergence | null;
-  /** Inside the counterfactual below a divergence — the client dims it. */
-  divergent: boolean;
-}
-
-/** One round on the main line to a candidate. */
-export interface MainLineStep {
-  round: number;
-  /** The addresses of the candidates the round's election crowned; at the
-   * candidate's own round, the candidate. Empty: the election crowned nobody. */
-  candidates: string[];
-}
-
-/** A candidate one locus of a child may have come from, other than the parent it descends from. */
-export interface GeneSource {
-  /** The locus the child moved off its parent, as `node.key`. */
-  locus: string;
-  /** The address of the candidate whose value it resembles. */
-  source: string;
-  /** How alike the child's value and the source's are, 0 to 1: a verbatim copy is
-   * 1. Always above the child's similarity to its parent on that locus. */
-  similarity: number;
-}
-
-/** Where an alternative criterion would have elected someone else, on the candidate it names. */
-export interface LineageDivergence {
-  /** The individual the masked criterion would have elected instead (measured, so
-   * nameable); null when the round would simply have held on origin. */
-  alternative_candidate_id: string | null;
-}
-
 export interface DatasetIndexResponse {
   datasets: DatasetIndexEntry[];
 }
@@ -3829,6 +3955,16 @@ export interface OriginEntry {
   created_at: string;
 }
 
+/** A command's state as it reads now, worded job by job where it launched any. */
+export interface CommandStatus {
+  command_id: string;
+  kind: string;
+  status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
+  said: string;
+  created_at: string;
+  last_updated_at: string;
+}
+
 /** One resolver turn's outcome: the checklist state it left and the post-apply draft. */
 export interface ResolveOriginResponse {
   resolution: OriginResolution;
@@ -3907,139 +4043,10 @@ export interface ArchiveReport {
   bytes_freed: number;
 }
 
-/** The caller's per-user preferences. */
-export interface UserSettings {
-  demo_mode_enabled: boolean;
-}
-
 /** The consent state after an accept, in the fields ``/me`` reports it. */
 export interface TermsConsent {
   terms_version: string;
   terms_accepted_version: string | null;
-}
-
-export interface AccountKey {
-  provider: string;
-  /** The key's last four characters: all that is ever served back. */
-  last4: string;
-  added_at: string;
-}
-
-/** The caller's identity envelope, with the provider and consent state the account and consent gates read. */
-export interface MeResponse {
-  user_id: string;
-  tenant_id: string;
-  issuer: string | null;
-  email: string | null;
-  name: string | null;
-  provider: string | null;
-  connected_accounts: ConnectedAccount[];
-  available_providers: string[];
-  capabilities: string[];
-  access_state: 'active' | 'blocked';
-  terms_version: string;
-  terms_accepted_version: string | null;
-}
-
-/** One OIDC provider bound to the active session. */
-export interface ConnectedAccount {
-  provider: string;
-  email: string | null;
-}
-
-/** Usage against the next launch's machine gates; the money is `/auth/coupon`'s. */
-export interface QuotaStatus {
-  concurrent_running: number;
-  /** This account's launches waiting for a machine slot. They count against
-   * `max_concurrent_cycles` exactly as running ones do. */
-  concurrent_queued: number;
-  max_concurrent_cycles: number;
-  /** Whether this caller may move `max_concurrent_cycles` through `set-concurrent-
-   * cycles`. False on the host's key, where the host sets it. */
-  max_concurrent_cycles_writable: boolean;
-  /** The machine's `MACHINE_RUN_CAPACITY`. */
-  ceiling: number;
-  /** `machine` while `max_concurrent_cycles` is above `ceiling`; null where the
-   * account's own limit is the one that binds. */
-  bound: 'throttle' | 'machine' | null;
-  campaigns_today: number;
-  max_campaigns_per_day: number;
-}
-
-/** Time-bucketed spend / requests / tokens over the requested window. */
-export interface ActivityResponse {
-  window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
-  /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
-   * the provider that billed the call, and whether the host's key under the
-   * coupon or the account's own sent it (`BilledCharge.key_source`). */
-  group_by: 'model' | 'api_key';
-  buckets: ActivityBucket[];
-  /** Every series in the window, in first-seen order — one colour per label, stable
-   * across the buckets. A call outside the optimizer's own carries its kind. */
-  series_labels: string[];
-  /** What providers reported they billed. */
-  total_spend_usd: number;
-  /** What our rate table prices the window's calls no provider billed. Never spent,
-   * and in no series. */
-  total_rate_priced_usd: number;
-  /** Some call in the window was priced at our rate, so there is a
-   * `total_rate_priced_usd` to show beside the bill. */
-  calls_rate_priced: boolean;
-  /** The two totals understate: a call in the window carries neither a bill nor a
-   * rate's price. */
-  bill_is_floor: boolean;
-  total_tokens: number;
-  total_requests: number;
-  /** The tallest bucket's billed USD — the scale the spend bars are drawn against.
-   * Null where no bucket was billed anything, so there is no bar to scale. */
-  peak_spend_usd: number | null;
-  /** `peak_spend_usd`'s twin over a bucket's tokens. */
-  peak_tokens: number | null;
-  /** `peak_spend_usd`'s twin over a bucket's requests. */
-  peak_requests: number | null;
-}
-
-/** One time bucket of the Activity pane's three stacked bar charts. */
-export interface ActivityBucket {
-  /** Billed USD per `series_labels` entry. A call no provider billed adds nothing
-   * here and still counts in the other two; one no rate prices either sets
-   * the response's `bill_is_floor`. */
-  series_spend: Record<string, number>;
-  series_tokens: Record<string, number>;
-  series_requests: Record<string, number>;
-}
-
-/** The host's allowance for this account, and who pays a send on each provider. */
-export interface CouponStatus {
-  state: 'unmetered' | 'used_up' | 'held' | 'open';
-  /** The allowance in one line: its state's label, what the box's keys drew of the
-   * face on the unit drawn nearest it (else the state's word), and the
-   * providers the account's own keys pay. */
-  headline: Said;
-  /** What this account's running campaigns reserve of the face. */
-  held: Budget;
-  /** What a new launch may still hold: the face less what is drawn and `held`, at
-   * most the unpriced grace while a bill is a floor. */
-  left: Budget;
-  /** What is drawn over the face on the unit drawn nearest it, at most 1; null
-   * where no unit is bounded. */
-  used_share: number | null;
-  /** What the box's keys paid for this account. */
-  host_key_spend: LifetimeSpend;
-  /** What this account's own keys paid. */
-  own_key_spend: LifetimeSpend;
-  /** Every provider a node may name. */
-  routes: ProviderRoute[];
-}
-
-/** Who pays this account's sends on one provider. */
-export interface ProviderRoute {
-  provider: string;
-  /** `user` where the account holds a key for it, else `host` where the box does,
-   * under the allowance; null where neither does, so a send on it is refused. */
-  payer: 'host' | 'user' | null;
-  /** The account's own key for it, if it holds one. */
-  key: AccountKey | null;
 }
 
 export interface SiteRecordWire {
@@ -4085,6 +4092,12 @@ export interface BankSnippetPayload {
   experiment: string;
 }
 
+/** Stop the act a command asked for: each queued launch it made is withdrawn, each running run */
+export interface CancelCommandPayload {
+  /** The command's id, as its caller named it or its door answered it. */
+  command_id: string;
+}
+
 /** Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent. */
 export interface CancelQueuedRunPayload {
   /** The queued job id, as `machine-status` lists it. */
@@ -4097,6 +4110,7 @@ export interface ChangeRunLimitsPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   budget: Budget;
 }
 
@@ -4106,6 +4120,7 @@ export interface CleanupEmptyCyclesPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
 }
 
 /** ``apply`` defaults to False on every mode, including the destructive one: a preview is what */
@@ -4133,6 +4148,7 @@ export interface DeleteCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
 }
 
 /** Close an open check-in without minting; its check-in calls stay billed to the workspace. */
@@ -4146,6 +4162,7 @@ export interface ForkCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   /** Recorded with the command. */
   reason: string;
   mode: RunMode;
@@ -4476,6 +4493,7 @@ export interface OriginGateDecisionPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   /** `proceed` into L1 anyway, `rescore` the origin force-fresh, or `abort` the
    * cycle. */
   decision: 'rescore' | 'proceed' | 'abort';
@@ -4487,6 +4505,7 @@ export interface PauseCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   /** Recorded with the command. */
   reason: string;
 }
@@ -4528,6 +4547,7 @@ export interface SetSampleLookaheadPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   /** 1 disarms. */
   cells: number;
   /** As deep as the stop rules allow, every round, until pressed off. */
@@ -4545,6 +4565,7 @@ export interface SkipSearchpointPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
 }
 
 /** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no */
@@ -4565,6 +4586,7 @@ export interface StartRunPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   budget: Budget;
   step_rounds: number | null;
   mode: RunMode;
@@ -4576,6 +4598,7 @@ export interface StepCyclePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   /** Rounds to run. */
   step_rounds: number;
 }
@@ -4586,6 +4609,7 @@ export interface SubmitArmsPayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   /** Each an edit of the round's parent: `changes_description` and at least one of
    * `prompt_fields`, `shots`, `pipeline_overlay`. */
   arms: SubmittedArm[];
@@ -4621,6 +4645,7 @@ export interface VerifyCandidatePayload {
    * payload. */
   campaign_id: string;
   cycle_id: string;
+  descend: string | null;
   candidate_id: string;
   samples: number | null;
   strategy: 'random' | 'hard';
@@ -4654,6 +4679,7 @@ export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
+  "cancel-command": CommandSent<CancelCommandPayload, "command_id">;
   "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
   "change-run-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
@@ -4691,6 +4717,7 @@ export interface CommandResponses {
   "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
+  "cancel-command": CommandStatus;
   "cancel-queued-run": CommandAcceptedBody;
   "change-run-limits": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;

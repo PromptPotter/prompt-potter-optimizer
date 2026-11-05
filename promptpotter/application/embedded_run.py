@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
-from promptpotter.application.commands import archive_compaction, measuring
+from promptpotter.application.command_status import CommandStatus
+from promptpotter.application.command_status import command_status as read_command_status
+from promptpotter.application.commands import archive_compaction, cancelling, measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
@@ -34,6 +36,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.command_kinds import (
+    CancelCommandPayload,
     CompactArchivePayload,
     GradeBenchPayload,
     OriginGateDecisionPayload,
@@ -65,6 +68,8 @@ if TYPE_CHECKING:
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
 __all__ = [
+    "cancel_command",
+    "command_status",
     "compact_archive",
     "grade_bench",
     "open_session",
@@ -136,10 +141,24 @@ async def submit_arms(
     )
 
 
-async def grade_bench(stores: Stores, campaign_id: str) -> BenchScore:
-    """Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands."""
+async def grade_bench(stores: Stores, campaign_id: str, *, command_id: str = "") -> BenchScore:
+    """*command_id* is the id the act is recorded under, as REST's ``Command-Id`` names it: a host
+    reads it by that id (`command_status`) and stops it (`cancel_command`) while it runs; unnamed,
+    one is minted. Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands."""
+    call = CommandCall(GradeBenchPayload(campaign_id=campaign_id), named_id=command_id)
+    sent = await CommandDispatcher(stores).answer(measuring.grade_bench, call)
+    return sent.result
+
+
+def command_status(stores: Stores, command_id: str) -> CommandStatus:
+    """A command's state by its id, as REST's ``command-status`` read answers it."""
+    return read_command_status(stores, JobRegistry.attach(stores.jobs_dir), command_id)
+
+
+async def cancel_command(stores: Stores, command_id: str) -> CommandStatus:
+    """The stop every door sends on a command's id: its status as the stop left it."""
     sent = await CommandDispatcher(stores).answer(
-        measuring.grade_bench, CommandCall(GradeBenchPayload(campaign_id=campaign_id))
+        cancelling.cancel_command, CommandCall(CancelCommandPayload(command_id=command_id))
     )
     return sent.result
 

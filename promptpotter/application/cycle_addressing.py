@@ -4,7 +4,7 @@ from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.config.paths import default_projects_root
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import (
@@ -76,9 +76,27 @@ def resolve_campaign_id(stores: Stores, needle: str, *, inside: CyclePath = ()) 
     return matches[0]
 
 
-def resolve_campaign_id_hint(stores: Stores, needle: str, *, inside: CyclePath = ()) -> str:
-    """Returned UNCHANGED where nothing matches: the dispatcher already answers ``not_found``."""
-    return next(iter(_campaign_matches(stores, needle, inside)), needle)
+def resolve_subject(stores: Stores, subject: Subject) -> Subject:
+    """Every door's one resolution of an addressed campaign id prefix, in the chain it names; left
+    UNCHANGED where nothing matches, so the read or command it rides answers ``not_found``."""
+    matches = _campaign_matches(stores, subject.campaign_id, subject.inside)
+    return subject._replace(campaign_id=next(iter(matches), subject.campaign_id))
+
+
+def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
+    """A terminal's named cycle: a named campaign (an id prefix) never takes the pointer's cycle,
+    and a cycle named alone is the active campaign's; each a prefix of its id."""
+    if campaign:
+        campaign_id = resolve_campaign_id(stores, campaign)
+        return CycleHop(
+            campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, cycle or None)
+        )
+    hop = active_pointer(stores)
+    if hop is None or not (cycle_id := cycle or hop.cycle_id):
+        raise NotFoundError(
+            "No active cycle — name one with --campaign/--cycle, or start one with `new`."
+        )
+    return CycleHop(campaign_id=hop.campaign_id, cycle_id=cycle_id)
 
 
 def resolve_cycle_id(stores: Stores, campaign_id: str, hint: str | None) -> str:

@@ -68,6 +68,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.runtime_flags import (
+    declare_run_phase,
     derive_run_state,
     run_state_stamps,
     standing_budget,
@@ -88,6 +89,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_resolved_run,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.command_index import CommandIndex
 from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
@@ -154,8 +156,17 @@ def _ledger_meters(ledgers: Iterable[Path]) -> dict[CeilingMeter, Budget]:
 
 
 class CampaignStore:
-    def __init__(self, base_dir: WorkspaceDir):
+    """*commands* is the account's command-id index, which every destroyer and the ledger move
+    here file into before they act (`command_index.py`)."""
+
+    def __init__(self, base_dir: WorkspaceDir, commands: CommandIndex):
         self._base_dir = base_dir
+        self._commands = commands
+
+    @classmethod
+    def of_account(cls, account: WorkspaceDir) -> CampaignStore:
+        """An account's own campaigns, outside any sandbox: its workspace holds its index."""
+        return cls(account, CommandIndex(account))
 
     @property
     def workspace(self) -> WorkspaceDir:
@@ -457,6 +468,8 @@ class CampaignStore:
             cycles_dir = campaign_cycles_dir(campaign_dir)
             if cycles_dir.is_dir():
                 inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
+        # Both keeps take every ledger under it, a keepsake's included.
+        self._commands.removing(campaign_dir)
         if keepsake:
             self._set_lifecycle(campaign_id, "deleted", changed_at, reason)
             _strip_to_keepsake(campaign_dir)
@@ -482,6 +495,7 @@ class CampaignStore:
             cycle_id=sandbox.name,
             metered=_ledger_meters([]),
         )
+        self._commands.removing(sandbox)
         rmtree_robust(sandbox)
 
     def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
@@ -492,10 +506,12 @@ class CampaignStore:
         return scan_cycle_facts(self.ledger(hop)).resumed_ending
 
     def adopt_ledger(self, hop: CycleHop, ledger: Path) -> None:
-        """A MOVE, never a copy: what a draft billed is the cycle's first lines."""
+        """A MOVE, never a copy: what a draft billed is the cycle's first lines. Filed past its
+        refusal and before the rename, which decides where the draft's command ids are read."""
         target = self.ledger(hop)
         if target.exists():
             raise ConflictError(f"cycle {hop.cycle_id} already holds a ledger")
+        self._commands.moving(ledger, target)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(ledger, target)
 
@@ -640,7 +656,7 @@ class CampaignStore:
         # Error first, so no reader finds the ending without it.
         if error is not None:
             ledger.append(error)
-        ledger.append(stop)
+        declare_run_phase(ledger, stop)
         if dashboard is not None:
             dashboard.drain()
         write_cycle_index(cycle_dir)
@@ -738,6 +754,7 @@ class CampaignStore:
             cycle_id=hop.cycle_id,
             metered=_ledger_meters([self.ledger(hop)]),
         )
+        self._commands.removing(cycle_dir)
         rmtree_robust(cycle_dir)
         return True, ""
 

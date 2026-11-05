@@ -84,7 +84,7 @@ invariants:
                       tail; there is no live-state endpoint. One exemption: a ONE-SHOT TOPOLOGY read
                       whose invalidation signal is the poll — `GET /campaigns/{id}/pipeline` is the
                       only panel-feeding one. `POST /campaigns/{id}/fork-preview`
-                      (presentation/api/routers/campaigns/manifests.py::preview_fork_steer) is keyed
+                      (`application/read_params.py::ForkPreviewParams`) is keyed
                       on the operator''s pending gesture, which no poll can invalidate.'
   I11_surface_parity: 'Whatever optimizer a campaign runs gets the same surfaces where the method
                       permits; where a feature cannot apply, the surface says so. A surface learns

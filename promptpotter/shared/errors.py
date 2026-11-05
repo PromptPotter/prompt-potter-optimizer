@@ -158,10 +158,14 @@ class DiagnosticError(PotterError):
     code = "diagnostic_refused"
 
 
-class TaskUncancellableError(ConflictError):
-    """A task whose act no command cancels, refused before any of its jobs is touched."""
+class CommandUncancellableError(ConflictError):
+    """A command whose act no stop reaches now, refused before any of its jobs is touched."""
 
-    code = "task_uncancellable"
+    code = "command_uncancellable"
+
+
+class ActStoppedError(ConflictError):
+    """A stop reached the act mid-way: its ack records it `stopped`, which reads as cancelled."""
 
 
 class IdempotencyKeyReusedError(PotterError):
@@ -169,6 +173,15 @@ class IdempotencyKeyReusedError(PotterError):
 
     http_status = 409
     code = "idempotency_key_reused"
+
+
+class CommandIdReusedError(PotterError):
+    """An id the account's command-id index files already (`store/command_index.py`): one command
+    id names one act, recorded once, so a second act under it is refused, and so is a retry of
+    an act no retry answers (one in flight, refused, stopped, or filed without its record)."""
+
+    http_status = 409
+    code = "command_id_reused"
 
 
 class MachineBusyError(PotterError):

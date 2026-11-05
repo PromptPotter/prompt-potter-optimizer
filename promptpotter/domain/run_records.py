@@ -687,7 +687,8 @@ class AccountEventRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-CommandAckStatus = Literal["accepted", "applied", "rejected"]
+# `stopped`: a stop reached the act mid-way (`shared/errors.py::ActStoppedError`).
+CommandAckStatus = Literal["accepted", "applied", "rejected", "stopped"]
 
 
 class CommandRecord(FrozenModel):

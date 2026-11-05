@@ -6,7 +6,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
 from promptpotter.application.intelligence.rasch import theta_cells
-from promptpotter.application.mask.record import Lens
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
     PairedGrade,
@@ -17,6 +16,7 @@ from promptpotter.application.scoring.selection import (
     paired_grades,
     paired_p_best,
 )
+from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.worded import Worded
 

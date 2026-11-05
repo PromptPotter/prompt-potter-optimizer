@@ -40,6 +40,16 @@ def standing_controls(cycle_dir: Path) -> Controls:
     return scan_ledger_controls(CycleLayout(cycle_dir).ledger)
 
 
+def declare_run_phase(ledger: CycleEventLog, declared: RunPhaseRecord) -> None:
+    """The one writer of a run's phase. A declaration that empties the inbox (a stop, a new
+    launch) acks every control it drops ``stopped`` (`Controls.dropped`): a loop command ends with
+    the loop that never took it, read off that ack, never off whether a process lives."""
+    before = scan_ledger_controls(ledger.path)
+    ledger.append(declared)
+    for ack in before.dropped(scan_ledger_controls(ledger.path)):
+        ledger.append(ack)
+
+
 def effective_lookahead(requested: int, ceiling: int) -> int:
     """The one clamp: the command records the request UNCLAMPED, the ceiling being the backend's."""
     return max(1, min(requested, ceiling))
@@ -120,7 +130,9 @@ def read_run_state(
         producer = ProducerReading.of(state, silent_for_s=silent_for_s, open_for_s=open_for_s)
     # Before the lifecycle: a pass scores ended cycles too, and a pause asked of it is standing.
     if scoring:
-        return RunState(RunPhase.PAUSED if pause_requested else RunPhase.SCORING, producer)
+        return RunState(
+            RunPhase.PAUSED if pause_requested else RunPhase.SCORING, producer, scoring=True
+        )
     if terminal:
         return RunState(RunPhase.TERMINAL, producer)
     if pause_requested or declared == RunPhase.PAUSED:

@@ -1,16 +1,19 @@
 """The host registry served over MCP: list and call it, read its resources, get its prompts.
 
 Every answer is `application/host_surface.py`'s `HostSession`; this module only words it in MCP's
-types. A task kind's call answers the Tasks extension's handle: claimed (`resultType: "task"`) on a
-connection that speaks the extensions vocabulary, and as the call's structured content on a
-handshake-era one, which has no claimed result to carry it. `tasks/get`, `tasks/result` and
-`tasks/cancel` serve both. A refusal keeps its `PotterError.code` on every answer.
+types, and is the one place a command is called a task. A task kind's call that asks to run as a
+task is started (`HostSession.start_command`) and answers the Tasks extension's handle, its command
+id: claimed (`resultType: "task"`) on a connection that speaks the extensions vocabulary, and as the
+call's structured content on a handshake-era one, which has no claimed result to carry it.
+`tasks/get` is the `command-status` read, `tasks/result` the command's answer replayed off its
+record (`HostSession.command_result`), `tasks/cancel` the `cancel-command` command. A refusal keeps its
+`PotterError.code` on every answer.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.extras import Extra, require_extra
 
@@ -26,26 +29,30 @@ except ModuleNotFoundError:
 
 from promptpotter.application import host_surface
 from promptpotter.application.caller import Caller
-from promptpotter.application.host_surface import HostAnswer, HostSession, HostTask
+from promptpotter.application.command_status import CommandStatus
+from promptpotter.application.host_surface import HostSession
 from promptpotter.shared.errors import PotterError
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
 
 type Ctx = ServerRequestContext[Any, Any]
 
 
-def _task(task: HostTask) -> types.Task:
+def _task(task: CommandStatus) -> types.Task:
     return types.Task(
-        task_id=task.task_id,
+        task_id=task.command_id,
         status=task.status,
-        status_message=task.status_message,
+        status_message=task.said,
         created_at=task.created_at,
         last_updated_at=task.last_updated_at,
         ttl=None,
     )
 
 
-def _task_json(task: HostTask) -> dict[str, Any]:
+def _task_json(task: CommandStatus) -> dict[str, Any]:
     return _task(task).model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
@@ -58,9 +65,15 @@ def _refused(exc: PotterError) -> MCPError:
     return MCPError(code=code, message=str(exc), data={"code": exc.code})
 
 
-def _answered(name: str, answer: HostAnswer) -> types.CallToolResult:
-    structured = host_surface.host_tool(name).structured(answer.value)
-    return types.CallToolResult(content=_text(answer.value), structured_content=structured)
+def _answered(name: str, value: JsonValue) -> types.CallToolResult:
+    structured = host_surface.host_tool(name).structured(value)
+    return types.CallToolResult(content=_text(value), structured_content=structured)
+
+
+def _refusal(exc: PotterError) -> types.CallToolResult:
+    """A refusal is the tool's answer, so the model reading it can correct its call."""
+    refused = {"code": exc.code, "message": str(exc)}
+    return types.CallToolResult(content=_text(refused), is_error=True)
 
 
 def host_server(session: HostSession) -> Server[Any]:
@@ -75,9 +88,10 @@ def host_server(session: HostSession) -> Server[Any]:
                     name=tool.name,
                     description=tool.description,
                     input_schema=tool.input_schema(),
-                    output_schema=None if tool.as_task else tool.output_schema(),
-                    execution=types.ToolExecution(task_support="required")
-                    if tool.as_task
+                    output_schema=tool.output_schema(),
+                    # Called without a task, it answers inline, as `tasks/result` answers it.
+                    execution=types.ToolExecution(task_support="optional")
+                    if tool.startable
                     else None,
                     # A command may touch the world past this box (a provider's key): the default.
                     annotations=types.ToolAnnotations(
@@ -89,17 +103,17 @@ def host_server(session: HostSession) -> Server[Any]:
         )
 
     async def call_tool(ctx: Ctx, params: types.CallToolRequestParams) -> Any:
+        tool = host_surface.HOST_TOOLS.get(params.name)
+        as_task = params.task is not None and tool is not None and tool.startable
         try:
-            answer = await session.answer(
-                host_surface.CallTool(params.name, params.arguments or {})
-            )
+            if not as_task:
+                return _answered(
+                    params.name, await session.call_tool(params.name, params.arguments or {})
+                )
+            started = await session.start_command(params.name, params.arguments or {})
         except PotterError as exc:
-            # A refusal is the tool's answer, so the model reading it can correct its call.
-            refused = {"code": exc.code, "message": str(exc)}
-            return types.CallToolResult(content=_text(refused), is_error=True)
-        if answer.task is None:
-            return _answered(params.name, answer)
-        task = _task_json(answer.task)
+            return _refusal(exc)
+        task = _task_json(started)
         if ctx.protocol_version in types.version.MODERN_PROTOCOL_VERSIONS:
             return {"resultType": "task", "task": task}
         return types.CallToolResult(
@@ -108,7 +122,7 @@ def host_server(session: HostSession) -> Server[Any]:
 
     async def get_task(_ctx: Ctx, params: types.GetTaskRequestParams) -> types.GetTaskResult:
         try:
-            task = await session.answer(host_surface.TaskStatusOf(params.task_id))
+            task = await session.command_status(params.task_id)
         except PotterError as exc:
             raise _refused(exc) from exc
         return types.GetTaskResult(**_task(task).model_dump())
@@ -117,16 +131,16 @@ def host_server(session: HostSession) -> Server[Any]:
         _ctx: Ctx, params: types.GetTaskPayloadRequestParams
     ) -> types.CallToolResult:
         try:
-            name, answer = await session.answer(host_surface.TaskResultOf(params.task_id))
+            status, value = await session.command_result(params.task_id)
         except PotterError as exc:
-            raise _refused(exc) from exc
-        return _answered(name, answer)
+            return _refusal(exc)
+        return _answered(status.kind, value)
 
     async def cancel_task(
         _ctx: Ctx, params: types.CancelTaskRequestParams
     ) -> types.CancelTaskResult:
         try:
-            task = await session.answer(host_surface.CancelTask(params.task_id))
+            task = await session.cancel_command(params.task_id)
         except PotterError as exc:
             raise _refused(exc) from exc
         return types.CancelTaskResult(**_task(task).model_dump())
@@ -135,7 +149,7 @@ def host_server(session: HostSession) -> Server[Any]:
         _ctx: Ctx, _params: types.PaginatedRequestParams | None
     ) -> types.ListResourcesResult:
         try:
-            listed = await session.answer(host_surface.ListResources())
+            listed = await session.resources()
         except PotterError as exc:
             raise _refused(exc) from exc
         return types.ListResourcesResult(
@@ -162,7 +176,7 @@ def host_server(session: HostSession) -> Server[Any]:
         _ctx: Ctx, params: types.ReadResourceRequestParams
     ) -> types.ReadResourceResult:
         try:
-            value = await session.answer(host_surface.ReadResource(params.uri))
+            value = await session.read_resource(params.uri)
         except PotterError as exc:
             raise _refused(exc) from exc
         text = json.dumps(value, ensure_ascii=False)
@@ -188,9 +202,7 @@ def host_server(session: HostSession) -> Server[Any]:
 
     async def get_prompt(_ctx: Ctx, params: types.GetPromptRequestParams) -> types.GetPromptResult:
         try:
-            text = await session.answer(
-                host_surface.RenderPrompt(params.name, params.arguments or {})
-            )
+            text = await session.render_prompt(params.name, params.arguments or {})
         except PotterError as exc:
             raise _refused(exc) from exc
         return types.GetPromptResult(

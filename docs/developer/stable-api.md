@@ -74,7 +74,9 @@ The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and wh
 
 ## 5b. Embedded launch entry (Python)
 
-`application/embedded_run.py::open_session`, `::run_campaign`, `::submit_gate_decision`, `::submit_arms`, `::compact_archive` and `::reindex_measurement_archive` — signatures there. What a host cannot read off a signature:
+`application/embedded_run.py::open_session`, `::run_campaign`, `::submit_gate_decision`, `::submit_arms`, `::grade_bench`, `::command_status`, `::cancel_command`, `::compact_archive` and `::reindex_measurement_archive` — signatures there. What a host cannot read off a signature:
+
+- **A started command is addressed by the id the host names** (`grade_bench(command_id=…)`, as REST's `Command-Id`): `command_status` reads it and `cancel_command` stops it from another task while it runs.
 
 - **Two steps because every caller works between them**: the mint is the same `mint_framed_cycle` prologue `new` and the web mint run, so the cycle is resumable, forkable and diagnosable by the §5 verbs; the session `run_campaign` answers is bound to the cycle the run ended on, a fork included.
 - **`campaign_config` is what a MINT declares** — required on a fresh session, refused on one bound to a cycle.
@@ -107,7 +109,7 @@ Forks within a family share one event stream via `CycleEventLog.inherit_from(par
 
 ### The event stream
 
-`GET /api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe` (`text/event-stream`) tails that ledger; the frame shape is [`events-asyncapi.generated.json`](../specs/events-asyncapi.generated.json) — `domain/projection_envelope.py::ProjectionKind` covers the whole `CycleRecord` union plus the synthesized `stream_snapshot`, asserted at import. Code path: `infrastructure/projections/event_stream.py::CycleLedgerTail` → `application/cycle_reads.py::cycle_event_frames` → `routers/campaigns/events.py::stream_cycle_events`. The contract, permanent ([`decisions.md`](../decisions.md) § 0001):
+`GET /api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe` (`text/event-stream`) tails that ledger; the frame shape is [`events-asyncapi.generated.json`](../specs/events-asyncapi.generated.json) — `domain/projection_envelope.py::ProjectionKind` covers the whole `CycleRecord` union plus the synthesized `stream_snapshot`, asserted at import. Code path: `infrastructure/projections/event_stream.py::CycleLedgerTail` → `application/cycle_reads.py::cycle_event_frames` → `routers/reads.py::_events`. The contract, permanent ([`decisions.md`](../decisions.md) § 0001):
 
 1. **Snapshot first**: a `stream_snapshot` whose `payload` is the cycle's served dashboard (`"warming_up": true` before a launch declared what the cycle runs with) and whose `sequence` is the offset the tail picks up at.
 2. **Live tail**: every later record as one envelope, `sequence` = its ledger offset, dense and in append order; a jump from N to N+2 is a gap, and the recovery is to re-subscribe. Density is why `kind` must cover every `record_type`: an unmapped kind reads as a gap and drives a reconnect.

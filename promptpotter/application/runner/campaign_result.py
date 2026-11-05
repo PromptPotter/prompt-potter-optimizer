@@ -18,7 +18,6 @@ from promptpotter.domain.arms import candidate_label
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
 from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.run_standing import LineOutlay
 from promptpotter.domain.spend import Budget, SpendRollup
@@ -178,12 +177,11 @@ def line_run(stores: Stores, hop: CycleHop) -> LineRun:
     named = bool(hop.cycle_id)
     index = stores.campaigns.load(hop, moment=None) if named else None
     standing = None if index is None else index.standing
-    # A pass holds the cycle too, and reads SCORING: only the loop's hold is a run still selecting.
+    # A pass holds the cycle too: only the loop's hold is a run still selecting.
     run = derive_run_state(stores.campaigns.cycle_dir(hop)) if named else None
     attached = run is not None and run.producer.attached
-    scoring = run is not None and run.run_phase is RunPhase.SCORING
     return LineRun(
-        selecting=attached and not scoring,
+        selecting=run is not None and attached and not run.scoring,
         # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
         pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
         ending=None if index is None else index.stop_reason,

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
+from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.diagnostics import verify
-from promptpotter.application.jobs.launcher.admission import PassHold, campaign_sends, paid_pass
+from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.paired_reading import ArmKey
@@ -16,19 +16,7 @@ from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import DispatchedToCycle
-    from promptpotter.domain.command_kinds import (
-        GradeBenchPayload,
-        PauseCyclePayload,
-        VerifyCandidatePayload,
-    )
-    from promptpotter.infrastructure.store.stores import Stores
-
-
-async def stop_pass(stores: Stores, hold: PassHold, pause: CommandCall[PauseCyclePayload]) -> None:
-    """Every door's stop of a paid pass in flight: *pause*, sent under the pass's own hold
-    (`PassHold.stopping`), so it reaches the pass or is refused, never a run holding the cycle after."""
-    async with hold.stopping(stores, pause.payload):
-        await CommandDispatcher(stores).dispatch(pause)
+    from promptpotter.domain.command_kinds import GradeBenchPayload, VerifyCandidatePayload
 
 
 async def verify_candidate(

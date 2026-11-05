@@ -55,10 +55,8 @@ from promptpotter.application.evidence.metric_catalogue import (
 from promptpotter.application.evidence.subjects import (
     SubjectMask,
     SubjectReading,
-    SubjectSpec,
     WinnerChainPoint,
     authorship_of,
-    parse_tree_address,
     scenario_said,
 )
 from promptpotter.application.mask.divergence import scenario_spine
@@ -78,7 +76,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
 )
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath, Subject, parse_pool
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
@@ -263,7 +261,7 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
 def select_evidence(
     stores: Stores,
     *,
-    subjects: Sequence[SubjectSpec],
+    subjects: Sequence[Subject],
     dataset: str = "",
     grid: str = "",
     include_ranking: bool = False,
@@ -273,13 +271,13 @@ def select_evidence(
 ) -> Evidence:
     specs = list(subjects)
     if dataset:
-        pool = parse_tree_address(dataset)
-        leaf = descend_store(stores, pool.inside)
+        name, inside = parse_pool(dataset)
+        leaf = descend_store(stores, inside)
         named = {s.key for s in specs}
         specs += [
             spec
-            for cid in campaigns_on_dataset(leaf, pool.name)
-            if (spec := SubjectSpec("campaign", cid, inside=pool.inside)).key not in named
+            for cid in campaigns_on_dataset(leaf, name)
+            if (spec := Subject(cid, inside=inside)).key not in named
         ]
     axes = [a.strip() for a in grid.split(",") if a.strip()]
     if grid and len(axes) != 2:
@@ -387,7 +385,7 @@ class _SubjectRead(NamedTuple):
 
 def subject_evidence(
     stores: Stores,
-    specs: list[SubjectSpec],
+    specs: list[Subject],
     *,
     include_ranking: bool = False,
     include_winner_chain: bool = False,
@@ -395,7 +393,7 @@ def subject_evidence(
     metric: str = MEASURAND,
     grid: tuple[str, str] | None = None,
 ) -> Evidence:
-    wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
+    wanted: dict[str, Subject] = {s.key: s for s in specs}
     located = {key: at for key, spec in wanted.items() if (at := _at(stores, spec)) is not None}
     answering = {
         key: at
@@ -539,7 +537,7 @@ class _Located(NamedTuple):
     cycle_dir: Path
 
 
-def _at(stores: Stores, spec: SubjectSpec) -> _Located | None:
+def _at(stores: Stores, spec: Subject) -> _Located | None:
     """`None`, never a raise: one mistyped id or deleted sandbox must not fail every other subject."""
     try:
         leaf = descend_store(stores, spec.inside)
@@ -562,12 +560,12 @@ def _files_read(at: _Located) -> Hashable:
     return (at.stores.archive.signature(), *(file_sig(path) for path in signed))
 
 
-def _answers(at: _Located, spec: SubjectSpec) -> bool:
+def _answers(at: _Located, spec: Subject) -> bool:
     head = _resolve_head(at, spec)
     return head is not None and bool(head.point.sheet)
 
 
-def _read_subject(at: _Located, spec: SubjectSpec) -> _SubjectRead | None:
+def _read_subject(at: _Located, spec: Subject) -> _SubjectRead | None:
     head = _resolve_head(at, spec)
     if head is None:
         return None
@@ -586,7 +584,7 @@ def _read_subject(at: _Located, spec: SubjectSpec) -> _SubjectRead | None:
     )
 
 
-def _member(spec: SubjectSpec, head: _Head, cycle: _CycleFacts) -> SubjectMember:
+def _member(spec: Subject, head: _Head, cycle: _CycleFacts) -> SubjectMember:
     hop = CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name)
     point = head.point
     arm = ArmName(key=ArmKey(point.candidate_id), round=point.round, label=point.label)
@@ -614,7 +612,7 @@ def _member_rows(path: CyclePath, arm: ArmName, sheet: CellSheet, instrument_id:
     )
 
 
-def _resolve_head(at: _Located, spec: SubjectSpec) -> _Head | None:
+def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
     stores, cycle_dir = at.stores, at.cycle_dir
     manifest = read_json_tolerant(CampaignLayout(at.campaign_dir).manifest, {})
     dataset_name = _dataset_name(manifest)
@@ -687,7 +685,7 @@ def _masked(point: _ChainPoint, keys: frozenset[str] | None) -> _ChainPoint:
 
 
 def _scenario(
-    stores: Stores, spec: SubjectSpec, cycle: _Cycle
+    stores: Stores, spec: Subject, cycle: _Cycle
 ) -> tuple[Said, list[_ChainPoint]] | None:
     record = load_mask_record(stores, spec.campaign_id, spec.samples, lens=spec.lens)
     recorded = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
@@ -726,7 +724,7 @@ def _candidate_point(cycle: _Cycle, candidate_id: str) -> _ChainPoint | None:
 def _winner_chain(
     stores: Stores,
     head: _Head,
-    spec: SubjectSpec,
+    spec: Subject,
     compiled: CompiledExpression,
     channels: dict[str, dict[str, float]],
 ) -> list[WinnerChainPoint]:
@@ -851,7 +849,7 @@ def _cycle_facts(stores: Stores, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
 
 def _reading_row(
     stores: Stores,
-    spec: SubjectSpec,
+    spec: Subject,
     head: _Head,
     compiled: CompiledExpression,
     channels: dict[str, dict[str, float]],

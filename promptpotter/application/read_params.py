@@ -7,8 +7,13 @@ call's arguments (`host_surface.py`), so a parse or a resolution lives here once
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any, ClassVar
+import asyncio
+import contextvars
+import functools
+import inspect
+from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field
 
@@ -20,8 +25,13 @@ from promptpotter.application.backend_listing import (
     list_backends,
 )
 from promptpotter.application.caller import Caller
+from promptpotter.application.command_status import CommandStatus, command_status
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
-from promptpotter.application.cycle_addressing import ActiveSessionResponse, active_session
+from promptpotter.application.cycle_addressing import (
+    ActiveSessionResponse,
+    active_session,
+    resolve_subject,
+)
 from promptpotter.application.cycle_files import FileContentResponse, FileScope, FilesResponse
 from promptpotter.application.cycle_reads import (
     FamilyRay,
@@ -37,7 +47,6 @@ from promptpotter.application.cycle_reads import (
 from promptpotter.application.datasets.draft_build import DraftReopenResponse, reopen_draft
 from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import Evidence, select_evidence
-from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.head_to_head_price import HeadToHeadPrice, price_head_to_head
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_moment
@@ -61,7 +70,6 @@ from promptpotter.application.maintenance.storage_report import (
     campaign_storage,
     workspace_storage,
 )
-from promptpotter.application.mask.record import parse_lens, parse_sample_ids
 from promptpotter.application.origin_listing import (
     DatasetIndexResponse,
     OriginListResponse,
@@ -93,8 +101,14 @@ from promptpotter.application.served_dashboard import (
 )
 from promptpotter.application.views.render.export import ExportFiles
 from promptpotter.domain.cells import Cell, CellsResponse, HardSampleOrder, HeatmapScope
-from promptpotter.domain.command_kinds import ReadKind
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, decode_cycle_path
+from promptpotter.domain.command_kinds import MAX_COMMAND_ID_CHARS, ReadKind
+from promptpotter.domain.cycle_paths import (
+    CyclePath,
+    Subject,
+    decode_cycle_path,
+    parse_lens,
+    parse_sample_ids,
+)
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.hierarchy import (
@@ -125,25 +139,56 @@ PARAMS_FOR_READ: dict[ReadKind, type[ReadParams]] = {}
 class ReadParams(StrictModel):
     """What a read takes off the wire; its `answer(caller)` is the row's answer, sync or async.
 
-    A row's model declares its own docstring: it is the read's one description, a host tool's and
-    the route's (`api/catalogue.py::bind_surface`) alike.
+    A row's model declares its own docstring, its HTTP `route` and its `method`: the docstring is
+    the read's one description, a host tool's and the route's alike, and the route is where
+    `api/routers/reads.py` mounts it (a GET's fields not in the route ride the query, a POST's its
+    body).
     """
 
     read: ClassVar[ReadKind]
+    route: ClassVar[str]
+    method: ClassVar[Literal["GET", "POST"]]
 
-    def __init_subclass__(cls, read: ReadKind | None = None, **kwargs: Any) -> None:
+    def __init_subclass__(
+        cls,
+        read: ReadKind | None = None,
+        route: str = "",
+        method: Literal["GET", "POST"] = "GET",
+        **kwargs: Any,
+    ) -> None:
         super().__init_subclass__(**kwargs)
         if read is None:
             return
         require_own_docstring(cls, read)
         if read in PARAMS_FOR_READ:
             raise TypeError(f"{read} already answers through {PARAMS_FOR_READ[read].__name__}")
-        cls.read = read
+        if not route.startswith("/"):
+            raise TypeError(f"{cls.__name__} declares no route for {read}")
+        cls.read, cls.route, cls.method = read, route, method
         PARAMS_FOR_READ[read] = cls
 
     def answer(self, caller: Caller) -> object:
-        """Overridden by each row's model; `api/catalogue.py::bind_surface` reads the override's return."""
+        """Overridden by each row's model; the override's return is the read's answer model."""
         raise NotImplementedError(type(self).__name__)
+
+    async def answered(self, caller: Caller) -> object:
+        """`answer`, awaited by every door alike: a sync answer reads the disk, so it runs off the
+        event loop (`off_loop`)."""
+        if inspect.iscoroutinefunction(type(self).answer):
+            return await self.answer(caller)  # type: ignore[misc]
+        return await off_loop(self.answer, caller)
+
+
+# The reads' own workers, as many as the threads a sync route had: a read never queues behind a
+# command's offloaded work on the loop's default executor.
+_READ_WORKERS = ThreadPoolExecutor(max_workers=40, thread_name_prefix="read")
+
+
+async def off_loop[*A, T](work: Callable[[*A], T], *args: *A) -> T:
+    """A read's disk work on the reads' workers, in the caller's context: every read door's one
+    offload, `answered`'s and a framed route's alike."""
+    run = functools.partial(contextvars.copy_context().run, work, *args)
+    return await asyncio.get_running_loop().run_in_executor(_READ_WORKERS, run)
 
 
 class _CycleAddressed(ReadParams):
@@ -153,14 +198,13 @@ class _CycleAddressed(ReadParams):
 
     @property
     def path(self) -> CyclePath:
-        hop = CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
-        return (hop, *decode_cycle_path(self.descend))
+        return Subject.below(self.campaign_id, self.cycle_id, self.descend).path
 
     def viewed(self, stores: Stores) -> ViewedCycle:
         return view_cycle(stores, self.path)
 
 
-class MeParams(ReadParams, read=ReadKind.ME):
+class MeParams(ReadParams, read=ReadKind.ME, route="/auth/me"):
     """The caller's identity envelope; ``available_providers`` is the configured ones minus the
     connected one."""
 
@@ -169,14 +213,14 @@ class MeParams(ReadParams, read=ReadKind.ME):
         return account.me(stores, account.account_read(stores), configured=caller.providers)
 
 
-class UserSettingsParams(ReadParams, read=ReadKind.USER_SETTINGS):
+class UserSettingsParams(ReadParams, read=ReadKind.USER_SETTINGS, route="/auth/user-settings"):
     """The current user's preferences."""
 
     def answer(self, caller: Caller) -> account.UserSettings:
         return account.user_settings(caller.stores)
 
 
-class QuotaStatusParams(ReadParams, read=ReadKind.QUOTA_STATUS):
+class QuotaStatusParams(ReadParams, read=ReadKind.QUOTA_STATUS, route="/auth/quota-status"):
     """The caller's live quota: usage is unclamped, and the ceilings are the resolved ones, never
     the raw nullable overrides."""
 
@@ -184,7 +228,7 @@ class QuotaStatusParams(ReadParams, read=ReadKind.QUOTA_STATUS):
         return quota_status(stores=caller.stores, job_registry=caller.jobs)
 
 
-class CouponParams(ReadParams, read=ReadKind.COUPON):
+class CouponParams(ReadParams, read=ReadKind.COUPON, route="/auth/coupon"):
     """The host's allowance for the caller on the box's keys: its face, what is left, and the keys
     the caller sends on past it. What is left is derived from the ledgers, never a counter."""
 
@@ -192,7 +236,7 @@ class CouponParams(ReadParams, read=ReadKind.COUPON):
         return coupon_status(caller.stores)
 
 
-class ActivityParams(ReadParams, read=ReadKind.ACTIVITY):
+class ActivityParams(ReadParams, read=ReadKind.ACTIVITY, route="/auth/activity"):
     """Time-bucketed spend, requests and tokens over the window, each billed call at the price it
     was stamped with."""
 
@@ -207,7 +251,7 @@ class ActivityParams(ReadParams, read=ReadKind.ACTIVITY):
         return account_activity(caller.stores, window=self.window, group_by=self.group_by)
 
 
-class ActiveSessionParams(ReadParams, read=ReadKind.ACTIVE_SESSION):
+class ActiveSessionParams(ReadParams, read=ReadKind.ACTIVE_SESSION, route="/sessions/active"):
     """The caller-tenant's active-session pointer: its latest launch from any entry point.
 
     No active session is a steady state: it answers null ids, never a not-found.
@@ -217,7 +261,7 @@ class ActiveSessionParams(ReadParams, read=ReadKind.ACTIVE_SESSION):
         return active_session(caller.stores)
 
 
-class MachineStatusParams(ReadParams, read=ReadKind.MACHINE_STATUS):
+class MachineStatusParams(ReadParams, read=ReadKind.MACHINE_STATUS, route="/machine-status"):
     """Machine occupancy: how many campaigns may run here and how many do, and the slots the
     caller may see."""
 
@@ -225,7 +269,7 @@ class MachineStatusParams(ReadParams, read=ReadKind.MACHINE_STATUS):
         return machine_status(caller.jobs, identity=caller.stores.identity)
 
 
-class OptimizersParams(ReadParams, read=ReadKind.OPTIMIZERS):
+class OptimizersParams(ReadParams, read=ReadKind.OPTIMIZERS, route="/optimizers"):
     """The optimizers this install can run, one per registered manifest: what
     ``optimization.optimizer`` accepts."""
 
@@ -233,7 +277,7 @@ class OptimizersParams(ReadParams, read=ReadKind.OPTIMIZERS):
         return optimizer_roster()
 
 
-class LibraryParams(ReadParams, read=ReadKind.LIBRARY):
+class LibraryParams(ReadParams, read=ReadKind.LIBRARY, route="/library"):
     """Every snippet the caller's library holds, the install's packs beside its own, for a target
     or an optimizer prompt alike."""
 
@@ -241,14 +285,16 @@ class LibraryParams(ReadParams, read=ReadKind.LIBRARY):
         return library(caller.stores.block_packs)
 
 
-class BackendsParams(ReadParams, read=ReadKind.BACKENDS):
+class BackendsParams(ReadParams, read=ReadKind.BACKENDS, route="/backends"):
     """Every registered connector, at the endpoint the operator configured for it."""
 
     def answer(self, caller: Caller) -> list[BackendResponse]:  # noqa: ARG002 -- install-wide
         return list_backends()
 
 
-class BackendHealthParams(ReadParams, read=ReadKind.BACKEND_HEALTH):
+class BackendHealthParams(
+    ReadParams, read=ReadKind.BACKEND_HEALTH, route="/backends/{backend_id}/health"
+):
     """Whether a launch against this backend would be admitted, by the reading admission itself
     takes.
 
@@ -261,7 +307,7 @@ class BackendHealthParams(ReadParams, read=ReadKind.BACKEND_HEALTH):
         return await backend_health(self.backend_id)
 
 
-class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY):
+class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY, route="/hierarchy"):
     """Every campaign in one store the caller owns, as hierarchy entries, each with its courses.
 
     ``descend`` enters an inner store exactly as every per-cycle read does.
@@ -285,18 +331,22 @@ class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY):
         return decode_cycle_path(self.descend)
 
     def answer(self, caller: Caller) -> HierarchyResponse:
+        stores, inside = caller.stores, self.inside
+        named = None if self.campaign is None else Subject(self.campaign, inside=inside)
         return list_hierarchy(
-            caller.stores,
-            inside=self.inside,
+            stores,
+            inside=inside,
             dataset=self.dataset,
             lifecycle=self.lifecycle,
-            campaign_id=self.campaign,
+            campaign_id=None if named is None else resolve_subject(stores, named).campaign_id,
             attached_only=self.attached,
             depth=self.depth,
         )
 
 
-class HierarchyStepsParams(ReadParams, read=ReadKind.HIERARCHY_STEPS):
+class HierarchyStepsParams(
+    ReadParams, read=ReadKind.HIERARCHY_STEPS, route="/hierarchy/{address:path}/@"
+):
     """The course's chronology: its steps, its forks' and its inner runs', merged by time.
 
     The replay read: the SSE tail always seeks to EOF, so history has no other home. Windowed
@@ -311,14 +361,16 @@ class HierarchyStepsParams(ReadParams, read=ReadKind.HIERARCHY_STEPS):
 
     def opened(self, stores: Stores) -> FamilyRay:
         return open_family_ray(
-            stores, decode_cycle_path(self.address), limit=self.limit, before=self.before
+            stores, Subject.parse_address(self.address).path, limit=self.limit, before=self.before
         )
 
     def answer(self, caller: Caller) -> HierarchySteps:
         return self.opened(caller.stores).window()
 
 
-class HierarchySubtreeParams(ReadParams, read=ReadKind.HIERARCHY_SUBTREE):
+class HierarchySubtreeParams(
+    ReadParams, read=ReadKind.HIERARCHY_SUBTREE, route="/hierarchy/{address:path}"
+):
     """The entry at ``address`` with every level under it: courses, rounds, candidates, inner
     campaigns.
 
@@ -351,7 +403,11 @@ class HierarchySubtreeParams(ReadParams, read=ReadKind.HIERARCHY_SUBTREE):
         )
 
 
-class CycleDashboardParams(_CycleAddressed, read=ReadKind.CYCLE_DASHBOARD):
+class CycleDashboardParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_DASHBOARD,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard",
+):
     """Live telemetry for the viewed cycle: the fold of its own ledger chain.
 
     The ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one
@@ -371,7 +427,11 @@ class CycleDashboardParams(_CycleAddressed, read=ReadKind.CYCLE_DASHBOARD):
         return self.served(self.viewed(caller.stores))
 
 
-class CycleRoundParams(_CycleAddressed, read=ReadKind.CYCLE_ROUND):
+class CycleRoundParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_ROUND,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
+):
     """One closed round: its last close's arms and verdict, and the rows it names, each carrying
     its mark as ``status``.
 
@@ -392,7 +452,11 @@ class CycleRoundParams(_CycleAddressed, read=ReadKind.CYCLE_ROUND):
         return closed
 
 
-class CycleRoundAuditParams(_CycleAddressed, read=ReadKind.CYCLE_ROUND_AUDIT):
+class CycleRoundAuditParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_ROUND_AUDIT,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}/audit",
+):
     """The round's audit twin: the per-node LLM I/O, which the round beside it does not carry.
 
     A fork answers for the rounds it inherited; ``null`` where no twin is on disk.
@@ -404,7 +468,11 @@ class CycleRoundAuditParams(_CycleAddressed, read=ReadKind.CYCLE_ROUND_AUDIT):
         return round_audit(self.viewed(caller.stores), self.round_num)
 
 
-class CycleExportParams(_CycleAddressed, read=ReadKind.CYCLE_EXPORT):
+class CycleExportParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_EXPORT,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/export",
+):
     """One reading of the cycle, chosen by what its reader does next — the CLI's ``export --tier``.
 
     ``chat`` and ``report`` are text to paste, ``deploy`` is ``export.json``; ``notebook`` and
@@ -418,7 +486,11 @@ class CycleExportParams(_CycleAddressed, read=ReadKind.CYCLE_EXPORT):
         return export_cycle(caller.stores, self.path, self.tier)
 
 
-class CycleEventsParams(_CycleAddressed, read=ReadKind.CYCLE_EVENTS):
+class CycleEventsParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_EVENTS,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe",
+):
     """Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.
 
     Not found only for an unknown cycle; a running, paused or finished one answers one
@@ -431,7 +503,11 @@ class CycleEventsParams(_CycleAddressed, read=ReadKind.CYCLE_EVENTS):
         return cycle_event_frames(self.viewed(caller.stores))
 
 
-class CycleFilesParams(_CycleAddressed, read=ReadKind.CYCLE_FILES):
+class CycleFilesParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_FILES,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/files",
+):
     """The recursive file tree of the cycle directory plus the campaign-level artifacts, at any
     depth through ``descend``."""
 
@@ -439,7 +515,11 @@ class CycleFilesParams(_CycleAddressed, read=ReadKind.CYCLE_FILES):
         return cycle_files.list_cycle_files(caller.stores, self.path)
 
 
-class CycleFileParams(_CycleAddressed, read=ReadKind.CYCLE_FILE):
+class CycleFileParams(
+    _CycleAddressed,
+    read=ReadKind.CYCLE_FILE,
+    route="/campaigns/{campaign_id}/cycles/{cycle_id}/file",
+):
     """The contents of one file under the cycle or campaign scope; with ``descend``, the inner
     cycle's, never the outer root's."""
 
@@ -455,7 +535,7 @@ class CycleFileParams(_CycleAddressed, read=ReadKind.CYCLE_FILE):
         )
 
 
-class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE):
+class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE, route="/evidence"):
     """The cross-subject read: the bench head-to-head, roster, comparability, replicates and
     decomposition, then a merged interval per subject with every pairwise test under the selected
     metric."""
@@ -541,9 +621,10 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE):
     )
 
     def answer(self, caller: Caller) -> Evidence:
+        stores = caller.stores
         return select_evidence(
-            caller.stores,
-            subjects=[parse_subject(raw) for raw in self.subject],
+            stores,
+            subjects=[resolve_subject(stores, Subject.parse(raw)) for raw in self.subject],
             dataset=self.dataset,
             grid=self.grid,
             include_ranking=self.ranking,
@@ -553,7 +634,9 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE):
         )
 
 
-class HeadToHeadPriceParams(ReadParams, read=ReadKind.HEAD_TO_HEAD_PRICE):
+class HeadToHeadPriceParams(
+    ReadParams, read=ReadKind.HEAD_TO_HEAD_PRICE, route="/head-to-head/price", method="POST"
+):
     """What a head-to-head plan costs before any of it is minted, in dollars, calls and wall
     clock; each budget point carries the ``mint-head-to-head`` payload that mints its arms.
 
@@ -566,7 +649,7 @@ class HeadToHeadPriceParams(ReadParams, read=ReadKind.HEAD_TO_HEAD_PRICE):
         return await price_head_to_head(caller.stores, self.plan)
 
 
-class DraftParams(ReadParams, read=ReadKind.DRAFT):
+class DraftParams(ReadParams, read=ReadKind.DRAFT, route="/drafts/{draft_id}"):
     """Re-open a check-in: its draft and its last resolver turn. Not found once started or
     discarded."""
 
@@ -576,21 +659,28 @@ class DraftParams(ReadParams, read=ReadKind.DRAFT):
         return await reopen_draft(caller.stores, self.draft_id)
 
 
-class CampaignPipelineParams(ReadParams, read=ReadKind.CAMPAIGN_PIPELINE):
+class CampaignPipelineParams(
+    ReadParams, read=ReadKind.CAMPAIGN_PIPELINE, route="/campaigns/{campaign_id}/pipeline"
+):
     """What this campaign runs, the one server-owned answer; ownership-gated, not found on a
     cross-tenant read."""
 
     campaign_id: str = Field(min_length=1, max_length=128)
     at: str = Field(
         default="",
-        description="Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
+        description="Searchpoint subject (`Subject.parse` grammar); defaults to the campaign root",
     )
 
     def answer(self, caller: Caller) -> CampaignPipelineResponse:
         return resolve_pipeline_at(caller.stores, self.campaign_id, self.at)
 
 
-class ForkPreviewParams(ReadParams, read=ReadKind.FORK_PREVIEW):
+class ForkPreviewParams(
+    ReadParams,
+    read=ReadKind.FORK_PREVIEW,
+    route="/campaigns/{campaign_id}/fork-preview",
+    method="POST",
+):
     """Whether this steer takes the babysit path: the fork gate's own verdict, asked without
     forking.
 
@@ -606,7 +696,9 @@ class ForkPreviewParams(ReadParams, read=ReadKind.FORK_PREVIEW):
         return fork_preview(caller.stores, self.campaign_id, self.pipeline_overlay)
 
 
-class ConfigMapParams(ReadParams, read=ReadKind.CONFIG_MAP):
+class ConfigMapParams(
+    ReadParams, read=ReadKind.CONFIG_MAP, route="/campaigns/{campaign_id}/config-map"
+):
     """One campaign's knob coupling and provenance map: what moves which estimand, what
     overwrites what, which knobs collide.
 
@@ -619,7 +711,9 @@ class ConfigMapParams(ReadParams, read=ReadKind.CONFIG_MAP):
         return campaign_config_map(caller.stores, self.campaign_id)
 
 
-class CampaignStorageParams(ReadParams, read=ReadKind.CAMPAIGN_STORAGE):
+class CampaignStorageParams(
+    ReadParams, read=ReadKind.CAMPAIGN_STORAGE, route="/campaigns/{campaign_id}/storage"
+):
     """On-disk size of the campaign tree, split into its MECE leaves. Not found on a
     cross-user read."""
 
@@ -629,7 +723,9 @@ class CampaignStorageParams(ReadParams, read=ReadKind.CAMPAIGN_STORAGE):
         return campaign_storage(caller.stores, self.campaign_id)
 
 
-class WorkspaceStorageParams(ReadParams, read=ReadKind.WORKSPACE_STORAGE):
+class WorkspaceStorageParams(
+    ReadParams, read=ReadKind.WORKSPACE_STORAGE, route="/workspace/storage"
+):
     """On-disk size per campaign across the caller's workspace, fattest first, archived
     campaigns included.
 
@@ -641,14 +737,16 @@ class WorkspaceStorageParams(ReadParams, read=ReadKind.WORKSPACE_STORAGE):
         return workspace_storage(caller.stores)
 
 
-class DatasetsParams(ReadParams, read=ReadKind.DATASETS):
+class DatasetsParams(ReadParams, read=ReadKind.DATASETS, route="/datasets"):
     """Every dataset this identity may read: its own tenant origins, then install content."""
 
     def answer(self, caller: Caller) -> DatasetIndexResponse:
         return dataset_index(caller.stores)
 
 
-class DatasetPipelineParams(ReadParams, read=ReadKind.DATASET_PIPELINE):
+class DatasetPipelineParams(
+    ReadParams, read=ReadKind.DATASET_PIPELINE, route="/datasets/{name:path}/pipeline"
+):
     """One dataset's declared pipeline, gated by the resolver every dataset read shares."""
 
     name: str = Field(min_length=1, description="The dataset name")
@@ -657,7 +755,9 @@ class DatasetPipelineParams(ReadParams, read=ReadKind.DATASET_PIPELINE):
         return await resolve_pipeline_for_dataset(caller.stores, self.name)
 
 
-class DatasetCellsParams(ReadParams, read=ReadKind.DATASET_CELLS):
+class DatasetCellsParams(
+    ReadParams, read=ReadKind.DATASET_CELLS, route="/datasets/{name:path}/cells"
+):
     """The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones
     holding a kept cell."""
 
@@ -737,7 +837,9 @@ class DatasetCellsParams(ReadParams, read=ReadKind.DATASET_CELLS):
         return self.logged(self.scoped(caller.stores))
 
 
-class DatasetCellParams(ReadParams, read=ReadKind.DATASET_CELL):
+class DatasetCellParams(
+    ReadParams, read=ReadKind.DATASET_CELL, route="/datasets/{name:path}/cells/{answer}"
+):
     """One answer opened: its row assembled into a trace."""
 
     name: str = Field(min_length=1, description="The dataset name")
@@ -750,7 +852,7 @@ class DatasetCellParams(ReadParams, read=ReadKind.DATASET_CELL):
         return await open_cell(caller.stores, self.name, self.answer_id)
 
 
-class OriginsParams(ReadParams, read=ReadKind.ORIGINS):
+class OriginsParams(ReadParams, read=ReadKind.ORIGINS, route="/origins"):
     """Every minted origin in the caller's tenant, newest first; a dataset no campaign ran is the
     ``datasets`` read's.
 
@@ -759,6 +861,21 @@ class OriginsParams(ReadParams, read=ReadKind.ORIGINS):
 
     def answer(self, caller: Caller) -> OriginListResponse:
         return origin_index(caller.stores)
+
+
+class CommandStatusParams(
+    ReadParams, read=ReadKind.COMMAND_STATUS, route="/commands/{command_id}/status"
+):
+    """A command read by its id, as its caller named it or its door answered it: in flight until
+    its ack, then as the ack left it; where it launched jobs, each as its registry reads it and the
+    state of the most open one. A host's task is this read."""
+
+    command_id: str = Field(
+        min_length=1, max_length=MAX_COMMAND_ID_CHARS, description="The command's id."
+    )
+
+    def answer(self, caller: Caller) -> CommandStatus:
+        return command_status(caller.stores, caller.jobs, self.command_id)
 
 
 # The last model is declared above, so a row answered by none fails right here.

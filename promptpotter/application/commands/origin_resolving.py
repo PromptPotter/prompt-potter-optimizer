@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
+from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
     draft_wire,
@@ -23,7 +23,6 @@ from promptpotter.shared.errors import PotterError, ServiceUnavailableError
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import DispatchedToDraft
     from promptpotter.domain.command_kinds import ResolveOriginPayload
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +37,8 @@ class ResolveOriginResponse(StrictModel):
 async def resolve_origin(
     dispatched: DispatchedToDraft[ResolveOriginPayload],
 ) -> Applier[ResolveOriginResponse]:
+    """A resolver turn, recorded: calling ``resolve_origin_turn`` bare records no turn AND
+    re-spends the call a replay serves."""
     stores = dispatched.dispatcher.stores
     draft_id = dispatched.payload.draft_id
     draft = owned_draft(stores, draft_id)
@@ -70,11 +71,3 @@ async def resolve_origin(
         )
 
     return Applier(_apply, replay=_on_replay)
-
-
-async def dispatch_origin_resolution(
-    stores: Stores, call: CommandCall[ResolveOriginPayload]
-) -> ResolveOriginResponse:
-    """Calling ``resolve_origin_turn`` bare records no turn AND re-spends the call a replay serves."""
-    outcome = await CommandDispatcher(stores).answer(resolve_origin, call)
-    return outcome.result

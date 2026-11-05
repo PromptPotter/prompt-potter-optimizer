@@ -12,6 +12,8 @@ from promptpotter.domain.spend import Budget
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from promptpotter.domain.command_kinds import ReadKind
+
 
 class Arg:
     def __init__(self, *flags: str, **spec: Any) -> None:
@@ -27,6 +29,11 @@ class Verb:
     args: tuple[Arg, ...] = ()
     # False only for a verb that parses no ledger, banked round or registered member.
     needs_registries: bool = True
+    # A read verb's row and its renderer (`module:fn`); its handler is `read:cmd_read`.
+    read: ReadKind | None = None
+    render: str | None = None
+    # A read verb's flags its renderer reads, which no field of the row's model takes.
+    render_args: tuple[str, ...] = ()
 
 
 GLOBAL_ARGS = (

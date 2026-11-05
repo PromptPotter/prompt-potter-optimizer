@@ -21,6 +21,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.presentation.cli.commands.launch import (
+    HeldLaunch,
     confirm_tty,
     cycle_result_command,
     divergence_hint,
@@ -43,7 +44,6 @@ from promptpotter.shared.errors import PayloadInvalidError, ResumeDivergenceErro
 if TYPE_CHECKING:
     from collections.abc import Coroutine
 
-    from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
     from promptpotter.presentation.cli.session import SessionCtx
@@ -73,13 +73,13 @@ def _start_run(
 
 async def _dispatch_held(
     args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
-) -> HeldRun:
+) -> HeldLaunch:
     """*ctx* follows the cycle the command answers (a fork, a diag sibling) and stays put when the hold is refused."""
     outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch(
         CommandCall(payload)
     )
-    held = held_run(outcome.result)
-    ctx.cycle_id = held.session.hop.cycle_id
+    held = held_run(outcome)
+    ctx.cycle_id = held.run.session.hop.cycle_id
     return held
 
 
@@ -91,7 +91,7 @@ async def _dispatch_fork(
     seed: ForkSeed,
     keep_rounds: bool = False,
     reason: str = "",
-) -> HeldRun:
+) -> HeldLaunch:
     """A refused hold leaves no fork: the applier removes the stub it minted."""
     budget = budget_from_args(args)
     if budget.named:
@@ -114,7 +114,7 @@ async def _dispatch_fork(
     )
 
 
-async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
+async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldLaunch:
     rewind_to: int = args.rewind_to_round
     reason = args.rewind_reason.strip() or f"operator rewind to round {rewind_to}"
     parent_cycle_id = ctx.cycle_id
@@ -160,7 +160,7 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
     return overlay
 
 
-async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
+async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldLaunch:
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
     overlay = _steer_overlay(args.steer, recorded_schema(ctx.store, ctx.hop))
     preview = fork_preview(ctx.store, ctx.campaign_id, overlay)
@@ -206,7 +206,7 @@ def _divergence_result(div: ResumeDivergenceError) -> CommandResult:
     )
 
 
-async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) -> CommandResult:
+async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldLaunch) -> CommandResult:
     fork_on_divergence: bool = args.fork_on_divergence
     cycle_result: CycleResult
     try:
@@ -239,7 +239,7 @@ async def _run_loop(args: argparse.Namespace, ctx: SessionCtx, held: HeldRun) ->
         held = await _dispatch_held(args, ctx, rerun)
         cycle_result = await run_inline(held, mode=rerun.mode)
 
-    return cycle_result_command(held.session, cycle_result)
+    return cycle_result_command(held.run.session, cycle_result)
 
 
 async def _pivot_to_fresh(
@@ -295,7 +295,7 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     except ConfigDriftError as drift:
         return await _pivot_to_fresh(args, ctx, drift)
 
-    session = held.session
+    session = held.run.session
     logger.info(
         "Resuming cycle %s%s",
         ctx.cycle_id,

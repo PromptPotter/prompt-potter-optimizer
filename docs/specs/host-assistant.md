@@ -12,8 +12,8 @@
 
 - **Tools.** Writes are the `domain/command_kinds.py::CommandKind` rows, already capability-gated. Reads
   are the `domain/command_kinds.py::ReadKind` rows, each answered by its `application/read_params.py::ReadParams`
-  model; every session route is bound to one row (`presentation/api/catalogue.py::bind_surface`), so the
-  tool list is the whole surface.
+  model, which also declares its route; one loop mounts every row (`presentation/api/routers/reads.py`), so
+  the tool list is the whole surface.
 - **Resources.** The account's data, addressed by the hierarchy address grammar
   ([`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address).
 - **Prompts.** Templates. The check-in is one — "reach the origin gate", seeded from the `checkin/2`
@@ -51,11 +51,13 @@ A long-running call returns a task handle per MCP's Tasks extension
    `application/host_surface.py::HOST_TOOLS` (every command a host may press, every read that answers
    once) called through `application/host_surface.py::HostSession` (the dispatcher for a command, the
    row's `ReadParams` for a read), each host request admitted once at its entry, and a command under
-   the idempotency key its caller sends; a kind its row answers as a task (`CommandKind.answering`)
-   answers an `application/host_surface.py::HostTask`, its status what its run returned
-   (`application/host_surface.py::job_status`), a reaped job's as its release stamped it
-   (`application/jobs/registry.py::JobRegistry.launched_by`), served by `tasks/get`, `tasks/result` and
-   `tasks/cancel`; the hierarchy as resources; the "reach the origin gate" prompt. `presentation/mcp/server.py::host_server` speaks it over stdio as `python -m promptpotter mcp`
+   the idempotency key its caller sends; a kind its row lets be started (`CommandKind.answering`)
+   that asks for a job answers its command id (MCP's task), the session holding nothing: `tasks/get`
+   is the `command-status` read (`application/command_status.py::command_status` over the jobs its
+   ledger ack names (`domain/run_records.py::LaunchedEffect`), a reaped job's as its release stamped
+   it), `tasks/result` the act's answer replayed off its ledger record once that status settles
+   (`HostSession.command_result`, one admission), `tasks/cancel` the `cancel-command` command every door sends
+   (`application/commands/cancelling.py::cancel_command`); the hierarchy as resources; the "reach the origin gate" prompt. `presentation/mcp/server.py::host_server` speaks it over stdio as `python -m promptpotter mcp`
    (the `mcp` extra), acting as the terminal's own principal.
 2. The host endpoint, declared before its handler; a turn's steps are records on the account's workspace ledger.
 3. The webapp: the composer on every screen, steps, the one proposal shape.

@@ -10,6 +10,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.command_index import CommandIndex
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import validate_path_component
@@ -44,6 +45,10 @@ class Stores:
     archive_home: ArchiveHome
     tenant_datasets: TenantDatasetStore
     ruler: RulerStore
+    # The account's one command-id index, invariant across depth: every ledger under the account,
+    # an L4 sandbox's included, files its ids in it, so one id names one act and a status read from
+    # any depth finds it. Its destroyers and the draft ledger's move file into it too.
+    command_index: CommandIndex
     campaigns: CampaignStore
     drafts: DraftStore
     archive: MeasurementArchive
@@ -111,6 +116,7 @@ def build_stores(
     shared = shared_root if shared_root is not None else root
     home = archive_home(identity, settings.SHARED_ARCHIVE, shared_root=shared)
     account = tenant_workspace(shared, identity.tenant_id)
+    commands = CommandIndex(account)
     return Stores(
         base_dir=tenant_dir,
         projects_root=root,
@@ -122,8 +128,9 @@ def build_stores(
         # dataset or the ruler an L4 cell reads is not state.
         tenant_datasets=TenantDatasetStore(account),
         ruler=RulerStore(account),
-        campaigns=CampaignStore(tenant_dir),
-        drafts=DraftStore(tenant_dir),
+        command_index=commands,
+        campaigns=CampaignStore(tenant_dir, commands),
+        drafts=DraftStore(tenant_dir, commands),
         archive=MeasurementArchive.at(home.root),
         optimizer_reuse=LLMReuseCache(home.root, paths.OPTIMIZER_REUSE_DIR),
         judge_reuse=LLMReuseCache(home.root, paths.JUDGE_REUSE_DIR),

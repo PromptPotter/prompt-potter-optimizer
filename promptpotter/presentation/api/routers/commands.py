@@ -3,21 +3,22 @@ from __future__ import annotations
 import inspect
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile
 from fastapi.routing import APIRoute
 
-from promptpotter.application.commands import launching, workspace_edits
+from promptpotter.application.commands import (
+    draft_editing,
+    launching,
+    origin_resolving,
+    workspace_edits,
+)
 from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
     command_answer,
 )
-from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
-from promptpotter.application.commands.origin_resolving import (
-    ResolveOriginResponse,
-    dispatch_origin_resolution,
-)
+from promptpotter.application.commands.origin_resolving import ResolveOriginResponse
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.jobs.launcher.head_to_head import (
@@ -36,10 +37,12 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
 )
 from promptpotter.presentation.api.deps import (
+    CommandIdDep,
     IdempotencyKeyDep,
     JobRegistryDep,
     StoresDep,
     bounded_read,
+    command_answered,
 )
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -52,10 +55,17 @@ commands_router = APIRouter(prefix="/commands", tags=["Commands"])
     name=CommandKind.EDIT_DRAFT_CAMPAIGN,
 )
 async def edit_draft_campaign(
-    stores: StoresDep, payload: EditDraftCampaignPayload, key: IdempotencyKeyDep
+    stores: StoresDep,
+    payload: EditDraftCampaignPayload,
+    key: IdempotencyKeyDep,
+    command_id: CommandIdDep,
+    response: Response,
 ) -> DraftCampaignWire:
     """Sparse-patch a `DraftCampaign` and return its full post-mutation shape."""
-    return await dispatch_draft_patch(stores, CommandCall(payload, key))
+    outcome = await CommandDispatcher(stores).answer(
+        draft_editing.edit_draft_campaign, CommandCall(payload, key, command_id)
+    )
+    return command_answered(response, outcome)
 
 
 @commands_router.post(
@@ -64,10 +74,17 @@ async def edit_draft_campaign(
     name=CommandKind.RESOLVE_ORIGIN,
 )
 async def resolve_origin(
-    stores: StoresDep, payload: ResolveOriginPayload, key: IdempotencyKeyDep
+    stores: StoresDep,
+    payload: ResolveOriginPayload,
+    key: IdempotencyKeyDep,
+    command_id: CommandIdDep,
+    response: Response,
 ) -> ResolveOriginResponse:
     """Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``."""
-    return await dispatch_origin_resolution(stores, CommandCall(payload, key))
+    outcome = await CommandDispatcher(stores).answer(
+        origin_resolving.resolve_origin, CommandCall(payload, key, command_id)
+    )
+    return command_answered(response, outcome)
 
 
 @commands_router.post(
@@ -80,15 +97,17 @@ async def start_checkin(
     stores: StoresDep,
     payload: StartCheckinPayload,
     key: IdempotencyKeyDep,
+    command_id: CommandIdDep,
+    response: Response,
 ) -> StartCheckinResponse | HeadToHeadStarted:
     """Mint the draft's campaign and root cycle, close the draft and detach the loop; with
     `head_to_head`, one campaign per arm, each detached.
 
     An incomplete origin answers 422 and the draft stays open.
     """
-    launched = await dispatch_start_checkin(
-        stores, CommandCall(payload, key), job_registry=job_registry
-    )
+    call = CommandCall(payload, key, command_id)
+    outcome = await dispatch_start_checkin(stores, call, job_registry=job_registry)
+    launched = command_answered(response, outcome)
     if isinstance(launched, HeadToHeadLaunched):
         return launched.started
     return StartCheckinResponse(job_id=launched.launch.job_id, hop=launched.launch.hop)
@@ -104,11 +123,14 @@ async def mint_head_to_head(
     stores: StoresDep,
     payload: MintHeadToHeadPayload,
     key: IdempotencyKeyDep,
+    command_id: CommandIdDep,
+    response: Response,
 ) -> HeadToHeadStarted:
     """Mint and detach every arm, or none; a retry under the same key answers the same arms."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    outcome = await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload, key))
-    return outcome.result.started
+    call = CommandCall(payload, key, command_id)
+    outcome = await dispatcher.answer(launching.mint_head_to_head, call)
+    return command_answered(response, outcome).started
 
 
 @commands_router.post(
@@ -119,6 +141,8 @@ async def mint_head_to_head(
 async def ingest_upload(
     stores: StoresDep,
     key: IdempotencyKeyDep,
+    command_id: CommandIdDep,
+    response: Response,
     file: Annotated[
         UploadFile,
         File(
@@ -136,9 +160,9 @@ async def ingest_upload(
     }
     payload = PayloadInvalidError.validating(IngestUploadPayload, fields)
     outcome = await CommandDispatcher(stores).answer(
-        workspace_edits.ingest_upload, CommandCall(payload, key)
+        workspace_edits.ingest_upload, CommandCall(payload, key, command_id)
     )
-    return outcome.result
+    return command_answered(response, outcome)
 
 
 class _Dispatching:
@@ -152,6 +176,8 @@ class _Dispatching:
             inspect.Parameter("stores", keyword, annotation=StoresDep),
             inspect.Parameter("payload", keyword, annotation=model),
             inspect.Parameter("key", keyword, annotation=IdempotencyKeyDep),
+            inspect.Parameter("command_id", keyword, annotation=CommandIdDep),
+            inspect.Parameter("response", keyword, annotation=Response),
         ]
         self.answers = answers
         self.__signature__ = inspect.Signature(
@@ -165,10 +191,13 @@ class _Dispatching:
         stores: StoresDep,
         payload: CommandPayload,
         key: IdempotencyKeyDep,
+        command_id: CommandIdDep,
+        response: Response,
     ) -> object:
         dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-        outcome = await dispatcher.dispatch(CommandCall(payload, key))
-        return outcome.accepted if self.answers is None else outcome.result
+        outcome = await dispatcher.dispatch(CommandCall(payload, key, command_id))
+        answer = command_answered(response, outcome)
+        return outcome.accepted if self.answers is None else answer
 
 
 # Each kind is PATHED and NAMED by its `CommandKind`, so no route names a kind no capability gates

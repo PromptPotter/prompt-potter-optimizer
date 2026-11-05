@@ -26,7 +26,6 @@ from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
     INNER_GATE_REFUSAL,
     INNER_LAUNCH_REFUSAL,
-    INNER_PAUSE_REFUSAL,
     INNER_SKIP_REFUSAL,
     GateDecision,
 )
@@ -71,9 +70,11 @@ def person(verb: str) -> Press:
 # The browser alone: no terminal verb and no host tool.
 BROWSER = None
 
-# How a door answers a kind: inline with its applied answer, or as a task its door tracks while
-# the act runs on (a launch, a paid pass, a resolver turn).
-type Answering = Literal["inline", "task"]
+# How a door answers a kind: inline with its applied answer, or also started, its command id
+# answered at once while the act runs on (a launch, a paid pass, a resolver turn).
+type Answering = Literal["inline", "started"]
+# The longest command id a door accepts from its caller (`CommandCall.command_id`).
+MAX_COMMAND_ID_CHARS = 256
 
 
 class CommandKind(StrEnum):
@@ -163,7 +164,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_RUN_CAP,
         anyone("resume"),
         False,
-        "task",
+        "started",
     )
     STEP_CYCLE = (
         "step-cycle",
@@ -171,7 +172,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_STEP_CAP,
         anyone("step-cycle"),
         False,
-        "task",
+        "started",
     )
     # Its fork supersedes the line's head, which it pauses.
     FORK_CYCLE = (
@@ -180,7 +181,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_RUN_CAP,
         anyone("resume"),
         True,
-        "task",
+        "started",
     )
     MINT_CAMPAIGN = (
         "mint-campaign",
@@ -188,7 +189,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_CREATE_CAP,
         anyone("new"),
         False,
-        "task",
+        "started",
     )
     MINT_HEAD_TO_HEAD = (
         "mint-head-to-head",
@@ -196,7 +197,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_CREATE_CAP,
         anyone("head-to-head"),
         False,
-        "task",
+        "started",
     )
     # It closes the draft it mints from.
     START_CHECKIN = (
@@ -205,7 +206,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_CREATE_CAP,
         anyone("new"),
         True,
-        "task",
+        "started",
     )
     # A verify SPENDS on real cells, so it sits with the verbs that buy measurement, not the step verbs.
     VERIFY_CANDIDATE = (
@@ -214,7 +215,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_RUN_CAP,
         anyone("verify"),
         False,
-        "task",
+        "started",
     )
     # It restates the line's headline in place.
     GRADE_BENCH = (
@@ -223,7 +224,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_RUN_CAP,
         anyone("bench"),
         True,
-        "task",
+        "started",
     )
     CHANGE_RUN_LIMITS = (
         "change-run-limits",
@@ -246,6 +247,14 @@ class CommandKind(StrEnum):
         "limits_and_queue:cancel_queued_run",
         CAMPAIGN_RUN_CAP,
         anyone("cancel-queued"),
+        True,
+    )
+    # A command's stop at every door: each job it asked for withdrawn if queued, else its cycle paused.
+    CANCEL_COMMAND = (
+        "cancel-command",
+        "cancelling:cancel_command",
+        None,
+        anyone("cancel"),
         True,
     )
     DELETE_CYCLE = (
@@ -313,7 +322,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_CREATE_CAP,
         anyone("new"),
         True,
-        "task",
+        "started",
     )
     # It writes what a later campaign's `packs` may draw, so it sits with the verbs that make one.
     BANK_SNIPPET = (
@@ -438,8 +447,8 @@ class CyclePayload(CampaignPayload):
     (``domain/phases.py::RunState.inner``), so the control and the refusal say one thing."""
 
     cycle_id: str = Field(min_length=1, max_length=128)
-    # Excluded: the dispatcher spends it resolving the leaf, so a recorded tail addresses it twice.
-    descend: str | None = Field(default=None, max_length=512, exclude=True)
+    # Recorded: the record keeps the address the act was sent to, its leaf read by `Subject.below`.
+    descend: str | None = Field(default=None, max_length=512)
 
     # ``None`` = acts on an inner run. Undeclared here, so a new kind fails at declaration until it answers.
     inner_refusal: ClassVar[str | None]
@@ -467,7 +476,9 @@ class SkipSearchpointPayload(LoopPayload, kind=CommandKind.SKIP_SEARCHPOINT):
 class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE_CYCLE):
     """Ask a running cycle to stop at its next checkpoint; it resumes from there."""
 
-    inner_refusal: ClassVar[str | None] = INNER_PAUSE_REFUSAL
+    # The cycle's state answers (`RunState.pause_refusal`): an inner run's loop refuses it, an
+    # operator's scoring pass on an inner cycle is stopped by it.
+    inner_refusal: ClassVar[str | None] = None
     follow_up: ClassVar[str] = "The loop exits at its next checkpoint; `resume` picks it up."
 
 
@@ -744,6 +755,18 @@ class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED_RUN)
         max_length=128,
         pattern=r"^[A-Za-z0-9_-]+$",
         description="The queued job id, as `machine-status` lists it.",
+    )
+
+
+class CancelCommandPayload(CommandPayload, kind=CommandKind.CANCEL_COMMAND):
+    """Stop the act a command asked for: each queued launch it made is withdrawn, each running run
+    has its cycle paused, and a paid pass in flight is paused under its hold; a command another
+    principal issued is not found."""
+
+    command_id: str = Field(
+        min_length=1,
+        max_length=MAX_COMMAND_ID_CHARS,
+        description="The command's id, as its caller named it or its door answered it.",
     )
 
 
@@ -1064,9 +1087,8 @@ class CommandAcceptedBody(StrictModel):
 class ReadKind(StrEnum):
     """The read catalogue beside `CommandKind`. A row's wire inputs and its answer are the
     `application/read_params.py::ReadParams` model that declares it, as a payload declares its kind.
-    The route serving a row is NAMED by its kind, and `presentation/api/catalogue.py::bind_surface`
-    refuses at import a session route no row names, a row no route serves, and an answer whose
-    return is not its route's model."""
+    The model also declares the row's route and method, and `presentation/api/routers/reads.py`
+    mounts every row on it, named by its kind."""
 
     ME = "me"
     USER_SETTINGS = "user-settings"
@@ -1104,3 +1126,4 @@ class ReadKind(StrEnum):
     DATASET_CELLS = "dataset-cells"
     DATASET_CELL = "dataset-cell"
     ORIGINS = "origins"
+    COMMAND_STATUS = "command-status"

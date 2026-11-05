@@ -102,6 +102,7 @@ def draft_dirs(tenant_root: WorkspaceDir) -> list[Path]:
 
 # Under a workspace: its own ledger and active pointer, its head-to-heads, its scoring verbs' runs.
 WORKSPACE_STATE_DIR = ".workspace"
+WORKSPACE_LEDGER_FILE = f"{WORKSPACE_STATE_DIR}/events.jsonl"
 HEAD_TO_HEADS_DIR = "head_to_heads"
 DIAGNOSTICS_DIR = "diagnostics"
 

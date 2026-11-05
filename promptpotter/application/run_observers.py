@@ -42,6 +42,7 @@ from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjec
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.runtime_flags import declare_run_phase
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.measurement_context import instrument_depth
@@ -110,13 +111,15 @@ def check_every_record_reported() -> None:
 def declare_running(session: Session) -> None:
     ledger = session.state.ledger
     if ledger is not None:
-        ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        declare_run_phase(ledger, RunPhaseRecord(run_phase=RunPhase.RUNNING))
 
 
 def declare_gate(session: Session, gate: GateKind, *, drafts: Sequence[Proposal] = ()) -> None:
     ledger = session.state.ledger
     if ledger is not None:
-        ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate=gate, drafts=list(drafts)))
+        declare_run_phase(
+            ledger, RunPhaseRecord(run_phase=RunPhase.GATE, gate=gate, drafts=list(drafts))
+        )
 
 
 def declare_run_stop(
@@ -142,10 +145,12 @@ def declare_run_stop(
     )
     ledger = observers.callbacks.ledger
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
-        ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
+        declare_run_phase(ledger, RunPhaseRecord.stop(stop_reason, spend=spend))
         return
     cause, detail = session.state.control.take_pause() or (interrupted_by, "")
-    ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))
+    declare_run_phase(
+        ledger, RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)
+    )
 
 
 def declare_run_wiring(

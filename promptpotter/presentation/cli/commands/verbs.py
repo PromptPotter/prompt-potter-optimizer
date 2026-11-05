@@ -20,10 +20,11 @@ from promptpotter.domain.command_kinds import (
     CampaignPayload,
     CommandKind,
     CyclePayload,
+    ReadKind,
 )
-from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
 from promptpotter.domain.diagnostic_run import RescoreCount, rescore_count
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
+from promptpotter.domain.hierarchy import ListingLifecycle
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.presentation.cli.parsers import (
@@ -35,7 +36,6 @@ from promptpotter.presentation.cli.parsers import (
     Arg,
     Verb,
 )
-from promptpotter.shared.errors import BadRequestError
 
 
 def _rescore_count_arg(raw: str) -> RescoreCount:
@@ -45,11 +45,26 @@ def _rescore_count_arg(raw: str) -> RescoreCount:
         raise argparse.ArgumentTypeError(f"expected a rescore count >= 2, got {raw!r}") from exc
 
 
-def _inside_arg(raw: str) -> CyclePath:
-    try:
-        return decode_cycle_path(raw)
-    except BadRequestError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
+def _read_verb(
+    name: str,
+    read: ReadKind,
+    render: str,
+    *,
+    help: str,
+    args: tuple[Arg, ...] = (),
+    render_args: tuple[str, ...] = (),
+) -> Verb:
+    """A read verb: its flags' dests are the row's fields, else its renderer's *render_args*,
+    answered by `read.py::cmd_read`."""
+    return Verb(
+        name,
+        "read:cmd_read",
+        help=help,
+        args=args,
+        read=read,
+        render=render,
+        render_args=render_args,
+    )
 
 
 def _int_list_arg(raw: str) -> list[int]:
@@ -378,9 +393,11 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
         ),
     ),
-    Verb(
+    _read_verb(
         "evidence",
-        "evidence:cmd_evidence",
+        ReadKind.EVIDENCE,
+        "evidence:evidence_human",
+        render_args=("top",),
         help="What a SET of subjects jointly says: the campaigns' bench headlines head-to-head, "
         "never paired where one bench set did not grade them all, then the roster, whether their "
         "levels are comparable at all, the cell/subject/residual decomposition, what the "
@@ -430,7 +447,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             Arg(
                 "--metric",
                 dest="metric",
-                # No default here: `cmd_evidence` supplies MEASURAND, so the name has one copy.
+                # Unset leaves the row's own default, so the name has one copy.
                 default=None,
                 help="Which number to compare on. Unset reads each cell's own headline: the seed's lift "
                 "over its origin on the recursion, the sample's fitness elsewhere. The rest are offered "
@@ -538,9 +555,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
         ),
     ),
-    Verb(
+    _read_verb(
         "price-head-to-head",
-        "head_to_head_price:cmd_price_head_to_head",
+        ReadKind.HEAD_TO_HEAD_PRICE,
+        "head_to_head_price:price_human",
         help="Price a planned head-to-head before it is minted: every budget point, arm and "
         "replicate a plan file declares, in dollars, calls and wall clock, at the cell price the "
         "archive measured on this bank and its models and each optimizer's measured rounds, then "
@@ -548,6 +566,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         args=(
             Arg(
                 "plan",
+                type=Path,
                 help="A head-to-head plan (YAML, `HeadToHeadPlan`), e.g. "
                 "paper/plans/comparability.yaml.",
             ),
@@ -613,19 +632,28 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "over the bench rows.",
         args=(ACTIVE_CAMPAIGN,),
     ),
-    Verb(
+    _read_verb(
         "cycles",
-        "cycles:cmd_cycles",
-        help="Every cycle of every campaign you own that loads, with its run state (`run_phase`) — derived at each read and written to "
+        ReadKind.HIERARCHY,
+        "cycles:cycles_human",
+        help="Every cycle of every active campaign you own that loads (`--lifecycle` for the "
+        "others), with its run state (`run_phase`) — derived at each read and written to "
         "no file, so this is where a terminal reads which runs are live, then each head-to-head's "
         "arms by key. Read-only, zero spend.",
         args=(
-            Arg("--campaign", default="", help="Only this campaign's cycles."),
+            Arg("--campaign", default=None, help="Only this campaign's cycles."),
             Arg("--attached", action="store_true", help="Only cycles a producer process holds."),
             Arg(
+                "--lifecycle",
+                choices=get_args(ListingLifecycle.__value__),
+                default=None,
+                help="Which campaigns: 'active' (unset), 'archived', 'deleted', 'unstarted' "
+                "(the open check-ins) or 'all'.",
+            ),
+            Arg(
                 "--inside",
-                type=_inside_arg,
-                default=(),
+                dest="descend",
+                default=None,
                 metavar="CAMPAIGN::CYCLE[~…]",
                 help="List an L4 inner run's cycles instead: the sandbox chain it lives in, one hop per "
                 "level, same codec as the API's '?descend=' and `evidence`'s ';in='. The only verb that "
@@ -634,9 +662,11 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
         ),
     ),
-    Verb(
+    _read_verb(
         "export",
-        "export:cmd_export",
+        ReadKind.CYCLE_EXPORT,
+        "export:export_written",
+        render_args=("out",),
         help="One reading of a cycle, chosen by what you do with it next — the same tiers the "
         "webapp's copy and download offer and `GET …/cycles/{id}/export?tier=` serves. `chat` and "
         "`report` print text to paste; `deploy` prints `export.json`; `notebook` and `package` "
@@ -660,9 +690,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
         ),
     ),
-    Verb(
+    _read_verb(
         "machine-status",
-        "machine_status:cmd_machine_status",
+        ReadKind.MACHINE_STATUS,
+        "machine_status:machine_status_human",
         help="How many campaigns the machine runs and admits, and where your queued launches "
         "stand in line. Read-only, zero spend.",
     ),

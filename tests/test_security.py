@@ -2,10 +2,11 @@
 
 Owns `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch
 fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py`,
-`application/host_surface.py` and `presentation/mcp/`. A key reaching the
-logs, dataset content reaching the optimizer LLM unfenced, a path segment escaping its tenant
-dir, a grant that widens, a recursive delete nobody asked for. Irreversible in a multi-tenant
-product.
+`application/host_surface.py`, `presentation/mcp/` and the command machinery's states
+(`application/command_status.py`, `commands/cancelling.py`, `store/command_index.py`). A key
+reaching the logs, dataset content reaching the optimizer LLM unfenced, a path segment escaping
+its tenant dir, a grant that widens, a recursive delete nobody asked for, a command read working
+after its act died. Irreversible in a multi-tenant product.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -27,17 +29,21 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, NamedTuple, cast, override
 
 import pytest
 from factories import (
+    PROMPT_INFO,
     SANDBOX_CAMPAIGN,
     arm_state,
     close_round,
     inner_sandbox,
+    loop_session,
     minted_campaign,
     optimizer_state,
+    pipeline_schema,
     round_result,
+    samples,
     seat,
     stored_campaign,
     workspace,
@@ -53,26 +59,24 @@ from starlette.types import Message, Receive, Scope, Send
 from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.command_status import CommandStatus, job_status
+from promptpotter.application.commands import dispatcher, draft_editing, measuring, workspace_edits
+from promptpotter.application.commands.cancelling import cancel_acts
+from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.ingest import ingest_draft
-from promptpotter.application.host_surface import (
-    CallTool,
-    HostSession,
-    TaskResultOf,
-    TaskStatusOf,
-    cancel_acts,
-    job_status,
-)
+from promptpotter.application.host_surface import HostSession
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
+    PassStoppedError,
     paid_pass,
     request_jobs,
     withdraw_queued,
 )
 from promptpotter.application.jobs.machine_status import machine_status
+from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
@@ -90,33 +94,47 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner.campaign_result import line_run
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
-from promptpotter.domain.campaign_config import OptimizerChoice
+from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
     CancelQueuedRunPayload,
     CommandKind,
+    DeleteCampaignPayload,
+    DeleteCyclePayload,
+    DiscardDraftPayload,
+    EditDraftCampaignPayload,
     MintCampaignPayload,
+    PauseCyclePayload,
+    SetUserSettingsPayload,
+    SkipSearchpointPayload,
     StepCyclePayload,
+    VerifyCandidatePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
+    INNER_PAUSE_REFUSAL,
     PRODUCER_STATE_INFO,
+    RUN_PHASE_INFO,
     ProducerState,
     RunPhase,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.prompt_block import (
     ACCOUNT_PACK,
     Authored,
@@ -157,10 +175,17 @@ from promptpotter.infrastructure.identity.provider_config import (
 )
 from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
+from promptpotter.infrastructure.llm import telemetry
+from promptpotter.infrastructure.producer_lock import (
+    hold_cycle,
+    hold_pass,
+    release_cycle,
+    release_pass,
+)
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
-from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
+from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl, write_yaml
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     campaign_root_dir_for,
@@ -175,7 +200,7 @@ from promptpotter.infrastructure.store.site_records import (
     SiteRecordStore,
     default_site_record_store,
 )
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.infrastructure.store.user_store import User, UserStore, count_accounts
 from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, app
 from promptpotter.presentation.api.deps import (
@@ -189,17 +214,18 @@ from promptpotter.presentation.api.middleware.oidc import (
 )
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
-from promptpotter.presentation.cli.commands.cycles import cmd_cycles
+from promptpotter.presentation.cli.commands.read import cmd_read
 from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.shared.errors import (
+    CommandUncancellableError,
     ConflictError,
     CycleBusyError,
     IdempotencyKeyReusedError,
     NotFoundError,
+    PayloadInvalidError,
     PotterError,
     ServiceUnavailableError,
     StoredConfigInvalidError,
-    TaskUncancellableError,
     UnauthorizedError,
 )
 from promptpotter.shared.hashing import ADDRESS_HEX
@@ -1264,8 +1290,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "a wedged run pinned no warning"
     )
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path))
-    listed = await cmd_cycles(
-        argparse.Namespace(tenant=None, inside=(), campaign=None, attached=False)
+    listed = await cmd_read(
+        argparse.Namespace(command="cycles", tenant=None, verbose=False, attached=False)
     )
     assert listed.human is not None and listed.data is not None
     [course] = listed.data["entries"][0]["children"]
@@ -1564,7 +1590,7 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     session = HostSession(caller)
 
     async def answered(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        return cast(dict[str, Any], (await session.answer(CallTool(name, arguments))).value)
+        return cast(dict[str, Any], await session.call_tool(name, arguments))
 
     def keyed(arguments: dict[str, Any]) -> dict[str, Any]:
         return {**arguments, "idempotency_key": uuid.uuid4().hex}
@@ -1670,19 +1696,19 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     workspace = caller.stores.campaigns.workspace
     run_dir = cycle_dir_for(workspace, run_hop)
     run_dir.mkdir(parents=True)
-    with pytest.raises(TaskUncancellableError):
+    with pytest.raises(CommandUncancellableError):
         cancel_acts([queued, running], workspace)
     CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     hold_cycle(run_dir)
     acts = cancel_acts([queued, running], workspace)
     release_cycle(run_dir)
     assert [(a.payload.kind, a.idempotency_key) for a in acts] == [
-        (CommandKind.CANCEL_QUEUED_RUN, f"host-task-cancel:{queued.job_id}"),
-        (CommandKind.PAUSE_CYCLE, f"host-task-cancel:{running.job_id}"),
+        (CommandKind.CANCEL_QUEUED_RUN, f"cancel-command:{queued.job_id}"),
+        (CommandKind.PAUSE_CYCLE, f"cancel-command:{running.job_id}"),
     ]
     hold_cycle(run_dir)
     elsewhere = dataclasses.replace(running, workspace=str(tmp_path / "sandbox"))
-    with pytest.raises(TaskUncancellableError):
+    with pytest.raises(CommandUncancellableError):
         cancel_acts([queued, elsewhere], workspace)
     release_cycle(run_dir)
     assert registry.cancel_queued(queued.job_id, principal_id=principal)
@@ -1727,11 +1753,549 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
             queuing.reap_orphans()
         assert queuing.get(launched.job_id) is None, "guard: the job was not reaped"
         retried = {**step.model_dump(mode="json"), "idempotency_key": key}
-        task = (await stepping.answer(CallTool("step-cycle", retried))).task
-        assert task is not None
-        await stepping.answer(TaskResultOf(task.task_id))
-        read_back = await stepping.answer(TaskStatusOf(task.task_id))
+        started = await stepping.start_command("step-cycle", retried)
+        await stepping.command_result(started.command_id)
+        read_back = await stepping.command_status(started.command_id)
         assert read_back.status == status, f"a reaped {status} launch read {read_back.status}"
         assert not queuing.list_queued(), "a retried launch launched again"
     for detached in list(launcher_launch._DETACHED):
         detached.cancel()
+
+
+# 5. The command state machine
+
+
+class _Seen(NamedTuple):
+    """One command as every door reads it: its status, the `cancel-command` answer, a retry's
+    answer under its id and key, its status after both, and the acks its ledgers hold."""
+
+    status: str
+    said: str
+    cancel: str
+    retry: str
+    after: str
+    acks: int
+
+
+_ACTS = CycleHop(campaign_id="acts", cycle_id="cycle_acts")
+_FILER_DEAD = "1-gone"
+
+
+async def test_a_command_reads_one_state_at_every_door_and_its_cancel_and_retry_agree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each row is a state a command reaches and the event that put it there; it reads the same
+    through its status, its cancel and a retry. An act whose process died reads terminal, a
+    terminal status never reads working again, and a refusal or a cancel leaves one ack."""
+    stores = workspace(tmp_path)
+    host, sender = HostSession(Caller(stores)), CommandDispatcher(stores)
+    stub = CycleHop(campaign_id="acts", cycle_id="cycle_acts_fork_1")
+    stores.campaigns.create_campaign(minted_campaign(_ACTS))
+    for hop in (_ACTS, stub):
+        stores.campaigns.mint_cycle(hop)
+    acts: dict[str, Callable[[], Awaitable[object]]] = {}
+
+    async def _replayed(_: object) -> None:
+        return None
+
+    async def _acting(dispatched: Any) -> Any:
+        """Every row's act: what `acts` names for its candidate (or its settings), replayed as is."""
+        named = getattr(dispatched.payload, "candidate_id", "settings")
+        return Applier(acts[named], replay=_replayed)
+
+    monkeypatch.setattr(measuring, "verify_candidate", _acting)
+    monkeypatch.setattr(workspace_edits, "set_user_settings", _acting)
+
+    async def _returns() -> None:
+        return None
+
+    def verify(command_id: str, hop: CycleHop = _ACTS) -> CommandCall[Any]:
+        payload = VerifyCandidatePayload(
+            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, candidate_id=command_id
+        )
+        return CommandCall(payload, command_id, command_id)
+
+    def acks(command_id: str) -> int:
+        return sum(
+            '"command_ack"' in line and json.loads(line)["command_id"] == command_id
+            for ledger in tmp_path.rglob("*.jsonl")
+            for line in ledger.read_text(encoding="utf-8").splitlines()
+        )
+
+    async def answer(asked: Callable[[], Awaitable[object]]) -> str:
+        try:
+            got = await asked()
+        except PotterError as refused:
+            return type(refused).__name__
+        return got.status if isinstance(got, CommandStatus) else "replayed"
+
+    async def seen(command_id: str, retried: CommandCall[Any] | None) -> _Seen:
+        status = await answer(lambda: host.command_status(command_id))
+        said = "" if status == "NotFoundError" else (await host.command_status(command_id)).said
+        cancel = await answer(lambda: host.cancel_command(command_id))
+        retry = "-" if retried is None else await answer(lambda: sender.dispatch(retried))
+        after = await answer(lambda: host.command_status(command_id))
+        return _Seen(status, said, cancel, retry, after, acks(command_id))
+
+    table: dict[tuple[str, str], _Seen] = {}
+
+    # Settled by its own act.
+    acts["done"] = _returns
+    await sender.dispatch(verify("done"))
+    table["applied", "act returned"] = await seen("done", verify("done"))
+
+    async def running(call: CommandCall[Any], name: str) -> tuple[asyncio.Task[Any], asyncio.Event]:
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def _midway() -> None:
+            started.set()
+            await release.wait()
+            if name.startswith("killed"):
+                raise RuntimeError("its process is gone")
+
+        acts[name] = _midway
+        task = asyncio.ensure_future(sender.dispatch(call))
+        await started.wait()
+        return task, release
+
+    task, release = await running(verify("alive"), "alive")
+    table["in flight", "act runs, its filer alive"] = await seen("alive", verify("alive"))
+    release.set()
+    await task
+
+    with monkeypatch.context() as killed:
+        killed.setattr(dispatcher, "this_producer", lambda _jobs: _FILER_DEAD)
+        task, release = await running(verify("killed-act"), "killed-act")
+    table["in flight", "its filer killed mid-act"] = await seen("killed-act", verify("killed-act"))
+    release.set()
+    with pytest.raises(RuntimeError):
+        await task
+
+    # Another process's pass, as this one reads it: its lock held, no hold of this process's.
+    act_dir = stores.campaigns.cycle_dir(_ACTS)
+    task, release = await running(verify("elsewhere"), "elsewhere")
+    hold_pass(act_dir)
+    table["in flight", "its pass held in another process"] = await seen(
+        "elsewhere", verify("elsewhere")
+    )
+    release_pass(act_dir)
+    release.set()
+    await task
+
+    settings_started, settings_release = asyncio.Event(), asyncio.Event()
+
+    async def _settings_midway() -> None:
+        settings_started.set()
+        await settings_release.wait()
+
+    acts["settings"] = _settings_midway
+    settings = SetUserSettingsPayload(demo_mode_enabled=True)
+    task = asyncio.ensure_future(sender.dispatch(CommandCall(settings, "ws", "ws")))
+    await settings_started.wait()
+    table["in flight", "a workspace kind's act runs"] = await seen(
+        "ws", CommandCall(settings, "ws", "ws")
+    )
+    settings_release.set()
+    await task
+
+    # Between its filing and its record.
+    real_emit = telemetry.emit_command
+
+    async def landing(command_id: str, *, filer: str | None) -> None:
+        """Its record held at the write while every door reads it; *filer* set, the filer is that
+        producer, dead, and its record never lands."""
+        reached, freed = threading.Event(), threading.Event()
+
+        def _held(**record: Any) -> None:
+            if record["command_id"] == command_id:
+                reached.set()
+                freed.wait()
+                if filer is not None:
+                    raise OSError("its filer died before its record")
+            real_emit(**record)
+
+        with monkeypatch.context() as held:
+            held.setattr(dispatcher, "emit_command", _held)
+            if filer is not None:
+                held.setattr(dispatcher, "this_producer", lambda _jobs: filer)
+            acts[command_id] = _returns
+            task = asyncio.ensure_future(sender.dispatch(verify(command_id)))
+            await asyncio.to_thread(reached.wait)
+            table["landing", f"its record held, filer {'dead' if filer else 'alive'}"] = await seen(
+                command_id, verify(command_id)
+            )
+            freed.set()
+            if filer is None:
+                await task
+            else:
+                with pytest.raises(OSError):
+                    await task
+
+    await landing("landing-alive", filer=None)
+    await landing("landing-dead", filer=_FILER_DEAD)
+
+    def _cut(**_: object) -> None:
+        raise OSError("disk gone between the filing and the record")
+
+    with monkeypatch.context() as cut:
+        cut.setattr(dispatcher, "emit_command", _cut)
+        acts["cut"] = _returns
+        with pytest.raises(OSError):
+            await sender.dispatch(verify("cut"))
+    table["landing", "its record write raised"] = await seen("cut", verify("cut"))
+
+    real_ack = telemetry.emit_command_ack
+
+    async def cancelled_landing(command_id: str, cancels: int) -> None:
+        reached, freed, met = threading.Event(), threading.Event(), threading.Event()
+
+        def _slow(**record: Any) -> None:
+            if record["command_id"] == command_id:
+                reached.set()
+                freed.wait()
+            real_emit(**record)
+
+        def _acked(**ack: Any) -> None:
+            real_ack(**ack)
+            if ack["command_id"] == command_id:
+                met.set()
+
+        with monkeypatch.context() as slow:
+            slow.setattr(dispatcher, "emit_command", _slow)
+            slow.setattr(dispatcher, "emit_command_ack", _acked)
+            acts[command_id] = _returns
+            task = asyncio.ensure_future(sender.dispatch(verify(command_id)))
+            await asyncio.to_thread(reached.wait)
+            for _ in range(cancels):
+                task.cancel()
+                await asyncio.sleep(0)  # each cancel reaches the await it lands on
+            freed.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await asyncio.to_thread(met.wait)  # its stop acks once its landing ends
+        times = "once" if cancels == 1 else "again at the landing"
+        table["landing", f"its call cancelled {times}"] = await seen(command_id, verify(command_id))
+
+    await cancelled_landing("cut-once", 1)
+    await cancelled_landing("cut-twice", 2)
+
+    # Raised out of its act.
+    async def _interrupted() -> None:
+        raise KeyboardInterrupt
+
+    async def _exited() -> None:
+        raise SystemExit(1)
+
+    async def _blank() -> None:
+        raise RuntimeError
+
+    for name, raised, act in (
+        ("interrupted", KeyboardInterrupt, _interrupted),
+        ("exited", SystemExit, _exited),
+        ("blank", RuntimeError, _blank),
+    ):
+        acts[name] = act
+        with pytest.raises(raised):
+            await sender.dispatch(verify(name))
+        table["recorded", f"{raised.__name__} left its act"] = await seen(name, verify(name))
+
+    # Its owner deleted, or its ledger moved.
+    for campaign_id, keep in (("kept", True), ("dropped", False)):
+        owner = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{campaign_id}")
+        stores.campaigns.create_campaign(minted_campaign(owner))
+        stores.campaigns.mint_cycle(owner)
+        acts[campaign_id] = _returns
+        await sender.dispatch(verify(campaign_id, owner))
+        await sender.dispatch(
+            CommandCall(DeleteCampaignPayload(campaign_id=campaign_id, keep_results=keep))
+        )
+        table["deleted", f"its campaign deleted, keep_results={keep}"] = await seen(
+            campaign_id, verify(campaign_id, owner)
+        )
+
+    acts["stub"] = _returns
+    await sender.dispatch(verify("stub", stub))
+    await sender.dispatch(
+        CommandCall(DeleteCyclePayload(campaign_id=stub.campaign_id, cycle_id=stub.cycle_id))
+    )
+    table["deleted", "its cycle deleted"] = await seen("stub", verify("stub", stub))
+
+    async def _edited(_: object) -> Any:
+        return Applier.silent(_returns)
+
+    monkeypatch.setattr(draft_editing, "edit_draft_campaign", _edited)
+
+    async def drafted(command_id: str) -> tuple[str, CommandCall[Any]]:
+        draft = new_draft(
+            tenant_id=stores.identity.tenant_id,
+            owner_user_id=str(stores.identity.user_id),
+            slug=command_id,
+            basis=DatasetBasis(dataset=command_id),
+            n_samples=1,
+            sample_preview=[],
+            headers=[],
+        )
+        stores.drafts.write_draft(draft.draft_id, draft.to_disk())
+        edit = EditDraftCampaignPayload(draft_id=draft.draft_id, patch=EditDraftPatch())
+        await sender.dispatch(CommandCall(edit, command_id, command_id))
+        return draft.draft_id, CommandCall(edit, command_id, command_id)
+
+    discarded, retried = await drafted("discarded")
+    await sender.dispatch(CommandCall(DiscardDraftPayload(draft_id=discarded)))
+    table["deleted", "its draft discarded"] = await seen("discarded", retried)
+
+    # A Start's mint of a real plan, its draft's ledger billed in: moved and closed, its rename
+    # raised (the draft kept, then discarded), or refused by a target that holds a ledger.
+    unframed = {"optimization": {"degradation_threshold": 0.4}}
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("acts") / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
+    )
+    rows = samples(30)
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
+    starting = loop_session(
+        stores, pipeline_schema([solve], name="acts"), rows, dataset=resolve_dataset(stores, "acts")
+    )
+    declared = declare(starting, CampaignConfig.model_validate(unframed), purpose=Optimize())
+    plan = resolve_cycle_plan(starting, declared, rows)
+
+    moved, retried = await drafted("moved")
+    mint(plan, campaign_id="adopted", billed=stores.drafts.ledger(moved))
+    stores.drafts.close(moved)
+    table["moved", "its draft's ledger adopted by its cycle, its draft closed"] = await seen(
+        "moved", retried
+    )
+
+    def _disk_gone(*_: object) -> None:
+        raise OSError("disk gone at the rename")
+
+    unrenamed, retried = await drafted("unrenamed")
+    with monkeypatch.context() as cut:
+        cut.setattr(shutil, "move", _disk_gone)
+        with pytest.raises(OSError):
+            mint(plan, campaign_id="unrenamed", billed=stores.drafts.ledger(unrenamed))
+    table["moving", "its move filed, its rename raised"] = await seen("unrenamed", retried)
+    await sender.dispatch(CommandCall(DiscardDraftPayload(draft_id=unrenamed)))
+    table["deleted", "its rename raised, then its draft discarded"] = await seen(
+        "unrenamed", retried
+    )
+
+    unmoved, retried = await drafted("unmoved")
+    stores.campaigns.mint_cycle(CycleHop(campaign_id="taken", cycle_id=plan.cycle_id))
+    with pytest.raises(ConflictError):
+        mint(plan, campaign_id="taken", billed=stores.drafts.ledger(unmoved))
+    await sender.dispatch(CommandCall(DiscardDraftPayload(draft_id=unmoved)))
+    table["deleted", "its move refused by its target, then its draft discarded"] = await seen(
+        "unmoved", retried
+    )
+
+    # Two filers of one id, racing: one files it, the other is refused unrecorded.
+    acts["raced"] = _returns
+    raced = [CommandCall(verify("raced").payload, key, "raced") for key in ("race-a", "race-b")]
+    ran = await asyncio.gather(*(sender.dispatch(c) for c in raced), return_exceptions=True)
+    outcomes = [type(r).__name__ for r in ran]
+    assert sorted(outcomes) == ["CommandIdReusedError", "CommandOutcome"], ran
+    won = raced[outcomes.index("CommandOutcome")]
+    table["recorded", "two filers raced its id"] = await seen(
+        "raced", CommandCall(won.payload, won.idempotency_key, "raced")
+    )
+    table["unfiled", "never sent"] = await seen("never-sent", None)
+
+    # An inner cycle: its own loop's run, a pass on it, and a kind that never addresses it.
+    leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+    sandbox = inner_sandbox(stores, _ACTS.campaign_id, _ACTS.cycle_id)
+    (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+    inner = descend_store(stores, (_ACTS,))
+    inner.campaigns.create_campaign(
+        minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
+    )
+    inner.campaigns.mint_cycle(leaf)
+    leaf_dir = inner.campaigns.cycle_dir(leaf)
+    into_leaf = Subject.parse(
+        f"course:innerds/{leaf.cycle_id};in={_ACTS.campaign_id}::{_ACTS.cycle_id}"
+    ).command_fields
+    controls: dict[str, str] = {}
+    CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(leaf_dir)
+    controls["inner, its own loop running"] = derive_run_state(leaf_dir).admission.refusal
+    paused = PauseCyclePayload(**into_leaf, reason="stop")
+    with pytest.raises(ConflictError):
+        await sender.dispatch(CommandCall(paused, "inner-run", "inner-run"))
+    table["refused", "a pause into an inner cycle its own loop runs"] = await seen(
+        "inner-run", CommandCall(paused, "inner-run", "inner-run")
+    )
+    release_cycle(leaf_dir)
+
+    held = CycleHop(campaign_id="held", cycle_id="cycle_held")
+    stores.campaigns.create_campaign(minted_campaign(held))
+    stores.campaigns.mint_cycle(held)
+    selecting: list[bool] = []
+
+    async def paused_under_pass(on: Stores, hop: CycleHop, address: dict[str, Any]) -> None:
+        """The control a cycle reads once a pause stands on the pass holding it."""
+        async with paid_pass(stores=on, verb="bench", hop=hop, declared=Budget(), sends=()):
+            await sender.dispatch(CommandCall(PauseCyclePayload(**address, reason="stop")))
+            run = derive_run_state(on.campaigns.cycle_dir(hop))
+            controls[f"{'inner' if run.inner else 'outer'}, paused under a pass"] = (
+                run.admission.refusal
+            )
+            if not run.inner:
+                selecting.append(line_run(stores, hop).selecting)
+            raise asyncio.CancelledError("aborted")
+
+    with pytest.raises(PassStoppedError):
+        await paused_under_pass(stores, held, {"campaign_id": "held", "cycle_id": "cycle_held"})
+    with pytest.raises(PassStoppedError):
+        await paused_under_pass(inner, leaf, into_leaf)
+
+    # A loop command: accepted by its act, then taken by its loop, or left as its loop ends.
+    looped = CycleHop(campaign_id="looped", cycle_id="cycle_looped")
+    stores.campaigns.create_campaign(minted_campaign(looped))
+    stores.campaigns.mint_cycle(looped)
+    looped_dir = stores.campaigns.cycle_dir(looped)
+    looped_ledger = CycleEventLog.open(CycleDir(looped_dir))
+    looped_ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(looped_dir)
+    asked = PauseCyclePayload(campaign_id="looped", cycle_id="cycle_looped", reason="stop")
+    await sender.dispatch(CommandCall(asked, "loop-pause", "loop-pause"))
+    table["accepted", "standing for its loop"] = await seen(
+        "loop-pause", CommandCall(asked, "loop-pause", "loop-pause")
+    )
+    bound = telemetry.set_cycle_ledger(looped_ledger)
+    assert RunControl(cycle_dir=looped_dir).take_pause() is not None
+    telemetry.reset_cycle_ledger(bound)
+    table["applied", "taken by its loop"] = await seen(
+        "loop-pause", CommandCall(asked, "loop-pause", "loop-pause")
+    )
+    skipped = SkipSearchpointPayload(campaign_id="looped", cycle_id="cycle_looped")
+    await sender.dispatch(CommandCall(skipped, "loop-left", "loop-left"))
+    release_cycle(looped_dir)
+    assert stores.campaigns.mark_producer_vanished(looped), "a dead loop's cycle was not reaped"
+    table["stopped", "its loop ended without taking it"] = await seen(
+        "loop-left", CommandCall(skipped, "loop-left", "loop-left")
+    )
+
+    unaddressed = DeleteCyclePayload(**into_leaf)
+    with pytest.raises(PayloadInvalidError) as static:
+        await sender.dispatch(CommandCall(unaddressed, "inner-422", "inner-422"))
+    assert static.value.code == "inner_cycle_unaddressed"
+    table["unfiled", "a kind no inner cycle takes, sent into one"] = await seen(
+        "inner-422", CommandCall(unaddressed, "inner-422", "inner-422")
+    )
+
+    refused, reused, gone = "CommandUncancellableError", "CommandIdReusedError", "NotFoundError"
+    # (status, a word its status says, cancel's answer, a retry's answer, its acks)
+    owed: dict[tuple[str, str], tuple[str, str | None, str, str, int]] = {
+        ("applied", "act returned"): ("completed", None, "completed", "replayed", 1),
+        ("in flight", "act runs, its filer alive"): ("working", None, refused, reused, 0),
+        ("in flight", "its filer killed mid-act"): ("failed", "ended", "failed", reused, 0),
+        ("in flight", "its pass held in another process"): ("working", None, refused, reused, 0),
+        ("in flight", "a workspace kind's act runs"): ("working", None, refused, reused, 0),
+        ("landing", "its record held, filer alive"): ("working", None, refused, reused, 0),
+        ("landing", "its record held, filer dead"): ("failed", "ended", "failed", reused, 0),
+        ("landing", "its record write raised"): ("failed", "raised", "failed", reused, 0),
+        ("landing", "its call cancelled once"): ("cancelled", None, "cancelled", reused, 1),
+        ("landing", "its call cancelled again at the landing"): (
+            "cancelled",
+            None,
+            "cancelled",
+            reused,
+            1,
+        ),
+        ("recorded", "KeyboardInterrupt left its act"): ("cancelled", None, "cancelled", reused, 1),
+        ("recorded", "SystemExit left its act"): ("cancelled", None, "cancelled", reused, 1),
+        ("recorded", "RuntimeError left its act"): ("failed", "RuntimeError", "failed", reused, 1),
+        ("recorded", "two filers raced its id"): ("completed", None, "completed", "replayed", 1),
+        ("deleted", "its campaign deleted, keep_results=True"): (
+            "failed",
+            "deleted",
+            "failed",
+            gone,
+            0,
+        ),
+        ("deleted", "its campaign deleted, keep_results=False"): (
+            "failed",
+            "deleted",
+            "failed",
+            gone,
+            0,
+        ),
+        ("deleted", "its cycle deleted"): ("failed", "deleted", "failed", gone, 0),
+        ("deleted", "its draft discarded"): ("failed", "deleted", "failed", gone, 0),
+        ("moved", "its draft's ledger adopted by its cycle, its draft closed"): (
+            "completed",
+            None,
+            "completed",
+            gone,
+            1,
+        ),
+        ("moving", "its move filed, its rename raised"): (
+            "completed",
+            None,
+            "completed",
+            "replayed",
+            1,
+        ),
+        ("deleted", "its rename raised, then its draft discarded"): (
+            "failed",
+            "deleted",
+            "failed",
+            gone,
+            0,
+        ),
+        ("accepted", "standing for its loop"): ("working", "accepted", refused, "replayed", 1),
+        ("applied", "taken by its loop"): ("completed", None, "completed", "replayed", 2),
+        ("stopped", "its loop ended without taking it"): (
+            "cancelled",
+            "loop ended",
+            "cancelled",
+            reused,
+            2,
+        ),
+        ("deleted", "its move refused by its target, then its draft discarded"): (
+            "failed",
+            "deleted",
+            "failed",
+            gone,
+            0,
+        ),
+        ("refused", "a pause into an inner cycle its own loop runs"): (
+            "failed",
+            None,
+            "failed",
+            reused,
+            1,
+        ),
+        ("unfiled", "never sent"): (gone, None, gone, "-", 0),
+        ("unfiled", "a kind no inner cycle takes, sent into one"): (
+            gone,
+            None,
+            gone,
+            "PayloadInvalidError",
+            0,
+        ),
+    }
+    assert set(table) == set(owed), "a row of the table was never reached"
+    wrong = []
+    for row, read in table.items():
+        status, word, cancel, retry, acked = owed[row]
+        if (read.status, read.cancel, read.retry, read.acks) != (status, cancel, retry, acked) or (
+            word is not None and word not in read.said
+        ):
+            wrong.append(f"{row}: read {read}, owed {owed[row]}")
+        if read.status in ("completed", "failed", "cancelled") and read.after != read.status:
+            wrong.append(f"{row}: read {read.status}, then {read.after} past its cancel and retry")
+    parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
+    owed_controls = {
+        "inner, its own loop running": INNER_PAUSE_REFUSAL,
+        "outer, paused under a pass": parked,
+        "inner, paused under a pass": parked,
+    }
+    wrong += [
+        f"{row}: its run control reads {controls.get(row)!r}, owed {said!r}"
+        for row, said in owed_controls.items()
+        if controls.get(row) != said
+    ]
+    if selecting != [False]:
+        wrong.append(f"a line whose pass is stopping reads as selecting: {selecting}")
+    assert not wrong, "\n".join(wrong)

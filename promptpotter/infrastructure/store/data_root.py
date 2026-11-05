@@ -51,6 +51,7 @@ from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
+from promptpotter.infrastructure.store.command_index import COMMAND_INDEX_FILE, INDEX_LINE
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -75,6 +76,7 @@ from promptpotter.infrastructure.store.layout import (
     HEAD_TO_HEADS_DIR,
     INNER_SANDBOXES_DIR,
     ROUND_GLOB,
+    WORKSPACE_LEDGER_FILE,
     WORKSPACE_STATE_DIR,
     CampaignLayout,
     CycleLayout,
@@ -281,6 +283,8 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _SURVIVOR, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
     Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _SURVIVOR, TypeAdapter(ChargeRecord)),
+    # One per account: every ledger under it, a sandbox's included, files its command ids here.
+    Kind("command index", Scope.ACCOUNT, COMMAND_INDEX_FILE, Fate.RUN, INDEX_LINE),
     Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
     # An upload definition's `source:` reads it.
     Kind("upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _SURVIVOR),
@@ -436,7 +440,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         Fate.RUN,
         TypeAdapter(CycleHop),
     ),
-    Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, RECORD_ADAPTER),
+    Kind("workspace ledger", _WS, WORKSPACE_LEDGER_FILE, Fate.RUN, RECORD_ADAPTER),
     Kind(
         "head-to-head",
         _WS,

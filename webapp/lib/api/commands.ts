@@ -12,15 +12,18 @@ import type { VerifyReading } from "./types";
 export type VerifyStrategy = VerifyReading["strategy"];
 
 // The body IS the kind's payload model, and the answer is its route's: neither is declared here.
+// `commandId` names the act while it runs, so a stop can address it (`cancel-command`).
 export async function postCommand<K extends keyof CommandPayloads>(
   kind: K,
   payload: CommandPayloads[K],
+  commandId?: string,
 ): Promise<CommandResponses[K]> {
   const r = await send(`${API}/commands/${kind}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": mintIdempotencyKey(),
+      ...(commandId ? { "Command-Id": commandId } : {}),
     },
     body: JSON.stringify(payload),
   });
