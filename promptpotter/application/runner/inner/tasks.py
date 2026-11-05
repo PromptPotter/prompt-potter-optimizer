@@ -25,7 +25,7 @@ from promptpotter.domain.campaign_config import (
     merge_node_overlays,
 )
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
-from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
+from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
@@ -157,15 +157,15 @@ class InnerTasks(FrozenModel):
         cfg = self.inner_benchmark_config
         by_dataset: dict[str, InnerCell] = {}
         for name in sorted(self.datasets):
-            dataset_dir = resolve_dataset(stores, name).directory
-            campaign = dataset_campaign_block(dataset_dir)
+            dataset = resolve_dataset(stores, name)
+            campaign = dataset_campaign_block(dataset)
             opt = CampaignConfig.model_validate(campaign).optimization
             identity = select_optimizer(
                 _inner_optimization(opt, cfg.inner_nodes, {}, n_samples=None)
             )
             by_dataset[name] = InnerCell(
                 campaign_config=campaign,
-                pipeline=read_dataset_pipeline(dataset_dir),
+                pipeline=read_dataset_pipeline(dataset),
                 optimizer=select_optimizer(
                     _inner_optimization(
                         opt,
@@ -267,7 +267,7 @@ class ResolvedPanel(FrozenModel):
                 "query": t.id,
                 "ground_truth": None,
                 "source_pin": PinnedCell(cell=t, instrument=self.instruments[t.id]).pin(),
-                "bench_only": t.held_out,
+                "held_out": t.held_out,
                 "measured_dataset": self.datasets[t.id],
             }
             for t in self.panel.tasks
@@ -424,7 +424,7 @@ class InnerCells:
 
     def pipeline(self) -> dict[str, Any]:
         """RAISES where two manifests declare one node differently (``owners``)."""
-        observed = [{"pipeline_key": key} for key in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS)]
+        observed = [{"pipeline_key": INNER_RESULT_KEY}]
         terminals = {_terminal(inner) for inner in self.optimizers}
         owners = self.owners
         nests: dict[str, list[str]] = {}

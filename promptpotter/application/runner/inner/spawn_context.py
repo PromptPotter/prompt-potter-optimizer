@@ -39,6 +39,9 @@ class InnerSpawnContext:
     inner_sandbox_root: Path
     identity: IdentityContext
     shared_root: Path
+    # The spawner's tiers, so a cell resolves its dataset where the spawner does.
+    install_datasets_root: Path
+    research_datasets_root: Path | None
     spawn_campaign_id: str
     spawn_cycle_id: str
     # Outermost first, ending at the asker's: a pause on any of their ledgers stops the cell.
@@ -85,6 +88,8 @@ def publish_inner_spawn_context(session: Session) -> None:
             inner_sandbox_root=inner_root,
             identity=session.store.identity,
             shared_root=shared_root,
+            install_datasets_root=session.store.install_datasets_root,
+            research_datasets_root=session.store.research_datasets_root,
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
             enclosing=(

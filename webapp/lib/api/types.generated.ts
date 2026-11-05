@@ -1982,7 +1982,7 @@ export interface ValidationFailure {
    * ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type``
    * (generator-side failure), ``steers_inner_stopping`` (an L4 override
    * telling the inner loop when to STOP rather than how to search — it edits
-   * the frame `mean_bench_lift` averages over instead of the search it
+   * the frame `held_out_lift` averages over instead of the search it
    * measures), ``steers_across_seeds`` (an L4 override making an inner node
    * reason over the seed panel, which exists only one level up — the rule
    * renders empty where it lands), ``guts_inherited_contract`` (an L4
@@ -2718,7 +2718,7 @@ export interface BenchSet {
 export interface DatasetSplit {
   /** Distinct samples the split ranks away from the search as the bench set, with
    * every row that repeats one: no optimizer node ever reads one, and the
-   * headline is scored on them. A row the bank declares `bench_only` is held
+   * headline is scored on them. A row the bank declares `held_out` is held
    * out beside them, never counted here. */
   bench: number;
   /** Distinct samples reserved as the demo pool — the rows an individual's `shots`
@@ -3589,6 +3589,10 @@ export interface CampaignPipelineResponse {
    * L4 drill-in, on this read */
   nests: NestedPipelineRef[];
   is_single_node: boolean;
+  /** The per-cell terms this campaign's connector adds to `CELL_TERM_META`'s core
+   * ones, each a key of the connector's cell report a criterion, dial or lens
+   * may name */
+  cell_terms: CellTerm[];
 }
 
 /** Which node of this pipeline runs another whole pipeline, and whose. */
@@ -3597,6 +3601,14 @@ export interface NestedPipelineRef {
   node: string;
   /** Slug of the pipeline that node runs; fetch it the same way. */
   dataset: string;
+}
+
+export interface CellTerm {
+  name: string;
+  direction: 'high' | 'low';
+  description: string;
+  dial: 'anchored' | 'unit' | null;
+  primary: boolean;
 }
 
 /** What `POST /commands/fork-cycle` would decide about this steer, asked without forking. */
@@ -3710,16 +3722,16 @@ export interface DatasetIndexResponse {
 export interface DatasetIndexEntry {
   /** The definition's path under its tier, `/`-separated. */
   name: string;
-  /** Display title (from `README.md`). */
+  /** Display title: the definition's `card.title`. */
   title: string | null;
   /** ``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``.
    * ``install`` = content that ships with the product at
-   * ``assets/datasets/{name}/`` (benchmarks, demos, ``promptpotter-self``) —
-   * tracked in git, so readable by anyone using the install. A ``yours`` slug
-   * shadows an ``install`` one. */
-  tier: 'yours' | 'install';
-  /** What the dataset is, in one plain sentence (the first under `README.md`'s
-   * title). */
+   * ``assets/datasets/{name}/`` (benchmarks, demos), readable by anyone using
+   * the install. ``research`` = a checkout's ``research/datasets/`` (L4's
+   * ``promptpotter-self``), resolved by name and never listed. A name reads
+   * from the first tier holding it: yours, install, research. */
+  tier: 'yours' | 'install' | 'research';
+  /** What the dataset is, in one plain sentence: the definition's `card.summary`. */
   summary: string | null;
   /** Rows held without a fetch (the connector's panel, else the materialized bank);
    * ``null`` when none are, which is not the same as a dataset holding zero
@@ -4845,14 +4857,6 @@ export interface SteerOutsideInfo {
   tone: Tone;
 }
 
-export interface CellTermMeta {
-  name: string;
-  direction: 'high' | 'low';
-  description: string;
-  dial: 'anchored' | 'unit' | null;
-  primary: boolean;
-}
-
 export interface AccountTabInfo {
   label: string;
   group: string;
@@ -5099,20 +5103,11 @@ export const STEER_OUTSIDE_INFO: Record<'babysat' | 'refused', SteerOutsideInfo>
 };
 
 // Mirror of application/scoring/evaluators.py::CELL_TERM_META, in display order.
-export const CELL_TERM_META: Record<string, CellTermMeta> = {
+export const CELL_TERM_META: Record<string, CellTerm> = {
   "fitness": { name: "fitness", direction: "high", description: "The cell's correctness under the per-sample formula.", dial: null, primary: true },
   "ground_truth_rank": { name: "ground_truth_rank", direction: "low", description: "Where the truth landed in the ranking; 1 is the top.", dial: null, primary: false },
   "latency": { name: "latency", direction: "low", description: "Seconds the cell took when measured; a replay keeps them.", dial: "anchored", primary: true },
   "unworked": { name: "unworked", direction: "low", description: "Seconds the cell sat blocked (suspend, rate-limit queue).", dial: "anchored", primary: false },
-  "bench_lift": { name: "bench_lift", direction: "high", description: "L4: the inner campaign's mean lift over its origin on its held-out rows.", dial: null, primary: false },
-  "bench_origin": { name: "bench_origin", direction: "high", description: "L4: the inner origin's headline on the held-out rows.", dial: null, primary: false },
-  "bench_final_lift": { name: "bench_final_lift", direction: "high", description: "L4: the held-out lift the inner campaign ended on.", dial: null, primary: false },
-  "lift": { name: "lift", direction: "high", description: "L4: the inner campaign's mean θ lift over its own origin.", dial: null, primary: false },
-  "origin": { name: "origin", direction: "high", description: "L4: the inner campaign's origin level.", dial: null, primary: false },
-  "final_lift": { name: "final_lift", direction: "high", description: "L4: the lift the inner campaign ended on.", dial: null, primary: false },
-  "peak_lift": { name: "peak_lift", direction: "high", description: "L4: the best lift the inner campaign reached.", dial: null, primary: false },
-  "rounds": { name: "rounds", direction: "low", description: "L4: rounds the inner campaign ran.", dial: "anchored", primary: false },
-  "round_budget": { name: "round_budget", direction: "high", description: "L4: rounds the inner campaign was allowed.", dial: null, primary: false },
   "cost": { name: "cost", direction: "low", description: "USD the cell cost.", dial: "anchored", primary: true },
   "tokens": { name: "tokens", direction: "low", description: "Input plus output tokens the cell spent.", dial: "anchored", primary: true },
   "target_prompt_chars": { name: "target_prompt_chars", direction: "low", description: "Characters of the candidate's prompt template.", dial: "anchored", primary: true },
@@ -5555,7 +5550,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [SCORE_LENS_LABELS, ["score:accuracy"]],
   [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:lock_in_off", "abort:all_off"]],
   [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
-  [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "bench_lift", "bench_origin", "bench_final_lift", "lift", "origin", "final_lift", "peak_lift", "rounds", "round_budget", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
+  [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
   [LOOKAHEAD_WORDS, ["one_at_a_time", "settled", "no_further_cell", "more_affordable", "holds_every_round", "holds_this_round", "discarded", "depth_one", "depth_many"]],
   [ACCOUNT_TAB_INFO, ["profile", "usage", "keys", "activity", "preferences", "storage", "about"]],
   [ARM_VERDICT_LABELS, ["retired", "invalid", "origin", "elected", "uncontested", "selected", "not_elected", "unmeasured", "awaiting"]],

@@ -66,7 +66,8 @@ test.describe("the recursion, end to end", () => {
     const res = await request.get("/api/v1/datasets");
     expect(res.ok()).toBeTruthy();
     const names = ((await res.json()).datasets ?? []).map((d: { name: string }) => d.name);
-    expect(names, `${DATASET} is not installed`).toContain(DATASET);
+    // The research tier resolves by name and is never offered: the mint below is what finds it.
+    expect(names, `${DATASET} is listed, so the research tier is offered`).not.toContain(DATASET);
     expect(DATASET, "this tier must never run the calibrated panel").not.toBe("promptpotter-self/panel");
   });
 

@@ -10,7 +10,7 @@ from pydantic import ValidationError, field_serializer
 from promptpotter.domain.strict_model import FrozenModel, NonNegativeWireFloat
 from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import StoredConfigInvalidError, validation_reason
+from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +44,15 @@ def _read(path: Path) -> GrantsFile:
     try:
         return GrantsFile.model_validate_json(raw)
     except ValidationError as exc:
-        raise StoredConfigInvalidError(
-            path=str(path), reason=validation_reason(exc, shown=1)
+        raise FileUnreadableError(
+            FileKind.STORED_CONFIG, path=str(path), reason=validation_reason(exc, shown=1)
         ) from exc
 
 
 def read_grant(path: Path, sub_principal_user_id: str) -> PrincipalGrant | None:
     try:
         grants = _read(path).grants
-    except StoredConfigInvalidError:
+    except FileUnreadableError:
         # Deny-all: an invalid file promotes nobody to a delegate.
         logger.warning("grants.json does not validate; no grant is read")
         return None

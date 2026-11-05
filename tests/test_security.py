@@ -166,6 +166,7 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
 from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl
 from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
     CycleLayout,
     campaign_root_dir_for,
     cycle_dir_for,
@@ -181,7 +182,12 @@ from promptpotter.infrastructure.store.site_records import (
     default_site_record_store,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.infrastructure.store.user_store import User, UserStore, count_accounts
+from promptpotter.infrastructure.store.user_store import (
+    CONSENT_FILE,
+    User,
+    UserStore,
+    count_accounts,
+)
 from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
@@ -202,11 +208,11 @@ from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
+    FileUnreadableError,
     IdempotencyKeyReusedError,
     NotFoundError,
     PotterError,
     ServiceUnavailableError,
-    StoredConfigInvalidError,
     TaskUncancellableError,
     UnauthorizedError,
 )
@@ -947,11 +953,12 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     held = grants.read_bytes()
     assert read_grant(grants, "sub-boss") is None, "an invalid grants file promoted a delegate"
     assert str(identity_of_session(session_of("sub-boss"), signed_in).tenant_id) == "sub-boss"
-    with pytest.raises(StoredConfigInvalidError):
+    with pytest.raises(FileUnreadableError) as invalid:
         list_grants(grants)
-    with pytest.raises(StoredConfigInvalidError):
+    assert invalid.value.http_status == 500, "an invalid grants file read as the caller's fault"
+    with pytest.raises(FileUnreadableError):
         grant("sub-y", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
-    with pytest.raises(StoredConfigInvalidError):
+    with pytest.raises(FileUnreadableError):
         revoke_principal(
             grants, sub_principal_user_id="sub-boss", actor="owner-9", audit_path=audit
         )
@@ -966,7 +973,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert check_blocklist(blocks, "anyone@x.com").blocked, "an empty blocklist read as absent"
     blocks.write_text('{"emails": "ada@x.com"}', encoding="utf-8")
     for edit in (block_email, unblock_email):
-        with pytest.raises(StoredConfigInvalidError):
+        with pytest.raises(FileUnreadableError):
             edit(blocks, "eve@x.com", actor="owner-9", audit_path=grant_paths.blocklist_audit)
     assert blocks.read_text(encoding="utf-8") == '{"emails": "ada@x.com"}'
     blocks.unlink()
@@ -1189,6 +1196,33 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         str(identity.user_id),
         "bob-id",
     ], "what a delegate did in this workspace is not told apart from what its owner did"
+    # A consent file this build cannot read costs the operator's survey its one account, no other.
+    bob_consent = workspace(tmp_path, bob).base_dir / CONSENT_FILE
+    held_consent = bob_consent.read_bytes()
+    bob_consent.write_bytes(held_consent + b"{not a row\n")
+    surveyed, unreadable = account.trails_since(projects, 0.0)
+    assert unreadable == ["bob@x.com"], "an unreadable consent file listed as read"
+    assert "Ada@x.com" in [trail.who for trail in surveyed], "one unreadable file hid the rest"
+    bob_consent.write_bytes(held_consent)
+    # So does a manifest: its campaign's lines list, naming no dataset, beside its neighbour's.
+    for campaign_id in ("camp-torn", "camp-whole"):
+        hop = CycleHop(campaign_id=campaign_id, cycle_id="cycle_survey000000")
+        stores.campaigns.create_campaign(minted_campaign(hop))
+        stores.campaigns.mint_cycle(hop)
+        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))).append(
+            command(f"run-{campaign_id}", "2001-01-01T00:00:00Z")
+        )
+    torn = CampaignLayout(stores.campaigns.campaign_root_dir("camp-torn")).manifest
+    held_manifest = torn.read_bytes()
+    torn.write_bytes(b"{not a manifest")
+    surveyed, unreadable = account.trails_since(projects, 0.0)
+    [ada_trail] = [trail for trail in surveyed if trail.who == "Ada@x.com"]
+    assert {line.what for line in ada_trail.trail.lines} >= {"run-camp-torn", "run-camp-whole"}, (
+        "an unreadable manifest hid its campaign's lines, or its neighbour's"
+    )
+    assert ada_trail.datasets == {"camp-whole": "ds1"}, "an unreadable manifest named a dataset"
+    assert unreadable == [], "an unreadable manifest cost its whole workspace"
+    torn.write_bytes(held_manifest)
 
     def unrecordable(_: object, **__: object) -> None:
         raise OSError("disk full")

@@ -53,6 +53,7 @@ from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.dataset_access import claim_own_definition, tenant_dataset
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -129,9 +130,11 @@ def _land_draft(
             else None
         )
     source = upload_source(draft, basis)
+    # The writer's own claim, asked before the mint's refusals: a held name is refused as itself.
+    claim_own_definition(stores, draft.slug, new=False)
     datasets = stores.tenant_datasets
     if datasets.slug_exists(draft.slug) and definition_source(
-        datasets.dataset_dir(draft.slug)
+        tenant_dataset(draft.slug, datasets.dataset_dir(draft.slug))
     ) != Source.of(source):
         raise LaunchError(
             f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"

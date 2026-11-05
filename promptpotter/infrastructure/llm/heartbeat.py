@@ -10,7 +10,6 @@ from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import (
     FileUnreadableError,
     LedgerUnreadableError,
-    ManifestUnreadableError,
 )
 
 if TYPE_CHECKING:
@@ -77,7 +76,6 @@ def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:
         OSError,
         ValueError,
         LedgerUnreadableError,
-        ManifestUnreadableError,
         FileUnreadableError,
     ) as exc:
         logger.warning("heartbeat read unavailable — %s: %s", exc.__class__.__name__, exc)

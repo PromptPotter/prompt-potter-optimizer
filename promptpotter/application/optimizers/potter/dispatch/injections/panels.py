@@ -54,6 +54,7 @@ from promptpotter.domain.candidate_diff import (
 )
 from promptpotter.domain.connector import unit_count, unit_plural
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
+from promptpotter.domain.l4.proxies import held_out_lift_of, inner_facts_of
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
@@ -488,7 +489,8 @@ def _inner_narrated(b: InjectionBundle) -> list[tuple[GradedCell, InnerCellFacts
     return [
         (r, inner)
         for r in b.trajectory_results
-        if (inner := r.facts.pipeline.inner) is not None and r.facts.pipeline.reasoning_trace
+        if (inner := inner_facts_of(r.facts.pipeline)) is not None
+        and r.facts.pipeline.reasoning_trace
     ]
 
 
@@ -507,8 +509,8 @@ def _paired_cell(
 
 def _paired_bench(r: GradedCell, origin: GradedCell | None) -> float | None:
     """The scored term, paired the same way; it carries no SE, so the θ pair keeps the ranking."""
-    own = r.facts.pipeline.mean_bench_lift
-    base = origin.facts.pipeline.mean_bench_lift if origin is not None else None
+    own = held_out_lift_of(r.facts.pipeline)
+    base = held_out_lift_of(origin.facts.pipeline) if origin is not None else None
     if own is None or base is None:
         return None
     return own - base
@@ -531,13 +533,13 @@ def _narrated_cells(b: InjectionBundle) -> list[_NarratedCell]:
         o = origin.get(r.key)
         # The origin's own measurement pairs with nothing: differenced with itself it reads `+0.000`, no null.
         paired = o is not None and o is not r and o.facts.answer != r.facts.answer
-        base = None if o is None else o.facts.pipeline.inner
+        base = None if o is None else inner_facts_of(o.facts.pipeline)
         d, bar = (
             _paired_cell(inner, base)
             if paired
             else (inner.mean_round_delta, inner.mean_parent_level_se)
         )
-        bench = _paired_bench(r, o) if paired else r.facts.pipeline.mean_bench_lift
+        bench = _paired_bench(r, o) if paired else held_out_lift_of(r.facts.pipeline)
         upper = None if d is None else d + _CELL_SEPARATION_SIGMAS * (bar or 0.0)
         cells.append(_NarratedCell(upper, d, bar, bench, paired, r))
     cells.sort(key=lambda c: (c.upper is None, 0.0 if c.upper is None else c.upper))

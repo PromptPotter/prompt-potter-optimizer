@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import StoredConfigInvalidError, validation_reason
+from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ def _read(path: Path) -> list[str] | None:
     try:
         emails = Blocklist.model_validate_json(raw).emails
     except ValidationError as exc:
-        raise StoredConfigInvalidError(
-            path=str(path), reason=validation_reason(exc, shown=1)
+        raise FileUnreadableError(
+            FileKind.STORED_CONFIG, path=str(path), reason=validation_reason(exc, shown=1)
         ) from exc
     return sorted({_norm_email(e) for e in emails if e.strip()})
 
@@ -49,7 +49,7 @@ def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
     answers, and invalid is never the wider."""
     try:
         blocked = _read(path)
-    except StoredConfigInvalidError:
+    except FileUnreadableError:
         logger.warning("blocklist.json does not validate; treating as block-all")
         return BlocklistDecision(blocked=True, reason="blocklist_invalid")
     if blocked is None:

@@ -1,8 +1,9 @@
 pipeline:
+  # The browser walk's L4 fixture: the family's graph over the degenerate one-cell panel in
+  # `panel:` below. It proves the recursion still spawns and scores end to end, cheaply enough to
+  # run often, and measures nothing.
   description: >-
-    The browser walk's L4 fixture — the family's graph, run over the degenerate one-cell panel in
-    `panel:` below. It exists to prove the recursion still spawns and scores end to end, cheaply
-    enough to run often. It measures nothing.
+    Self-optimization smoke test: one small inner campaign per outer cell.
 
 campaign:
   # No `per_cell` term: the panel's prices fitness against a 500s/cell latency anchor measured on
@@ -55,7 +56,7 @@ panel:
   # `promptpotter-self/panel`'s `dataset.yaml::panel` is the real one and this is not a cheaper version of it:
   # every property that makes that panel MEASURE something has been removed here on purpose. One
   # cell, so PoBB can never reach its elimination floor of 4 and nothing is ever eliminated. One
-  # inner round, so `mean_bench_lift` is a single difference with no series behind it. One inner
+  # inner round, so `held_out_lift` is a single difference with no series behind it. One inner
   # variant, so there is no candidate field to select from. Two samples, so the inner θ is noise,
   # and ONE held-out row, so the scored lift is a coin.
   #

@@ -1,4 +1,4 @@
-import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
+import { CELL_TERM_META, type CellTerm } from "@/lib/api/types.generated";
 import { wordRows } from "@/lib/api/words";
 import { createModuleStore } from "@/lib/state/module-store";
 
@@ -9,13 +9,19 @@ export type ScoringMask =
 
 export const NO_DIALS: ScoringMask = { kind: "dials", weights: {} };
 
-export const DIAL_TERMS: readonly CellTermMeta[] = wordRows(CELL_TERM_META)
-  .map(([, m]) => m)
-  .filter((m) => m.dial !== null);
+const CORE_TERMS: readonly CellTerm[] = wordRows(CELL_TERM_META).map(([, m]) => m);
+
+// The core's dials, then the campaign connector's own (`useConnector().cellTerms`).
+export function dialTerms(own: readonly CellTerm[]): readonly CellTerm[] {
+  return [...CORE_TERMS, ...own].filter((m) => m.dial !== null);
+}
 
 // The spelling `compiler.py::parse_dials` reads; served vocabulary order, so one set is one string.
-export function dialsText(weights: Readonly<Record<string, number>>): string {
-  return DIAL_TERMS.flatMap((m) => {
+export function dialsText(
+  weights: Readonly<Record<string, number>>,
+  own: readonly CellTerm[],
+): string {
+  return dialTerms(own).flatMap((m) => {
     const w = weights[m.name];
     return w !== undefined && w > 0 ? [`${m.name}=${w}`] : [];
   }).join(",");
@@ -42,10 +48,10 @@ export function servedMask(
 const SCORE = "score:";
 const DIALS = "dials:";
 
-export function lensOf(mask: ScoringMask | null): string | null {
+export function lensOf(mask: ScoringMask | null, own: readonly CellTerm[]): string | null {
   if (mask == null) return null;
   if (mask.kind === "expression") return mask.lens.trim() || null;
-  const text = dialsText(mask.weights);
+  const text = dialsText(mask.weights, own);
   return text ? DIALS + text : null;
 }
 

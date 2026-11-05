@@ -190,9 +190,7 @@ async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
         stores, dataset, experiment=experiment_outside_run(stores, dataset)
     )
     schema = parse_pipeline_response(declared)
-    return _assemble(
-        described, filed, dataset_scorer(dataset.directory).grade(filed.cell), schema, slot
-    )
+    return _assemble(described, filed, dataset_scorer(dataset).grade(filed.cell), schema, slot)
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
@@ -346,7 +344,7 @@ def _cycle_view(stores: Stores, hop: CycleHop) -> HardSamples:
 
 
 def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
-    scorer = dataset_scorer(resolve_dataset(stores, name).directory)
+    scorer = dataset_scorer(resolve_dataset(stores, name))
     knobs = _dataset_campaign_config(stores, name).optimization
     n_min, enable_2pl = knobs.elimination_n_min, knobs.enable_2pl_graduation
 
@@ -504,7 +502,7 @@ def _cycle_cells(
 
 def _dataset_cells(stores: Stores, name: str, bank: Bank, wanted: Mapping[str, int]) -> ScopeCells:
     """A column is a CONFIGURATION's population: the archive names no individual or walk, so no ``RoleScope``."""
-    scorer = dataset_scorer(resolve_dataset(stores, name).directory)
+    scorer = dataset_scorer(resolve_dataset(stores, name))
     archive = stores.archive
     sigs = archive.cell_signatures()
     candidates: list[CellCandidate] = []
@@ -536,7 +534,7 @@ def _dataset_cells(stores: Stores, name: str, bank: Bank, wanted: Mapping[str, i
 
 
 def _dataset_campaign_config(stores: Stores, name: str) -> CampaignConfig:
-    return load_dataset_campaign_config(resolve_dataset(stores, name).directory)
+    return load_dataset_campaign_config(resolve_dataset(stores, name))
 
 
 def _graded(cells: list[CellRow]) -> list[float]:

@@ -1,3 +1,7 @@
+card:
+  title: JustLogic — deductive reasoning
+  summary: Given logical premises and a claim, answer TRUE, FALSE or Uncertain.
+
 source:
   depths: [2, 3, 4]
 

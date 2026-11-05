@@ -13,7 +13,7 @@ from the dataset NAME by its `DATASET_FAMILIES` row / `_justlogic_rows`
 `justlogic/d34` needs a dataset dir and no code.
 
 **Each cut is a separate dataset name, never a re-cut of another** — owned by
-[`datasets/CLAUDE.md`](../../CLAUDE.md) § L4 — `promptpotter-self`; here that means a
+[`research/datasets/CLAUDE.md`](../../../../../research/datasets/CLAUDE.md) § L4 — `promptpotter-self`; here that means a
 cross-cut comparison reads a difference of δ scales, not of capability.
 
 Two things no other file carries:

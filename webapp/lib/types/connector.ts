@@ -8,6 +8,7 @@ import type {
   NodeReach,
   OptimizerSetup,
 } from "@/lib/api";
+import type { CellTerm } from "@/lib/api/types.generated";
 import type { ReadFailure } from "@/lib/hooks/useRead";
 import type { PipelineView } from "./pipeline";
 
@@ -43,4 +44,6 @@ export interface ConnectorView {
   // Empty is UNKNOWN (an unresolved catalogue), never "this model supports nothing".
   modelCapabilities: CapabilityMenu;
   nests: NestedPipelineRef[];
+  // served: `CampaignPipelineResponse.cell_terms`, the terms its connector adds to the core's.
+  cellTerms: readonly CellTerm[];
 }

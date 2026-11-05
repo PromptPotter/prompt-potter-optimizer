@@ -89,7 +89,7 @@ async def open_session(
     if stores is None:
         stores = local_stores(tenant=None)
     down = await probe_backend(
-        runnable_definition(resolve_dataset(stores, dataset_name).directory).backend_type
+        runnable_definition(resolve_dataset(stores, dataset_name)).backend_type
     )
     if down is not None:
         raise down

@@ -34,7 +34,7 @@ campaign:
     l2_context: *pp_self_narrowing
     l3_plan: *pp_self_narrowing
     checkin: *pp_self_narrowing
-  # ONE measurand: what the inner search DELIVERED on rows it never searched — `mean_bench_lift`, the
+  # ONE measurand: what the inner search DELIVERED on rows it never searched — `held_out_lift`, the
   # ADOPTED prompt's accuracy on the cell's held-out bench minus the origin's, averaged over the
   # round budget, so exploring costs nothing and a promotion that fits its own rows buys nothing.
   # The four-factor composite this replaces is described in `domain/l4/proxies.py`; measured over a
@@ -50,7 +50,7 @@ campaign:
   # past ten rows of lift or loss, and the floor (-1) lands at exactly 0.0. Re-check here, not by
   # intuition, once a banked corpus exists under this measurand.
   scoring:
-    per_sample: max(0.0, min(1.0, mean_bench_lift + 0.5))
+    per_sample: max(0.0, min(1.0, held_out_lift + 0.5))
   display_metric: ability
   optimization:
     # Priced against `budget.usd`, not intuition: C0 costs ~$0.47 for the 6-cell calibration panel

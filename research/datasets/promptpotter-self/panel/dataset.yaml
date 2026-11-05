@@ -1,8 +1,8 @@
 pipeline:
+  # Each outer cell runs an inner campaign on a cheap proxy benchmark, configured in `panel:`
+  # below; docs/specs/l4-outer-loop.md.
   description: >-
-    Optimizer-of-the-optimizer — outer PromptPotter cycle mutates the inner optimizer's own prompts.
-    Each outer 'sample' runs an inner cycle on a cheap proxy benchmark, configured in `panel:` below.
-    See docs/specs/l4-outer-loop.md.
+    Self-optimization: evolves the optimizer's own prompts, scored by the inner campaigns they run.
 
 campaign:
   # PER-ROUND, over the cell fitnesses: what the edit delivered, PRICED IN TIME. An edit buys
@@ -48,7 +48,7 @@ panel:
   # `max_inner_rounds` IS BINDING — counted across every banked inner cell that recorded a stop, a
   # majority terminated ON the cap rather than on `inner_lives`, and most used every round. That is
   # not a defect: the cap IS the estimand. Every arm on the panel is graded on what it delivered
-  # over this one budget, and `mean_bench_lift` divides by the budget rather than by the rounds a
+  # over this one budget, and `held_out_lift` divides by the budget rather than by the rounds a
   # cell happened to run (`domain/l4/proxies.py::bench_level_series`) — so a cell `lives` stopped
   # early is measured on the same denominator as one that ran the cap out, instead of being paid for
   # quitting. Raising it changes what the panel measures and costs proportional spend, so it is an

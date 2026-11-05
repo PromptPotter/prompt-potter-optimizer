@@ -32,6 +32,7 @@ from promptpotter.application.datasets.tabular_ingest import (
 )
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import cycle_config, draft_served
+from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
@@ -42,8 +43,12 @@ from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
+from promptpotter.infrastructure.store.dataset_access import (
+    claim_own_definition,
+    runnable_definition,
+)
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import ConflictError, NotFoundError
+from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 
@@ -83,17 +88,6 @@ async def _kept(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
     return wire
 
 
-class SlugTakenError(ConflictError):
-    def __init__(self, slug: str, suggested: str) -> None:
-        self.slug = slug
-        self.suggested = suggested
-        super().__init__(
-            f"A dataset named '{slug}' already exists. Suggested slug: {suggested}.",
-            code="slug_collision",
-            details={"slug": slug, "suggested_slug": suggested},
-        )
-
-
 async def ingest_draft(
     *,
     stores: Stores,
@@ -110,9 +104,8 @@ async def ingest_draft(
         validate_dataset_name(base_slug)
     except ValueError as exc:
         raise IngestError(reason="bad_slug", message=str(exc)) from None
-    # Raised before the draft is kept, so a collision leaves no orphan.
-    if stores.tenant_datasets.slug_exists(base_slug):
-        raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
+    # Raised before the draft is kept, so a taken name leaves no orphan.
+    claim_own_definition(stores, base_slug, new=True)
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
@@ -138,14 +131,15 @@ async def draft_from_dataset(
     origin_campaign: Campaign | None = None,
 ) -> DraftCampaignWire:
     await _open_checkin(stores)
-    dataset_dir = offered_dataset(stores, dataset_name).directory
+    dataset = offered_dataset(stores, dataset_name)
     bank = checkin_bank(stores, dataset_name)
     rows = labelled_rows(bank.samples)
 
-    authored = read_authored_dataset(dataset_dir)
+    authored = read_authored_dataset(dataset)
     cc = authored.campaign_config
     task = authored.task_description or None
-    matcher, dials = scoring_choice(cc.scoring)
+    terms = campaign_terms(runnable_definition(dataset).backend_type)
+    matcher, dials = scoring_choice(cc.scoring, terms)
     pipeline_overlay = authored.pipeline_nodes
     if origin_campaign is not None:
         # A merge, not a replacement: the origin's declaration names only what its layers set.
@@ -156,7 +150,7 @@ async def draft_from_dataset(
 
     authored_prompts = {
         node: dict(prompt.fields)
-        for node, prompt in origin_prompts(dataset_dir, authored.active_steps).items()
+        for node, prompt in origin_prompts(dataset, authored.active_steps).items()
     }
 
     slug = dataset_name.lower()

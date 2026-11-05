@@ -26,6 +26,11 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.run_observers import check_every_record_reported
+from promptpotter.application.scoring.evaluators import (
+    connector_name_refusals,
+    connector_report_owner,
+    observation_key_refusals,
+)
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.prompt_blocks import PackShelf
@@ -119,6 +124,22 @@ def _verify_required_observation_keys(
         )
 
 
+def _verify_observation_names(
+    schema: PipelineSchema,
+    connector: Connector,
+    dataset_name: str | None,
+) -> None:
+    """An observation named like another owner's term would give one name two values."""
+    report = connector_report_owner(connector.name, connector.cell_report_keys)
+    if refused := observation_key_refusals(schema.observation_keys, report):
+        raise PayloadInvalidError(
+            f"{dataset_name or '<dataset>'}'s pipeline maps {'; '.join(refused)}, and a cell's "
+            "formula reads one value per name. Map the observation under another key.",
+            code="pipeline_config_invalid",
+            details={"dataset_name": dataset_name, "refused_observation_keys": refused},
+        )
+
+
 def _verify_package_cache_scope(
     connector: Connector,
     experiment: dict[str, Any] | None,
@@ -174,6 +195,10 @@ def _session_bank(
 def complete_registries(*, every_treatment: bool = True) -> None:
     """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
     connectors.CONNECTORS.complete()
+    for name, connector in connectors.CONNECTORS.table.items():
+        if shadowed := connector_name_refusals(connector.cell_terms, connector.reported_keys):
+            where = f"connector {name!r} [{connectors.CONNECTORS.origins[name]}]"
+            raise RuntimeError(f"{where}: {'; '.join(shadowed)}.")
     judge_registry.JUDGES.complete()
     optimizers.MANIFESTS.complete()
     for member in optimizers.NODE_MEMBERS.table.values():
@@ -210,7 +235,7 @@ async def init_services(
     await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset = resolve_dataset(stores, dataset_name)
-    definition = runnable_definition(dataset.directory)
+    definition = runnable_definition(dataset)
     connector = connectors.CONNECTORS.get(definition.backend_type)
     panel = dataset_experiment(stores, dataset, connector)
     if panel is None and connector.owns_panel and build_panel(stores, dataset):
@@ -234,6 +259,7 @@ async def init_services(
     pipeline_schema = parse_pipeline_response(declaration)
     logger.info("Pipeline: %s (%d nodes)", dataset.name, len(pipeline_schema.nodes))
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
+    _verify_observation_names(pipeline_schema, connector, dataset_name)
     backend_revision = await _read_backend_revision(client, connector)
     bank, candidate_library = _session_bank(
         stores, dataset, connector=connector, experiment=experiment

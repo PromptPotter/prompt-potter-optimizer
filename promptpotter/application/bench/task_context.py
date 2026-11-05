@@ -14,6 +14,7 @@ from promptpotter.application.bench.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimizer_manifest import checkin_manifest, running_prompt
+from promptpotter.config.paths import checkin_manifest_path
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import (
@@ -30,7 +31,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import StoredConfigInvalidError
+from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 ORIGIN_FIELD_MAX = 600
 
@@ -218,8 +219,10 @@ def checkin_template() -> OptimizerPromptTemplate:
     checkin = checkin_manifest()
     template = running_prompt(CHECKIN_NODE, checkin.config, checkin.manifest)
     if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
-        raise StoredConfigInvalidError(
-            path="the `checkin` optimizer prompt", reason=f"unknown slot(s) {sorted(unknown)}"
+        raise FileUnreadableError(
+            FileKind.OPTIMIZER_PROMPT,
+            path=str(checkin_manifest_path()),
+            reason=f"unknown slot(s) {sorted(unknown)}",
         )
     return template
 

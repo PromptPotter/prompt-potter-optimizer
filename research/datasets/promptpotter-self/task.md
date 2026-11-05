@@ -9,7 +9,7 @@ data_characteristics: >-
   panel layouts, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but
   improvement is real and infrequent.
 optimization_goals: >-
-  Maximize mean_bench_lift (the MEAN, over inner rounds, of the accuracy of the prompt the inner
+  Maximize held_out_lift (the MEAN, over inner rounds, of the accuracy of the prompt the inner
   search had ADOPTED by that round on HELD-OUT rows it never searched, minus the origin prompt's
   accuracy on the same rows). The score averages the
   staircase rather than reading its last step: a lift bought in round 1 is worth more than the same
@@ -54,7 +54,7 @@ finding the discipline; do not hard-code task answers into it.
 
 ONE number, in ``family.yaml::campaign.scoring``:
 
-- ``mean_bench_lift`` — the mean, over the inner rounds, of the accuracy of the
+- ``held_out_lift`` — the mean, over the inner rounds, of the accuracy of the
   prompt the search had ADOPTED by that round on HELD-OUT rows no inner node ever
   read, minus the origin prompt's accuracy on the same rows. Accuracy points,
   linearly re-anchored into [0,1]. The search split's own θ lift

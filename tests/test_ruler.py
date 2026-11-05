@@ -28,6 +28,7 @@ from factories import (
     sheet,
     workspace,
 )
+from pydantic import TypeAdapter
 
 from promptpotter.application.bench.difficulty import (
     DifficultyView,
@@ -49,10 +50,13 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graduate_ruler_model,
 )
+from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.domain.arms import ArmSlot
+from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,
     inner_cell_facts,
+    inner_cell_report,
     mean_parent_level_se,
 )
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
@@ -73,7 +77,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, Scorer
+from promptpotter.domain.scoring import CellSheet, LedgerCell, Scorer
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -629,7 +633,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
 
     def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float:
         px = compute_outer_proxies(cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
-        return px.mean_bench_lift
+        return px.held_out_lift
 
     # The parent levels held forward to the round budget, averaged, less the origin's 0.30.
     walked: tuple[tuple[list[float | None], int | None, float, str], ...] = (
@@ -657,7 +661,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     # bench origin's 0.40: churn on the search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
     churn = (inner_cell_facts(churned).mean_round_delta, compute_outer_proxies(churned))
-    assert (churn[0], churn[1].mean_bench_lift) == pytest.approx((0.25, 0.0))
+    assert (churn[0], churn[1].held_out_lift) == pytest.approx((0.25, 0.0))
     assert lift([0.55, 0.55], [0.50, 0.50], round_budget=4) == pytest.approx(0.10)
     assert lift([0.30, 0.55], [0.40, 0.50], round_budget=4) == pytest.approx(0.075)
 
@@ -679,23 +683,31 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         cyc([0.40, 0.55], origin=None),
     ):
         facts = inner_cell_facts(unread)
-        assert compute_outer_proxies(unread).mean_bench_lift == pytest.approx(0.0), (
+        assert compute_outer_proxies(unread).held_out_lift == pytest.approx(0.0), (
             "a cold or holed search series excluded a cell its held-out lift scores"
         )
         assert facts.mean_round_delta is None and facts.series_reason, (
             "a θ lift read off a series that differences nothing, or withheld without its reason"
         )
+        # The tape reads the row the ledger kept, live and on replay alike.
+        report = inner_cell_report(facts, compute_outer_proxies(unread))
+        row = measurement(0, None, pipeline_data={"cell_report": report})
+        kept = TypeAdapter(LedgerCell).validate_python(row)
+        line = fmt_query_result(0, kept.facts, kept.grade, display_tags={})
+        assert f"withheld: {series_reason_head(facts.series_reason)}" in line, (
+            "the L4 tape line lost the reason its θ lift was withheld"
+        )
 
     # Ending on its own terms, an all-tooling cycle is FLOORED: the loss reproduces.
     floored = compute_outer_proxies(cyc([0.40], rounds=tooling))
-    assert floored.mean_bench_lift == -1.0
+    assert floored.held_out_lift == -1.0
 
     def lost(reason: str) -> RoundResult:
         arm = arm_state("x", slot=ArmSlot(round=1, idx=0, total=1), invalid_reason=reason)
         return round_result(1, candidates_scored=0, arms={ArmKey("x"): arm})
 
     tooled = cyc([0.40], rounds=[lost(PARSE_FAILURE_TOOLING)])
-    assert compute_outer_proxies(tooled).mean_bench_lift == -1.0, "empty replies floor"
+    assert compute_outer_proxies(tooled).held_out_lift == -1.0, "empty replies floor"
     assert delta([0.40, 0.55], rounds=[lost(PARSE_FAILURE_MALFORMED), round_result(2)]) == (
         pytest.approx(0.175)
     ), "a malformed reply is the prompt's verdict and scores"

@@ -22,7 +22,6 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
-from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.spend import StepUsage
 from promptpotter.domain.wire_record import (
@@ -76,6 +75,8 @@ class TurnRecord(TypedDict, total=False):
 
 # Disjoint from `CELL_INTRINSIC_NAMES` (`formula/compiler.py`): the splat drops a collision silently.
 TURN_SCALAR_KEYS: frozenset[str] = frozenset({"n_turns", "n_tool_calls"})
+# A step's own count, ``{step}_turns``: the step is one only the cell's turns name.
+TURN_STEP_SUFFIX = "_turns"
 
 
 def turn_scalars(turns: list[TurnRecord] | None) -> dict[str, float]:
@@ -91,7 +92,7 @@ def turn_scalars(turns: list[TurnRecord] | None) -> dict[str, float]:
         if name := str(t.get("step") or ""):
             per_step[name] = per_step.get(name, 0) + 1
     for name, count in per_step.items():
-        if (term := f"{name}_turns").isidentifier():
+        if (term := f"{name}{TURN_STEP_SUFFIX}").isidentifier():
             out[term] = float(count)
     return out
 
@@ -175,11 +176,6 @@ class PipelineData:
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
     # Seconds BLOCKED, not working. ABSENT, never 0.0, on a row no cell send measured.
     unworked_s: float | None = None
-    # L4: one outer sample IS a whole inner campaign, so its "answer" is its held-out lift, the
-    # scored term; `mean_round_delta`, the search split's θ lift, is an `InnerCellFacts` fact.
-    mean_bench_lift: float | None = None
-    # Written by the recursion alone, so a row carrying it IS an L4 outer row.
-    inner: InnerCellFacts | None = None
     # The BACKEND reporting a fault on a row PromptPotter classified clean.
     error: str | None = None
     result_ranking: tuple[Any, ...] | None = None
@@ -195,6 +191,9 @@ class PipelineData:
     target_prompt_chars: int | None = None
     # The bare question, where the dataset declared one distinct from `query` — what a judge reads.
     question: str | None = None
+    # What the CONNECTOR reports of its cell, under the keys its declaration names
+    # (`Connector.cell_terms`, `reported_keys`): taken off the answer by that declaration alone.
+    cell_report: Mapping[str, Any] = field(default_factory=dict)
     # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.
     observations: Mapping[str, Any] = field(default_factory=dict, metadata=REST)
 
@@ -229,8 +228,7 @@ LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
         "step_tokens",
         "diagnostics",
         "unworked_s",
-        "mean_bench_lift",
-        "inner",
+        "cell_report",
         "error",
     }
 )

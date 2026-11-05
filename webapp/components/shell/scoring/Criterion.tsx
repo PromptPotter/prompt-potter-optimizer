@@ -17,10 +17,11 @@ import {
   Term,
   ValueList,
 } from "@/components/ui";
-import type { CellTermMeta } from "@/lib/api/types.generated";
+import type { CellTerm } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import type { ReadFailure } from "@/lib/hooks/useRead";
-import { DIAL_TERMS, NO_DIALS, type ScoringMask } from "@/lib/scoring-mask";
+import { useConnector } from "@/lib/hooks/useConnector";
+import { NO_DIALS, dialTerms, type ScoringMask } from "@/lib/scoring-mask";
 import { TERMS } from "@/lib/terms";
 
 const TERM_GLYPHS: Record<string, ComponentType> = {
@@ -52,11 +53,15 @@ interface CriterionMatcher {
 
 const pct = (weight: number) => String(Math.round(weight * 1000) / 10);
 
-function lineParts(mask: ScoringMask, matcher: CriterionMatcher | undefined): string[] {
+function lineParts(
+  mask: ScoringMask,
+  matcher: CriterionMatcher | undefined,
+  terms: readonly CellTerm[],
+): string[] {
   if (mask.kind === "expression") return [mask.lens.trim() || "no expression yet"];
   return [
     matcher?.value || "accuracy",
-    ...DIAL_TERMS.flatMap((m) => {
+    ...terms.flatMap((m) => {
       const w = mask.weights[m.name];
       return w !== undefined && w > 0 ? [`${m.name} ${pct(w)}%`] : [];
     }),
@@ -75,7 +80,7 @@ export function CriterionLine({
       <span className="criterion-glyph" aria-hidden="true">
         <IconTarget />
       </span>
-      {lineParts(mask, matcher).join(" · ")}
+      {lineParts(mask, matcher, dialTerms(useConnector().cellTerms)).join(" · ")}
     </span>
   );
 }
@@ -114,12 +119,13 @@ export function Criterion({
   // A dial at 0 has no other way to stay on screen.
   const [added, setAdded] = useState<readonly string[]>([]);
 
+  const terms = dialTerms(useConnector().cellTerms);
   const weights = mask.kind === "dials" ? mask.weights : NO_WEIGHTS;
-  const shown = DIAL_TERMS.filter((m) => {
+  const shown = terms.filter((m) => {
     const on = (weights[m.name] ?? 0) > 0;
     return onMask ? m.primary || on || added.includes(m.name) : on;
   });
-  const addable = DIAL_TERMS.filter((m) => !shown.includes(m));
+  const addable = terms.filter((m) => !shown.includes(m));
 
   const setWeight = (name: string, weight: number) =>
     onMask?.({ kind: "dials", weights: { ...weights, [name]: weight } });
@@ -288,7 +294,7 @@ function DialRow({
   onWeight,
   onRemove,
 }: {
-  term: CellTermMeta;
+  term: CellTerm;
   weight: number;
   anchor: number | undefined;
   onWeight: ((weight: number) => void) | undefined;

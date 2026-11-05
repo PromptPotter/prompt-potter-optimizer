@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.evaluators import (
     Evaluator,
     JudgedTerm,
+    NameOwner,
     validate_campaign_evaluator,
 )
 from promptpotter.application.scoring.judges.call import bind_cache
@@ -90,8 +91,12 @@ async def _compute(
 
 
 def build_evaluators(
-    specs: Mapping[str, JudgeSpec], *, cache: LLMReuseCache | None = None
+    specs: Mapping[str, JudgeSpec],
+    *,
+    beside: Sequence[NameOwner],
+    cache: LLMReuseCache | None = None,
 ) -> tuple[Evaluator, ...]:
+    """``beside``: the names the campaign binds beyond the package's, refused as terms."""
     out: list[Evaluator] = []
     for term, spec in specs.items():
         if not term.isidentifier():
@@ -116,6 +121,6 @@ def build_evaluators(
             # Undefined, not zero, on a verifier-graded bank: `materialize_sample_values` skips it.
             needs_labels=judge.needs_gold,
         )
-        validate_campaign_evaluator(ev, f"campaign judge {spec.name!r}")
+        validate_campaign_evaluator(ev, f"campaign judge {spec.name!r}", beside)
         out.append(ev)
     return tuple(out)

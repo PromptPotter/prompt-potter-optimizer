@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.classification import scoreable_rows
-from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES, CELL_TERMS
+from promptpotter.application.scoring.formula.compiler import (
+    EVAL_BUILTIN_NAMES,
+    PIPELINE_BOUND_NAMES,
+    REPORTABLE_CORE_TERMS,
+    ROW_HEALTH_TERMS,
+)
+from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     ROW_GRADES,
-    DialKind,
+    TURN_SCALAR_KEYS,
+    TURN_STEP_SUFFIX,
     JudgeReading,
     all_verifier_graded,
     extract_item_label,
@@ -247,53 +255,132 @@ def _validate_evaluator(ev: Evaluator, origin: str) -> None:
             f"paths that re-derive over archived rows, so an awaiting compute re-bills the whole "
             f"measurement history on every refresh. Measure once at per_sample scope instead."
         )
-    if ev.scope == "per_sample" and ev.name in CELL_INTRINSIC_NAMES:
-        raise ValueError(
-            f"{where}: the name collides with a term `cell_namespace` binds itself, so the "
-            f"value would be silently dropped by the pipeline_data splat and no formula could "
-            f"reach it. Pick another name."
-        )
 
 
-def validate_campaign_evaluator(ev: Evaluator, origin: str) -> None:
-    _validate_evaluator(ev, origin)
-    if ev.name in {e.name for e in _REGISTRY}:
-        raise ValueError(
-            f"evaluator {ev.name!r} ({origin}): the name is a package evaluator's. A campaign term "
-            f"is materialized after the registry and would overwrite it, so the formula would read "
-            f"this value under a name that promises the other one. Pick another term."
-        )
+@dataclass(frozen=True)
+class NameOwner:
+    """One owner of names the cell namespace binds: its names, or every name ending ``suffix``."""
+
+    what: str
+    names: frozenset[str]
+    suffix: str | None = None
+
+    def holds(self, name: str) -> bool:
+        return name in self.names or (self.suffix is not None and name.endswith(self.suffix))
+
+
+_PACKAGE_EVALUATOR = "a package evaluator's term"
+_PIPELINE_KEY = "a PipelineData key"
+_CORE_TERM = "a core cell term"
+
+
+def cell_name_owners() -> tuple[NameOwner, ...]:
+    """EVERY name the cell namespace (`compiler.py::cell_namespace`, `objective_namespace`) and
+    its channels bind, each under the ONE owner serving its value (`_validate_registry` refuses a
+    name two hold). A door admitting a name (a connector's term or reported key, a package
+    evaluator, a campaign judge, a pipeline's observation key) refuses one another owner holds,
+    so a name has one meaning and one value across channels, dials and formulas."""
+    return (
+        # A report answers these where the core reader cannot (an L4 cell's inner spend).
+        NameOwner(_CORE_TERM, REPORTABLE_CORE_TERMS),
+        NameOwner("a row-health term", ROW_HEALTH_TERMS),
+        # `ground_truth_rank` and `error` among them: the cell's grade and message serve them.
+        NameOwner("a name the namespace binds off the cell", CELL_BOUND_NAMES),
+        NameOwner("a matcher", frozenset(MATCHERS)),
+        # `target_prompt_chars` among them: its channel reads the field.
+        NameOwner(_PIPELINE_KEY, PIPELINE_BOUND_NAMES),
+        # `{step}_turns` names a step the backend's turns carry, unknown before a cell lands.
+        NameOwner("a turn scalar", TURN_SCALAR_KEYS, suffix=TURN_STEP_SUFFIX),
+        NameOwner("a builtin every formula may call", EVAL_BUILTIN_NAMES),
+        NameOwner(
+            _PACKAGE_EVALUATOR,
+            frozenset(ev.name for ev in _REGISTRY if ev.scope == "per_sample"),
+        ),
+    )
+
+
+def bound_by(
+    name: str, *, feeds: str | None = None, beside: Sequence[NameOwner] = ()
+) -> str | None:
+    """Which owner other than ``feeds`` binds ``name``, or ``None``. ``feeds`` names the owner
+    whose names this door fills (an observation a ``PipelineData`` field), so a name it alone
+    holds is admitted; ``beside`` adds a campaign's own owners."""
+    holders = (o.what for o in (*cell_name_owners(), *beside) if o.holds(name))
+    return next((what for what in holders if what != feeds), None)
 
 
 def _validate_registry() -> None:
+    """At import: each package evaluator, then ONE owner per name, the package's included."""
     seen: set[str] = set()
     for ev in _REGISTRY:
         if ev.name in seen:
             raise ValueError(f"evaluator {ev.name!r}: declared twice in the registry.")
         seen.add(ev.name)
         _validate_evaluator(ev, "built-in")
+    owners = cell_name_owners()
+    for i, owner in enumerate(owners):
+        for other in owners[i + 1 :]:
+            shared = {n for n in owner.names if other.holds(n)}
+            shared |= {n for n in other.names if owner.holds(n)}
+            if shared:
+                raise ValueError(
+                    f"{sorted(shared)}: each is {owner.what} and {other.what}; a name has one "
+                    "owner, the one serving its value."
+                )
 
 
 _validate_registry()
 
 
-class CellTermMeta(NamedTuple):
-    name: str
-    direction: Literal["high", "low"]
-    description: str
-    dial: DialKind | None
-    primary: bool
+def connector_name_refusals(terms: Iterable[CellTerm], reported: Iterable[str]) -> list[str]:
+    """Each name a connector declares that another owner binds, as one sentence; asked once, as
+    the connector table completes (`wiring.py::complete_registries`). A reported key may name a
+    core cell term: it answers that channel where the core reader cannot (an L4 cell's spend)."""
+    out = [f"cell term {t.name!r} is {owner}" for t in terms if (owner := bound_by(t.name))]
+    out += [
+        f"reported key {key!r} is {owner}"
+        for key in reported
+        if (owner := bound_by(key, feeds=_CORE_TERM))
+    ]
+    return out
 
 
-# What a per_cell formula can name: the intrinsic terms, then each per_sample evaluator's.
-CELL_TERM_META: Worded[str, CellTermMeta] = Worded(
+def connector_report_owner(connector_name: str, report_keys: Iterable[str]) -> NameOwner:
+    return NameOwner(f"a key connector {connector_name!r} reports", frozenset(report_keys))
+
+
+def observation_owner(observation_keys: Iterable[str]) -> NameOwner:
+    return NameOwner("an observation key of this pipeline", frozenset(observation_keys))
+
+
+def observation_key_refusals(keys: Iterable[str], report: NameOwner) -> list[str]:
+    """An observation lands on ``PipelineData`` (a declared field, or a dataset observation), so
+    only another owner's name is refused: the package's, or the connector's report."""
+    return [
+        f"observation key {key!r} is {owner}"
+        for key in sorted(keys)
+        if (owner := bound_by(key, feeds=_PIPELINE_KEY, beside=(report,)))
+    ]
+
+
+def validate_campaign_evaluator(ev: Evaluator, origin: str, beside: Sequence[NameOwner]) -> None:
+    """A campaign judge: every owner's name is refused, the package evaluators' and the
+    campaign's (``beside``: its connector's report, its pipeline's observations) included."""
+    _validate_evaluator(ev, origin)
+    if owner := bound_by(ev.name, beside=beside):
+        raise ValueError(
+            f"evaluator {ev.name!r} ({origin}): the name is {owner}, and a cell's formula reads "
+            f"one value per name. Pick another term."
+        )
+
+
+# What every campaign's per_cell formula can name: the core cell's terms, then each per_sample
+# evaluator's; a connector's own ride its campaign's pipeline answer (`cell_terms`).
+CELL_TERM_META: Worded[str, CellTerm] = Worded(
     {
+        **CELL_TERMS,
         **{
-            name: CellTermMeta(name, term.direction, term.description, term.dial, term.primary)
-            for name, term in CELL_TERMS.items()
-        },
-        **{
-            ev.name: CellTermMeta(ev.name, ev.direction, ev.description, None, False)
+            ev.name: CellTerm(name=ev.name, direction=ev.direction, description=ev.description)
             for ev in _REGISTRY
             if ev.scope == "per_sample"
         },

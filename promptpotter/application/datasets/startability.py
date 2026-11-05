@@ -4,8 +4,9 @@ Two questions with two scopes. What the deployment OFFERS (`settings.DATASET_OFF
 account but the host's: the host (the terminal, an embedded host program, the claimed browser
 account) runs the whole install. Whether a CHECK-IN can open one binds the draft alone: a draft is a
 table of labelled rows, so a verifier-graded bank has nothing to put in it and launches from `new`.
-The listing and the draft read both off the one row ladder (`loaders.resolve_bank`), and
-neither reads a row before the extra the dataset runs through is installed.
+The listing and the draft read both off the one row ladder (`loaders.resolve_bank`): a bank the
+account holds opens without its source's extra, which only a fetch needs, and no row is read
+before the extra its connector runs through is installed.
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter import connectors
@@ -35,12 +35,18 @@ from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
+    dataset_not_found,
+    install_dataset,
     is_dataset_dir,
     resolve_dataset,
     runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import DatasetAccessError, NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import (
+    FileUnreadableError,
+    NotFoundError,
+    PayloadInvalidError,
+)
 from promptpotter.shared.extras import Extra, install_hint, installed
 
 if TYPE_CHECKING:
@@ -63,7 +69,7 @@ def offered(stores: Stores, name: str) -> bool:
 def offered_dataset(stores: Stores, name: str) -> ResolvedDataset:
     """Where a NEW campaign's dataset resolves: an unoffered one does not exist, as a 404."""
     if not offered(stores, name):
-        raise DatasetAccessError(name)
+        raise dataset_not_found(stores, name)
     return resolve_dataset(stores, name)
 
 
@@ -82,28 +88,37 @@ def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
     return None if labelled_rows(samples) else StartBlock.EMPTY
 
 
-def dataset_extra(dataset_dir: Path) -> Extra | None:
-    """What the dataset runs through beyond core: its connector's declaration, else its source's."""
+def _connector_extra(dataset: ResolvedDataset) -> Extra | None:
+    """What every cell of the dataset imports beyond core."""
     try:
-        backend_type = runnable_definition(dataset_dir).backend_type
-    except PayloadInvalidError:
+        backend_type = runnable_definition(dataset).backend_type
+    except (FileUnreadableError, PayloadInvalidError):
         backend_type = ""
     connector = connectors.CONNECTORS.table.get(backend_type)
-    if connector is not None and connector.extra is not None:
-        return connector.extra
-    return source_extra(dataset_dir)
+    return None if connector is None else connector.extra
 
 
-def missing_extra(dataset_dir: Path) -> Extra | None:
-    extra = dataset_extra(dataset_dir)
+def dataset_extra(dataset: ResolvedDataset) -> Extra | None:
+    """What the dataset runs through beyond core: its connector's declaration, else its source's."""
+    return _connector_extra(dataset) or source_extra(dataset)
+
+
+def _absent(extra: Extra | None) -> Extra | None:
     return extra if extra is not None and not installed(extra) else None
 
 
-def _held_block(dataset_dir: Path, held: Bank | None) -> StartBlock | None:
-    """Over the rows the account HOLDS; one not held opens on a fetch, which needs a source."""
+def missing_extra(dataset: ResolvedDataset) -> Extra | None:
+    return _absent(dataset_extra(dataset))
+
+
+def _held_block(dataset: ResolvedDataset, held: Bank | None) -> StartBlock | None:
+    """Over the rows the account HOLDS; one not held opens on a fetch, which needs a source and
+    the extra that source reads through."""
     if held is not None:
         return rows_block(held.samples)
-    return None if has_source(dataset_dir) else StartBlock.EMPTY
+    if not has_source(dataset):
+        return StartBlock.EMPTY
+    return None if _absent(source_extra(dataset)) is None else StartBlock.MISSING_EXTRA
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,27 +132,27 @@ class DatasetReading:
 def dataset_reading(stores: Stores, name: str) -> DatasetReading:
     """A SURVEY: one unreadable dataset lists as blocked by that, never as startable or absent."""
     dataset = resolve_dataset(stores, name)
-    # Asked before any row is read: reading one may import the very extra that is absent.
-    if missing_extra(dataset.directory) is not None:
+    # Asked before any row is read: reading a panel may import the very extra that is absent.
+    if _absent(_connector_extra(dataset)) is not None:
         return DatasetReading(None, StartBlock.MISSING_EXTRA)
     try:
         held = held_bank(stores, dataset)
     except BackendUnreachableError:
         return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
-    except (ValueError, OSError):
+    except (FileUnreadableError, ValueError, OSError):
         logger.exception("datasets: %s could not be read for the listing", name)
         return DatasetReading(None, StartBlock.UNREADABLE)
     n_held = None if held is None else len(held.samples)
-    return DatasetReading(n_held, _held_block(dataset.directory, held))
+    return DatasetReading(n_held, _held_block(dataset, held))
 
 
 def checkin_bank(stores: Stores, name: str) -> Bank:
     """The bank a check-in opens on, refused with the reason the listing serves."""
     dataset = resolve_dataset(stores, name)
-    if missing_extra(dataset.directory) is not None:
+    if _absent(_connector_extra(dataset)) is not None:
         raise DatasetUnstartableError(name, StartBlock.MISSING_EXTRA)
     held = held_bank(stores, dataset)
-    if (block := _held_block(dataset.directory, held)) is not None:
+    if (block := _held_block(dataset, held)) is not None:
         raise DatasetUnstartableError(name, block)
     if held is not None:
         return held
@@ -183,24 +198,25 @@ def checkin_rows(stores: Stores, draft: DraftCampaign) -> list[dict[str, str]]:
             assert_never(draft.basis)
 
 
-def _offer() -> dict[str, Path]:
-    """The install dataset each offered name names, the offer whole or refused: boot and deploy both."""
+def _offer() -> dict[str, ResolvedDataset]:
+    """The install dataset each offered name names, the offer whole or refused: boot and deploy
+    both. Only the install's: a research definition is never offered."""
     root = install_datasets_root()
-    offer = {name: root / name for name in sorted(settings.dataset_offer or ())}
-    if absent := [name for name, path in offer.items() if not is_dataset_dir(path)]:
+    offer = {name: install_dataset(root, name) for name in sorted(settings.dataset_offer or ())}
+    if absent := [name for name, d in offer.items() if not is_dataset_dir(d.directory)]:
         raise NotFoundError(f"DATASET_OFFER names no dataset in this install: {', '.join(absent)}")
     return offer
 
 
 def offer_extras() -> set[Extra]:
     """What the deployment must install so every dataset it offers can run."""
-    return {extra for path in _offer().values() if (extra := dataset_extra(path))}
+    return {extra for dataset in _offer().values() if (extra := dataset_extra(dataset))}
 
 
 def offer_faults() -> list[str]:
     """Each offered dataset whose extra this install lacks, as a line for the boot banner."""
     return [
         f"{name}: needs the `{extra}` extra — {install_hint(extra)}"
-        for name, path in _offer().items()
-        if (extra := missing_extra(path)) is not None
+        for name, dataset in _offer().items()
+        if (extra := missing_extra(dataset)) is not None
     ]

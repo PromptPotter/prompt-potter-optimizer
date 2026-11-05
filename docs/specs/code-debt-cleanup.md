@@ -115,30 +115,6 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   the pipeline response whole; `ConnectorView` and `PipelineStatus` go and `useConnector` returns the read
   result. The one node editor, with the strict parser, is U1b's. **Re-test:**
   `git grep -c "scoring_dials" -- promptpotter`; `git grep -n "interface ConnectorView" -- webapp`.
-- **ED: nothing says who a dataset or a word is for.** The wheel ships every definition under
-  `assets/datasets/` though only `email-tagging` and the hub-backed `justlogic` cuts are startable product;
-  `promptpotter-self` (the L4 panel and the browser-walk fixture) is research and test tooling, and an
-  unset `DATASET_OFFER` treats every pip user as a developer. `formula/compiler.py::CELL_TERMS` serves nine
-  "L4:" per-cell terms on every campaign, so every criterion's term menu offers them. The card is parsed
-  out of README prose by `dataset_access.py::_read_heading` (the heading verbatim as the title, the
-  description cut at the first ". ", so "Yang et al." ends it), and a node's `description:` with its
-  research notes is served on screen. `startability.py::dataset_reading` refuses on the source's extra
-  before reading the bank, though a bank on disk starts without it, and `extras.py::install_hint` names pip.
-  Action: where a definition lives says what it is. The wheel holds only what a user may start;
-  `promptpotter-self` moves to a research tier, never listed, so an L4 campaign shows only because it
-  exists. A tenant dataset cannot be that tier: `dataset_access.py::definition_chain` lays no family or
-  default under it. So the resolved dataset carries its tier root, the chain lays the install root's
-  `defaults.yaml` under the research tier, the research root is a `Stores` field defaulted from a setting
-  (unset: none) and carried by `JobSpec` and the inner spawn context, and a name resolves tenant, install,
-  then research, refused where two tiers hold it. Each connector declares its cell vocabulary as data on
-  the pipeline answer, not a `Worded` table: the `promptpotter` connector its nine terms, named with the
-  held-out word now so U4 renames nothing (`held_out` and `Sample.bench_only` become one word here);
-  `inner` and `mean_bench_lift` leave the core cell, and `evaluators.py::CELL_TERM_META` keeps the core
-  terms. The card's title and summary are declared fields and every served description is product copy;
-  a held bank starts and only a fetch needs the extra, refusing with its uv command. Owns
-  `connectors/protocol.py` and `runner/inner/connector.py` too, and shares the pipeline answer's model
-  with EN. Wipes run data and re-keys the estimator digest. **Re-test:**
-  `git grep -c '"L4: ' -- promptpotter/application/scoring/formula/compiler.py`.
 - **EM: `domain/wire_record.py::WireRecord` is a second model framework beside pydantic**: a
   source generator (exec plus linecache) behind six classes, each shadowed by a `TypedDict` and bridged
   back through `__get_pydantic_core_schema__`. What varies is speed only ("no per-cell field loop").
@@ -398,8 +374,6 @@ loop decides, so it lands with an offline run.
   (`registered_user_id`). It is survivor data (its `store/data_root.py` row), so the delete is a landing migration that rewrites each marker without the
   field, run once and then deleted ([`../decisions.md`](../decisions.md) § 0011). **Rides with:** the
   next survivor-row reshape. **Re-test:** `git grep -n "\.renamed" -- promptpotter` finds no reader.
-- **`held_out` (`InnerTask`, `domain/cells.py`) and `Sample.bench_only` name one concept**, translated in
-  `ResolvedPanel.samples`. Rides with ED (§ The excision pass), which names the cell terms with the final word.
 
 ### The file layout (import-graph pass 2026-10-31)
 
@@ -745,7 +719,7 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   fork off an arm, then read the arm's `evidence`.
 - **An unparseable job file is logged and skipped** (`jobs/registry.py::JobRegistry.list_all`), so
   occupancy undercounts a live slot; a parseable one that fails validation raises
-  `JobUnreadableError`. Action: one refusal for both. **Re-test:** `git grep -n "logger" -- promptpotter/application/jobs/registry.py`.
+  `FileUnreadableError` (`FileKind.JOB`). Action: one refusal for both. **Re-test:** `git grep -n "logger" -- promptpotter/application/jobs/registry.py`.
 - **Potter's and capo-pobb's digests hash the review.md and log.md writers' words**: their members
   reach `generation_only.py::run_generation_only_round` → `round.py::close_round` →
   `output.py::write_review_md` / `write_log_md`, so `READING_STATE_INFO`, `STOP_REASON_INFO`,
@@ -900,9 +874,9 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   refuses every child a `NodeSearchNarrowing.prompt_fields_held` field, the operator's own arm with
   them. Open: may that arm write it? **Rides with:** any change to `carried_writes`.
 - **A declared bench is not the held-out count**: `CampaignConfig.dataset_split` `{bench: 100}` held out
-  162 rows on the box's `hotpotqa-closedbook`. No shipped recipe adds it a `bench_only` tail and the
+  162 rows on the box's `hotpotqa-closedbook`. No shipped recipe adds it a `held_out` tail and the
   loader dedups rows, so the 62 are in the box's tenant definition; the one code path holding out past
-  `bench` is `domain/bench.py::partition_bank` holding declared `bench_only` rows beside the ranked
+  `bench` is `domain/bench.py::partition_bank` holding declared `held_out` rows beside the ranked
   ones, which L4 inner cells (`bench: 0`) and `justlogic/d234-held` are built on. Open: read the
   definition (`/potter-box`), then decide whether `bench` becomes the total. **Re-test:** a fresh
   `{bench: 100}` campaign on that definition holds out 100.

@@ -36,6 +36,7 @@ const EMPTY: ConnectorView = {
   modelCapabilities: {},
   reach: null,
   nests: [],
+  cellTerms: [],
 };
 
 const NO_BACKENDS: BackendResponse[] = [];
@@ -98,6 +99,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       modelCapabilities: resp.model_capabilities,
       reach: resp.reach,
       nests: resp.nests,
+      cellTerms: resp.cell_terms,
     };
   }, [resp, pipelineStatus, backends, health]);
 }

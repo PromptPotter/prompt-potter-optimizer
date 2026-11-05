@@ -212,7 +212,7 @@ class BankLoader:
         if self.bench_tail is None:
             return samples
         return samples + [
-            row.model_copy(update={"id": len(samples) + row.id, "bench_only": True})
+            row.model_copy(update={"id": len(samples) + row.id, "held_out": True})
             for row in self.bench_tail.load()
         ]
 
@@ -526,8 +526,8 @@ def recipe_code(recipe: str) -> str:
     return module_source_digest(*recipe_modules(recipe))
 
 
-def definition_source(dataset_dir: Path) -> Source | None:
-    definition = read_dataset_definition(dataset_dir)
+def definition_source(dataset: ResolvedDataset) -> Source | None:
+    definition = read_dataset_definition(dataset)
     return None if definition is None else Source.of(definition.source)
 
 
@@ -546,14 +546,14 @@ def cut_bank(stores: Stores, section: Mapping[str, Any]) -> list[Sample]:
     return _loader(stores, src).load()
 
 
-def source_extra(dataset_dir: Path) -> Extra | None:
+def source_extra(dataset: ResolvedDataset) -> Extra | None:
     """What a fetch from this definition's source imports: a panel build reads the hub too."""
-    src = definition_source(dataset_dir)
+    src = definition_source(dataset)
     return None if src is None else src.kind.extra
 
 
-def has_source(dataset_dir: Path) -> bool:
-    src = definition_source(dataset_dir)
+def has_source(dataset: ResolvedDataset) -> bool:
+    src = definition_source(dataset)
     return src is not None and (src.recipe in BANK_RECIPES or src.recipe in PANEL_RECIPES)
 
 
@@ -569,7 +569,7 @@ def no_dataset_hint(stores: Stores) -> str:
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:
     """A panel recipe materializes into the tenant tier, never beside the definition — on demand,
     per account, so no account depends on another having built it."""
-    src = definition_source(dataset.directory)
+    src = definition_source(dataset)
     if src is None or src.recipe not in PANEL_RECIPES:
         return False
     out = stores.tenant_datasets.materialized_panel_dir(dataset.name)
@@ -586,7 +586,7 @@ def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
     """The ladder's last rung: it records the bank its recipe cut, and moves no label."""
     if build_panel(stores, dataset):
         return held_bank(stores, dataset) or Bank.of(())
-    src = definition_source(dataset.directory)
+    src = definition_source(dataset)
     if src is None or src.recipe not in BANK_RECIPES:
         return Bank.of(())
     bank = _cut(_loader(stores, src))
@@ -601,7 +601,7 @@ def held_bank(stores: Stores, dataset: ResolvedDataset) -> Bank | None:
     if connector is not None and connector.owns_panel:
         rows = dataset_panel_rows(stores, dataset)
         return None if rows is None else Bank.of(samples_from_dicts(rows))
-    src = definition_source(dataset.directory)
+    src = definition_source(dataset)
     if src is None or src.recipe not in BANK_RECIPES:
         return stores.tenant_datasets.labelled(dataset.name)
     if src.kind.local:

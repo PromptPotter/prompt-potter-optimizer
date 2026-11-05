@@ -44,7 +44,12 @@ from promptpotter.infrastructure.store.user_store import (
     read_accounts,
 )
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
-from promptpotter.shared.errors import ConflictError, LedgerUnreadableError, PotterError
+from promptpotter.shared.errors import (
+    ConflictError,
+    FileUnreadableError,
+    LedgerUnreadableError,
+    PotterError,
+)
 from promptpotter.shared.identity import (
     AccessState,
     IdentityContext,
@@ -312,11 +317,12 @@ def tenant_trail(stores: Stores) -> Trail:
 def _scanned(
     accounts: Iterable[AccountDir], unreadable: list[str]
 ) -> Iterator[tuple[AccountDir, list[TrailLine]]]:
-    """A ledger that will not scan costs its own workspace and no other: it is named, then skipped."""
+    """A ledger or file that will not read costs its own workspace and no other: it is named, then
+    skipped."""
     for account in accounts:
         try:
             found = list(workspace_lines(CampaignStore(account.workspace)))
-        except (OSError, ValueError, LedgerUnreadableError):
+        except (OSError, FileUnreadableError, LedgerUnreadableError):
             if (who := _who(account)) not in unreadable:
                 unreadable.append(who)
             continue
@@ -361,6 +367,15 @@ def trail_by_email(projects_root: Path, email: str) -> Trail:
     return Trail(own, in_time_order(lines), unreadable)
 
 
+def _dataset_of(store: CampaignStore, campaign_id: str) -> str | None:
+    """A manifest that will not read names no dataset; its lines still list."""
+    try:
+        campaign = store.load_campaign(campaign_id)
+    except FileUnreadableError:
+        return None
+    return None if campaign is None else campaign.dataset_name
+
+
 class AccountTrail(NamedTuple):
     who: str  # `_who`
     trail: Trail
@@ -381,15 +396,15 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
         recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
         if recent and not isinstance(account.user, Torn):
             store = CampaignStore(account.workspace)
-            campaigns = {
-                campaign_id: store.load_campaign(campaign_id)
-                for campaign_id in {line.campaign_id for line in recent if line.campaign_id}
-            }
             trails.append(
                 AccountTrail(
                     _who(account),
                     Trail(frozenset({account.user.user_id}), in_time_order(recent), []),
-                    {key: c.dataset_name for key, c in campaigns.items() if c is not None},
+                    {
+                        campaign_id: dataset
+                        for campaign_id in {line.campaign_id for line in recent if line.campaign_id}
+                        if (dataset := _dataset_of(store, campaign_id)) is not None
+                    },
                 )
             )
     return trails, unreadable

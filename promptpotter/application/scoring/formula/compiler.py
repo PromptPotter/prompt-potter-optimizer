@@ -8,16 +8,17 @@ import math
 import statistics
 from collections.abc import Callable, Iterable, Mapping
 from types import SimpleNamespace
-from typing import Any, Literal, NamedTuple
+from typing import Any, NamedTuple
 
+from promptpotter import connectors
 from promptpotter.application.scoring.formula.matchers import MATCHERS, backend_rank, matcher_of
-from promptpotter.domain.l4.inner_facts import InnerCellFacts
+from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
+    PIPELINE_KEYS,
     TURN_SCALAR_KEYS,
     Dial,
-    DialKind,
     Grade,
     GradedCell,
     MeasuredCell,
@@ -62,6 +63,8 @@ SAFE_BUILTINS = {
     }
 }
 _EVAL_BUILTINS = {"__builtins__": {**SAFE_BUILTINS["__builtins__"], _NUMERIC: _numeric}}
+# Every name the eval binds beneath the namespace: a term named like one is never read.
+EVAL_BUILTIN_NAMES: frozenset[str] = frozenset(_EVAL_BUILTINS["__builtins__"])
 
 
 # No Attribute (kills ``().__class__...``), comprehension, lambda, walrus or subscript.
@@ -247,38 +250,24 @@ def _step_tokens(steps: Mapping[str, StepUsage]) -> float | None:
     return None if account is None else float(account.total)
 
 
-def _own_else_steps(own: float | None, steps: float | None) -> float | None:
-    """``is None`` rather than ``or``: a cell that genuinely cost 0.0 is a MEASUREMENT."""
-    return own if own is not None else steps
+ChannelReader = Callable[[MeasuredCell, Grade | None], float | None]
 
-
-def _inner(facts: MeasuredCell, read: Callable[[InnerCellFacts], float | None]) -> float | None:
-    inner = facts.pipeline.inner
-    return None if inner is None else _number(read(inner))
-
-
-_CHANNEL_READERS: dict[str, Callable[[MeasuredCell, Grade | None], float | None]] = {
+# The core's own channels: where its reader cannot answer, a connector's report does (an L4
+# cell's inner spend).
+_CHANNEL_READERS: dict[str, ChannelReader] = {
     "fitness": lambda _facts, grade: None if grade is None else _number(grade.fitness),
-    "ground_truth_rank": lambda _facts, grade: (
-        None if grade is None else _number(grade.ground_truth_rank)
-    ),
     # `cost_s`, never `total_time`: a replayed row's `total_time` is zeroed.
     "latency": lambda facts, _grade: facts.cost_s,
     "unworked": lambda facts, _grade: facts.pipeline.unworked_s,
-    "bench_lift": lambda facts, _grade: facts.pipeline.mean_bench_lift,
-    "bench_origin": lambda facts, _grade: _inner(facts, lambda i: i.bench_origin_level),
-    "bench_final_lift": lambda facts, _grade: _inner(facts, lambda i: i.bench_final_lift),
-    "lift": lambda facts, _grade: _inner(facts, lambda i: i.mean_round_delta),
-    "origin": lambda facts, _grade: _inner(facts, lambda i: i.origin_level),
-    "final_lift": lambda facts, _grade: _inner(facts, lambda i: i.final_lift),
-    "peak_lift": lambda facts, _grade: _inner(facts, lambda i: i.peak_lift),
-    "rounds": lambda facts, _grade: _inner(facts, lambda i: i.rounds_ran),
-    "round_budget": lambda facts, _grade: _inner(facts, lambda i: i.round_budget),
-    "cost": lambda facts, _grade: _own_else_steps(
-        _inner(facts, lambda i: i.sent_usd), _step_cost(facts.pipeline.step_tokens)
-    ),
-    "tokens": lambda facts, _grade: _own_else_steps(
-        _inner(facts, lambda i: i.tokens), _step_tokens(facts.pipeline.step_tokens)
+    "cost": lambda facts, _grade: _step_cost(facts.pipeline.step_tokens),
+    "tokens": lambda facts, _grade: _step_tokens(facts.pipeline.step_tokens),
+}
+
+# Channels whose value another owner serves, so no report answers them: the rank the cell's
+# grade binds, the prompt length its `PipelineData` carries.
+_BORROWED_CHANNELS: dict[str, ChannelReader] = {
+    "ground_truth_rank": lambda _facts, grade: (
+        None if grade is None else _number(grade.ground_truth_rank)
     ),
     # Characters, not tokens: no tokenizer ships.
     "target_prompt_chars": lambda facts, _grade: _number(facts.pipeline.target_prompt_chars),
@@ -291,63 +280,34 @@ _ROW_HEALTH: dict[str, Callable[[MeasuredCell], float]] = {
     "cached": lambda facts: float(facts.cached),
 }
 
-CELL_CHANNELS: tuple[str, ...] = tuple(_CHANNEL_READERS)
-
-
-class CellTerm(NamedTuple):
-    direction: Literal["high", "low"]
-    description: str
-    # ``None`` reaches a criterion through a typed expression only.
-    dial: DialKind | None = None
-    primary: bool = False
-
-
-CELL_TERMS: dict[str, CellTerm] = {
-    "fitness": CellTerm(
-        "high", "The cell's correctness under the per-sample formula.", primary=True
-    ),
-    "ground_truth_rank": CellTerm("low", "Where the truth landed in the ranking; 1 is the top."),
-    "latency": CellTerm(
-        "low", "Seconds the cell took when measured; a replay keeps them.", "anchored", True
-    ),
-    "unworked": CellTerm(
-        "low", "Seconds the cell sat blocked (suspend, rate-limit queue).", "anchored"
-    ),
-    "bench_lift": CellTerm(
-        "high", "L4: the inner campaign's mean lift over its origin on its held-out rows."
-    ),
-    "bench_origin": CellTerm("high", "L4: the inner origin's headline on the held-out rows."),
-    "bench_final_lift": CellTerm("high", "L4: the held-out lift the inner campaign ended on."),
-    "lift": CellTerm("high", "L4: the inner campaign's mean θ lift over its own origin."),
-    "origin": CellTerm("high", "L4: the inner campaign's origin level."),
-    "final_lift": CellTerm("high", "L4: the lift the inner campaign ended on."),
-    "peak_lift": CellTerm("high", "L4: the best lift the inner campaign reached."),
-    "rounds": CellTerm("low", "L4: rounds the inner campaign ran.", "anchored"),
-    "round_budget": CellTerm("high", "L4: rounds the inner campaign was allowed."),
-    "cost": CellTerm("low", "USD the cell cost.", "anchored", True),
-    "tokens": CellTerm("low", "Input plus output tokens the cell spent.", "anchored", True),
-    "target_prompt_chars": CellTerm(
-        "low", "Characters of the candidate's prompt template.", "anchored", True
-    ),
-    "errored": CellTerm("low", "1 where the cell errored, else 0.", "unit"),
-    "degraded": CellTerm("low", "1 where a pipeline node did not finish cleanly, else 0.", "unit"),
-    "cached": CellTerm(
-        "high", "1 where the cell was replayed from the archive, else 0.", "unit", True
-    ),
-}
-assert set(CELL_TERMS) == {*_CHANNEL_READERS, *_ROW_HEALTH}, "a per-cell term went untaught"
-assert all(term.direction == "low" for term in CELL_TERMS.values() if term.dial == "anchored"), (
-    "an anchored dial reads a cost against its origin level, so it is lower-is-better"
+CELL_CHANNELS: tuple[str, ...] = tuple(
+    name for name in CELL_TERMS if name in _CHANNEL_READERS or name in _BORROWED_CHANNELS
 )
+assert set(CELL_TERMS) == {*CELL_CHANNELS, *_ROW_HEALTH}, "a per-cell term went untaught"
+# The core terms a report may answer; a health term is the row's own, never a report's.
+REPORTABLE_CORE_TERMS: frozenset[str] = frozenset(_CHANNEL_READERS)
+ROW_HEALTH_TERMS: frozenset[str] = frozenset(_ROW_HEALTH)
+
+
+def campaign_terms(backend_type: str) -> dict[str, CellTerm]:
+    """What a campaign's criterion, dial or anchor may name: the core's terms, then its
+    connector's own (`Connector.cell_terms`), which its registration refused to collide."""
+    declared = connectors.CONNECTORS.get(backend_type).cell_terms
+    return {**CELL_TERMS, **{term.name: term for term in declared}}
 
 
 def cell_channels_of(facts: MeasuredCell, grade: Grade | None) -> dict[str, float]:
-    """A key absent from the result is a channel the cell cannot answer."""
+    """A key absent from the result is a channel the cell cannot answer. The connector's report
+    (`PipelineData.cell_report`, taken by its declaration alone) answers its own terms, and a core
+    channel where the core reader cannot (an L4 cell's inner spend)."""
     out: dict[str, float] = {}
-    for name, read in _CHANNEL_READERS.items():
+    for name, read in (*_CHANNEL_READERS.items(), *_BORROWED_CHANNELS.items()):
         value = read(facts, grade)
         if value is not None:
             out[name] = value
+    for name, value in facts.pipeline.cell_report.items():
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            out.setdefault(name, float(value))
     return out
 
 
@@ -367,7 +327,13 @@ def cell_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
         ns["input_tokens"] = account.input
         ns["output_tokens"] = account.output
 
-    for key, val in facts.pipeline.terms().items():
+    terms = facts.pipeline.terms()
+    terms.pop("cell_report", None)
+    # The connector's report is bound key by key, as the answer named it; a key naming a core
+    # term answers that channel alone (`cell_channels_of`). Every name here has one owner
+    # (`evaluators.py::cell_name_owners`), so no key is two values.
+    report = {k: v for k, v in facts.pipeline.cell_report.items() if k not in CELL_TERMS}
+    for key, val in {**report, **terms}.items():
         if isinstance(val, Mapping):
             ns[key] = SimpleNamespace(**val)
         elif key not in ns:
@@ -376,19 +342,12 @@ def cell_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
     return ns
 
 
-CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
-    {
-        "ground_truth_rank",
-        "error",
-        "predicted",
-        "ground_truth",
-        "n_candidates",
-        "input_tokens",
-        "output_tokens",
-        *MATCHERS,
-    }
-)
+CELL_INTRINSIC_NAMES: frozenset[str] = CELL_BOUND_NAMES | frozenset(MATCHERS)
 """A ``pipeline_data`` key colliding with one of these is SILENTLY dropped by ``cell_namespace``'s splat."""
+
+# What the namespace binds off `PipelineData`: its keys the cell's own binding does not take
+# (`error` is the cell's message; the backend's `PipelineData.error` reaches no formula).
+PIPELINE_BOUND_NAMES: frozenset[str] = PIPELINE_KEYS - CELL_INTRINSIC_NAMES
 
 # Maximal: a thinner probe would under-report and let a real collision through.
 _INTRINSIC_PROBE = MeasuredCell.from_wire(
@@ -528,8 +487,8 @@ def auto_scorer_id(
 DIALS_KEY = "dials"
 
 
-def _refuse_dials(text: str, why: str) -> PayloadInvalidError:
-    dialable = sorted(name for name, term in CELL_TERMS.items() if term.dial is not None)
+def _refuse_dials(text: str, why: str, terms: Mapping[str, CellTerm]) -> PayloadInvalidError:
+    dialable = sorted(name for name, term in terms.items() if term.dial is not None)
     return PayloadInvalidError(
         f"the dials {text!r} cannot be read: {why}. Dials are spelled 'term=weight' joined by "
         f"commas, each weight between 0 and 1, over {dialable}.",
@@ -538,50 +497,52 @@ def _refuse_dials(text: str, why: str) -> PayloadInvalidError:
     )
 
 
-def parse_dials(text: str) -> dict[str, float]:
+def parse_dials(text: str, terms: Mapping[str, CellTerm]) -> dict[str, float]:
     """Refuses a term no dial can weigh: read as weight 0 it would score an undeclared criterion."""
     weights: dict[str, float] = {}
     for part in filter(None, (p.strip() for p in text.split(","))):
         name, sep, raw = (piece.strip() for piece in part.partition("="))
-        term = CELL_TERMS.get(name)
+        term = terms.get(name)
         if not sep or term is None or term.dial is None:
-            raise _refuse_dials(text, f"{name!r} is not a term a dial weighs")
+            raise _refuse_dials(text, f"{name!r} is not a term a dial weighs", terms)
         if name in weights:
-            raise _refuse_dials(text, f"{name!r} is weighed twice")
+            raise _refuse_dials(text, f"{name!r} is weighed twice", terms)
         try:
             weight = float(raw)
         except ValueError:
-            raise _refuse_dials(text, f"{raw!r} is not a number") from None
+            raise _refuse_dials(text, f"{raw!r} is not a number", terms) from None
         if not 0.0 <= weight <= 1.0:
-            raise _refuse_dials(text, f"the weight {weight} on {name!r} is outside 0..1")
+            raise _refuse_dials(text, f"the weight {weight} on {name!r} is outside 0..1", terms)
         weights[name] = weight
     return weights
 
 
-def spell_dials(weights: Mapping[str, float]) -> str:
+def spell_dials(weights: Mapping[str, float], terms: Mapping[str, CellTerm]) -> str:
     """Vocabulary order, a zero dial dropped: two declarations of one criterion are one string."""
-    return ",".join(f"{name}={weights[name]}" for name in CELL_TERMS if weights.get(name))
+    return ",".join(f"{name}={weights[name]}" for name in terms if weights.get(name))
 
 
-def origin_anchors(rows: Iterable[GradedCell]) -> dict[str, float]:
+def origin_anchors(rows: Iterable[GradedCell], terms: Mapping[str, CellTerm]) -> dict[str, float]:
     """The MEDIAN, so one runaway cell cannot lift the anchor out of reach of every other."""
     carried: dict[str, list[float]] = {}
     for cell in rows:
         if cell.facts.errored:
             continue
         for name, value in cell_channels_of(cell.facts, cell.grade).items():
-            if CELL_TERMS[name].dial == "anchored":
+            if (term := terms.get(name)) is not None and term.dial == "anchored":
                 carried.setdefault(name, []).append(value)
     levels = {name: statistics.median(values) for name, values in carried.items()}
     return {name: round(level, 6) for name, level in levels.items() if level > 0.0}
 
 
-def realize_dials(weights: Mapping[str, float], anchors: Mapping[str, float]) -> str:
+def realize_dials(
+    weights: Mapping[str, float], anchors: Mapping[str, float], terms: Mapping[str, CellTerm]
+) -> str:
     dials: dict[str, Dial] = {}
     for name, weight in weights.items():
         if not weight:
             continue
-        term = CELL_TERMS[name]
+        term = terms[name]
         if term.dial != "anchored":
             dials[name] = Dial(weight, rewards=term.direction == "high")
             continue

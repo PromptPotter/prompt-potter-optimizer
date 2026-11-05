@@ -17,7 +17,7 @@ from promptpotter.domain.arm_reading import ArmReading, ScoreboardRow
 from promptpotter.domain.arms import ArmState
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.export import ExportTier, ExportVersionError, PromptExport
+from promptpotter.domain.export import ExportTier
 from promptpotter.domain.hierarchy import HierarchySteps
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -40,7 +40,7 @@ from promptpotter.infrastructure.store.lineage_queries import (
 )
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
-from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 _TAIL_POLL_INTERVAL_S = 0.5
 
@@ -152,14 +152,8 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
             if "model" in config
         }
     )
-    export: PromptExport | None = None
     no_export = "this cycle has none: it is written when the cycle ends with a round closed"
-    try:
-        export = cycle.stores.campaigns.read_export(hop)
-    except ValueError as exc:
-        # Old exports are disposable, so one that does not read refuses every tier, in one sentence.
-        why = str(exc) if isinstance(exc, ExportVersionError) else "its export.json does not read"
-        raise ConflictError(f"Cycle {hop.cycle_id}: {why}; re-run the cycle to export it.") from exc
+    export = cycle.stores.campaigns.read_export(hop)
     return export_files(
         tier,
         course,

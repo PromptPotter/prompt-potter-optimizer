@@ -15,12 +15,17 @@ from promptpotter.application.free_tier import (
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
     ServedPipeline,
+    draft_backend_type,
     draft_pipeline,
     draft_served,
     resolved_output_schemas,
 )
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
-from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
+from promptpotter.application.scoring.formula.compiler import (
+    campaign_terms,
+    parse_dials,
+    spell_dials,
+)
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import merge_config_layers
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
@@ -35,7 +40,8 @@ from promptpotter.domain.pipeline_schema import (
     description_paths,
     narrowing_of,
 )
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError
+from promptpotter.infrastructure.store.dataset_access import claim_own_definition
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
@@ -58,12 +64,7 @@ async def plan_draft_patch(
     provenance: dict[str, Provenance] = {}
 
     if patch.slug is not None and patch.slug != draft.slug:
-        if stores.tenant_datasets.slug_exists(patch.slug):
-            raise ConflictError(
-                f"Slug '{patch.slug}' already exists in your collection. Suggested slug: "
-                f"{stores.tenant_datasets.suggest_free_slug(patch.slug)}.",
-                code="slug_collision",
-            )
+        claim_own_definition(stores, patch.slug, new=True)
         changes["slug"] = patch.slug
 
     if patch.scoring_matcher is not None and patch.scoring_matcher not in MATCHERS:
@@ -89,14 +90,12 @@ async def plan_draft_patch(
         and patch.connector != draft.basis.connector
     ):
         changes["basis"] = draft.basis.model_copy(update={"connector": patch.connector})
-    served = (
-        await draft_served(stores, draft.patch(basis=changes["basis"]))
-        if "basis" in changes
-        else held
-    )
+    served_draft = draft.patch(basis=changes["basis"]) if "basis" in changes else draft
+    served = await draft_served(stores, served_draft) if "basis" in changes else held
     if patch.scoring_dials is not None:
         # Canonical spelling, so two drafts declaring the same criterion mint the same block.
-        changes["scoring_dials"] = spell_dials(parse_dials(patch.scoring_dials))
+        terms = campaign_terms(draft_backend_type(stores, served_draft))
+        changes["scoring_dials"] = spell_dials(parse_dials(patch.scoring_dials, terms), terms)
 
     for patch_val, draft_attr in (
         (patch.scoring_matcher, "scoring_matcher"),

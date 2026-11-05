@@ -5,6 +5,7 @@ import pkgutil
 import typing
 
 from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.cell_terms import misdeclared_connector_terms
 from promptpotter.domain.connector import ConnectorExecution
 from promptpotter.shared.plugin_registry import Registry
 
@@ -53,6 +54,8 @@ def _validate(c: object, origin: str) -> Connector:
         raise RuntimeError(f"{where}: compose_overlay needs cells_hold_the_machine.")
     if c.round_trip_is_latency and c.execution != "remote_http":
         raise RuntimeError(f"{where}: core clocks an in-process cell — drop round_trip_is_latency.")
+    if refused := misdeclared_connector_terms(c.cell_terms):
+        raise RuntimeError(f"{where}: {'; '.join(refused)}.")
     return c
 
 

@@ -8,6 +8,7 @@ import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
 import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { shownData, useRead, type ReadResult } from "@/lib/hooks/useRead";
 import { useRegistry } from "@/lib/state/registry";
@@ -82,7 +83,11 @@ export function LineageProvider({
     () => (sampleSet && sampleSet.length > 0 ? sampleSet : null),
     [sampleSet],
   );
-  const liveMaskLens = useMemo(() => (maskOpen ? lensOf(mask) : null), [maskOpen, mask]);
+  const { cellTerms } = useConnector();
+  const liveMaskLens = useMemo(
+    () => (maskOpen ? lensOf(mask, cellTerms) : null),
+    [maskOpen, mask, cellTerms],
+  );
   const maskLens = useDebounced(liveMaskLens, MASK_LENS_DEBOUNCE_MS);
   const lensParam = maskOpen ? maskLens : lens || null;
 

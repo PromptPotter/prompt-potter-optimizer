@@ -6,7 +6,7 @@ task, the pin and the `:nitro` trade are that file's; this one states only the c
 ## The cut
 
 The bank is `justlogic/d234`'s 600 rows at the same ids in the same order, followed by 120 rows
-of the same depths that cut never drew (40 per depth, ids 600 onward), each marked `bench_only`.
+of the same depths that cut never drew (40 per depth, ids 600 onward), each marked `held_out`.
 150 rows is the ceiling for any pass (operator, 2026-10-23).
 Both halves are derived from the dataset NAME by `_justlogic_bank`, the held half as its `bench_tail`
 (`promptpotter/application/datasets/loaders.py`).

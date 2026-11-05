@@ -2483,6 +2483,14 @@
             "title": "Campaign Id",
             "type": "string"
           },
+          "cell_terms": {
+            "description": "The per-cell terms this campaign's connector adds to `CELL_TERM_META`'s core ones, each a key of the connector's cell report a criterion, dial or lens may name",
+            "items": {
+              "$ref": "#/components/schemas/CellTerm"
+            },
+            "title": "Cell Terms",
+            "type": "array"
+          },
           "connector": {
             "title": "Connector",
             "type": "string"
@@ -2596,7 +2604,8 @@
           "model_capabilities",
           "reach",
           "nests",
-          "is_single_node"
+          "is_single_node",
+          "cell_terms"
         ],
         "title": "CampaignPipelineResponse",
         "type": "object"
@@ -3431,6 +3440,54 @@
           "node"
         ],
         "title": "CellSpan",
+        "type": "object"
+      },
+      "CellTerm": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "dial": {
+            "anyOf": [
+              {
+                "enum": [
+                  "anchored",
+                  "unit"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dial"
+          },
+          "direction": {
+            "enum": [
+              "high",
+              "low"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "primary": {
+            "default": false,
+            "title": "Primary",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "direction",
+          "description"
+        ],
+        "title": "CellTerm",
         "type": "object"
       },
       "CellsResponse": {
@@ -4749,14 +4806,15 @@
                 "type": "null"
               }
             ],
-            "description": "What the dataset is, in one plain sentence (the first under `README.md`'s title).",
+            "description": "What the dataset is, in one plain sentence: the definition's `card.summary`.",
             "title": "Summary"
           },
           "tier": {
-            "description": "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. ``install`` = content that ships with the product at ``assets/datasets/{name}/`` (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by anyone using the install. A ``yours`` slug shadows an ``install`` one.",
+            "description": "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. ``install`` = content that ships with the product at ``assets/datasets/{name}/`` (benchmarks, demos), readable by anyone using the install. ``research`` = a checkout's ``research/datasets/`` (L4's ``promptpotter-self``), resolved by name and never listed. A name reads from the first tier holding it: yours, install, research.",
             "enum": [
               "yours",
-              "install"
+              "install",
+              "research"
             ],
             "title": "Tier",
             "type": "string"
@@ -4770,7 +4828,7 @@
                 "type": "null"
               }
             ],
-            "description": "Display title (from `README.md`).",
+            "description": "Display title: the definition's `card.title`.",
             "title": "Title"
           }
         },
@@ -4976,7 +5034,7 @@
         "additionalProperties": false,
         "properties": {
           "bench": {
-            "description": "Distinct samples the split ranks away from the search as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them. A row the bank declares `bench_only` is held out beside them, never counted here.",
+            "description": "Distinct samples the split ranks away from the search as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them. A row the bank declares `held_out` is held out beside them, never counted here.",
             "minimum": 0.0,
             "title": "Bench",
             "type": "integer"
@@ -17297,7 +17355,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Reason code that steers L2's healing direction. One of: ``forbidden_axis`` (operator-locked param touched), ``type_mismatch`` (wrong declared type), ``not_in_available_models`` / ``not_in_param_allowed_values`` / ``not_accepted_by_model`` (value outside the axis's resolved space — the last where the node declared it and the chosen model refuses it, so the healing move is the model, not the value), ``reproposes_known_failing_config`` (matches a prior ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type`` (generator-side failure), ``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP rather than how to search — it edits the frame `mean_bench_lift` averages over instead of the search it measures), ``steers_across_seeds`` (an L4 override making an inner node reason over the seed panel, which exists only one level up — the rule renders empty where it lands), ``guts_inherited_contract`` (an L4 override replacing a long prompt field with a fraction of its length, deleting contracts the parent carried in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named a node absent from the schema — NON-fatal: the phantom edit is stripped, the candidate still scores; routed as signal, not a synthetic-0).",
+            "description": "Reason code that steers L2's healing direction. One of: ``forbidden_axis`` (operator-locked param touched), ``type_mismatch`` (wrong declared type), ``not_in_available_models`` / ``not_in_param_allowed_values`` / ``not_accepted_by_model`` (value outside the axis's resolved space — the last where the node declared it and the chosen model refuses it, so the healing move is the model, not the value), ``reproposes_known_failing_config`` (matches a prior ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` / ``optimizer_prompt_unexpected_type`` (generator-side failure), ``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP rather than how to search — it edits the frame `held_out_lift` averages over instead of the search it measures), ``steers_across_seeds`` (an L4 override making an inner node reason over the seed panel, which exists only one level up — the rule renders empty where it lands), ``guts_inherited_contract`` (an L4 override replacing a long prompt field with a fraction of its length, deleting contracts the parent carried in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named a node absent from the schema — NON-fatal: the phantom edit is stripped, the candidate still scores; routed as signal, not a synthetic-0).",
             "title": "Reason",
             "type": "string"
           },

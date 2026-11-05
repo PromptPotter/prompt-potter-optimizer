@@ -197,7 +197,7 @@ def draw_bench(
     taken = {s.key for s in bank}
     rest = [s for s in all_samples if s.key not in taken]
     drawn = random.Random(seed).sample(rest, min(n, len(rest)))
-    return [s.model_copy(update={"bench_only": True}) for s in drawn]
+    return [s.model_copy(update={"held_out": True}) for s in drawn]
 
 
 async def screen_inner_seeds(
@@ -218,7 +218,7 @@ async def screen_inner_seeds(
     if provider and not model:
         raise DiagnosticError("--provider is the gateway a --model is asked through; pass both.")
     # The pin moves a task node's model, never its payer: the dataset's cells send as declared.
-    dataset = resolve_dataset(stores, dataset_name).directory
+    dataset = resolve_dataset(stores, dataset_name)
     sends = sends_on(
         stores, load_dataset_campaign_config(dataset), runnable_definition(dataset).backend_type
     )
@@ -246,11 +246,10 @@ async def _screen(
     if not all_samples:
         raise DiagnosticError(f"dataset {dataset_name!r} loaded zero samples.")
 
-    dataset_dir = None if session.dataset is None else session.dataset.directory
     campaign_config = (
         CampaignConfig.model_validate({})
-        if dataset_dir is None
-        else load_dataset_campaign_config(dataset_dir)
+        if session.dataset is None
+        else load_dataset_campaign_config(session.dataset)
     )
     solver = session.pipeline_schema.prompt_nodes()
     if model and not solver:
@@ -285,7 +284,7 @@ async def _screen(
         )
     # The run's C0 framing: the origin must be the prompt the campaign will actually score.
     origin = resolve_origin_opt_search_point(
-        dataset_dir,
+        session.dataset,
         pipeline_params=pipeline_params,
         schema=session.pipeline_schema,
     )

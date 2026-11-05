@@ -19,6 +19,7 @@ import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { Button, FailureLine, Loading, Said } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { DatasetPreview } from "./DatasetPreview";
 import { SchemaFields, setIn, writeOnlyDefaults, type Commit } from "./SchemaFields";
 import { ComposerTools } from "./ComposerTools";
@@ -199,6 +200,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       Object.assign({}, ...stepSchemas.map((s) => writeOnlyDefaults(s))) as StartCheckinOptions,
     );
   }
+  const { cellTerms } = useConnector();
   // Start sits right below the refusal, so scrolling to it shows both.
   const startRef = useRef<HTMLButtonElement>(null);
   const failure = flow.failure;
@@ -256,7 +258,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           dialsOnly
           mask={{ kind: "dials", weights: dialsOf(draft.scoring_dials) }}
           onMask={(mask) => {
-            if (mask.kind === "dials") flow.applyPatch({ scoring_dials: dialsText(mask.weights) });
+            if (mask.kind === "dials") flow.applyPatch({ scoring_dials: dialsText(mask.weights, cellTerms) });
           }}
           matcher={{
             value: draft.scoring_matcher,

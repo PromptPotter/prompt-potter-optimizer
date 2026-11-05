@@ -78,7 +78,6 @@ it; its batch 3, 4 and 5 groups join U2, U1b, U3, S, B and U5 as part of what ea
 |---|---|---|---|---|
 | **EW** | the webapp reads straight off the cache: descriptors declare cadence, keep and effects; no mirroring providers; read results with wire names; one type door | `webapp/lib/read-cache.ts`, `poll.tsx`, `lineage.tsx`, `hard-samples.tsx`, `webapp/lib/hooks/` except `useConnector.ts`, `webapp/lib/api/`, `useChannelModel` | cloud · Opus | — |
 | **EN** | the draft one partial `CampaignConfig` over its basis; the pipeline answer whole | `domain/checkin_draft.py`, `domain/draft_edit.py`, `datasets/draft_*.py`, `pipeline_resolve.py` draft readers, `webapp/lib/hooks/useConnector.ts`, `webapp/lib/types/connector.ts`; shares the pipeline answer's model with ED | cloud · Opus | — |
-| **ED** | who a dataset or a word is for: the research tier, connector-declared cell vocabularies in the final held-out word, declared cards, a held bank starts | `assets/datasets/`, `store/dataset_access.py`, `datasets/startability.py`, `scoring/formula/compiler.py` terms, `scoring/evaluators.py` terms, `connectors/protocol.py`, `runner/inner/connector.py`, `shared/extras.py`, `scripts/smoke_wheel.py` | local · Opus | — |
 | **EM** | `WireRecord` timed against pydantic; where pydantic holds, the generator goes | `domain/wire_record.py`, its six classes | cloud · Opus | — |
 
 **Beside the unifications**, in the batches their dependencies allow: batch 2 is U1a with P, W2 and

@@ -17,9 +17,9 @@
 
 **`measurements/` is ONE content-addressed tree per archive home, and it outlives the campaigns that filled it.** A row is filed under the bank it measured — the dataset hash, never a label or the paying campaign. Nothing on an answer names a campaign; the join is `CandidateFacts.reading.sp_hash` → `prompt_fields_id`. **Every archive path is built from `measurement_archive.py::ArchiveFile`, keyed by a content address, never a name** <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 -->; a dataset name in any other tenant path is one segment, `layout.py::dataset_id_prefix`.
 
-## Dataset content has two tiers, and only one is writable
+## Dataset content has three tiers, and only one is writable
 
-**A dataset DEFINITION is authored; everything DERIVED from it is the operator's** and lands in the tenant tree, never under the definition's directory. A name resolves ONCE, tenant-first (`dataset_access.py::resolve_dataset`); inside a run every read takes the `ResolvedDataset` on `Session.dataset`. No verb writes the install tier.
+**A dataset DEFINITION is authored; everything DERIVED from it is the operator's** and lands in the tenant tree, never under the definition's directory. A name resolves ONCE, to the first tier holding it: tenant, then install, then a checkout's research tier (`Stores.research_datasets_root`, never listed) (`dataset_access.py::resolve_dataset`). No read refuses a name for a second holder; `stores.py::Stores.write_own_definition`, the one writer of an account's definition, refuses a NEW name another tier holds (`dataset_access.py::claim_own_definition`, also asked before a Start's cut); every chain read takes that `ResolvedDataset`, which carries its tier root, never a bare directory. No verb writes the install or research tier.
 
 ## Picking a JSON reader is a decision
 

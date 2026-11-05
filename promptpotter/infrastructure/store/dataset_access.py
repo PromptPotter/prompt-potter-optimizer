@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -19,7 +20,13 @@ from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import parse_yaml, read_bytes_optional
 from promptpotter.infrastructure.store.read_model import file_sig, read_file
-from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError
+from promptpotter.shared.errors import (
+    DatasetAccessError,
+    FileKind,
+    FileUnreadableError,
+    PayloadInvalidError,
+    SlugTakenError,
+)
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -29,21 +36,38 @@ FAMILY_FILE = "family.yaml"
 DEFAULTS_FILE = "defaults.yaml"
 FRAMING_FILE = "task.md"
 ORIGIN_FILE = "origin.yaml"
-README_FILE = "README.md"
 MATERIALIZED_PANEL_FILE = "panel.yaml"
 # A connector panel a source recipe materialized: the experiment the connector resolves.
 MATERIALIZED_PANEL: TypeAdapter[dict[str, Any]] = TypeAdapter(
     Annotated[dict[str, Any], Field(min_length=1)]
 )
 
-DatasetTier = Literal["yours", "install"]
+# Where a definition lives says what it is: an account's own upload, what the install ships, or
+# research and test tooling no wheel carries (`config/paths.py::research_datasets_root`).
+DatasetTier = Literal["yours", "install", "research"]
 
 
 @dataclass(frozen=True)
-class DatasetRef:
-    dataset: ResolvedDataset
-    title: str | None
-    summary: str | None
+class ResolvedDataset:
+    """A dataset name resolved ONCE to the tier that holds it: every read of the dataset takes this,
+    so none re-decides which directory answers, nor which layers lie under it."""
+
+    name: str
+    directory: Path
+    tier: DatasetTier
+    # The tier's root, below which a `family.yaml` is a layer; `None` on an account's own, which
+    # no tenant can lay a family or a default under.
+    tier_root: Path | None
+    # The install root, whose `defaults.yaml` lies under every install and research definition.
+    defaults_root: Path | None
+
+
+def tenant_dataset(name: str, directory: Path) -> ResolvedDataset:
+    return ResolvedDataset(name, directory, "yours", None, None)
+
+
+def install_dataset(install_root: Path, name: str) -> ResolvedDataset:
+    return ResolvedDataset(name, install_root / name, "install", install_root, install_root)
 
 
 def is_dataset_dir(dataset_dir: Path) -> bool:
@@ -54,16 +78,16 @@ def _holds_definition(directory: Path) -> bool:
     return is_dataset_dir(directory) or (directory / FAMILY_FILE).is_file()
 
 
-def definition_chain(dataset_dir: Path) -> list[Path]:
-    """The directories a definition is laid from, root first: the nearest ancestor holding
-    ``defaults.yaml`` (the install root), every directory below it holding ``family.yaml`` or a
+def definition_chain(dataset: ResolvedDataset) -> list[Path]:
+    """The directories a definition is laid from, root first: the install root (its
+    ``defaults.yaml``), every directory below the tier root holding ``family.yaml`` or a
     ``dataset.yaml``, then the leaf; a plain directory between them is a path segment, never a
-    layer. With no such ancestor the leaf is whole — no tenant writes a family or a default."""
-    for depth, root in enumerate(dataset_dir.parents):
-        if (root / DEFAULTS_FILE).is_file():
-            between = list(dataset_dir.parents)[:depth][::-1]
-            return [root, *(d for d in between if _holds_definition(d)), dataset_dir]
-    return [dataset_dir]
+    layer. An account's own is the leaf whole."""
+    leaf, root = dataset.directory, dataset.tier_root
+    if root is None or dataset.defaults_root is None:
+        return [leaf]
+    between = [d for d in reversed(leaf.parents) if d.is_relative_to(root) and d != root]
+    return [dataset.defaults_root, *(d for d in between if _holds_definition(d)), leaf]
 
 
 def _layer_file(directory: Path, leaf: Path) -> Path:
@@ -72,12 +96,12 @@ def _layer_file(directory: Path, leaf: Path) -> Path:
     return directory / (FAMILY_FILE if (directory / FAMILY_FILE).is_file() else DEFAULTS_FILE)
 
 
-def definition_files(dataset_dir: Path) -> list[Path]:
+def definition_files(dataset: ResolvedDataset) -> list[Path]:
     """Every file a definition reads, so a cache keyed on them sees any layer's edit."""
-    return [_layer_file(d, dataset_dir) for d in definition_chain(dataset_dir)]
+    return [_layer_file(d, dataset.directory) for d in definition_chain(dataset)]
 
 
-_SECTIONS = ("pipeline", "campaign", "source", "panel")
+_SECTIONS = ("pipeline", "campaign", "source", "panel", "card")
 
 
 def definition_layer(raw: bytes) -> dict[str, Any] | None:
@@ -91,6 +115,7 @@ def definition_layer(raw: bytes) -> dict[str, Any] | None:
     for key in _SECTIONS:
         if not isinstance(data.get(key) or {}, dict):
             raise ValueError(f"`{key}` must be a mapping")
+    _card(data.get("card") or {})
     return data
 
 
@@ -105,16 +130,37 @@ def _named[T](path: Path, read: Callable[[bytes], T]) -> T | None:
         raise ValueError(f"{path}: {exc}") from exc
 
 
-def _layers(dataset_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
+def _layers(dataset: ResolvedDataset) -> list[tuple[Path, dict[str, Any]]]:
+    """Each layer file read whole: one that is no definition layer is refused by its path."""
     return [
         (path, layer)
-        for path in definition_files(dataset_dir)
-        if (layer := _named(path, definition_layer)) is not None
+        for path in definition_files(dataset)
+        if (layer := read_file(path, definition_layer, FileKind.STORED_CONFIG)) is not None
     ]
 
 
 def _section(layer: Mapping[str, Any], key: str) -> dict[str, Any]:
     return dict(layer.get(key) or {})
+
+
+@dataclass(frozen=True)
+class DatasetCard:
+    """What a listing calls the dataset: product copy the definition declares."""
+
+    title: str
+    summary: str
+
+
+def _card(section: Mapping[str, Any]) -> DatasetCard | None:
+    if not section:
+        return None
+    title, summary = section.get("title"), section.get("summary")
+    if set(section) != {"title", "summary"} or not all(
+        isinstance(text, str) and text.strip() for text in (title, summary)
+    ):
+        raise ValueError("`card` declares a `title` and a `summary`, each plain text")
+    assert isinstance(title, str) and isinstance(summary, str)
+    return DatasetCard(title.strip(), " ".join(summary.split()))
 
 
 @dataclass(frozen=True)
@@ -127,6 +173,7 @@ class DatasetDefinition:
     panel: dict[str, Any] | None
     # The deepest layer declaring a panel key: a local path the panel names resolves against it.
     panel_dir: Path | None
+    card: DatasetCard | None
 
     @property
     def backend_type(self) -> str:
@@ -135,19 +182,22 @@ class DatasetDefinition:
         return declared.lower() if isinstance(declared, str) else ""
 
 
-def read_dataset_definition(dataset_dir: Path) -> DatasetDefinition | None:
+def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | None:
     """Per section, root first: ``pipeline`` replaces its top-level keys and merges its nodes,
-    ``campaign`` layers depth-first, ``source`` and ``panel`` merge by key. A node in
-    ``defaults.yaml`` is a TEMPLATE: only a node the dataset or a family declares receives it."""
-    if not is_dataset_dir(dataset_dir):
+    ``campaign`` layers depth-first, ``source`` and ``panel`` merge by key, and the deepest
+    ``card`` stands whole. A node in ``defaults.yaml`` is a TEMPLATE: only a node the dataset or a
+    family declares receives it. A layer that is no definition layer raises
+    ``FileUnreadableError`` by its path."""
+    if not is_dataset_dir(dataset.directory):
         return None
-    layers = _layers(dataset_dir)
+    layers = _layers(dataset)
     top: dict[str, Any] = {}
     nodes: dict[str, Any] = {}
     templates: dict[str, Any] = {}
     campaign: list[dict[str, Any]] = []
     source: dict[str, Any] = {}
     panel: dict[str, Any] = {}
+    card: dict[str, Any] = {}
     panel_dir: Path | None = None
     for path, layer in layers:
         pipeline = _section(layer, "pipeline")
@@ -159,6 +209,8 @@ def read_dataset_definition(dataset_dir: Path) -> DatasetDefinition | None:
         top |= {k: v for k, v in pipeline.items() if k != "nodes"}
         campaign.append(_section(layer, "campaign"))
         source |= _section(layer, "source")
+        if "card" in layer:
+            card = _section(layer, "card")
         if "panel" in layer:
             panel |= _section(layer, "panel")
             panel_dir = path.parent
@@ -167,11 +219,19 @@ def read_dataset_definition(dataset_dir: Path) -> DatasetDefinition | None:
             n: merge_node_blocks({n: templates[n]}, {n: block})[n] if n in templates else block
             for n, block in nodes.items()
         }
-    return DatasetDefinition(dataset_dir, top, tuple(campaign), source, panel or None, panel_dir)
+    return DatasetDefinition(
+        dataset.directory,
+        top,
+        tuple(campaign),
+        source,
+        panel or None,
+        panel_dir,
+        _card(card),
+    )
 
 
-def read_dataset_pipeline(dataset_dir: Path) -> dict[str, Any] | None:
-    definition = read_dataset_definition(dataset_dir)
+def read_dataset_pipeline(dataset: ResolvedDataset) -> dict[str, Any] | None:
+    definition = read_dataset_definition(dataset)
     return None if definition is None else definition.pipeline
 
 
@@ -185,12 +245,12 @@ def declared_pipelines(declaration: Mapping[str, Any]) -> dict[str, list[str]]:
     return ({DEFAULT_PIPELINE: [str(node) for node in nodes]} if nodes else {}) | declared
 
 
-def nearest_file(dataset_dir: Path, filename: str) -> Path | None:
-    """The dataset's own file, else its nearest family's: one framing, origin or README per kind."""
+def nearest_file(dataset: ResolvedDataset, filename: str) -> Path | None:
+    """The dataset's own file, else its nearest family's: one framing or origin per kind."""
     return next(
         (
             path
-            for directory in reversed(definition_chain(dataset_dir))
+            for directory in reversed(definition_chain(dataset))
             if (path := directory / filename).is_file()
         ),
         None,
@@ -232,8 +292,8 @@ def read_framing_file(path: Path | None) -> DatasetFraming:
     return DatasetFraming("", TaskDecomposition()) if framing is None else framing
 
 
-def read_dataset_framing(dataset_dir: Path) -> DatasetFraming:
-    return read_framing_file(nearest_file(dataset_dir, FRAMING_FILE))
+def read_dataset_framing(dataset: ResolvedDataset) -> DatasetFraming:
+    return read_framing_file(nearest_file(dataset, FRAMING_FILE))
 
 
 def render_framing_file(description: str, framing: TaskDecomposition) -> str:
@@ -255,37 +315,59 @@ def origin_layer(raw: bytes) -> dict[str, dict[str, Any]] | None:
     return data
 
 
-def read_dataset_origin(dataset_dir: Path) -> dict[str, dict[str, Any]]:
+def read_dataset_origin(dataset: ResolvedDataset) -> dict[str, dict[str, Any]]:
     """Starting prompts keyed by node; a family's entry is the default for a node it names."""
     out: dict[str, dict[str, Any]] = {}
-    for directory in definition_chain(dataset_dir):
+    for directory in definition_chain(dataset):
         if (layer := _named(directory / ORIGIN_FILE, origin_layer)) is not None:
             out |= layer
     return out
 
 
-@dataclass(frozen=True)
-class ResolvedDataset:
-    """A dataset name resolved ONCE to the tier that holds it: every read of the dataset takes this,
-    so none re-decides which directory answers."""
+def _holders(stores: Stores, name: str) -> list[ResolvedDataset]:
+    """Each tier holding a definition *name*, in reading order: tenant, then install, then
+    research; raises ``ValueError`` on a name no tier could hold."""
+    research = stores.research_datasets_root
+    tiers = [
+        tenant_dataset(name, stores.tenant_datasets.dataset_dir(name)),
+        install_dataset(stores.install_datasets_root, name),
+    ]
+    if research is not None:
+        tiers.append(
+            ResolvedDataset(
+                name, research / name, "research", research, stores.install_datasets_root
+            )
+        )
+    return [dataset for dataset in tiers if is_dataset_dir(dataset.directory)]
 
-    name: str
-    directory: Path
-    tier: DatasetTier
+
+def claim_own_definition(stores: Stores, slug: str, *, new: bool) -> None:
+    """THE claim on the name of an account's definition: refused where the install or research
+    tier holds it, since the account's would shadow theirs. A re-write of a name the account holds
+    is admitted; *new* is a draft naming a dataset the account does not hold yet, refused where it
+    does. The suggestion is a name no tier holds."""
+    held = _holders(stores, slug)
+    if held and (new or held[0].tier != "yours"):
+        free = next(f"{slug}-{n}" for n in count(2) if not _holders(stores, f"{slug}-{n}"))
+        raise SlugTakenError(slug, free)
+
+
+def dataset_not_found(stores: Stores, name: str) -> DatasetAccessError:
+    """The one 404 for a dataset *name* this caller may not start: an unoffered name reads
+    exactly as an absent one, so the answer never says which."""
+    return DatasetAccessError(name, research_tier=stores.research_datasets_root is not None)
 
 
 def resolve_dataset(stores: Stores, name: str) -> ResolvedDataset:
-    """Tenant first: an upload of the same name shadows the install's."""
+    """The first tier holding *name*, in reading order: an account's own shadows the install's,
+    which shadows the research tier's."""
     try:
-        tenant_dir = stores.tenant_datasets.dataset_dir(name)
+        held = _holders(stores, name)
     except ValueError as exc:
-        raise DatasetAccessError(name) from exc
-    if is_dataset_dir(tenant_dir):
-        return ResolvedDataset(name, tenant_dir, "yours")
-    install_dir = stores.install_datasets_root / name
-    if is_dataset_dir(install_dir):
-        return ResolvedDataset(name, install_dir, "install")
-    raise DatasetAccessError(name)
+        raise dataset_not_found(stores, name) from exc
+    if held:
+        return held[0]
+    raise dataset_not_found(stores, name)
 
 
 def definition_version(stores: Stores, name: str) -> tuple[object, ...]:
@@ -294,26 +376,18 @@ def definition_version(stores: Stores, name: str) -> tuple[object, ...]:
         dataset = resolve_dataset(stores, name)
     except DatasetAccessError:
         return (name, None)
-    files = definition_files(dataset.directory)
-    return (name, str(dataset.directory), *(file_sig(path) for path in files))
+    return (name, str(dataset.directory), *(file_sig(path) for path in definition_files(dataset)))
 
 
-def runnable_definition(dataset_dir: Path) -> DatasetDefinition:
+def runnable_definition(dataset: ResolvedDataset) -> DatasetDefinition:
     """One naming its backend; raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
-    path = dataset_dir / DEFINITION_FILE
-    try:
-        definition = read_dataset_definition(dataset_dir)
-    except ValueError as exc:
-        raise PayloadInvalidError(
-            f"{path} is malformed: {exc}",
-            code="pipeline_config_invalid",
-            details={"dataset_dir": str(dataset_dir)},
-        ) from exc
+    path = dataset.directory / DEFINITION_FILE
+    definition = read_dataset_definition(dataset)
     if definition is None or not definition.backend_type:
         raise PayloadInvalidError(
             f"backend_type missing or empty in {path}",
             code="pipeline_config_invalid",
-            details={"dataset_dir": str(dataset_dir)},
+            details={"dataset_dir": str(dataset.directory)},
         )
     return definition
 
@@ -321,8 +395,8 @@ def runnable_definition(dataset_dir: Path) -> DatasetDefinition:
 def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
     """Tolerant, a SURVEY's: a campaign outlives its dataset, and one bad file fails no listing."""
     try:
-        return runnable_definition(resolve_dataset(stores, dataset_name).directory).backend_type
-    except (DatasetAccessError, PayloadInvalidError, OSError):
+        return runnable_definition(resolve_dataset(stores, dataset_name)).backend_type
+    except (DatasetAccessError, FileUnreadableError, PayloadInvalidError, OSError):
         return ""
 
 
@@ -341,7 +415,7 @@ def _declared_panel(stores: Stores, dataset: ResolvedDataset) -> PanelRead | Non
     )
     if held is not None:
         return PanelRead(held, materialized)
-    definition = read_dataset_definition(dataset.directory)
+    definition = read_dataset_definition(dataset)
     if definition is None or definition.panel is None or definition.panel_dir is None:
         return None
     return PanelRead(definition.panel, definition.panel_dir)
@@ -378,8 +452,8 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
     """``None`` where the definition names no backend; one naming a connector this PROCESS lacks
     raises, since its panel and identity are unreadable, never empty."""
     try:
-        backend_type = runnable_definition(dataset.directory).backend_type
-    except PayloadInvalidError:
+        backend_type = runnable_definition(dataset).backend_type
+    except (FileUnreadableError, PayloadInvalidError):
         return None
     connector = connectors.CONNECTORS.table.get(backend_type)
     if connector is None:
@@ -406,66 +480,51 @@ def dataset_panel_rows(
 def readable_task_context(stores: Stores, dataset: ResolvedDataset) -> TaskDecomposition:
     """An upload's own framing wins; an install's yields to the one this tenant decomposed or
     edited, which the read-only tier cannot hold. A blank record is absent."""
-    committed = read_dataset_framing(dataset.directory).framing
+    committed = read_dataset_framing(dataset).framing
     decomposed = stores.tenant_datasets.load_task_context(dataset.name)
     tiers = (committed, decomposed) if dataset.tier == "yours" else (decomposed, committed)
     return next((framing for framing in tiers if framing), TaskDecomposition())
 
 
-def _install_names(root: Path) -> list[tuple[str, Path]]:
-    out: list[tuple[str, Path]] = []
+def _install_names(root: Path) -> list[str]:
+    out: list[str] = []
     for path in sorted(root.rglob(DEFINITION_FILE)):
         name = path.parent.relative_to(root).as_posix()
         try:
             validate_dataset_name(name)
         except ValueError:
             continue
-        out.append((name, path.parent))
+        out.append(name)
     return out
 
 
+@dataclass(frozen=True)
+class DatasetRef:
+    dataset: ResolvedDataset
+    # `None` on an account's own, which declares none, and on a malformed definition, which the
+    # listing's reading reports.
+    card: DatasetCard | None
+
+
 def list_readable_datasets(stores: Stores) -> list[DatasetRef]:
+    """An account's own, then the install's named unlike them: each name once, as it resolves.
+    The research tier is never listed."""
     refs: list[DatasetRef] = []
     own: set[str] = set()
     for slug in stores.tenant_datasets.list_slugs():
-        dataset_dir = stores.tenant_datasets.dataset_dir(slug)
         own.add(slug)
-        refs.append(_dataset_ref(ResolvedDataset(slug, dataset_dir, "yours")))
+        refs.append(_dataset_ref(tenant_dataset(slug, stores.tenant_datasets.dataset_dir(slug))))
 
     if stores.install_datasets_root.is_dir():
-        for name, entry in _install_names(stores.install_datasets_root):
+        for name in _install_names(stores.install_datasets_root):
             if name not in own:
-                refs.append(_dataset_ref(ResolvedDataset(name, entry, "install")))
+                refs.append(_dataset_ref(install_dataset(stores.install_datasets_root, name)))
     return refs
 
 
 def _dataset_ref(dataset: ResolvedDataset) -> DatasetRef:
-    title, summary = _read_heading(dataset.directory / README_FILE)
-    return DatasetRef(dataset, title, summary)
-
-
-_MARKUP = re.compile(r"\*\*|__|`|\[([^\]]*)\]\([^)]*\)")
-
-
-def _read_heading(md: Path) -> tuple[str | None, str | None]:
-    """The ``# `` title, and the first sentence of the paragraph under it as plain text."""
-    if not md.is_file():
-        return None, None
-    title: str | None = None
-    paragraph: list[str] = []
-    for line in md.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if title is None:
-            if stripped.startswith("# "):
-                title = stripped[2:].strip() or None
-            continue
-        if not stripped:
-            if paragraph:
-                break
-            continue
-        if stripped.startswith("#"):
-            break
-        paragraph.append(stripped)
-    text = _MARKUP.sub(lambda m: m.group(1) or "", " ".join(paragraph))
-    sentence = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].strip()
-    return title, sentence or None
+    try:
+        definition = read_dataset_definition(dataset)
+    except FileUnreadableError:
+        return DatasetRef(dataset, None)
+    return DatasetRef(dataset, None if definition is None else definition.card)

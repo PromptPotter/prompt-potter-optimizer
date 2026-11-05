@@ -305,7 +305,16 @@ def _emit_word_tables(emitted: set[str]) -> str:
             row = column(row_type)
 
             def render(info: typing.Any) -> str:
-                return json.dumps(info, ensure_ascii=False)
+                if not isinstance(info, BaseModel):
+                    return json.dumps(info, ensure_ascii=False)
+                return (
+                    "{ "
+                    + ", ".join(
+                        f"{col}: {json.dumps(v, ensure_ascii=False)}"
+                        for col, v in info.model_dump(mode="json").items()
+                    )
+                    + " }"
+                )
 
         body = "\n".join(f"  {json.dumps(str(_wire(k)))}: {render(v)}," for k, v in table.items())
         owner = module.removeprefix("promptpotter.").replace(".", "/")

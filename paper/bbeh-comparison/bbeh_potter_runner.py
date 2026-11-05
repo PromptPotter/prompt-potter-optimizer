@@ -32,6 +32,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.presentation.terminal.completion import report_completion
 
 # The bbeh definition is the SoT for everything about the task — its `pipeline` section drives
@@ -46,7 +47,7 @@ def _normalize(examples: list[Record]) -> list[Sample]:
 
 
 def build_campaign_config(
-    dataset_dir: Path,
+    dataset: ResolvedDataset,
     *,
     budget_rounds: int | None = None,
     n_variants: int | None = None,
@@ -67,7 +68,7 @@ def build_campaign_config(
     if sp_budget_round is not None:
         nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
     optimization: dict[str, Any] = {"budget": {"rounds": budget_rounds or 5}, "nodes": nodes}
-    return with_optimization(load_dataset_campaign_config(dataset_dir), optimization)
+    return with_optimization(load_dataset_campaign_config(dataset), optimization)
 
 
 async def run_bbeh_campaign(
@@ -98,7 +99,7 @@ async def run_bbeh_campaign(
     try:
         assert session.dataset is not None, "open_session resolves the dataset it names"
         campaign_config = build_campaign_config(
-            session.dataset.directory,
+            session.dataset,
             budget_rounds=budget_rounds,
             n_variants=n_variants,
             sp_budget_round=sp_budget_round,

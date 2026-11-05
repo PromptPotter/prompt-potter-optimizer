@@ -107,7 +107,11 @@ from promptpotter.infrastructure.store.archive_queries import (
     load_population,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
-from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
+from promptpotter.infrastructure.store.dataset_access import (
+    install_dataset,
+    read_dataset_pipeline,
+    resolve_dataset,
+)
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.stores import build_stores
@@ -481,7 +485,7 @@ class ByCallIdentity:
 
 def stand_in_fetch(stores: Stores, samples: list[Sample]) -> None:
     """The synthetic rows as the cut of the definition's own `source:`: no fetch reaches the hub."""
-    src = definition_source(resolve_dataset(stores, DATASET).directory)
+    src = definition_source(resolve_dataset(stores, DATASET))
     assert src is not None, f"{DATASET} names a source"
     stores.tenant_datasets.record_cut(src.identity, Bank.of(samples))
 
@@ -513,9 +517,10 @@ def campaign_config(
     crossover: str | None = None,
     knobs: dict[str, dict[str, Any]] | None = None,
 ) -> CampaignConfig:
-    raw = dict(dataset_campaign_block(install_datasets_root() / DATASET))
+    shipped = install_dataset(install_datasets_root(), DATASET)
+    raw = dict(dataset_campaign_block(shipped))
     # The narrowing a check-in of the shipped definition declares, its `optimizer` blocks included.
-    pipeline = read_dataset_pipeline(install_datasets_root() / DATASET)
+    pipeline = read_dataset_pipeline(shipped)
     assert pipeline is not None, f"{DATASET} declares a pipeline"
     _, narrowing = split_overlay(pipeline["nodes"])
     raw.update(BENCH, bench_trigger=bench_trigger, optimizer_narrowing=narrowing)

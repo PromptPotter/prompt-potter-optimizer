@@ -27,7 +27,7 @@ class Sample(StrictModel):
     source_pin: dict[str, JsonValue] | None = None
 
     # Where the row sits, never what it is: out of `key`, so its cells replay under any membership.
-    bench_only: bool = False
+    held_out: bool = False
 
     # The dataset this cell measures where it is not the one it is filed under: its δ scale's. Out of `key`.
     measured_dataset: str | None = None
@@ -69,10 +69,21 @@ class Bank:
 
     @classmethod
     def read(cls, rows: Iterable[Mapping[str, Any]]) -> Bank:
-        return cls.of(Sample(id=slot, **row) for slot, row in enumerate(rows))
+        return cls.of(banked_row(slot, row) for slot, row in enumerate(rows))
 
     def banked(self) -> list[dict[str, JsonValue]]:
         return [row.banked() for row in self.samples]
+
+
+def banked_row(slot: int, row: Mapping[str, object]) -> Sample:
+    """A banked row is this build's own write, so a key ``Sample`` does not declare is refused, never
+    ignored; the store names the bank it read it from."""
+    if undeclared := sorted(row.keys() - Sample.model_fields.keys()):
+        raise ValueError(
+            f"row {slot} carries {', '.join(undeclared)}: a build whose rows declared other "
+            "fields wrote it"
+        )
+    return Sample.model_validate({**row, "id": slot})
 
 
 #: How wide a row's slot is printed; served, so the browser's `lib/format.ts::fmtSampleTag` pads alike.

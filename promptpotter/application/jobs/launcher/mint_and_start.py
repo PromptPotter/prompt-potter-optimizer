@@ -104,10 +104,10 @@ class FreshMint:
         return None
 
     def backend_type(self, _stores: Stores) -> str:
-        return runnable_definition(self.dataset.directory).backend_type
+        return runnable_definition(self.dataset).backend_type
 
     def campaign_config(self) -> CampaignConfig:
-        declared = self.declared or load_dataset_campaign_config(self.dataset.directory)
+        declared = self.declared or load_dataset_campaign_config(self.dataset)
         return with_optimization(declared, self.optimization)
 
     def declared_budget(self, _stores: Stores) -> Budget:
@@ -135,9 +135,7 @@ class ExistingCycle:
         return None
 
     def backend_type(self, stores: Stores) -> str:
-        return runnable_definition(
-            resolve_dataset(stores, self.dataset_name).directory
-        ).backend_type
+        return runnable_definition(resolve_dataset(stores, self.dataset_name)).backend_type
 
     def declared_budget(self, stores: Stores) -> Budget:
         return cycle_config(stores, self.campaign, self.hop).config.optimization.budget
@@ -198,7 +196,7 @@ def commit_upload_definition(
     chain: PipelineSchema,
 ) -> None:
     """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug."""
-    stores.tenant_datasets.write_definition(
+    stores.write_own_definition(
         draft.slug,
         source=source,
         pipeline=committed_pipeline_json(draft, upload),

@@ -61,9 +61,10 @@ from factories import (
     walking_cycle,
     workspace,
 )
-from offline_world import FakeHarness, Router
+from offline_world import FakeBackend, FakeHarness, Router
 from pydantic import SecretStr, ValidationError
 
+from promptpotter import connectors
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle
@@ -91,7 +92,9 @@ from promptpotter.application.host_surface import (
     _Tracked,
     host_tool,
 )
+from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import LaunchClock, Session
+from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     responses_of,
@@ -168,10 +171,11 @@ from promptpotter.application.runner.inner.spawn_context import publish_inner_sp
 from promptpotter.application.runner.measurement import ReferencePairs
 from promptpotter.application.runner.round import announce_opening, execute_round, run_init
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
-from promptpotter.application.scoring import query_loop
+from promptpotter.application.scoring import evaluators, query_loop
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
 from promptpotter.application.scoring.evaluators import (
     DEFAULT_CELL_FORMULA,
+    Evaluator,
     compute_accuracy,
     compute_degraded_rate,
     compute_error_rate,
@@ -209,7 +213,8 @@ from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
-from promptpotter.connectors.protocol import PROBE_WORKLOAD
+from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
+from promptpotter.connectors.termnorm import termnorm_wire_adapter
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, arm_end, is_leader_eligible
 from promptpotter.domain.bench import (
@@ -222,8 +227,9 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
-from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
+from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
 from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
@@ -237,6 +243,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.origin_panel import (
@@ -272,7 +279,11 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
+from promptpotter.domain.pipeline_schema import (
+    ManifestNodeOverlay,
+    ObservationMapping,
+    PipelineNode,
+)
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
@@ -333,6 +344,8 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
+from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands import launch as launch_cli
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
@@ -340,11 +353,13 @@ from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import (
     ConflictError,
     ErrorCategory,
+    PayloadInvalidError,
     SendRefusedError,
     TaskUncancellableError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
+from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
 _H2H_FORMULA = "env_reward"
@@ -395,8 +410,9 @@ _MEETING_GOLD = (
 )
 
 
+@pytest.mark.usefixtures("offline")
 def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Each matcher grades an answer against its gold.
     matcher = {name: m.score for name, m in MATCHERS.items()}
@@ -698,23 +714,25 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     def composite(scorer: Scorer, *cells: MeasuredCell) -> float | None:
         return compute_composite_fitness(scorer.sheet(cells), _LLM_ONLY).composite_fitness
 
+    core = CELL_TERMS
     anchors = origin_anchors(
         sheet(
             GradedCell.from_wire(solve(0, said, t).wire()) for said, t in (("a", 600), ("b", 784))
-        )
+        ),
+        core,
     )
     assert anchors["tokens"] == pytest.approx(692.0), "the anchor is the origin's mean"
     per_sample = "label_match(predicted, ground_truth)"
     dialled = scorer_of(
         per_sample,
-        realize_dials(parse_dials("tokens=0.08, latency=0"), anchors),
+        realize_dials(parse_dials("tokens=0.08, latency=0", core), anchors, core),
     )
     for tokens, expected in ((692, 1.0), (6920, 0.92 + 0.08 * 0.1), (100, 1.0)):
         assert composite(dialled, solve(0, "a", tokens)) == pytest.approx(expected), (
             f"a hit at {tokens} tokens reads its tokens against the origin's"
         )
     read_back = anchored_criterion_dials(
-        realize_dials(parse_dials("tokens=0.08,cached=0.1,errored=0.2"), anchors)
+        realize_dials(parse_dials("tokens=0.08,cached=0.1,errored=0.2", core), anchors, core)
     )
     assert read_back is not None and read_back["tokens"].anchor == pytest.approx(692.0)
     assert {name: dial.weight for name, dial in read_back.items()} == {
@@ -771,6 +789,186 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     )
     assert "cost" not in compiler.cell_channels_of(solve(0, "a", 692), None), (
         "most cells report no dollars, and an unpriced cell has no cost term"
+    )
+    assert "cost" not in compiler.cell_channels_of(solve(0, "a", 692, cost=9.0), None), (
+        "a dataset observation named for a core channel filled it, undeclared"
+    )
+
+    # A connector's declared dial parses and anchors as a core one does.
+    l4 = compiler.campaign_terms("promptpotter")
+    with pytest.raises(PayloadInvalidError):
+        parse_dials("rounds=0.1", core)
+
+    def inner(sid: int, rounds: int) -> GradedCell:
+        report = {"held_out_lift": 0.0, "rounds": rounds}
+        row = measurement(sid, None, pipeline_data={"cell_report": report}).facts
+        return GradedCell.from_wire(row.wire())
+
+    l4_anchors = origin_anchors(sheet([inner(0, 3), inner(1, 5)]), l4)
+    assert l4_anchors["rounds"] == pytest.approx(4.0), "the inner rounds dial lost its anchor"
+    l4_dials = anchored_criterion_dials(
+        realize_dials(parse_dials("rounds=0.2", l4), l4_anchors, l4)
+    )
+    assert l4_dials is not None and l4_dials["rounds"].anchor == pytest.approx(4.0)
+
+    # One name, one meaning, one value: every door admitting a name to the cell namespace refuses
+    # one another owner binds. Unrefused, a judge named `max` breaks every `max(...)` formula, and
+    # a connector term `n_turns` reads its report on a dial and the turn count in a formula.
+    shipped = connectors.CONNECTORS
+
+    def term(name: str, **rest: Any) -> CellTerm:
+        return CellTerm(name=name, direction="high", description="A probe term.", **rest)
+
+    def table_refuses(*, probe: Connector | None = None) -> bool:
+        members = [*shipped.table.items(), *([("probe", probe)] if probe else [])]
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                connectors,
+                "CONNECTORS",
+                Registry(shipped.group, members.copy, connectors._validate),
+            )
+            try:
+                complete_registries(every_treatment=False)
+            except RuntimeError:
+                return True
+        return False
+
+    def connector_refuses(**declared: Any) -> bool:
+        return table_refuses(
+            probe=Connector(
+                "probe",
+                termnorm_wire_adapter,
+                endpoint=lambda: "http://probe",
+                cell_envelope_s=cell_envelope_of(600.0),
+                **declared,
+            )
+        )
+
+    def package_evaluator_refuses(name: str) -> bool:
+        ev = Evaluator(name=name, description="A probe.", scope="per_sample", compute=lambda **_: 1)
+        with monkeypatch.context() as patched:
+            patched.setattr(evaluators, "_REGISTRY", [*evaluators._REGISTRY, ev])
+            try:
+                evaluators._validate_registry()
+            except ValueError:
+                return True
+            return table_refuses()
+
+    # The campaign's doors are run init's own: a connector reporting `rounds` as L4's does, a
+    # pipeline mapping `env_reward`.
+    reporting = Connector(
+        "reporting",
+        termnorm_wire_adapter,
+        endpoint=lambda: f"http://{FakeBackend.AT}",
+        cell_envelope_s=cell_envelope_of(600.0),
+        reported_keys=("rounds",),
+    )
+    observed = PipelineNode(
+        name="llm_only",
+        tunes_llm=False,
+        observation_name="llm_only",
+        observation_mappings=[ObservationMapping(pipeline_key="env_reward")],
+    )
+
+    def judge_refuses(name: str) -> bool:
+        stores = workspace(tmp_path / "judge")
+        session = loop_session(
+            stores,
+            pipeline_schema(name="judged", nodes=[observed]),
+            samples(2),
+            client=BackendClient(reporting, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir),
+        )
+        spec = JudgeSpec(name="sealqa", stages=[JudgeStage(model="m", provider="openai")])
+        config = CampaignConfig(
+            scoring="label_match(predicted, ground_truth)",
+            optimization=OptimizationConfig(degradation_threshold=0.4),
+            judges={name: spec},
+        )
+        try:
+            populate_session_scoring(
+                session,
+                config,
+                source=RunSource.ORIGIN,
+                partition=partition_bank(session.bank.samples, None, seed=0),
+            )
+        except ValueError:
+            return True
+        return False
+
+    def observation_refuses(name: str) -> bool:
+        stores = workspace(tmp_path / "observed")
+        mapping = [
+            {"pipeline_key": "final_ranking", "output_field": "generated_text", "is_llm": True},
+            {"pipeline_key": name, "output_field": name},
+        ]
+        write_yaml(
+            stores.tenant_datasets.dataset_dir("observed") / DEFINITION_FILE,
+            {
+                "pipeline": {
+                    "backend_type": "reporting",
+                    "nodes": {"llm_only": {"optimizer": {"observation_mappings": mapping}}},
+                }
+            },
+        )
+        members = [*shipped.table.items(), ("reporting", reporting)]
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                connectors,
+                "CONNECTORS",
+                Registry(shipped.group, members.copy, connectors._validate),
+            )
+            connectors.CONNECTORS.complete()
+            try:
+                asyncio.run(init_services("observed", identity=stores.identity, stores=stores))
+            except PayloadInvalidError as exc:
+                # Past this door, the next refusal is the dataset's empty bank.
+                return "refused_observation_keys" in exc.details
+        raise AssertionError("an observation door admitted a dataset holding no rows")
+
+    doors: dict[str, Callable[[str], bool]] = {
+        "connector term": lambda n: connector_refuses(cell_terms=(term(n),)),
+        "reported key": lambda n: connector_refuses(reported_keys=(n,)),
+        "package evaluator": package_evaluator_refuses,
+        "campaign judge": judge_refuses,
+        "observation key": observation_refuses,
+    }
+    for name, admitted_at in (
+        ("fresh_term", set(doors)),
+        ("latency", {"reported key"}),  # a core term: a report answers its channel
+        # Two owners served it once: the grade's rank, and a report's read on the channel alone.
+        ("ground_truth_rank", set()),
+        ("target_prompt_chars", {"observation key"}),  # a PipelineData field, never a report's
+        ("error", set()),  # the cell's message; `PipelineData.error` reaches no formula
+        ("errored", set()),  # a row-health term: the row answers it
+        ("predicted", set()),  # bound off the cell
+        ("label_match", set()),  # a matcher
+        ("max", set()),  # a builtin
+        ("total_time", {"observation key"}),  # a PipelineData key: an observation fills it
+        ("n_turns", set()),  # a turn scalar
+        ("n_tool_calls", set()),
+        ("retrieve_turns", set()),  # a step's turn count
+        ("retrieval_shortfall", set()),  # a package evaluator
+        # The L4 connector's term: another connector may declare it, nothing its campaigns read.
+        ("rounds", {"connector term", "reported key"}),
+        ("env_reward", set(doors) - {"campaign judge"}),  # a campaign's observation
+    ):
+        refused_at = {door for door, refuses in doors.items() if refuses(name)}
+        assert refused_at == set(doors) - admitted_at, f"{name!r} admitted where another owns it"
+    assert connector_refuses(cell_terms=(term("probe_anchor", dial="anchored"),)), (
+        "an anchored term reading higher-is-better was registered: a dial reads it as a cost"
+    )
+    # A reported core channel is ONE value: the formula reads what the channel reads.
+    spent = measurement(
+        0,
+        1.0,
+        pipeline_data={
+            "cell_report": {"cost": 99.0},
+            "step_tokens": {"n": {"input": 1, "output": 1, "cost_usd": 2.0}},
+        },
+    )
+    channel = compiler.cell_channels_of(spent.facts, spent.grade)["cost"]
+    assert compiler.objective_namespace(spent.facts, spent.grade)["cost"] == channel == 2.0, (
+        "a reported core channel read one value on a dial and another in a formula"
     )
 
     # A conversation reaches the formula only as projected scalars.

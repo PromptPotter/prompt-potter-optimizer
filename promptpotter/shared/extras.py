@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from enum import StrEnum
@@ -82,8 +83,22 @@ def installed(extra: Extra) -> bool:
     return not missing(extra)
 
 
+@cache
+def _editable() -> bool:
+    """A checkout's install, as its own metadata records it (PEP 610's `direct_url.json`)."""
+    try:
+        raw = metadata.distribution("promptpotter").read_text("direct_url.json")
+    except metadata.PackageNotFoundError:
+        return False
+    return bool(raw and json.loads(raw).get("dir_info", {}).get("editable"))
+
+
 def install_hint(extra: Extra) -> str:
-    return f'pip install -e ".[{extra}]"'
+    """The uv command adding *extra* where this install came from, keeping every extra it holds:
+    the checkout's locked env, else the index."""
+    if _editable():
+        return f"uv sync --inexact --extra {extra}"
+    return f'uv pip install "promptpotter[{extra}]"'
 
 
 class MissingExtraError(PotterError):

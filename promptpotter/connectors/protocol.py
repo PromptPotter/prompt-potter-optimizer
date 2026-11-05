@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.connector import (
     AuthScheme,
     CellEnvelopeSeconds,
@@ -179,6 +180,19 @@ class Connector:
 
     required_observation_keys: tuple[str, ...] = ()
     """Keys the backend ALWAYS emits: run init raises unless the schema maps each."""
+
+    cell_terms: tuple[CellTerm, ...] = ()
+    """The per-cell terms its cells add to the core's, each the answer key of its name, which
+    lands on ``PipelineData.cell_report``; served on the pipeline answer, so only its campaigns
+    offer them."""
+
+    reported_keys: tuple[str, ...] = ()
+    """Answer keys beyond its terms that land on ``PipelineData.cell_report``: a core channel no
+    node usage answers (an L4 cell's inner spend), or the facts its tape reads."""
+
+    @property
+    def cell_report_keys(self) -> frozenset[str]:
+        return frozenset({*(t.name for t in self.cell_terms), *self.reported_keys})
 
     answer_key: str | None = None
     """The ``data`` key holding the answer TEXT; ``None``: ``predicted`` is the terminal ranker's."""

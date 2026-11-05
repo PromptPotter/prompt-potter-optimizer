@@ -168,7 +168,12 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, owned_campaign
-from promptpotter.shared.errors import ConflictError, LedgerUnreadableError
+from promptpotter.shared.errors import (
+    ConflictError,
+    FileKind,
+    FileUnreadableError,
+    LedgerUnreadableError,
+)
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -865,6 +870,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert stores.campaigns.standing_rounds(hop, moment=None).crowns == dict(enumerate(grown)), (
         "a re-minted ledger was read as the tail of the file it replaced"
     )
+    # An export this build cannot read is refused as an export: disposable, so a re-run remedies it.
+    export_file = stores.campaigns.layout(hop).export
+    export_file.write_text("{not an export", encoding="utf-8")
+    with pytest.raises(FileUnreadableError) as unread_export:
+        stores.campaigns.read_export(hop)
+    assert unread_export.value.kind is FileKind.EXPORT, "an export was refused as another file"
+    export_file.unlink()
 
     # A close this build cannot read refuses its cycle to every reader of rounds, never half-read;
     # the remedy it names deletes the campaign, paused as it is, and keeps the paid measurement.

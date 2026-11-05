@@ -6,7 +6,6 @@ from functools import reduce
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import ValidationError
 
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
@@ -19,14 +18,17 @@ from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     DatasetDefinition,
+    ResolvedDataset,
     declared_pipelines,
     read_dataset_definition,
     read_dataset_framing,
 )
-from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.infrastructure.store.io import parse_yaml
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.errors import (
+    FileKind,
+    FileUnreadableError,
     PayloadInvalidError,
-    StoredConfigInvalidError,
     validation_reason,
 )
 
@@ -58,33 +60,23 @@ class AuthoredDataset:
     reads the same file directly for the term-index union."""
 
 
-def _definition(dataset_dir: Path) -> DatasetDefinition | None:
-    try:
-        return read_dataset_definition(dataset_dir)
-    except (yaml.YAMLError, ValueError) as exc:
-        raise StoredConfigInvalidError(
-            path=str(dataset_dir / DEFINITION_FILE), reason=str(exc)
-        ) from exc
-
-
 def _campaign_block(definition: DatasetDefinition | None) -> dict[str, Any]:
     return {} if definition is None else reduce(merge_config_layers, definition.campaign_layers, {})
 
 
-def dataset_campaign_block(dataset_dir: Path) -> dict[str, Any]:
+def dataset_campaign_block(dataset: ResolvedDataset) -> dict[str, Any]:
     """The ``campaign`` section with every layer laid on; the minted ``campaign.json`` is another schema."""
-    return _campaign_block(_definition(dataset_dir))
+    return _campaign_block(read_dataset_definition(dataset))
 
 
 def campaign_file_block(path: Path) -> dict[str, Any]:
     """A definition FILE's own ``campaign`` section, laid over nothing."""
-    try:
-        parsed = read_yaml_optional(path)
-    except yaml.YAMLError as exc:
-        raise StoredConfigInvalidError(path=str(path), reason=f"not valid YAML — {exc}") from exc
+    parsed = read_file(path, parse_yaml, FileKind.STORED_CONFIG)
     block = (parsed or {}).get("campaign") or {}
     if not isinstance(block, dict):
-        raise StoredConfigInvalidError(path=str(path), reason="`campaign` must be a mapping")
+        raise FileUnreadableError(
+            FileKind.STORED_CONFIG, path=str(path), reason="`campaign` must be a mapping"
+        )
     return block
 
 
@@ -92,14 +84,14 @@ def validated_campaign_config(block: Mapping[str, Any], *, path: Path) -> Campai
     try:
         return CampaignConfig.model_validate(block)
     except ValidationError as exc:
-        raise StoredConfigInvalidError(
-            path=str(path), reason=validation_reason(exc, shown=3)
+        raise FileUnreadableError(
+            FileKind.STORED_CONFIG, path=str(path), reason=validation_reason(exc, shown=3)
         ) from exc
 
 
-def load_dataset_campaign_config(dataset_dir: Path) -> CampaignConfig:
+def load_dataset_campaign_config(dataset: ResolvedDataset) -> CampaignConfig:
     return validated_campaign_config(
-        dataset_campaign_block(dataset_dir), path=dataset_dir / DEFINITION_FILE
+        dataset_campaign_block(dataset), path=dataset.directory / DEFINITION_FILE
     )
 
 
@@ -129,19 +121,19 @@ def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
     )
 
 
-def dataset_scorer(dataset_dir: Path) -> Scorer:
-    return scorer_of(load_dataset_campaign_config(dataset_dir), verifier_graded=False)
+def dataset_scorer(dataset: ResolvedDataset) -> Scorer:
+    return scorer_of(load_dataset_campaign_config(dataset), verifier_graded=False)
 
 
-def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
-    definition = _definition(dataset_dir)
+def read_authored_dataset(dataset: ResolvedDataset) -> AuthoredDataset:
+    definition = read_dataset_definition(dataset)
     pipeline: dict[str, Any] = {} if definition is None else definition.pipeline
     return AuthoredDataset(
         campaign_config=validated_campaign_config(
-            _campaign_block(definition), path=dataset_dir / DEFINITION_FILE
+            _campaign_block(definition), path=dataset.directory / DEFINITION_FILE
         ),
-        task_description=read_dataset_framing(dataset_dir).description,
+        task_description=read_dataset_framing(dataset).description,
         pipeline_nodes=dict(pipeline.get("nodes") or {}),
         active_steps=declared_pipelines(pipeline).get(DEFAULT_PIPELINE, []),
-        candidate_library=read_candidate_library_file(dataset_dir),
+        candidate_library=read_candidate_library_file(dataset.directory),
     )
