@@ -30,7 +30,6 @@ from promptpotter.application.hierarchy import (
     entries_version,
     superseded_tag,
 )
-from promptpotter.application.mask.record import Lens
 from promptpotter.application.mask.tree_lens import lensed, read_samples
 from promptpotter.domain.arm_reading import (
     ARM_VERDICT_LABELS,
@@ -39,16 +38,7 @@ from promptpotter.domain.arm_reading import (
 )
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import (
-    HOP_SEP,
-    UNIT_SEP,
-    CycleHop,
-    CyclePath,
-    candidate_address,
-    decode_cycle_path,
-    encode_cycle_path,
-    round_address,
-)
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
     CandidateStanding,
@@ -90,19 +80,9 @@ from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.measurement_context import ARM_ROLES
 
 
-def _campaign_of(address: str) -> tuple[CyclePath, str]:
-    """The campaign an address sits in, and the store path it is listed inside."""
-    head = address.partition("/")[0]
-    *above, last = head.split(HOP_SEP)
-    inside = decode_cycle_path(HOP_SEP.join(above))
-    campaign_id, sep, _ = last.partition(UNIT_SEP)
-    return inside, campaign_id if sep else last
-
-
-def _top_campaign(address: str) -> str:
+def _top_campaign(subject: Subject) -> str:
     """The top-level campaign an address sits under: what a subtree is built and versioned from."""
-    inside, campaign_id = _campaign_of(address)
-    return inside[0].campaign_id if inside else campaign_id
+    return subject.inside[0].campaign_id if subject.inside else subject.campaign_id
 
 
 @dataclass(frozen=True)
@@ -135,7 +115,7 @@ class _Read:
     def address(self, arm: RoundArm) -> str | None:
         """The candidate a record names by round and arm on this line: an id alone names none."""
         o = self.owner.get(arm.round)
-        return None if o is None else candidate_address(o.course.address, arm.round, arm.arm)
+        return None if o is None else o.course.at_round(arm.round, arm.arm)
 
     def crown(self, round_: int) -> str | None:
         election = self.owner[round_].elections[round_]
@@ -275,6 +255,14 @@ class _Course:
     def address(self) -> str:
         return self.entry.address
 
+    @cached_property
+    def subject(self) -> Subject:
+        return Subject.parse_address(self.address)
+
+    def at_round(self, round_: int, candidate: str = "") -> str:
+        """The address of its round *round_*, or of *candidate* in it."""
+        return self.subject._replace(round=round_, candidate_id=candidate).address
+
     @property
     def head(self) -> _Read:
         return self.at[None]
@@ -392,7 +380,7 @@ class _Build:
         courses = [
             _Course(listed, hop, index_of[hop.cycle_id])
             for listed in entry.children
-            for hop in (decode_cycle_path(listed.address)[-1],)
+            for hop in (Subject.parse_address(listed.address).path[-1],)
         ]
         self._place(stores, courses, host)
         for course in courses:
@@ -425,7 +413,7 @@ class _Build:
             for read in course.reads:
                 for key, arm in read.arms.items():
                     if key not in course.ran:
-                        c = _Candidate(candidate_address(course.address, *key), arm, read)
+                        c = _Candidate(course.at_round(*key), arm, read)
                         course.ran[key] = found[c.address] = c
                         course.candidates.append(c)
         for course in courses:
@@ -532,7 +520,7 @@ class _Build:
             ]
             rounds.append(
                 HierarchyRound(
-                    address=round_address(course.address, round_),
+                    address=course.at_round(round_),
                     parent=course.address,
                     children=members,
                     facts=RoundFacts(round=round_, elects_on=elects_on),
@@ -603,7 +591,7 @@ class _Build:
         )
         return HierarchyCandidate(
             address=c.address,
-            parent=round_address(course.address, c.round),
+            parent=course.at_round(c.round),
             label=reading.arm.label,
             tags=tags,
             figures=candidate_figures(reading),
@@ -710,7 +698,7 @@ def hierarchy_subtree(
     Built from the top-level campaign down, so an inner entry's ``parent`` is the candidate that
     spawned it on every read, never re-derived for a direct one.
     """
-    campaign = owned_campaign(stores, _top_campaign(address))
+    campaign = owned_campaign(stores, _top_campaign(Subject.parse_address(address)))
     held = campaign_courses(stores, campaign, moment=moment)
     root = _answering(
         _Build(moment).campaign(stores, (), campaign, held, depth=MAX_COURSE_DEPTH, host=None)
@@ -725,8 +713,9 @@ def hierarchy_subtree(
 
 
 def _root_path(stores: Stores, address: str) -> CyclePath:
-    inside, campaign_id = _campaign_of(address)
-    return (*inside, owned_campaign(descend_store(stores, inside), campaign_id).root_hop)
+    subject = Subject.parse_address(address)
+    inside = subject.inside
+    return (*inside, owned_campaign(descend_store(stores, inside), subject.campaign_id).root_hop)
 
 
 def subtree_moment(
@@ -745,7 +734,7 @@ def subtree_moment(
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
     """Every store the TOP campaign's family spans: the body is built from all of them."""
-    top = (owned_campaign(stores, _top_campaign(address)).root_hop,)
+    top = (owned_campaign(stores, _top_campaign(Subject.parse_address(address))).root_hop,)
     return entries_version(c.store for c in iter_family_courses(stores, top))
 
 
@@ -757,7 +746,7 @@ def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:
     inside, hop = path[:-1], path[-1]
     leaf = descend_store(stores, inside)
     campaign = leaf.campaigns.load_campaign(hop.campaign_id)
-    address = encode_cycle_path(path)
+    address = Subject.of(path).address
     if campaign is not None:
         held = campaign_courses(leaf, campaign, moment=None)
         built = _Build(None).campaign(leaf, inside, campaign, held, depth=0, host=None)

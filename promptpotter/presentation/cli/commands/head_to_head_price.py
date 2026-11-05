@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from promptpotter.application.head_to_head_price import (
-    ArmPrice,
-    HeadToHeadPrice,
-    price_head_to_head,
-    read_head_to_head_plan,
-)
-from promptpotter.config.logging import setup_logging
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.new import head_to_head_command
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
+
+if TYPE_CHECKING:
+    import argparse
+
+    from promptpotter.application.caller import Caller
+    from promptpotter.application.head_to_head_price import ArmPrice, HeadToHeadPrice
+    from promptpotter.application.read_params import HeadToHeadPriceParams
 
 
 def _clock(seconds: float | None) -> str:
@@ -64,8 +62,10 @@ def _human(price: HeadToHeadPrice) -> str:
     )
 
 
-async def cmd_price_head_to_head(args: argparse.Namespace) -> CommandResult:
-    setup_logging(style="full" if args.verbose else "cli")
-    stores = open_stores(args)
-    price = await price_head_to_head(stores, read_head_to_head_plan(Path(args.plan)))
+def price_human(
+    _params: HeadToHeadPriceParams,
+    price: HeadToHeadPrice,
+    _args: argparse.Namespace,
+    _caller: Caller,
+) -> CommandResult:
     return CommandResult(data=price.model_dump(mode="json"), human=_human(price))

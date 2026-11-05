@@ -60,7 +60,6 @@ from promptpotter.application.embedded_run import (
 )
 from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
-from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.maintenance.landing import plan_landing
@@ -87,7 +86,7 @@ from promptpotter.domain.command_kinds import (
     HeadToHeadRequest,
     PauseCyclePayload,
 )
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.prompt_block import Presumption
@@ -1102,7 +1101,7 @@ async def run_controlled(
                 f"{record.ruler_version} for {cid}"
             )
         print(f"arm {name}: every election read its head-to-head's freeze plus its own lines")
-    ev = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects])
+    ev = subject_evidence(stores, [Subject(c) for c in subjects])
     table = ev.head_to_head
     assert table is not None
     (workspace / "head_to_head.json").write_text(table.model_dump_json(indent=1), encoding="utf-8")
@@ -1122,7 +1121,7 @@ async def run_controlled(
     launched = forked.result
     assert isinstance(launched, Launched) and launched.held is not None
     await launched.held.run_inline(mode=RunMode(), readout_sink=print)
-    after = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects]).head_to_head
+    after = subject_evidence(stores, [Subject(c) for c in subjects]).head_to_head
     assert after is not None
     row = next(r for r in after.rows if r.campaign_id == cid)
     if row.guard.state is not GuardState.UNCONTROLLED:

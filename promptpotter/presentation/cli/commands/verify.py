@@ -4,14 +4,12 @@ import argparse
 
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
-from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.arm_reading import lift_band_text
 from promptpotter.domain.bench import BandedValue
-from promptpotter.domain.command_kinds import PauseCyclePayload, VerifyCandidatePayload
-from promptpotter.domain.cycle_paths import CycleHop, command_address
+from promptpotter.domain.command_kinds import VerifyCandidatePayload
+from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.run_records import VERIFY_WORDS, VerifySaturated
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
@@ -28,27 +26,22 @@ def _level(level: BandedValue | None) -> str:
 
 async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    spec = parse_subject(args.subject)
+    spec = Subject.parse(args.subject)
     if spec.kind != "candidate" or spec.lens or spec.samples:
         raise BadRequestError(
             "verify takes one searchpoint and no mask: "
             "`candidate:<campaign>/<cycle>/<candidate_id>[;in=<c::y~…>]`."
         )
     stores = open_stores(args)
-    leaf = CycleHop(
-        campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside),
-        cycle_id=spec.cycle_id,
-    )
-    address = command_address((*spec.inside, leaf))
     fields = {
-        **address,
+        **spec.command_fields,
         "candidate_id": spec.candidate_id,
         "samples": args.samples,
         "strategy": args.strategy,
         "seed": args.seed,
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
-    pause = PauseCyclePayload.model_validate({**address, "reason": "Ctrl+C"})
+    pause = measuring.pass_pause(stores, payload, reason="Ctrl+C")
     with ctrl_c_stops_pass(stores, pause):
         dispatched = await CommandDispatcher(stores).answer(
             measuring.verify_candidate, CommandCall(payload)

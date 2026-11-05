@@ -25,7 +25,7 @@ One definition, `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, from which `OWNER_CO
 
 **Isolation is structural.** `build_stores` (`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id` and the caches at `Stores.archive_home`; the served API builds only from the session (`deps.py::resolve_identity`). `SHARED_ARCHIVE` is the one deliberate crossing ([`../decisions.md`](../decisions.md) § 0008), the host's alone to compact or purge. Today `tenant_id == user_id`.
 
-**Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it exists and is the caller's, else `NotFoundError`; `routers/origins.py` alone is tenant-scoped (a CLI-minted campaign's owner differs from a browser session's `user_id`).
+**Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it exists and is the caller's, else `NotFoundError`; `read_params.py::OriginsParams` alone is tenant-scoped (a CLI-minted campaign's owner differs from a browser session's `user_id`).
 
 **A block pack is the install's or one account's, and only an account's is written** (`config/paths.py::block_packs_root` read-only; `Stores.block_packs` per account; a name both hold is refused). **All writes** flow through one `CommandDispatcher`, stamping `issued_by` (`shared/identity.py::Principal`) on a `CommandRecord`.
 

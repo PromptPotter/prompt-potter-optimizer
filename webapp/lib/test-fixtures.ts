@@ -438,7 +438,6 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
     round: 0,
     active_node: null,
     measurement_node: "l1_score",
-    measuring: false,
     inner: null,
     candidates: [],
     nodes: {},

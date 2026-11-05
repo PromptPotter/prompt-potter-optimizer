@@ -426,7 +426,8 @@ class CampaignPayload(CommandPayload):
     campaign_id: str = Field(
         min_length=1,
         max_length=128,
-        description="The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+        description="The campaign acted on, by its id or a prefix naming one, resolved by the "
+        "dispatcher for every door; the root of a `descend` chain is named by its full id.",
     )
 
 
@@ -1064,9 +1065,8 @@ class CommandAcceptedBody(StrictModel):
 class ReadKind(StrEnum):
     """The read catalogue beside `CommandKind`. A row's wire inputs and its answer are the
     `application/read_params.py::ReadParams` model that declares it, as a payload declares its kind.
-    The route serving a row is NAMED by its kind, and `presentation/api/catalogue.py::bind_surface`
-    refuses at import a session route no row names, a row no route serves, and an answer whose
-    return is not its route's model."""
+    The model also declares the row's route and method, and `presentation/api/routers/reads.py`
+    mounts every row on it, named by its kind."""
 
     ME = "me"
     USER_SETTINGS = "user-settings"

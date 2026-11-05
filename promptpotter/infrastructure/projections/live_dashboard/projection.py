@@ -542,7 +542,6 @@ class LiveDashboardProjection(Projection):
             round=s.round,
             active_node=active,
             measurement_node=self._measurement_node,
-            measuring=measuring,
             inner=self._inner,
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
             nodes=self._current_round_nodes(),

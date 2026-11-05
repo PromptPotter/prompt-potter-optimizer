@@ -30,13 +30,10 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend_by_round,
 )
-from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -103,14 +100,6 @@ class HeadToHeadPrice(StrictModel):
     usd: float
     wall_clock_s: float | None = Field(description="Every arm minted after the last, in turn.")
     serial_s: float | None
-
-
-def read_head_to_head_plan(path: Path) -> HeadToHeadPlan:
-    try:
-        raw = read_yaml(path)
-    except (OSError, ValueError) as exc:
-        raise PayloadInvalidError(f"plan {path}: {exc}", code="plan_unreadable") from exc
-    return PayloadInvalidError.validating(HeadToHeadPlan, raw)
 
 
 _PRICED_CAMPAIGNS = 8

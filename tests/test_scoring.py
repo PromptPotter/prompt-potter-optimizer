@@ -38,6 +38,7 @@ from factories import (
     election_knobs,
     filed,
     filed_under,
+    inner_sandbox,
     jumping_clock,
     level_series,
     loop_session,
@@ -70,6 +71,7 @@ from promptpotter.application.bench.difficulty import ruler_clock, session_ruler
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
+from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
@@ -79,8 +81,9 @@ from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
-from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.host_surface import (
+    IDEMPOTENCY_KEY,
+    CallTool,
     CancelTask,
     HostSession,
     HostTask,
@@ -224,13 +227,15 @@ from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes,
 from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
+    GradeBenchPayload,
     OriginGateDecisionPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
     SubmitArmsPayload,
     SubmittedArm,
+    VerifyCandidatePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
@@ -328,7 +333,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands import launch as launch_cli
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
@@ -1773,20 +1778,89 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         async def _host_cancel() -> HostTask:
             hold = PassHold()
 
-            async def _pass() -> tuple[CommandOutcome[Any], None]:
+            async def _pass() -> tuple[CommandOutcome[Any, Any], None]:
                 with hold.bound():
                     await _held_pass(lambda: host.answer(CancelTask("held")))
                 raise AssertionError("a host cancel left the pass running")
 
             running = asyncio.create_task(_pass())
+            # By an id prefix, as a terminal names its stop: it still addresses the pass's cycle.
+            by_prefix = pause.model_copy(update={"campaign_id": _PEER_HOP.campaign_id[:3]})
             host._tasks["held"] = _Tracked(
-                host_tool("verify-candidate"), CommandCall(pause), hold, running
+                host_tool("verify-candidate"), CommandCall(by_prefix), hold, running
             )
             await asyncio.wait([running])
             return await host.answer(TaskStatusOf("held"))
 
         before = len(paused_by())
         cancelled = asyncio.run(_host_cancel())
+        # A command addresses an L4 leaf by the id prefix a read takes, below its chain: one rule
+        # resolves both, so the act reaches the leaf's campaign under its full id.
+        leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+        sandbox = inner_sandbox(stores, _PEER_HOP.campaign_id, _PEER_HOP.cycle_id)
+        (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+        inner = descend_store(stores, (_PEER_HOP,))
+        inner.campaigns.create_campaign(
+            minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
+        )
+        inner.campaigns.mint_cycle(leaf)
+        reached: list[CycleHop] = []
+
+        async def _verify_reached(dispatched: Any) -> Any:
+            reached.append(dispatched.hop)
+            raise ConflictError("reached")
+
+        addressed = Subject.parse(
+            f"candidate:innerds/{leaf.cycle_id}/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
+        )
+        verify = VerifyCandidatePayload.model_validate(
+            {**addressed.command_fields, "candidate_id": addressed.candidate_id}
+        )
+        with monkeypatch.context() as patched:
+            patched.setattr(measuring, "verify_candidate", _verify_reached)
+            with pytest.raises(ConflictError):
+                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(verify)))
+        assert reached == [leaf], "a command resolved its leaf by another rule than a read's"
+        # A campaign's command by a prefix reaches the campaign under its full id, as a cycle's does.
+        benched: list[str] = []
+
+        async def _bench_reached(dispatched: Any) -> Any:
+            benched.append(dispatched.payload.campaign_id)
+            raise ConflictError("reached")
+
+        bench_by_prefix = GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id[:3])
+        with monkeypatch.context() as patched:
+            patched.setattr(measuring, "grade_bench", _bench_reached)
+            with pytest.raises(ConflictError):
+                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix)))
+        assert benched == [_PEER_HOP.campaign_id], "a campaign's command acted on the typed prefix"
+        # A host task tracks the address its dispatch acts on, so its stop names the pass's cycle
+        # even once another campaign shares the prefix it was sent by.
+        sent_by_prefix = {
+            "campaign_id": _PEER_HOP.campaign_id[:3],
+            "cycle_id": _PEER_HOP.cycle_id,
+            "candidate_id": "c1",
+            IDEMPOTENCY_KEY: "verify-by-prefix",
+        }
+
+        async def _tracked_by_prefix() -> object:
+            opened = await host.answer(CallTool("verify-candidate", sent_by_prefix))
+            assert opened.task is not None
+            tracked = host._tasks[opened.task.task_id]
+            await asyncio.wait([tracked.dispatching])
+            return tracked.call.payload
+
+        with monkeypatch.context() as patched:
+            patched.setattr(measuring, "verify_candidate", _verify_reached)
+            tracked_payload = asyncio.run(_tracked_by_prefix())
+        assert (
+            isinstance(tracked_payload, VerifyCandidatePayload)
+            and tracked_payload.campaign_id == _PEER_HOP.campaign_id
+        ), "a host task tracked the prefix it was sent by, which a later mint can make ambiguous"
+        by_full_id = GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id)
+        assert measuring.pass_pause(stores, bench_by_prefix, reason="stop") == measuring.pass_pause(
+            stores, by_full_id, reason="stop"
+        ), "a bench's stop by a prefix missed the line holder of the campaign it grades"
 
         async def _ctrl_c() -> str:
             stopped = asyncio.Event()
@@ -3248,9 +3322,9 @@ def _evidence_campaign(
     tilt: float = 0.0,
     elects_on: DisplayMetric = "ability",
     fit: ArmFit | None = None,
-) -> SubjectSpec:
+) -> Subject:
     if stores.campaigns.load_campaign(cid) is not None:
-        return SubjectSpec("campaign", cid)
+        return Subject(cid)
     split = DatasetSplit(bench=6)
     partition = partition_bank(_H2H_BANK, split, seed=seed)
     root = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
@@ -3393,7 +3467,7 @@ def _evidence_campaign(
     )
     campaign = stores.campaigns.load_campaign(cid)
     assert campaign is not None and len(line_launches(stores, campaign)) == 1
-    return SubjectSpec("campaign", cid)
+    return Subject(cid)
 
 
 def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_it_is_none(
@@ -3956,8 +4030,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
 
     # A head-to-head pairs two optimizers only on one bench under one grader.
     h2h_stores = workspace(tmp_path / "h2h")
-    potter_a, capo_b = SubjectSpec("campaign", "potter_a"), SubjectSpec("campaign", "capo_b")
-    potter_course = SubjectSpec("course", "potter_a", "cycle_potter_a_fork_r1")
+    potter_a, capo_b = Subject("potter_a"), Subject("capo_b")
+    potter_course = Subject("potter_a", "cycle_potter_a_fork_r1")
     _evidence_campaign(h2h_stores, "potter_a", 1, selected=0.5, rebased=True)
     _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
@@ -3982,7 +4056,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             )
         )
     h2h_cases: tuple[
-        tuple[tuple[SubjectSpec, ...], dict[str, Any] | None, bool | None, list[str], int, int],
+        tuple[tuple[Subject, ...], dict[str, Any] | None, bool | None, list[str], int, int],
         ...,
     ] = (
         ((potter_a, capo_b), None, True, [], 1, 1),

@@ -13,7 +13,7 @@ from typing import ClassVar, NamedTuple
 
 from promptpotter.domain import activity
 from promptpotter.domain.activity import ActivityFeed, ActivityItem
-from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path, step_address
+from promptpotter.domain.cycle_paths import CyclePath, Subject
 from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
 from promptpotter.domain.projection_envelope import bearing_record
 from promptpotter.domain.run_records import RECORD_KINDS, CycleRecord, LLMCallProgressRecord
@@ -163,7 +163,7 @@ def ray_validator_parts(
     """Deep windows revalidate like the head: immutability would bet against a backdated append."""
     parts: list[object] = ["ray", _CURATION_TAG, limit, before]
     for course in courses:
-        parts.append(encode_cycle_path(course.path))
+        parts.append(Subject.of(course.path).address)
         parts.append(course_validator_ns(cycle_dir_for(course.store.base_dir, course.path[-1])))
     return tuple(parts)
 
@@ -182,7 +182,7 @@ def build_family_ray(
 
     for course in courses:
         ledger = course.store.campaigns.ledger(course.path[-1])
-        key = encode_cycle_path(course.path)
+        key = Subject.of(course.path).address
         rows, dropped = _read_curated(
             ledger, encoded_path=key, depth=course.depth, keep=limit, bound=before
         )
@@ -202,7 +202,7 @@ def build_family_ray(
     )
     steps = [
         HierarchyStep(
-            address=step_address(key, row.offset),
+            address=Subject.of(path)._replace(at=row.offset).address,
             parent=key,
             facts=StepFacts(
                 offset=row.offset,
@@ -211,7 +211,7 @@ def build_family_ray(
                 activity=row.activity,
             ),
         )
-        for (_epoch, key, _offset), _path, row in pool
+        for (_epoch, key, _offset), path, row in pool
     ]
     return HierarchySteps(
         steps=steps,

@@ -34,6 +34,7 @@ from factories import (
     SANDBOX_CAMPAIGN,
     arm_state,
     close_round,
+    cycle_result,
     inner_sandbox,
     minted_campaign,
     optimizer_state,
@@ -53,7 +54,9 @@ from starlette.types import Message, Receive, Scope, Send
 from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands import measuring
+from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
+from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.host_surface import (
@@ -103,6 +106,7 @@ from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     CommandKind,
     MintCampaignPayload,
+    ReadKind,
     StepCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
@@ -170,6 +174,7 @@ from promptpotter.infrastructure.store.layout import (
     inner_sandboxes_dir,
 )
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.site_records import (
     SiteRecord,
     SiteRecordStore,
@@ -177,7 +182,7 @@ from promptpotter.infrastructure.store.site_records import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User, UserStore, count_accounts
-from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, app
+from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
     require_site_records_token,
@@ -189,7 +194,10 @@ from promptpotter.presentation.api.middleware.oidc import (
 )
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
-from promptpotter.presentation.cli.commands.cycles import cmd_cycles
+from promptpotter.presentation.api.routers.reads import reads_router
+from promptpotter.presentation.cli.commands.bench import cmd_bench
+from promptpotter.presentation.cli.commands.command import cmd_command
+from promptpotter.presentation.cli.commands.read import cmd_read
 from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.shared.errors import (
     ConflictError,
@@ -558,6 +566,17 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
                 continue
             answer = anonymous.request(method, re.sub(r"\{[^}]+\}", "x", path))
             assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
+
+    # A read is mounted by its row alone: a hand-written route named by the read, beside the mount
+    # or on it, would serve it past the row's params and answer models and its framing, so the
+    # surface refuses it at import.
+    async def forwarded() -> None: ...
+
+    beside = APIRoute("/hierarchy", forwarded, name=ReadKind.HIERARCHY.value)
+    assert _off_catalogue(beside), "a hand-written route serving a read beside its mount passed"
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(reads_router, "routes", [*reads_router.routes, beside])
+        assert _off_catalogue(beside), "a second route serving a read on its mount was admitted"
     # A body past the largest any route takes is refused before any gate spools it: by its declared
     # length, and by its bytes where it declares none.
     for declared in (True, False):
@@ -1264,8 +1283,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "a wedged run pinned no warning"
     )
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path))
-    listed = await cmd_cycles(
-        argparse.Namespace(tenant=None, inside=(), campaign=None, attached=False)
+    listed = await cmd_read(
+        argparse.Namespace(command="cycles", tenant=None, verbose=False, attached=False)
     )
     assert listed.human is not None and listed.data is not None
     [course] = listed.data["entries"][0]["children"]
@@ -1273,6 +1292,36 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     rows = [Said.model_validate(row) for row in [*course["figures"], *course["lines"]]]
     assert rows and all(said_text(row) in listed.human for row in rows), (
         "the terminal's cycle list did not say every figure and line the listing serves"
+    )
+    # A terminal's act by an id prefix reports the campaign it acted on, never the typed prefix.
+    prefix = SANDBOX_CAMPAIGN.split("__")[0]
+    renamed = await cmd_command(
+        argparse.Namespace(command="rename", campaign_id=prefix, label="held", tenant=None)
+    )
+    assert renamed.data is not None and renamed.data["campaign_id"] == SANDBOX_CAMPAIGN, (
+        "a terminal's act by an id prefix recorded the prefix as what it acted on"
+    )
+    assert renamed.human is not None and renamed.human.startswith(SANDBOX_CAMPAIGN), (
+        "a terminal's act by an id prefix said the prefix as what it acted on"
+    )
+    # A cycle named alone is the active campaign's, by an id prefix as under a named campaign.
+    save_active_pointer(built_stores.base_dir, hop)
+    assert cycle_target(built_stores, "", hop.cycle_id[:3]) == hop, (
+        "a cycle prefix named without its campaign was taken as a full id"
+    )
+    score = cycle_result([0.4], 0.3, []).bench
+
+    async def _graded(_: object) -> Applier[Any]:
+        async def _score() -> object:
+            return score
+
+        return Applier(_score, replay=None)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(measuring, "grade_bench", _graded)
+        benched = await cmd_bench(argparse.Namespace(campaign=prefix, tenant=None))
+    assert benched.human is not None and benched.human.startswith(SANDBOX_CAMPAIGN), (
+        "a terminal's bench by an id prefix said the prefix as what it graded"
     )
     assert sweep_dead_cycles(built_stores.projects_root) == 0, "a quiet held producer was reaped"
     assert campaigns.mark_producer_vanished(hop) is False

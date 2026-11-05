@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.pipeline_resolve import fork_preview, recorded_schema
 from promptpotter.config.logging import setup_logging
@@ -32,10 +33,7 @@ from promptpotter.presentation.cli.commands.launch import (
 )
 from promptpotter.presentation.cli.commands.new import mint_and_run
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import (
-    open_stores,
-    resolve_target,
-)
+from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.presentation.cli.session import load_session
 from promptpotter.shared.errors import PayloadInvalidError, ResumeDivergenceError
@@ -273,7 +271,7 @@ def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 async def _resume(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    ctx = load_session(stores, resolve_target(args, stores))
+    ctx = load_session(stores, cycle_target(stores, args.campaign, args.cycle))
 
     resume_from_round: int | None = args.resume_from_round
     if resume_from_round is not None and resume_from_round < 0:

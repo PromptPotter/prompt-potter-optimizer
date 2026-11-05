@@ -12,18 +12,8 @@ from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account, health
-from promptpotter.application.jobs.account_activity import ActivityResponse
-from promptpotter.application.jobs.quota import CouponStatus, QuotaStatus
-from promptpotter.application.read_params import (
-    ActivityParams,
-    CouponParams,
-    MeParams,
-    QuotaStatusParams,
-    UserSettingsParams,
-)
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.run_records import Device, device_of
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.default_claim import (
@@ -37,13 +27,11 @@ from promptpotter.infrastructure.identity.provider_config import (
 )
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import count_accounts
 from promptpotter.presentation.admin_bot import forward_new_account_to_crm, notify_operator
 from promptpotter.presentation.api.deps import (
-    CallerDep,
-    IdentityDep,
     build_stores_from_identity,
-    read_input,
     require_identity_bundle,
 )
 from promptpotter.presentation.api.middleware.oidc import (
@@ -64,7 +52,6 @@ from promptpotter.shared.identity import (
 logger = logging.getLogger(__name__)
 
 auth_flow_router = APIRouter(prefix="/auth", tags=["Auth"])
-auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 
 # `provider.state.nonce` of the sign-in this browser started; the callback honours no other.
 OAUTH_FLOW_COOKIE_NAME = "promptpotter_oauth_flow"
@@ -335,44 +322,8 @@ def _announce_if_opened(
         )
 
 
-@auth_router.get("/me", response_model=account.MeResponse, name=ReadKind.ME)
-def me(
-    request: Request,
-    background: BackgroundTasks,
-    identity: IdentityDep,
-    caller: CallerDep,
-    read: Annotated[MeParams, read_input(MeParams)],
-) -> account.MeResponse:
-    # Opened at sign-in as a rule; here for an open box, which has none, and for a session that outlived its files.
+def arrive(request: Request, background: BackgroundTasks, stores: Stores) -> None:
+    """`me`'s arrival: opened at sign-in as a rule; here for an open box, which has none, and for a
+    session that outlived its files."""
     device = _device(request)
-    arrival = account.arrive(caller.stores, device=device)
-    _announce_if_opened(background, arrival, identity, device)
-    return read.answer(caller)
-
-
-@auth_router.get("/quota-status", response_model=QuotaStatus, name=ReadKind.QUOTA_STATUS)
-def get_quota_status(
-    caller: CallerDep, read: Annotated[QuotaStatusParams, read_input(QuotaStatusParams)]
-) -> QuotaStatus:
-    return read.answer(caller)
-
-
-@auth_router.get("/user-settings", response_model=account.UserSettings, name=ReadKind.USER_SETTINGS)
-def get_user_settings(
-    caller: CallerDep, read: Annotated[UserSettingsParams, read_input(UserSettingsParams)]
-) -> account.UserSettings:
-    return read.answer(caller)
-
-
-@auth_router.get("/activity", response_model=ActivityResponse, name=ReadKind.ACTIVITY)
-def activity(
-    caller: CallerDep, read: Annotated[ActivityParams, read_input(ActivityParams)]
-) -> ActivityResponse:
-    return read.answer(caller)
-
-
-@auth_router.get("/coupon", response_model=CouponStatus, name=ReadKind.COUPON)
-def get_coupon(
-    caller: CallerDep, read: Annotated[CouponParams, read_input(CouponParams)]
-) -> CouponStatus:
-    return read.answer(caller)
+    _announce_if_opened(background, account.arrive(stores, device=device), stores.identity, device)

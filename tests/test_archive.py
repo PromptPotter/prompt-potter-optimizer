@@ -105,8 +105,7 @@ from promptpotter.domain.command_kinds import DeleteCampaignPayload, ForkSeed
 from promptpotter.domain.cycle_paths import (
     CycleDir,
     CycleHop,
-    candidate_address,
-    hierarchy_address,
+    Subject,
 )
 from promptpotter.domain.hierarchy import (
     HierarchyCampaign,
@@ -1183,7 +1182,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         depth=1,
     ).entries
     assert isinstance(listed, HierarchyCampaign), "guard"
-    assert listed.facts.line == hierarchy_address((), fork_hop.campaign_id, fork_hop.cycle_id), (
+    assert listed.facts.line == Subject.of((fork_hop,)).address, (
         "the campaign's line stayed on the cycle a supersede retired"
     )
     [line_course] = [c for c in listed.children if c.address == listed.facts.line]
@@ -1420,12 +1419,10 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         ],
         cycle=closing,
     )
-    tree = hierarchy_subtree(
-        stores, hierarchy_address((), family.campaign_id), None, None, moment=None
-    )
+    tree = hierarchy_subtree(stores, Subject(family.campaign_id).address, None, None, moment=None)
 
     def course_of(hop: CycleHop) -> str:
-        return hierarchy_address((), hop.campaign_id, hop.cycle_id)
+        return Subject.of((hop,)).address
 
     hung = {
         name: e.parent
@@ -1436,7 +1433,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     }
 
     def at(hop: CycleHop, rnd: int, name: str) -> str:
-        return candidate_address(course_of(hop), rnd, ArmKey(ident(name)))
+        return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(ident(name))).address
 
     o, first_pick, b, x = (
         at(family, 0, "o"),

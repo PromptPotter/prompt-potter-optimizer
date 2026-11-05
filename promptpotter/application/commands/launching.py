@@ -19,7 +19,6 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.startability import offered_dataset
-from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
@@ -50,7 +49,7 @@ from promptpotter.application.pipeline_resolve import (
     steer_verdict,
 )
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, LaidSpan
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
@@ -92,9 +91,7 @@ def parse_cycle_seed(
     narrowing: dict[str, NodeSearchNarrowing] = {}
     if sent.node_narrowing:
         # The rows served at *hop*, not the root's: a row's menu is its cycle's own declaration.
-        rows = resolve_pipeline_for_campaign(
-            stores, of, at=SubjectSpec("course", hop.campaign_id, hop.cycle_id)
-        ).node_config_schema
+        rows = resolve_pipeline_for_campaign(stores, of, at=Subject.of((hop,))).node_config_schema
         try:
             narrowing = {
                 node: narrowing_of(rows.get(node, []), asked)

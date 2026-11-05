@@ -29,9 +29,7 @@ from promptpotter.domain.cycle_index import STATUS_MARK_INFO, CycleIndex, RunSta
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
-    decode_cycle_path,
-    encode_cycle_path,
-    hierarchy_address,
+    Subject,
 )
 from promptpotter.domain.hierarchy import (
     CANDIDATE_STANDING_INFO,
@@ -261,7 +259,7 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
 
 def superseded_tag(successor: str) -> HierarchyTag:
     """Worn by a retired course or candidate: the course that took its place, named as its card."""
-    cycle_id = decode_cycle_path(successor)[-1].cycle_id
+    cycle_id = Subject.parse_address(successor).cycle_id
     label = f"retired by {_course_label(sibling_kind(cycle_id), cycle_id)}"
     return HierarchyTag(kind="superseded", value=successor, label=label)
 
@@ -306,13 +304,13 @@ def course_entry(
         HierarchyTag(kind="mint", value=mint, label=_MINT_WORDS[mint]),
     ]
     if (successor := index.superseded_by) is not None:
-        tags.append(superseded_tag(hierarchy_address(inside, hop.campaign_id, successor)))
+        tags.append(superseded_tag(Subject(hop.campaign_id, successor, inside=inside).address))
     fork, parent_id, cut = index.fork, index.parent_cycle_id, index.cut_round
     spawn = (
         None
         if fork is None or parent_id is None or cut is None
         else CourseSpawn(
-            parent=hierarchy_address(inside, hop.campaign_id, parent_id),
+            parent=Subject(hop.campaign_id, parent_id, inside=inside).address,
             cut_round=cut,
             trigger=fork.trigger,
             direction=fork.resolved_direction,
@@ -333,8 +331,8 @@ def course_entry(
         bench=bench,
     )
     return HierarchyCourse(
-        address=hierarchy_address(inside, hop.campaign_id, hop.cycle_id),
-        parent=hierarchy_address(inside, hop.campaign_id),
+        address=Subject(hop.campaign_id, hop.cycle_id, inside=inside).address,
+        parent=Subject(hop.campaign_id, inside=inside).address,
         # An inner course is named for the outer panel cell it measures, by its last segment.
         label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
         tags=tags,
@@ -462,8 +460,8 @@ def campaign_entry(
     )
     spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
     return HierarchyCampaign(
-        address=hierarchy_address(inside, campaign.campaign_id),
-        parent=encode_cycle_path(inside) if inside else None,
+        address=Subject(campaign.campaign_id, inside=inside).address,
+        parent=Subject.of(inside).address if inside else None,
         label=campaign.label or campaign.dataset_name,
         tags=_campaign_tags(campaign, runs_with),
         # The campaign's row reads its line course's as its own, its bill the campaign's whole life.
@@ -486,8 +484,8 @@ def campaign_entry(
         children=list(courses.values()) if depth > 0 else [],
         facts=CampaignFacts(
             label=campaign.label or None,
-            root=hierarchy_address(inside, campaign.campaign_id, campaign.root_cycle_id),
-            line=hierarchy_address(inside, campaign.campaign_id, holder.cycle_id),
+            root=Subject(campaign.campaign_id, campaign.root_cycle_id, inside=inside).address,
+            line=Subject(campaign.campaign_id, holder.cycle_id, inside=inside).address,
             lifecycle=campaign.lifecycle_status,
             spend_lifetime=spend_lifetime,
             runs_with=runs_with,

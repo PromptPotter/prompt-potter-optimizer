@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.mask.record import (
-    Lens,
     MaskCandidate,
     MaskCycle,
     MaskReading,
@@ -26,7 +25,7 @@ from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electabl
 from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ConfigOverrides

@@ -1,57 +1,17 @@
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, get_args
-
 from pydantic import Field
 
+from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.worded import Worded
-
-LensKind = Literal["score", "dials", "abort"]
-_LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
-
-
-class Lens(NamedTuple):
-    kind: LensKind
-    body: str
-
-    @property
-    def spelling(self) -> str:
-        return f"{self.kind}:{self.body}"
-
 
 #: The `score:` formulas a picklist offers by name, keyed as the `lens=` it sends; any other is
 #: the operator's own expression.
 SCORE_LENS_LABELS: Worded[str, str] = Worded({Lens("score", "accuracy").spelling: "Accuracy"})
-
-
-def parse_lens(value: str, *, allow_abort: bool) -> Lens:
-    """A comparable LEVEL refuses ``abort:``: a gate switched off changes which candidates ran, not a score."""
-    name, sep, body = value.partition(":")
-    kind = _LENS_KINDS.get(name) if sep else None
-    if kind is None or (kind == "abort" and not allow_abort):
-        expected = (
-            "'score:<formula>', 'dials:<term=weight,…>' or 'abort:<variant>'"
-            if allow_abort
-            else "'score:<formula>' or 'dials:<term=weight,…>'; an abort lens is a lineage-tree "
-            "question, not a comparable level"
-        )
-        raise BadRequestError(f"Unknown lens: {value!r} (expected {expected})")
-    return Lens(kind, body)
-
-
-def parse_sample_ids(text: str | None) -> frozenset[int] | None:
-    if not text or not text.strip():
-        return None
-    try:
-        ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
-    except ValueError as exc:
-        raise BadRequestError(f"Invalid samples list: {text!r} ({exc})") from exc
-    return ids or None
 
 
 class MaskReading(FrozenModel):

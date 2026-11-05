@@ -1,28 +1,16 @@
 from __future__ import annotations
 
-from typing import Literal, NamedTuple
-
 from pydantic import Field
 
-from promptpotter.application.mask.record import Lens, parse_lens, parse_sample_ids
 from promptpotter.domain.arms import ArmStateKind
-from promptpotter.domain.cycle_paths import (
-    CycleHop,
-    CyclePath,
-    decode_cycle_path,
-    encode_cycle_path,
-)
+from promptpotter.domain.cycle_paths import SUBJECT_ARITY, CycleHop, SubjectKind
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.worded import Worded
 
-SubjectKind = Literal["campaign", "course", "candidate"]
-
-_SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "course": 2, "candidate": 3}
 SUBJECT_KIND_LABELS: Worded[SubjectKind, str] = Worded(
     {
         "campaign": "origin",
@@ -30,106 +18,7 @@ SUBJECT_KIND_LABELS: Worded[SubjectKind, str] = Worded(
         "candidate": "searchpoint",
     }
 )
-assert SUBJECT_KIND_LABELS.keys() == _SUBJECT_ARITY.keys()
-
-
-class SubjectSpec(NamedTuple):
-    kind: SubjectKind
-    campaign_id: str
-    cycle_id: str = ""
-    candidate_id: str = ""
-    inside: CyclePath = ()
-    lens: Lens | None = None
-    samples: frozenset[int] | None = None
-
-    @property
-    def key(self) -> str:
-        addressed = [p for p in (self.campaign_id, self.cycle_id, self.candidate_id) if p]
-        segments = _Segments(self.inside, self.lens, self.samples)
-        return ";".join([f"{self.kind}:{'/'.join(addressed)}", *segments.spelled()])
-
-
-class TreeAddress(NamedTuple):
-    """``<name>[;in=<c::y~…>]`` — a dataset or campaign name, in the sandbox chain it is read in."""
-
-    name: str
-    inside: CyclePath = ()
-
-    @property
-    def spelling(self) -> str:
-        return ";".join([self.name, *_Segments(self.inside, None, None).spelled()])
-
-
-class _Segments(NamedTuple):
-    inside: CyclePath
-    lens: Lens | None
-    samples: frozenset[int] | None
-
-    def spelled(self) -> list[str]:
-        """What `_parse_segments` reads back."""
-        parts = [f"in={encode_cycle_path(self.inside)}"] if self.inside else []
-        if self.lens:
-            parts.append(f"lens={self.lens.spelling}")
-        if self.samples:
-            parts.append("samples=" + ",".join(str(s) for s in sorted(self.samples)))
-        return parts
-
-
-_ADDRESS_SEGMENTS = frozenset({"in"})
-_SUBJECT_SEGMENTS = _ADDRESS_SEGMENTS | {"lens", "samples"}
-
-
-def _parse_segments(spec: str, segments: list[str], *, allowed: frozenset[str]) -> _Segments:
-    lens: Lens | None = None
-    samples, inside = None, CyclePath()
-    for segment in segments:
-        name, _, value = segment.partition("=")
-        if name not in allowed:
-            raise BadRequestError(
-                f"Unknown segment {segment!r} on {spec!r} "
-                f"(expected {', '.join(f'{a}=' for a in sorted(allowed))})."
-            )
-        if name == "in":
-            inside = decode_cycle_path(value)
-        elif name == "lens":
-            lens = parse_lens(value, allow_abort=False)
-        else:
-            samples = parse_sample_ids(value)
-    return _Segments(inside, lens, samples)
-
-
-def parse_tree_address(spec: str) -> TreeAddress:
-    name, *segments = spec.split(";")
-    if not name:
-        raise BadRequestError(f"Address {spec!r} names nothing before its segments.")
-    return TreeAddress(name, _parse_segments(spec, segments, allowed=_ADDRESS_SEGMENTS).inside)
-
-
-def parse_subject(spec: str) -> SubjectSpec:
-    """``kind:<campaign>[/<cycle>[/<candidate>]][;in=<c::y~…>][;lens=score:…|dials:…][;samples=1,2,3]``."""
-    # `;` cannot appear in a safe-AST formula, so a lens needs no escaping.
-    address, *segments = spec.split(";")
-    kind, sep, rest = address.partition(":")
-    if not sep or kind not in _SUBJECT_ARITY:
-        raise BadRequestError(
-            f"Unknown subject kind in {spec!r} (expected one of {sorted(_SUBJECT_ARITY)}, "
-            "as `kind:<campaign>[/<cycle>[/<candidate>]]`)."
-        )
-    parts = rest.split("/")
-    arity = _SUBJECT_ARITY[kind]
-    if len(parts) != arity or not all(parts):
-        raise BadRequestError(
-            f"Subject {spec!r} addresses {len([p for p in parts if p])} id(s); a "
-            f"{kind!r} subject takes exactly {arity}."
-        )
-    inside, lens, samples = _parse_segments(spec, segments, allowed=_SUBJECT_SEGMENTS)
-    if lens and kind != "course":
-        raise BadRequestError(
-            f"A {kind!r} subject takes no lens: an alternative formula re-decides ELECTIONS, and "
-            "only a course has any. Address the branch instead."
-        )
-    ids = [*parts, "", ""]
-    return SubjectSpec(kind, ids[0], ids[1], ids[2], inside=inside, lens=lens, samples=samples)
+assert SUBJECT_KIND_LABELS.keys() == SUBJECT_ARITY.keys()
 
 
 def authorship_of(source: str, issued_by: Principal | None) -> str:
