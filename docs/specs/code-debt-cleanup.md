@@ -223,6 +223,116 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   info), and `library.py::LibrarySnippet` flattens a cited-or-authored snippet into nullable fields.
   Action: one table each; the snippet keeps its union. Rides with the arc that next owns each file.
 
+### The quantum-leap pass (2026-11-05)
+
+Batch E's reviews found one shape in every arc: a fact held or re-derived at many sites, kept
+consistent by each site remembering a convention, so review finds one violation at a time and every
+fix adds a site. A leap gives the fact one owner and derives every other site by construction, held
+by an exhaustive table or state-machine test. Each is a pattern a mature project runs on. **Rides
+with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-11-04).
+
+**Decided once, read by every arc before a leap.**
+- No arc before Q1 holds a command's state anywhere but the record `commands/dispatcher.py` writes.
+- No arc before Q2 adds a cadence, a `revalidate` list or a cross-invalidation; a new read polls on
+  the descriptor it has, and A4's conversation opens no second `EventSource`.
+- No arc before Q3 adds a `logger.warning` in `application/`: a new fault is a record kind with a reader.
+- Batch E closes EA's command states and EW's failed-read cadence at "no regression against main";
+  Q1 and Q2 delete them.
+
+- **Q1: one command log.** The fact: what was asked of the system and where it stands. Today it is
+  split: `run_records.py::CommandRecord` and `run_records.py::CommandAckRecord` land on whichever
+  ledger `commands/dispatcher.py::dispatch` picks (the cycle's, its root's for a delete, the draft's,
+  the workspace's), a draft's records move with its ledger (`campaign_store/store.py::adopt_ledger`,
+  from `jobs/mint.py::_mint_campaign`), a deleted cycle's go to the root's, the loop reads its
+  standing commands off its own ledger (`runtime_flags.py::standing_controls`), the trail folds
+  command lines out of every ledger and a tombstone's copies (`store/account_trail.py`), idempotency
+  is a ledger scan (`commands/dispatcher.py::_find_idempotent_command`), a running act's status lives
+  in MCP memory (EA), and whether the filer is alive is asked beside all of it. Sites:
+  `git grep -l "CommandRecord\|CommandAckRecord\|standing_controls(" -- promptpotter`. Owner: one
+  account-scoped append-only log; a command is one record stream in it (filed, applied, refused,
+  voided, cancelled), each event written with its filing in one step, its status a fold of its own
+  events, its subject the address it was filed on and the one it landed on (a draft's Start lands on
+  the cycle the mint adopts, so the adopt step moves no record). The ledger keeps what HAPPENED
+  (`RunPhaseRecord`, the effects); the log keeps what was ASKED. The pattern: event sourcing's
+  per-aggregate stream with status a fold (EventStoreDB, Axon). Deletes: the two record kinds from
+  the ledger, `ledger_scan.py`'s command fold, the trail's per-ledger walk and
+  `run_records.py::TrailTombstoneRecord`'s copied commands, the idempotency scan, EA's index and
+  `host_surface.py::_cancel_task`; a pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`)
+  is addressed by its command id, so its stop is one command at every entry point. Shares with U2:
+  the adopt step and U2's one launch answer, which is a log read. Edges inside: the loop's pending
+  read becomes a by-subject read of the log, so the log keeps its own per-subject offsets, a fold,
+  never a file beside it; a command filed by a process that died before applying stays "filed", and
+  the fold reads the filer's OS lock (§0.5) to derive "filed, filer gone". Invariant tests: the
+  exhaustive `(status, event)` table yields one status or a refusal for every pair; for any
+  interleaving of file, apply, refuse, cancel and void with any ledger move or delete, the fold after
+  the move equals the fold before. Amends [`../architecture.md`](../architecture.md) § Control-remote
+  and [`../decisions.md`](../decisions.md) § 0001 in its commit: both place the record on the cycle's
+  ledger. **Re-test:** `git grep -n "class CommandRecord" -- promptpotter/domain/run_records.py`.
+- **Q2: one change feed — the server says what moved.** The fact: that a served subject moved. The
+  webapp guesses it at many sites: a cadence per read (`cadence.ts`, read through
+  `useRead.ts::useRead`'s `intervalMs`), a re-ask per write (`useCommand.ts::useCommand`'s
+  `revalidate` and the `read-cache.ts::invalidateReads` calls beside it), the dashboard poll's phase
+  re-ask and slow beat (`api/reads.ts::onViewedPhaseChange`, `poll.tsx::viewedIntervalMs`),
+  `useEvidence.ts`'s and `AccountSpend.tsx`'s own re-asks, focus, visibility and online revalidation in
+  `read-cache.ts`, and its failed-read cadence (`cadence.ts::RECONNECT_POLL_MS`); the
+  server guesses beside it with mtimes and clock edges (`runtime_flags.py::run_state_stamps`) and one
+  store-wide version (`application/hierarchy.py::entries_version`). Sites:
+  `git grep -l "intervalMs\|invalidateReads(\|revalidate" -- webapp/lib webapp/components`. The server
+  writes every ledger and runs every command, so it knows. Owner: a version per subject, the length
+  of the ledgers the subject folds, from the one producer door (U3's `scope.ledger.append`), plus the
+  moves no append makes (a process gone, a beat stale), published by the sweep that detects them. The
+  door and `commands/dispatcher.py` publish `{subject, version}` on one account SSE stream
+  (`routers/reads.py::_events` is the shape; `useCycleEvents.ts::useCycleEvents`
+  folds in); the cache subscribes once and re-asks exactly the moved subject; a read's descriptor is
+  `{id, load}` and nothing more; `routers/reads.py::_conditional`'s ETag is the same version. Which
+  reads an append moved is the projections that consumed the record (U3), derived, never a hand
+  table: before U3 that table is the convention site this leap removes, so it waits on U3. The
+  pattern: server-pushed invalidation with the fetch as truth (Phoenix LiveView, Firestore listeners;
+  the client half is SWR / React Query's `invalidateQueries`). Deletes: the read intervals,
+  `intervalMs`, `invalidateReads`, `revalidate`, the phase re-ask, the slow beat, the focus and
+  visibility hooks, the second channel, `run_state_stamps`' clock edges, the store-wide version. In
+  U4, U5, W2, B and A4 nothing is added beyond a descriptor; U5's arm row and A4's conversation ride
+  the one stream. One failure rule: the stream lost → reconnect, then re-ask every mounted read once.
+  Edges inside: an event before, after or without the read it hints, or twice: harmless by
+  construction, a hint only triggers a read, the body's version is what the cache keeps, a lower
+  version never replaces a higher. Invariant tests: "hint, not truth" — for any sequence of events,
+  reorderings, drops and duplicates, the cache's body equals the server's at the last read and never
+  regresses in version; on the server, every record kind a projection consumes names a subject in a
+  table derived from U3's projection roster, and every input `run_state_stamps` reads today is an
+  append or a sweep publication. **Re-test:** `git grep -n "intervalMs" -- webapp/lib/hooks/useRead.ts`.
+- **Q3: one fault channel — a fault is a value.** The fact: a step failed or was skipped, and why.
+  Today it is a log line at many sites, each kept honest by remembering to serve it: engine decisions
+  narrated into `logger.warning` (§ Config resolution item 10, moved here: `bench/resume_and_fork/repair.py`,
+  `runner/origin_gate.py`, `runner/termination.py`, `escalation/firing.py`),
+  `runner/origin_gate.py::run_origin_gate` logging a failed re-score and holding again,
+  `origin_listing.py::list_origins` logging and skipping an origin whose dataset no longer resolves
+  (so the list is silently short), `campaign_store/store.py::CampaignStore.bank_final` swallowing a
+  failed export write under `shared/errors.py::graceful` (the export is the run's handed-on prompt).
+  Sites: `git grep -c "logger\.\(warning\|error\|exception\)(" -- promptpotter/application`;
+  `git grep -l "^import logging" -- promptpotter/application`. Owner: inside a run, a typed fault
+  record through the one producer door, read by a projection (`run_records.py::RoundWarningKind` is the
+  self-heal half already); inside a read, a field of the row it failed, served as its `Said`; `logging`
+  leaves `application/` and `domain/`, banned at the gate as `gate.py::_IMPORTS_OPTIMIZER` bans an
+  optimizer import. `infrastructure/`, `presentation/` and `main.py` keep theirs: a disk write that
+  failed has no ledger to land on. The pattern: errors as values (Go, Rust's `Result`) and faults as
+  data the next reader folds (Kubernetes `status.conditions`). Deletes: the logging imports and
+  `graceful` in `application/`, the entries above. Edges inside: a fault kind nobody reads (U3's check
+  fails a kind no projection reads); a row's fault field no surface renders (it is a `Said`, and W2
+  renders every served `Said`). Invariant test: the gate lists every `except` in `application/` and
+  `domain/` that neither raises nor hands its fault on (an append through the door, or a return whose
+  type carries it), and the list is empty; every fault kind has one projection reader and one word
+  row. **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
+
+**Weighed and left.** Liveness (a verification orphaned at two seams, `started_at === null` in the
+browser): `runtime_flags.py::derive_run_state` is the owner §0 already names, the sites are U3's and
+W2's. The run lifecycle as one state machine: the command side is Q1's fold, the run side
+`derive_run_state` and `phases.py::RUN_PHASE_INFO`'s admission table, one owner each. L4 measurement
+identity hashed off rendered bytes instead of the AST reach (`optimizers/nodes.py`'s `source_digest`):
+the static reach is §0.5 load-bearing and honest before any call runs; its over-reach is one entry
+under § Typed state. Served words, typed records, the run scope, the subject, the read catalogue and
+the typed file rows: W2, U3, U1a, EA and K3a each already are that leap. `??` defaults on served
+facts: a lint over EW's one type door, not a mechanism.
+
 ### Config resolution and run scope (backbone hunt 2026-10-31, ranked by impact radius)
 
 **Rides with:** one arc; 4 absorbs 7.
@@ -253,9 +363,7 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
    lays the dataset's `node.config` and declared nodes from `dataset.yaml` as it stands; `ResolvedRun`
    records the laid declaration but not the layer the run sent. Action: run init records the dataset
    layer; a read lays the recorded one. **Re-test:** `git grep -n "runnable_definition" -- promptpotter/application/pipeline_resolve.py`.
-10. **Engine decisions narrated into `logger.warning`** — `bench/resume_and_fork/repair.py`, `origin_gate.py`,
-    `termination.py`, `escalation/firing.py`. Action: each decision a field of its step's record.
-    **Re-test:** `git grep -c "logger.warning" -- promptpotter/application/bench/resume_and_fork/repair.py`.
+10. Moved to § The quantum-leap pass (2026-11-05), Q3.
 
 ### The engine swept by shape (debt hunt 2026-11-02)
 
@@ -524,9 +632,6 @@ fixtures.
 - **`hooks/useNestedPipelines.ts` walks the nest client-side** with its own `MAX_DEPTH` and self-nest
   test, worded into `truncated`. Action: the pipeline read serves the whole nest and its depth.
   **Blocked by** K1 (`application/pipeline_resolve.py`). **Re-test:** `git grep -n "MAX_DEPTH" -- webapp/lib/hooks`.
-- **`useEvidence`'s move re-asks every mounted evidence read**, not its own: `invalidateReads` takes a
-  read name, never an id; `useTimeRay`'s `loadOlder` retry re-asks every earlier-steps read the same
-  way via `invalidateReads("earlier-steps")`. **Re-test:** `git grep -nE 'invalidateReads\("(evidence|earlier-steps)"\)' -- webapp`.
 
 **F. The node editor reads served row facts.**
 - **Key-name tests stand in for row facts** (I9): `NodeSurface::onAuthor`, `node-config.ts::effortLadder` /
@@ -654,9 +759,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   optimizer runtime); `bench` / `grade-bench` / "Grade on bench" disagree. "held-out" is the clear word.
 - Ledger shape changes, so run data is wiped (after the 11-02 demo); archive and survivor rows untouched.
 
-**Seen alongside:** `campaign_store/store.py::CampaignStore.bank_final` still swallows a failed export
-write (`graceful`); the export is the run's handed-on prompt, so a lost one is never reported.
-
 ### Typed state — what the 2026-10-30 arc left (served words → enums + one exported table)
 
 - **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and asserts it a `StatusMark`**, so the
@@ -759,9 +861,6 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
 - **The bench pass runs on a launch the origin gate halts**, sending its cells to a dead backend
   (10 in `gated/`). Action: the gate decides before the bench spends. **Re-test:** the `gated/`
   leg's halted launches send no bench cell.
-- **`runner/origin_gate.py::run_origin_gate` logs a failed re-score and holds again**: an error
-  swallowed into a log. Action: the failure is the halt's served cause. **Re-test:**
-  `git grep -n "logger" -- promptpotter/application/runner/origin_gate.py`.
 - **`capo/members.py::CapoInit.refuse_origin` reads a schema fact ("no prompt node") off answered
   rows**, so it needs a guard for an origin nothing answered. Action: refuse on the pipeline
   schema at selection. **Re-test:** `git grep -n "refuse_origin" -- promptpotter/application/optimizers/capo/members.py`.
@@ -864,12 +963,9 @@ write (`graceful`); the export is the run's handed-on prompt, so a lost one is n
   ones, which L4 inner cells (`bench: 0`) and `justlogic/d234-held` are built on. Open: read the
   definition (`/potter-box`), then decide whether `bench` becomes the total. **Re-test:** a fresh
   `{bench: 100}` campaign on that definition holds out 100.
-- **A pass with no cycle has no address**: `seed-screen` and `probe-reasoning` hold a job
-  (`jobs/launcher/admission.py::paid_pass`, `hop=None`) but no ledger a `pause-cycle` reaches, so only
-  Ctrl+C in their own terminal stops them; `noise-floor` lets its pause escape as `PassStoppedError`,
-  a band over fewer than `k` rescores being no band. Open: a job-addressed stop at all five entry
-  points, or Ctrl+C named as a CLI-only verb's stop. **Rides with:** any change to `paid_pass`.
-  **Re-test:** stop a `seed-screen` from a second terminal.
+- **`noise-floor` lets its pause escape as `PassStoppedError`**, a band over fewer than `k` rescores
+  being no band; the pass's address is Q1's (§ The quantum-leap pass). **Rides with:** any change to
+  `paid_pass`. **Re-test:** stop a `noise-floor` from a second terminal; it banks no band.
 - **A locked-in arm's catch-up cells are read by its race, never its round**: `potter/race.py`
   measures a prior on each later challenger's cells (`RaceCatchUpRecord`), but
   `runner/measurement.py::_walk_population` folds only the arm's own walk into `rows[key]`, so the
@@ -1029,18 +1125,13 @@ word's `git grep -c` for that sense is 0.
   the browser shows a sidebar stuck on "loading…". On 2026-10-30, with 91 MB / 129k lines in
   `projects/`, it took 33 s cold beside the boot sweep and 1.1 s warm (`.scratch/cold_real.py`).
   `SpendRollup`'s private-attr factories and per-record `setdefault(k, Model())` cost a further
-  70–90 s before they were cut. Two shapes remain:
-  - The `run_state_stamps` ETag is the first opener. To learn the launch claim, its "stats only"
-    stamp folds the whole roster.
-  - `jobs/reaper.py::periodic_sweep` runs at boot, beside the first page. Over 58 ledgers it folds
-    23 s, about 10 s of it on L4 inner-sandbox ledgers that no page reads.
+  70–90 s before they were cut. One shape remains (the `run_state_stamps` ETag is Q2's,
+  § The quantum-leap pass): `jobs/reaper.py::periodic_sweep` runs at boot, beside the first page. Over
+  58 ledgers it folds 23 s, about 10 s of it on L4 inner-sandbox ledgers that no page reads.
 
   The fold itself is the root: pydantic validates each screened line on every cold start. A fold
   snapshot keyed by `file_sig` would make a restart pay only the tail.
 - **Seen in the parsimony pass (2026-11-01)**:
-  - **One append rebuilds every campaign's entry**: `application/hierarchy.py::entries_version` and
-    `hierarchy_subtree.py::subtree_version` are store-wide. The shape is a per-campaign version and an
-    entry memo; what a shared input (the ruler, an account's spend) invalidates is the decision.
   - **An activity row is a `Said` row under other names**: `domain/activity.py::ActivityItem` carries
     label, tone and detail, with kind glyphs (★ ◆ ↻) beside the CSS tone glyphs. One `Said` row
     reaches every constructor, `chat/LiveSegment`, `TimeRay` and the event contract. That reshapes
@@ -1117,9 +1208,6 @@ word's `git grep -c` for that sense is 0.
 - **A side worktree cannot pass the full gate**: pytest's `compileall` breaks on long Temp paths,
   so a rebuilt commit series is gated without it. **Re-test:** the full gate green in a worktree.
 - **Seen building the read catalogue** (2026-11-04):
-  - `application/origin_listing.py::list_origins` logs and skips an origin whose dataset no longer
-    resolves: an error swallowed into a log, so the list is silently short. Action: serve the row with
-    its fault. **Re-test:** `git grep -n "skipping origin" -- promptpotter/application/origin_listing.py`.
   - `GET /auth/me` writes (`account.arrive`): a read catalogued as `ReadKind.ME` that opens an account.
     Action: arrival is the sign-in callback's act alone. **Re-test:** `git grep -n "arrive(" -- promptpotter/presentation`.
     Until it ships, the `me` read itself (`read_params.py::MeParams`) reads through
