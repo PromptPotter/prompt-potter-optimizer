@@ -112,7 +112,7 @@ export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {
   return once("optimizer-roster", `${API}/optimizers`);
 }
 
-// `at` takes the `parse_subject` grammar (absent = campaign root); the server refuses a mask there.
+// `at` takes the `Subject.parse` grammar (absent = campaign root); the server refuses a mask there.
 export function campaignPipelineRead(
   campaignId: string,
   at: string | null,

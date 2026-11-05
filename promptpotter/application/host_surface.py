@@ -20,7 +20,7 @@ import json
 import secrets
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, cast, get_origin
 from urllib.parse import quote, unquote
@@ -35,9 +35,10 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
     CommandOutcome,
+    addressed,
     command_answer,
 )
-from promptpotter.application.commands.measuring import stop_pass
+from promptpotter.application.commands.measuring import pass_pause, stop_pass
 from promptpotter.application.jobs.launcher.admission import PassHold, PassStoppedError
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
@@ -56,8 +57,6 @@ from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     CommandKind,
     CommandPayload,
-    CyclePayload,
-    LinePayload,
     PauseCyclePayload,
     ReadKind,
 )
@@ -75,7 +74,6 @@ from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import cycle_dir_for
-from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     NotFoundError,
@@ -229,12 +227,6 @@ def _jsonable(value: object) -> JsonValue:
     return to_jsonable_python(value, by_alias=True)  # type: ignore[no-any-return]
 
 
-async def _read(caller: Caller, read: ReadParams) -> object:
-    if inspect.iscoroutinefunction(type(read).answer):
-        return await read.answer(caller)  # type: ignore[misc]
-    return await _off_loop(lambda: read.answer(caller))
-
-
 type TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
 
 # Past its run's end a task's status is how the run ended, and a pause the operator asked for is a
@@ -328,7 +320,7 @@ class _Tracked:
     tool: HostTool
     call: CommandCall[CommandPayload]
     hold: PassHold
-    dispatching: asyncio.Task[tuple[CommandOutcome[Any], list[LaunchedJob] | None]]
+    dispatching: asyncio.Task[tuple[CommandOutcome[Any, Any], list[LaunchedJob] | None]]
     created_at: str = field(default_factory=utcnow_iso)
     dispatched_at: str | None = None
 
@@ -466,16 +458,20 @@ class HostSession:
     async def _call_tool(self, tool: HostTool, arguments: Mapping[str, Any]) -> HostAnswer:
         sent = await _off_loop(lambda: tool.arguments(arguments))
         if isinstance(sent, ReadParams):
-            return HostAnswer(_jsonable(await _read(self.caller, sent)))
+            return HostAnswer(_jsonable(await sent.answered(self.caller)))
         if tool.as_task:
             return HostAnswer(task=await self._open(tool, sent))
         outcome = await self._dispatcher().dispatch(sent)
         return HostAnswer(_jsonable(outcome.accepted if tool.answers() is None else outcome.result))
 
-    async def _open(self, tool: HostTool, call: CommandCall[CommandPayload]) -> HostTask:
+    async def _open(self, tool: HostTool, sent: CommandCall[CommandPayload]) -> HostTask:
+        """Tracked as the dispatcher acts on it (`addressed`), so its stop names the cycle the pass
+        holds even once another campaign shares the prefix it was sent by."""
         task_id, hold = secrets.token_urlsafe(12), PassHold()
+        acted = await _off_loop(lambda: addressed(self.caller.stores, sent.payload))
+        call = replace(sent, payload=acted)
 
-        async def _dispatch() -> tuple[CommandOutcome[Any], list[LaunchedJob] | None]:
+        async def _dispatch() -> tuple[CommandOutcome[Any, Any], list[LaunchedJob] | None]:
             with hold.bound():
                 outcome = await self._dispatcher().dispatch(call)
             return outcome, _launches(await _launched(outcome.result))
@@ -551,7 +547,9 @@ class HostSession:
         stores = self.caller.stores
         if tracked.tool.answers() is not None:
             if not tracked.dispatching.done():
-                pause = await _off_loop(lambda: _pass_pause(stores, tracked.call.payload))
+                pause = await _off_loop(
+                    lambda: pass_pause(stores, tracked.call.payload, reason=_CANCELLED)
+                )
                 await stop_pass(
                     stores, tracked.hold, CommandCall(pause, f"host-task-cancel:{task_id}")
                 )
@@ -565,7 +563,7 @@ class HostSession:
         return await self._status(task_id)
 
     async def _host_resources(self) -> list[HostResource]:
-        listing = await _read(self.caller, HierarchyParams())
+        listing = await HierarchyParams().answered(self.caller)
         listed: list[HostResource] = []
         for campaign in listing.entries:  # type: ignore[attr-defined]
             if not isinstance(campaign, HierarchyCampaign):
@@ -582,7 +580,7 @@ class HostSession:
             raise NotFoundError(f"no resource {uri!r}")
         address = unquote(uri.removeprefix(RESOURCE_PREFIX))
         read = PayloadInvalidError.validating(HierarchySubtreeParams, {"address": address})
-        return _jsonable(await _read(self.caller, read))
+        return _jsonable(await read.answered(self.caller))
 
     async def _render_prompt(self, name: str, arguments: Mapping[str, str]) -> str:
         prompt = HOST_PROMPTS.get(name)
@@ -626,29 +624,6 @@ def cancel_acts(jobs: list[Job], workspace: WorkspaceDir) -> list[CommandCall[Co
         )
         acts.append(CommandCall(pause, key))
     return acts
-
-
-def _pass_pause(stores: Stores, payload: CommandPayload) -> PauseCyclePayload:
-    """The one stop of a paid pass in flight, as every other door sends it: a pause of the cycle
-    it scores — the cycle a verify names, the line holder a bench grades — sent under the pass's
-    own hold (`stop_pass`)."""
-    match payload:
-        case CyclePayload():
-            return PauseCyclePayload(
-                campaign_id=payload.campaign_id,
-                cycle_id=payload.cycle_id,
-                descend=payload.descend,
-                reason=_CANCELLED,
-            )
-        case LinePayload():
-            holder = stores.campaigns.line_holder(
-                owned_campaign(stores, payload.campaign_id).root_hop
-            )
-            return PauseCyclePayload(
-                campaign_id=holder.campaign_id, cycle_id=holder.cycle_id, reason=_CANCELLED
-            )
-        case _:
-            raise TaskUncancellableError(f"no command stops a {payload.kind} in flight")
 
 
 # How often a launch's task result re-reads its jobs while they run.

@@ -11,8 +11,8 @@ from promptpotter.application.mask.divergence import (
     make_scoring_verdict,
 )
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, decode_cycle_path
+from promptpotter.application.mask.record import MaskReading, MaskRecord
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
 from promptpotter.domain.hierarchy import (
     HierarchyCandidate,
     HierarchyEntry,
@@ -57,7 +57,7 @@ def _mask_records(
     for course in entries_under(root):
         if not isinstance(course, SubtreeCourse):
             continue
-        path = decode_cycle_path(course.address)
+        path = Subject.parse_address(course.address).path
         if (campaign := (path[:-1], path[-1].campaign_id)) in seen:
             continue
         seen.add(campaign)
@@ -145,7 +145,7 @@ class _Overlay:
     def apply(self, entry: HierarchyEntry) -> HierarchyEntry:
         if not isinstance(entry, SubtreeCourse):
             return entry.model_copy(update={"children": [self.apply(c) for c in entry.children]})
-        path = decode_cycle_path(entry.address)
+        path = Subject.parse_address(entry.address).path
         # The course's own candidates, never an inner campaign's under them.
         read = {
             c.address: self._candidate(path, c)

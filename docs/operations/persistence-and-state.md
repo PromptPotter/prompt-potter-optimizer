@@ -26,7 +26,7 @@ step     := course "/@" offset                       bbeh__20261024-091500::cycl
 inside   := course ("~" course)*                     the L4 sandbox chain, the `?descend=` wire byte-exact
 ```
 
-One minter, `domain/cycle_paths.py::hierarchy_address`; a course's address IS its encoded `CyclePath` (`webapp/lib/ids.ts::encodeCyclePath`), a step's offset the line index in its course's own ledger. A fork is stored as a sibling cycle, served as a child course; its `facts.spawn` is its `domain/run_records.py::ForkSpec`.
+One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_address`); a course's address IS its encoded `CyclePath` (`webapp/lib/ids.ts::encodeCyclePath`), a step's offset the line index in its course's own ledger. A fork is stored as a sibling cycle, served as a child course; its `facts.spawn` is its `domain/run_records.py::ForkSpec`.
 
 ## Active session pointer
 

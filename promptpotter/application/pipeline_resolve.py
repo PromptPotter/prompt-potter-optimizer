@@ -28,7 +28,6 @@ from promptpotter.application.datasets.prompts import (
     pipeline_node_overlay,
 )
 from promptpotter.application.datasets.startability import draft_samples
-from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.free_tier import free_fence, free_task_models, with_free_tier_layer
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.coupon import Send
@@ -58,7 +57,7 @@ from promptpotter.domain.campaign_config import (
     scoring_locked,
 )
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
@@ -522,7 +521,7 @@ def _validate_model_ownership(
             )
 
 
-def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], dict[str, Any]]:
+def _evolved_overlay(stores: Stores, at: Subject) -> tuple[dict[str, Any], dict[str, Any]]:
     """(sparse delta, complete config): the complete one read as a delta stamps every param ``evolved``."""
     if at.kind != "candidate" or not at.cycle_id:
         return {}, {}
@@ -701,7 +700,7 @@ def _task_fenced(stores: Stores, connector: str) -> bool:
     return fence is not None and fence.task
 
 
-def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _CampaignMerge:
+def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _CampaignMerge:
     """Off its mint's records alone, so a campaign outlives its dataset dir; lays no identity:
     what a point is keyed by is the subject's to add."""
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
@@ -891,7 +890,7 @@ def resolve_pipeline_for_campaign(
     stores: Stores,
     campaign: Campaign,
     *,
-    at: SubjectSpec,
+    at: Subject,
 ) -> CampaignPipelineResponse:
     """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
     m = _campaign_merge(stores, campaign, at)
@@ -923,10 +922,10 @@ def resolve_pipeline_for_campaign(
     )
 
 
-def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:
+def _pipeline_subject(at: str, campaign_id: str) -> Subject:
     if not at:
-        return SubjectSpec("campaign", campaign_id)
-    spec = parse_subject(at)
+        return Subject(campaign_id)
+    spec = Subject.parse(at)
     if spec.lens or spec.samples:
         raise BadRequestError(
             f"Subject {at!r} carries a scoring mask, and a mask cannot change what config a "
@@ -1060,7 +1059,7 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
 
 
 def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
-    m = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
+    m = _campaign_merge(stores, campaign, Subject(campaign.campaign_id))
     # What the root SENDS: no identity layer, which keys a cell and is never sent.
     folded = m.layers.fold()
     stripped = strip_rendered_prompt(folded.params)

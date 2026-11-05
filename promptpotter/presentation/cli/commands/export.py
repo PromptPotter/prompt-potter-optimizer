@@ -1,18 +1,22 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from promptpotter.application.cycle_reads import export_cycle
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
+
+if TYPE_CHECKING:
+    import argparse
+
+    from promptpotter.application.caller import Caller
+    from promptpotter.application.read_params import CycleExportParams
+    from promptpotter.application.views.render.export import ExportFiles
 
 
-async def cmd_export(args: argparse.Namespace) -> CommandResult:
-    stores = open_stores(args)
-    hop = resolve_target(args, stores)
-    ids = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, "tier": args.tier}
-    files = export_cycle(stores, (hop,), args.tier)
+def export_written(
+    params: CycleExportParams, files: ExportFiles, args: argparse.Namespace, _caller: Caller
+) -> CommandResult:
+    ids = {"campaign_id": params.campaign_id, "cycle_id": params.cycle_id, "tier": params.tier}
     single = files.single
     if single is not None and args.out is None:
         return CommandResult(data={**ids, "text": single}, human=single.rstrip("\n"))
@@ -24,5 +28,5 @@ async def cmd_export(args: argparse.Namespace) -> CommandResult:
     written = sorted(files.files)
     return CommandResult(
         data={**ids, "dir": str(root), "files": written},
-        human=f"{args.tier}: wrote {len(written)} file(s) under {root}",
+        human=f"{params.tier}: wrote {len(written)} file(s) under {root}",
     )

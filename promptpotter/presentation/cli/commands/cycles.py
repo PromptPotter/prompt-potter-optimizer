@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import argparse
+from typing import TYPE_CHECKING
 
-from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
-from promptpotter.application.hierarchy import list_hierarchy
-from promptpotter.domain.cycle_paths import hierarchy_address
+from promptpotter.application.cycle_addressing import active_pointer
+from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
-from promptpotter.presentation.cli.commands.workspace import open_stores
+
+if TYPE_CHECKING:
+    import argparse
+
+    from promptpotter.application.caller import Caller
+    from promptpotter.application.read_params import HierarchyParams
+    from promptpotter.domain.hierarchy import HierarchyResponse
 
 
 def _line(course: HierarchyCourse, *, active: bool) -> str:
@@ -29,23 +34,15 @@ def _line(course: HierarchyCourse, *, active: bool) -> str:
     )
 
 
-async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
-    stores = open_stores(args)
-    listing = list_hierarchy(
-        stores,
-        inside=args.inside,
-        dataset=None,
-        lifecycle="all",
-        campaign_id=(
-            resolve_campaign_id_hint(stores, args.campaign, inside=args.inside)
-            if args.campaign
-            else None
-        ),
-        attached_only=args.attached,
-        depth=1,
-    )
-    hop = active_pointer(stores, inside=args.inside)
-    active = None if hop is None else hierarchy_address(args.inside, hop.campaign_id, hop.cycle_id)
+def cycles_human(
+    params: HierarchyParams,
+    listing: HierarchyResponse,
+    _args: argparse.Namespace,
+    caller: Caller,
+) -> CommandResult:
+    inside = params.inside
+    hop = active_pointer(caller.stores, inside=inside)
+    active = None if hop is None else Subject.of((*inside, hop)).address
     lines: list[str] = []
     for campaign in listing.entries:
         if not isinstance(campaign, HierarchyCampaign):

@@ -76,11 +76,6 @@ class CurrentRound(StrictModel):
         description="The optimizer node every scoring pass of the run runs as — origin, round, "
         "bench and verify alike — as its wiring declares it."
     )
-    measuring: bool = Field(
-        default=False,
-        description="Whether `measurement_node` is the node at work now: `measuring_arm` is "
-        "served only while it is.",
-    )
     inner: CycleHop | None = Field(
         default=None,
         description="The inner cycle an open cell runs, where a cell is a whole campaign (L4), "

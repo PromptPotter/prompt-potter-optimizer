@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hmac
 import inspect
+import re
 from typing import Annotated, Any, get_origin
 
 from fastapi import Depends, Header, Query, Request, UploadFile
-from pydantic import BaseModel, Field, create_model
+from pydantic import Field, create_model
 from pydantic.fields import FieldInfo
 
 from promptpotter.application.account import registered_or_default_identity
@@ -76,7 +77,7 @@ def require_identity_bundle(request: Request) -> IdentityBundle:
 
 def _drawn(request: Request, identity: IdentityDep) -> None:
     """The request drawn on its principal's rate, read or write as the kind its route is named by
-    (`api/catalogue.py::bind_surface` names every one), before anything is built for it."""
+    (every session route is named by one), before anything is built for it."""
     route = request.scope.get("route")
     refuse_request_rate(identity, read=isinstance(_NAMED[getattr(route, "name", "")], ReadKind))
 
@@ -99,24 +100,16 @@ _NAMED: dict[str, CommandKind | ReadKind] = {k.value: k for k in (*CommandKind, 
 CallerDep = Annotated[Caller, Depends(open_caller)]
 
 
-def _carried(field: FieldInfo) -> bool:
-    """A mapping or a model rides the JSON body; anything else rides the URL."""
-    annotation = field.annotation
-    return get_origin(annotation) is dict or (
-        isinstance(annotation, type) and issubclass(annotation, BaseModel)
-    )
-
-
 def read_input(model: type[ReadParams]) -> Any:
-    """A read route's one input: its row's `ReadParams` model, each URL field a path parameter
-    where the route's path names it, else a query one (a list repeats), and the fields the body
-    carries one `RequestBody` named for the model. Each keeps its field's own constraints and
-    description, so a value the model refuses is refused before the route runs. The dependency's
-    signature returns *model*, which `api/catalogue.py::bind_surface` matches to the route's row."""
+    """A read route's one input: its row's `ReadParams` model, each field a path parameter where
+    the model's `route` names it, else a query one on a GET (a list repeats) and a field of one
+    `RequestBody` named for the model on a POST. Each keeps its field's own constraints and
+    description, so a value the model refuses is refused before the route runs."""
+    in_path = set(re.findall(r"\{(\w+)", model.route))
     params: list[inspect.Parameter] = []
     carried: dict[str, Any] = {}
     for name, field in model.model_fields.items():
-        if _carried(field):
+        if model.method == "POST" and (field.alias or name) not in in_path:
             carried[name] = (field.annotation, field)
             continue
         spec: FieldInfo = (

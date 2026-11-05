@@ -12,8 +12,8 @@
 
 - **Tools.** Writes are the `domain/command_kinds.py::CommandKind` rows, already capability-gated. Reads
   are the `domain/command_kinds.py::ReadKind` rows, each answered by its `application/read_params.py::ReadParams`
-  model; every session route is bound to one row (`presentation/api/catalogue.py::bind_surface`), so the
-  tool list is the whole surface.
+  model, which also declares its route; one loop mounts every row (`presentation/api/routers/reads.py`), so
+  the tool list is the whole surface.
 - **Resources.** The account's data, addressed by the hierarchy address grammar
   ([`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address).
 - **Prompts.** Templates. The check-in is one — "reach the origin gate", seeded from the `checkin/2`

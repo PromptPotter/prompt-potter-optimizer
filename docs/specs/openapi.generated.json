@@ -547,7 +547,7 @@
         "description": "Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree\ndoes not move.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -3559,7 +3559,7 @@
             "$ref": "#/components/schemas/Budget"
           },
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -3646,7 +3646,7 @@
         "description": "Remove the stub cycles a mint left behind when it never reached round 0.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -4396,12 +4396,6 @@
             "title": "Measurement Node",
             "type": "string"
           },
-          "measuring": {
-            "default": false,
-            "description": "Whether `measurement_node` is the node at work now: `measuring_arm` is served only while it is.",
-            "title": "Measuring",
-            "type": "boolean"
-          },
           "nodes": {
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeBlock"
@@ -5131,7 +5125,7 @@
         "description": "Remove a campaign for good; its measurements still cache-hit for siblings.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -5162,7 +5156,7 @@
         "description": "Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding\nrounds or a live producer (pause it first).",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -6980,7 +6974,7 @@
         "description": "The cut, and the shape of the fork's first run (``mode``) — one act, so one command.\nA parent a producer still holds is paused by the applier once the fork's run is admitted.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -7237,7 +7231,7 @@
         "description": "Grade the campaign's origin and its selection on the held-out bench rows.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -11941,7 +11935,7 @@
         "description": "Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -12596,7 +12590,7 @@
         "description": "Ask a running cycle to stop at its next checkpoint; it resumes from there.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15402,7 +15396,7 @@
         "description": "Name a campaign wherever it is named to a human; its id still addresses it.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15450,7 +15444,7 @@
             "type": "boolean"
           },
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15609,7 +15603,7 @@
         "description": "Cut the candidate being scored at its next sample boundary; the round carries on with the rest.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15857,7 +15851,7 @@
             "default": {}
           },
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15932,7 +15926,7 @@
         "description": "Let a paused cycle run a bounded number of rounds, then stop again.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -16448,7 +16442,7 @@
             "type": "array"
           },
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -17160,7 +17154,7 @@
         "description": "Restore an archived campaign to active.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -17465,7 +17459,7 @@
         "description": "``samples`` omitted is the ANSWER, not an absence: the count is derived from the\nper-candidate round budget and the rounds run since this cycle's last verification\n(``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is\nrefused, naming the budget — which is what keeps one click on a million-row dataset from being\na million-cell bill.\n\nAddressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``\n— so an L4 inner candidate is as reachable as a top-level one.",
         "properties": {
           "campaign_id": {
-            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -18068,7 +18062,7 @@
         },
         "summary": "Activity",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18142,7 +18136,7 @@
         },
         "summary": "Coupon",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18245,7 +18239,7 @@
         },
         "summary": "Me",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18277,7 +18271,7 @@
         },
         "summary": "Quota-Status",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18309,7 +18303,7 @@
         },
         "summary": "User-Settings",
         "tags": [
-          "Auth"
+          "Reads"
         ]
       }
     },
@@ -18345,7 +18339,7 @@
         },
         "summary": "Backends",
         "tags": [
-          "Backends"
+          "Reads"
         ]
       }
     },
@@ -18390,7 +18384,7 @@
         },
         "summary": "Backend-Health",
         "tags": [
-          "Backends"
+          "Reads"
         ]
       }
     },
@@ -18435,7 +18429,7 @@
         },
         "summary": "Config-Map",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18535,7 +18529,7 @@
         },
         "summary": "Cycle-Dashboard",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18602,8 +18596,7 @@
         },
         "summary": "Cycle-Events",
         "tags": [
-          "Campaigns",
-          "Stream"
+          "Reads"
         ]
       }
     },
@@ -18683,7 +18676,7 @@
         },
         "summary": "Cycle-Export",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18781,7 +18774,7 @@
         },
         "summary": "Cycle-File",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18855,7 +18848,7 @@
         },
         "summary": "Cycle-Files",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -18957,7 +18950,7 @@
         },
         "summary": "Cycle-Round",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19049,7 +19042,7 @@
         },
         "summary": "Cycle-Round-Audit",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19104,7 +19097,7 @@
         },
         "summary": "Fork-Preview",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19130,7 +19123,7 @@
             "required": false,
             "schema": {
               "default": "",
-              "description": "Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
+              "description": "Searchpoint subject (`Subject.parse` grammar); defaults to the campaign root",
               "title": "At",
               "type": "string"
             }
@@ -19160,7 +19153,7 @@
         },
         "summary": "Campaign-Pipeline",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -19205,7 +19198,7 @@
         },
         "summary": "Campaign-Storage",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21123,7 +21116,7 @@
         },
         "summary": "Datasets",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21476,7 +21469,7 @@
         },
         "summary": "Dataset-Cells",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21532,7 +21525,7 @@
         },
         "summary": "Dataset-Cell",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21577,7 +21570,7 @@
         },
         "summary": "Dataset-Pipeline",
         "tags": [
-          "Datasets"
+          "Reads"
         ]
       }
     },
@@ -21622,7 +21615,7 @@
         },
         "summary": "Draft",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21737,7 +21730,7 @@
         },
         "summary": "Evidence",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21779,7 +21772,7 @@
         },
         "summary": "Head-To-Head-Price",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     },
@@ -21930,7 +21923,7 @@
         },
         "summary": "Hierarchy",
         "tags": [
-          "Hierarchy"
+          "Reads"
         ]
       }
     },
@@ -22067,7 +22060,7 @@
         },
         "summary": "Hierarchy-Subtree",
         "tags": [
-          "Hierarchy"
+          "Reads"
         ]
       }
     },
@@ -22141,7 +22134,7 @@
         },
         "summary": "Hierarchy-Steps",
         "tags": [
-          "Hierarchy"
+          "Reads"
         ]
       }
     },
@@ -22173,7 +22166,7 @@
         },
         "summary": "Library",
         "tags": [
-          "Optimizer"
+          "Reads"
         ]
       }
     },
@@ -22205,7 +22198,7 @@
         },
         "summary": "Machine-Status",
         "tags": [
-          "Sessions"
+          "Reads"
         ]
       }
     },
@@ -22237,7 +22230,7 @@
         },
         "summary": "Optimizers",
         "tags": [
-          "Optimizer"
+          "Reads"
         ]
       }
     },
@@ -22269,7 +22262,7 @@
         },
         "summary": "Origins",
         "tags": [
-          "Origins"
+          "Reads"
         ]
       }
     },
@@ -22301,7 +22294,7 @@
         },
         "summary": "Active-Session",
         "tags": [
-          "Sessions"
+          "Reads"
         ]
       }
     },
@@ -22487,7 +22480,7 @@
         },
         "summary": "Workspace-Storage",
         "tags": [
-          "Campaigns"
+          "Reads"
         ]
       }
     }

@@ -4,11 +4,12 @@ import asyncio
 import types
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel, SecretStr
 
+from promptpotter.application.cycle_addressing import resolve_subject
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_kinds import (
     CampaignPayload,
@@ -21,7 +22,7 @@ from promptpotter.domain.command_kinds import (
     LinePayload,
     PauseCyclePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, decode_cycle_path
 from promptpotter.domain.run_records import (
     CommandAckRecord,
     CommandAckStatus,
@@ -191,7 +192,9 @@ class DispatchedToDraft[P: CommandPayload](Dispatched[P]):
 
 
 @dataclass(frozen=True, slots=True)
-class CommandOutcome[R]:
+class CommandOutcome[R, P: CommandPayload]:
+    # What the dispatcher acted on: its address resolved from the prefix the door sent.
+    payload: P
     accepted: CommandAcceptedBody
     result: R
     ack: CommandAckStatus
@@ -199,6 +202,23 @@ class CommandOutcome[R]:
 
 # A kind's handler: what its row names, typed by the answer its applier carries.
 type Handler[R] = Callable[[Any], Awaitable[Applier[R]]]
+
+
+def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
+    """*payload* as the dispatcher acts on it: its addressed campaign id — a cycle command's leaf,
+    below its ``descend`` chain — resolved from the prefix any door sent by the one rule every read
+    takes (`resolve_subject`). A door that names a pass's stop before the pass ends holds this."""
+    if not isinstance(payload, CampaignPayload):
+        return payload
+    if isinstance(payload, CyclePayload):
+        subject = Subject.below(payload.campaign_id, payload.cycle_id, payload.descend)
+        resolved = resolve_subject(stores, subject)
+        fields: dict[str, str | None] = {"descend": None, **resolved.command_fields}
+    else:
+        subject = Subject(payload.campaign_id)
+        resolved = resolve_subject(stores, subject)
+        fields = {"campaign_id": resolved.campaign_id}
+    return payload if resolved == subject else payload.model_copy(update=fields)
 
 
 def handler_of(kind: CommandKind) -> Handler[Any]:
@@ -251,15 +271,21 @@ class CommandDispatcher:
             )
         return await handler_of(kind)(dispatched)
 
-    async def answer[R](self, handler: Handler[R], call: CommandCall[Any]) -> CommandOutcome[R]:
+    async def answer[R, P: CommandPayload](
+        self, handler: Handler[R], call: CommandCall[P]
+    ) -> CommandOutcome[R, P]:
         """`dispatch`, its answer typed by *handler*'s own `Applier[R]`: refused unless *handler*
         is the one the call's row names, so the type a caller reads is what the act answers."""
         if handler is not handler_of(call.kind):
             raise TypeError(f"{call.kind} is answered by {call.kind.handler}, not {handler!r}")
-        return cast(CommandOutcome[R], await self.dispatch(call))
+        return cast(CommandOutcome[R, P], await self.dispatch(call))
 
-    async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[object]:
-        """The payload's address base IS its target ledger; `answer` types what it answers."""
+    async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[object, Any]:
+        """The payload's address base IS its target ledger, acted on as `addressed` resolves it;
+        `answer` types what it answers."""
+        acted = await asyncio.to_thread(addressed, self.stores, call.payload)
+        if acted is not call.payload:
+            call = replace(call, payload=acted)
         match call.payload:
             case CyclePayload():
                 return await self._on_cycle(call)
@@ -274,21 +300,25 @@ class CommandDispatcher:
                 applier = await self._applier(Dispatched(self, call.payload))
                 return await self._record_and_apply(ledger, call, applier)
 
-    async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
+    async def _on_campaign(
+        self, call: CommandCall[CampaignPayload]
+    ) -> CommandOutcome[object, CampaignPayload]:
         owned_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         applier = await self._applier(Dispatched(self, call.payload))
         return await self._record_and_apply(ledger, call, applier)
 
-    async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object]:
+    async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object, LinePayload]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
         ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(hop)))
         applier = await self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
         return await self._record_and_apply(ledger, call, applier)
 
-    async def _on_cycle(self, call: CommandCall[CyclePayload]) -> CommandOutcome[object]:
+    async def _on_cycle(
+        self, call: CommandCall[CyclePayload]
+    ) -> CommandOutcome[object, CyclePayload]:
         payload = call.payload
         hop = CycleHop(campaign_id=payload.campaign_id, cycle_id=payload.cycle_id)
         tail = decode_cycle_path(payload.descend)
@@ -314,7 +344,7 @@ class CommandDispatcher:
         applier = await self._applier(DispatchedToCycle(self, payload, campaign, hop))
         return await self._record_and_apply(ledger, call, applier)
 
-    async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any]:
+    async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any, DraftPayload]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
         # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
         owned_draft_data(self.stores, call.payload.draft_id)
@@ -334,7 +364,7 @@ class CommandDispatcher:
 
     async def _record_and_apply[P: CommandPayload, R](
         self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]
-    ) -> CommandOutcome[R]:
+    ) -> CommandOutcome[R, P]:
         kind, idempotency_key = call.kind, call.idempotency_key
         # Off the loop: an upload's act hashes its bytes.
         payload, act_digest = await asyncio.to_thread(call.payload.recorded)
@@ -345,6 +375,7 @@ class CommandDispatcher:
             existing = _find_idempotent_command(ledger, kind, act_digest, idempotency_key)
             if existing is not None:
                 return CommandOutcome(
+                    payload=call.payload,
                     accepted=CommandAcceptedBody(command_id=existing.command_id),
                     result=await applier.replay(existing.effect),
                     ack=existing.ack,
@@ -398,7 +429,10 @@ class CommandDispatcher:
             )
 
         return CommandOutcome(
-            accepted=CommandAcceptedBody(command_id=command_id), result=applied[0], ack=ack_status
+            payload=call.payload,
+            accepted=CommandAcceptedBody(command_id=command_id),
+            result=applied[0],
+            ack=ack_status,
         )
 
     def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:

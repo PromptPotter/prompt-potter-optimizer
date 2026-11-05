@@ -23,6 +23,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application import health
 from promptpotter.application.account import record_refusal
+from promptpotter.application.commands.dispatcher import command_answer
 from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.quota import RateLimitedError
@@ -37,12 +38,16 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
 from promptpotter.domain.account_words import refusal_words
-from promptpotter.domain.command_kinds import MAX_UPLOAD_BYTES, CommandKind
+from promptpotter.domain.command_kinds import (
+    MAX_UPLOAD_BYTES,
+    CommandAcceptedBody,
+    CommandKind,
+    ReadKind,
+)
 from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
-from promptpotter.presentation.api.catalogue import bind_surface
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
@@ -53,14 +58,10 @@ from promptpotter.presentation.api.deps import (
 from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
-from promptpotter.presentation.api.routers.active import active_router
-from promptpotter.presentation.api.routers.auth import auth_flow_router, auth_router
-from promptpotter.presentation.api.routers.backends import backends_router
-from promptpotter.presentation.api.routers.campaigns import campaigns_router
+from promptpotter.presentation.api.routers.auth import auth_flow_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
-from promptpotter.presentation.api.routers.hierarchy import hierarchy_router
-from promptpotter.presentation.api.routers.origins import origins_router
+from promptpotter.presentation.api.routers.reads import READ_ROUTES, reads_router
 from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
@@ -306,30 +307,48 @@ class RouterMount(NamedTuple):
 API_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(_contract, "", None),
     RouterMount(_health, _API, None),
-    RouterMount(backends_router, _API, open_caller),
-    RouterMount(campaigns_router, _API, open_caller),
-    RouterMount(active_router, _API, open_caller),
-    RouterMount(hierarchy_router, _API, open_caller),
+    RouterMount(reads_router, _API, open_caller),
     RouterMount(datasets_router, _API, open_caller),
-    RouterMount(origins_router, _API, open_caller),
     RouterMount(commands_router, _API, open_caller),
     RouterMount(auth_flow_router, _API, None),
-    RouterMount(auth_router, _API, open_caller),
     RouterMount(site_records_router, _API, require_site_records_token),
 )
 _ROUTES = [
     route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)
 ]
-# Before the mounts, whose copies of the routes carry what it binds.
-bind_surface(
-    [
-        route
-        for mount in API_ROUTERS
-        if mount.gate is open_caller
-        for route in mount.router.routes
-        if isinstance(route, APIRoute)
-    ]
-)
+
+
+def _off_catalogue(route: APIRoute) -> str | None:
+    """A session route out of the catalogue: named by no kind (its rate draw would 500 its first
+    request, `deps.py::_drawn`), a read's route other than the one its row's loop made, or a
+    command route answering other than the kind applies."""
+    where = f"{sorted(route.methods or ())} {route.path}"
+    if route.name in ReadKind:
+        made = route is READ_ROUTES[ReadKind(route.name)]
+        return None if made else f"{where} serves read {route.name!r} beside its row's route"
+    kind = next((kind for kind in CommandKind if kind == route.name), None)
+    if kind is None:
+        return f"{where} is named {route.name!r}, no kind"
+    applied = command_answer(kind)
+    # A task kind applying no model answers its launch, whose handle its route projects.
+    if applied is None and kind.answering == "task":
+        return None
+    # Set by FastAPI on every route, though its stubs do not declare it.
+    served = vars(route)["response_model"]
+    if served != (applied or CommandAcceptedBody):
+        return f"{where} serves {served!r}; {kind} applies {applied!r}"
+    return None
+
+
+# Refused at import, over the copies the mounts carry: a session route is named by its row.
+if _faults := [
+    fault
+    for mount in API_ROUTERS
+    if mount.gate is open_caller
+    for route in mount.router.routes
+    if isinstance(route, APIRoute) and (fault := _off_catalogue(route)) is not None
+]:
+    raise RuntimeError("the surface is out of the catalogue:\n  " + "\n  ".join(_faults))
 for _mount in API_ROUTERS:
     app.include_router(
         _mount.router,
