@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 from pydantic import Field
 
 from promptpotter.domain.arms import Cut
+from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
-from promptpotter.domain.scoring import PIPELINE_KEYS, GradedCell, PipelineData
+from promptpotter.domain.scoring import GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
@@ -25,13 +27,89 @@ class OuterSampleProxies(FrozenModel):
     # The SCORED term: the standing selection's headline on the cell's held-out rows minus the
     # origin's on the same rows, in accuracy points, averaged over the round budget. A promotion
     # on the rows the search selected on is in-sample and reads here only if it holds on fresh ones.
-    mean_bench_lift: float = Field(ge=-1.0, le=1.0)
+    held_out_lift: float = Field(ge=-1.0, le=1.0)
 
 
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 # Here because the `promptpotter` connector declares it too and may not import `application/runner`.
 INNER_RESULT_KEY = "final_ranking"
+# The facts no term names (the series' reason, its SE, the stop): what the narration and tape read.
+INNER_FACTS_KEY = "inner"
+
+
+def _term(name: str, direction: str, description: str, **rest: object) -> CellTerm:
+    return CellTerm.model_validate(
+        {"name": name, "direction": direction, "description": description, **rest}
+    )
+
+
+# The `promptpotter` connector's cell vocabulary (`Connector.cell_terms`).
+INNER_CELL_TERMS: tuple[CellTerm, ...] = (
+    _term(
+        "held_out_lift",
+        "high",
+        "The inner campaign's mean lift over its origin on its held-out rows.",
+    ),
+    _term("held_out_origin", "high", "The inner origin's headline on the held-out rows."),
+    _term("held_out_final_lift", "high", "The held-out lift the inner campaign ended on."),
+    _term("lift", "high", "The inner campaign's mean θ lift over its own origin."),
+    _term("origin", "high", "The inner campaign's origin level."),
+    _term("final_lift", "high", "The lift the inner campaign ended on."),
+    _term("peak_lift", "high", "The best lift the inner campaign reached."),
+    _term("rounds", "low", "Rounds the inner campaign ran.", dial="anchored"),
+    _term("round_budget", "high", "Rounds the inner campaign was allowed."),
+)
+
+# Each reported key's `InnerCellFacts` field: the fact rides ONCE, under the key, never in `inner`.
+# `cost` and `tokens` answer the core channels of those names: no node usage prices an inner run.
+_FACT_OF_KEY: dict[str, str] = {
+    "held_out_origin": "bench_origin_level",
+    "held_out_final_lift": "bench_final_lift",
+    "lift": "mean_round_delta",
+    "origin": "origin_level",
+    "final_lift": "final_lift",
+    "peak_lift": "peak_lift",
+    "rounds": "rounds_ran",
+    "round_budget": "round_budget",
+    "cost": "sent_usd",
+    "tokens": "tokens",
+}
+assert set(_FACT_OF_KEY.values()) <= set(InnerCellFacts.model_fields)
+
+# What the connector reports beside its terms (`Connector.reported_keys`).
+INNER_REPORTED_KEYS: tuple[str, ...] = (INNER_FACTS_KEY, "cost", "tokens")
+assert {*OUTER_PROXY_KEYS, *_FACT_OF_KEY, INNER_FACTS_KEY} == {
+    *(t.name for t in INNER_CELL_TERMS),
+    *INNER_REPORTED_KEYS,
+}, "a reported key is no term, fact or proxy, or one went unreported"
+
+
+def inner_cell_report(facts: InnerCellFacts, proxies: OuterSampleProxies) -> dict[str, object]:
+    """An absent value is a key left out: a bound 0 would score a measurement nobody took."""
+    dumped = facts.model_dump(mode="json")
+    reported = {key: dumped[field] for key, field in _FACT_OF_KEY.items()}
+    return {
+        **proxies.model_dump(),
+        **{key: value for key, value in reported.items() if value is not None},
+        INNER_FACTS_KEY: {k: v for k, v in dumped.items() if k not in _FACT_OF_KEY.values()},
+    }
+
+
+def inner_facts_of(pipeline: PipelineData) -> InnerCellFacts | None:
+    """Written by the recursion alone, so a row carrying it IS an L4 outer row."""
+    report = pipeline.cell_report
+    raw: Any = report.get(INNER_FACTS_KEY)
+    if raw is None:
+        return None
+    return InnerCellFacts.model_validate(
+        {**raw, **{field: report.get(key) for key, field in _FACT_OF_KEY.items()}}
+    )
+
+
+def held_out_lift_of(pipeline: PipelineData) -> float | None:
+    value = pipeline.cell_report.get("held_out_lift")
+    return None if value is None else float(value)
 
 
 def _origin_headroom(result: CycleResult) -> float | None:
@@ -201,7 +279,7 @@ def floor_reason(result: CycleResult) -> str | None:
 
 def _floor_proxies() -> OuterSampleProxies:
     """``-1`` sits at or below the bottom of every re-anchoring window, so the composed fitness is exactly 0.0."""
-    return OuterSampleProxies(mean_bench_lift=-1.0)
+    return OuterSampleProxies(held_out_lift=-1.0)
 
 
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
@@ -216,7 +294,7 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     # Guaranteed by no_evidence_reason.
     assert result.bench_origin_level is not None
     bench = bench_level_series(result)
-    return OuterSampleProxies(mean_bench_lift=sum(bench) / len(bench) - result.bench_origin_level)
+    return OuterSampleProxies(held_out_lift=sum(bench) / len(bench) - result.bench_origin_level)
 
 
 class PanelPrecision(FrozenModel):
@@ -231,18 +309,14 @@ class PanelPrecision(FrozenModel):
     # No RATIO of the two is served: a clamped share rounds noise above the total spread into "100% noise".
 
 
-assert set(OUTER_PROXY_KEYS) <= PIPELINE_KEYS, (
-    "an L4 key PipelineData does not declare is filed as a dataset observation, and no field "
-    "reader finds it"
-)
-
-
 def _level(pipeline: PipelineData) -> float | None:
-    return None if pipeline.inner is None else pipeline.inner.mean_round_delta
+    inner = inner_facts_of(pipeline)
+    return None if inner is None else inner.mean_round_delta
 
 
 def _level_se(pipeline: PipelineData) -> float | None:
-    return None if pipeline.inner is None else pipeline.inner.mean_parent_level_se
+    inner = inner_facts_of(pipeline)
+    return None if inner is None else inner.mean_parent_level_se
 
 
 def cell_values(

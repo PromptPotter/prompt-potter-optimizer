@@ -92,7 +92,6 @@ from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
     prune_empty_dirs,
-    read_text_optional,
     rmtree_robust,
     take_lock,
     unlink_robust,
@@ -120,6 +119,7 @@ from promptpotter.infrastructure.store.session_pointer import (
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
+    FileKind,
     FileUnreadableError,
     NotFoundError,
     graceful,
@@ -188,7 +188,7 @@ class CampaignStore:
     def _read_declared[M: (Campaign, HeadToHeadRecord)](
         self, path: Path, model: type[M]
     ) -> M | None:
-        return read_file(path, model.model_validate_json)
+        return read_file(path, model.model_validate_json, FileKind.MANIFEST)
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         return self._read_declared(self._manifest_path(campaign_id), Campaign)
@@ -593,8 +593,10 @@ class CampaignStore:
             self._write_export(hop, export.model_copy(update={"bench": bench}))
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:
-        text = read_text_optional(self.layout(hop).export)
-        return parse_prompt_export(text) if text else None
+        """An export this build does not read is refused as one, by its path."""
+        return read_file(
+            self.layout(hop).export, lambda raw: parse_prompt_export(raw.decode()), FileKind.EXPORT
+        )
 
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
         # The relation always lands; the ending only where none stands, or it replaces why it ended.

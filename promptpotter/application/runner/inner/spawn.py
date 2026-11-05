@@ -49,6 +49,7 @@ from promptpotter.domain.l4.proxies import (
     effective_round_budget,
     floor_reason,
     inner_cell_facts,
+    inner_cell_report,
     parent_levels,
     unread_rounds,
 )
@@ -168,7 +169,7 @@ def _inner_narrative(
         )
     lines = [
         f"{head}: held-out {result.bench.bench_size} rows:"
-        f" floor {bench_origin:.3f} -> mean-over-rounds B{proxies.mean_bench_lift:+.3f}"
+        f" floor {bench_origin:.3f} -> mean-over-rounds B{proxies.held_out_lift:+.3f}"
         f" (the scored lift), ended {bench_origin + bench_final:.3f} (B{bench_final:+.3f})"
         f"{search}; stop={result.stop_reason}.",
         _lift_shape(result),
@@ -304,7 +305,11 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
 def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
     """Only campaign STATE is sandboxed; the caches stay on the real tenant tree via ``shared_root``."""
     return build_stores(
-        ctx.identity, projects_root=ctx.inner_sandbox_root, shared_root=ctx.shared_root
+        ctx.identity,
+        projects_root=ctx.inner_sandbox_root,
+        install_datasets_root=ctx.install_datasets_root,
+        research_datasets_root=ctx.research_datasets_root,
+        shared_root=ctx.shared_root,
     )
 
 
@@ -558,10 +563,9 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
-        INNER_RESULT_KEY: [f"inner:{query} B{proxies.mean_bench_lift:+.3f} D{delta}"],
+        INNER_RESULT_KEY: [f"inner:{query} B{proxies.held_out_lift:+.3f} D{delta}"],
         "reasoning_trace": _inner_narrative(result, facts, proxies, _narrative_head(cell.spec)),
-        **proxies.model_dump(),
-        "inner": facts.model_dump(mode="json"),
+        **inner_cell_report(facts, proxies),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.
         "terminal_node": _cells(cell.ctx).terminal(cell.cell),
         # No `step_tokens`: every call was billed as it settled, and returning it bills the cell twice.

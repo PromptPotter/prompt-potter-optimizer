@@ -49,7 +49,8 @@ class MetricSpec(StrictModel):
 _UNNAMED_UNITS: frozenset[MeasurandUnit] = frozenset({"rate", "score", "theta"})
 
 
-# The builder the per-sample formula namespace is cut from, so a channel here IS a `scoring:` term.
+# The core cell's, which the per-sample formula namespace is cut from, so a channel here IS a
+# `scoring:` term; a connector's own (`Connector.cell_terms`) are what its rows carry.
 CHANNELS: tuple[str, ...] = CELL_CHANNELS
 
 
@@ -248,14 +249,15 @@ def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
     return tuple(out)
 
 
-def compile_metric(expression: str) -> CompiledExpression:
-    """Checked against every channel, wider than the served namespace: an unanswerable one is unscorable, never refused."""
+def compile_metric(expression: str, available: frozenset[str]) -> CompiledExpression:
+    """Checked against every core channel and the selection's own: a core one no row answers is
+    unscorable, never refused."""
     compiled = compile_expression(expression, source="compare metric expression")
-    unknown = compiled.names - set(CHANNELS)
-    if unknown:
+    known = set(CHANNELS) | available
+    if unknown := compiled.names - known:
         raise BadRequestError(
             f"Metric expression {expression!r} names {sorted(unknown)}, which no cell carries. "
-            f"Available: {sorted(CHANNELS)}."
+            f"Available: {sorted(known)}."
         )
     return compiled
 
@@ -277,7 +279,7 @@ def resolve_metric(
                 higher_is_better=None,
                 description="Composed from the channels this selection carries.",
             ),
-            compile_metric(expression),
+            compile_metric(expression, available),
         )
 
     catalogue = catalogue_for(available)
@@ -289,4 +291,4 @@ def resolve_metric(
             f"{offered or 'nothing — no channel is carried by every campaign here'}, or "
             f"'{CUSTOM_METRIC_PREFIX}<expression>' over {sorted(available)}."
         )
-    return (named, compile_metric(named.expression))
+    return (named, compile_metric(named.expression, available))

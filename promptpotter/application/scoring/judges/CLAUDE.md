@@ -4,7 +4,7 @@ Adding one is `judges/<name>.py` plus a `_BUILTIN` row (`registry.py`); its `Eva
 
 ## A judge is a MEASUREMENT, never a formula term
 
-**A judge runs ONCE, at measure time, and banks its verdict into the row; the pure formula reads that number by name** (it re-runs offline over archived rows). `build_evaluators(specs)` returns `per_sample` `Evaluator`s, one per TERM (`needs_labels=True` skips them on a verifier-graded bank); values land top-level in `pipeline_data`.
+**A judge runs ONCE, at measure time, and banks its verdict into the row; the pure formula reads that number by name** (it re-runs offline over archived rows). `build_evaluators(specs, beside=…)` returns `per_sample` `Evaluator`s, one per TERM, each refused where another owner binds its name (`evaluators.py::bound_by`, the campaign's connector report and observation keys beside the package's) (`needs_labels=True` skips them on a verifier-graded bank); values land top-level in `pipeline_data`.
 
 ## The step schema — one per task SHAPE
 

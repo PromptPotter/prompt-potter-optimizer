@@ -43,9 +43,11 @@ def main() -> int:
     # `pyproject.toml::package-data` decides this, and a typo there drops a whole tree silently.
     bench = paths.install_datasets_root()
     assert bench.is_dir(), f"benchmark definitions absent from the wheel: {bench}"
-    assert (bench / "promptpotter-self" / "panel" / "dataset.yaml").is_file(), (
+    assert (bench / "justlogic" / "d234" / "dataset.yaml").is_file(), (
         f"{bench} exists but carries no dataset definitions"
     )
+    # The wheel ships only what a user may start: L4's panel is a checkout's research tier.
+    assert not (bench / "promptpotter-self").exists(), f"{bench} ships the research tier"
     assert paths.PACKAGE_ROOT in bench.parents or bench.is_relative_to(paths.PACKAGE_ROOT), (
         f"benchmarks resolved outside the installed package: {bench}"
     )
@@ -80,6 +82,18 @@ def main() -> int:
     store = build_stores(default_identity(), projects_root=paths.default_projects_root())
     assert store.base_dir.is_relative_to(home_path), f"store rooted at {store.base_dir}"
     assert store.install_datasets_root == bench
+    assert store.research_datasets_root is None, (
+        f"an install resolves a research tier at {store.research_datasets_root}"
+    )
+    from promptpotter.infrastructure.store.dataset_access import resolve_dataset
+    from promptpotter.shared.errors import DatasetAccessError
+
+    try:
+        resolve_dataset(store, "promptpotter-self/panel")
+    except DatasetAccessError as refused:
+        assert "no research tier" in str(refused), f"the L4 panel refused unexplained: {refused}"
+    else:
+        raise AssertionError("an install resolved the L4 panel")
 
     from promptpotter.main import app
 

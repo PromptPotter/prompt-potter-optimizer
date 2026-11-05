@@ -13,6 +13,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
 from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
+from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
@@ -218,6 +219,10 @@ class CampaignPipelineResponse(StrictModel):
         "the L4 drill-in, on this read"
     )
     is_single_node: bool
+    cell_terms: list[CellTerm] = Field(
+        description="The per-cell terms this campaign's connector adds to `CELL_TERM_META`'s core "
+        "ones, each a key of the connector's cell report a criterion, dial or lens may name"
+    )
 
 
 SteerOutside = Literal["babysat", "refused"]

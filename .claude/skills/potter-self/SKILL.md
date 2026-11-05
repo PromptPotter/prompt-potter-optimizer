@@ -42,7 +42,7 @@ A replayed round runs no proposer: its walk is the `round_proposed` record's `wa
 
 ## Live-run supervision
 
-**Run `new promptpotter-self` ONCE, in the FOREGROUND, to completion.** A kill orphans the open inner run
+**Run `new promptpotter-self/panel` ONCE, in the FOREGROUND, to completion**, from a checkout (the panel is the research tier's, [`research/datasets/CLAUDE.md`](../../../research/datasets/CLAUDE.md)). A kill orphans the open inner run
 (`producer_vanished`, not cached); a relaunch continues the same inner campaign
 (`runner/inner/spawn.py::inner_campaign_id`), so a kill costs the interrupted round, not the cell. The outer
 `cycle_id` hashes optimizer prompts + benchmark, so re-`new` with unchanged prompts collides on ONE cycle.

@@ -69,6 +69,7 @@ class JobSpec(StrictModel):
     projects_root: Path
     shared_root: Path
     install_datasets_root: Path
+    research_datasets_root: Path | None
 
     @model_validator(mode="after")
     def _reads_back_as_written(self) -> Self:
@@ -271,6 +272,7 @@ class HeldRun:
             projects_root=stores.projects_root,
             shared_root=stores.shared_root,
             install_datasets_root=stores.install_datasets_root,
+            research_datasets_root=stores.research_datasets_root,
         )
 
     async def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
@@ -309,6 +311,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         spec.identity,
         projects_root=spec.projects_root,
         install_datasets_root=spec.install_datasets_root,
+        research_datasets_root=spec.research_datasets_root,
         shared_root=spec.shared_root,
     )
     job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)

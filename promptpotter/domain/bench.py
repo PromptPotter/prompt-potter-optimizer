@@ -34,7 +34,7 @@ class DatasetSplit(StrictModel):
         ge=0,
         description="Distinct samples the split ranks away from the search as the bench set, with "
         "every row that repeats one: no optimizer node ever reads one, and the headline is scored "
-        "on them. A row the bank declares `bench_only` is held out beside them, never counted here.",
+        "on them. A row the bank declares `held_out` is held out beside them, never counted here.",
     )
     demo: int = Field(
         0,
@@ -116,7 +116,7 @@ def partition_bank(
     bank: Sequence[Sample], split: DatasetSplit | None, *, seed: int
 ) -> BankPartition:
     """Ranks DISTINCT samples by *seed* and content, so every copy lands on its sample's side."""
-    declared = {s.key for s in bank if s.bench_only}
+    declared = {s.key for s in bank if s.held_out}
     rank = {k: stable_hash([seed, k]) for k in {s.key for s in bank}}
 
     def ordered(rows: Iterable[Sample]) -> tuple[Sample, ...]:
@@ -129,7 +129,7 @@ def partition_bank(
                 "declared, so the search would draw rows the dataset holds out."
             )
         return BankPartition(split=None, search=ordered(bank), bench=(), demo=())
-    if repeats := sorted(s.id for s in bank if not s.bench_only and s.key in declared):
+    if repeats := sorted(s.id for s in bank if not s.held_out and s.key in declared):
         raise ValueError(
             f"rows {repeats} repeat the content of a bench-only row, so one sample would sit on "
             "both sides of the split."

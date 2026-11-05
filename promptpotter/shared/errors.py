@@ -141,10 +141,17 @@ class NotFoundError(PotterError):
 
 
 class DatasetAccessError(NotFoundError):
-    """A 404, never a 403: the existence-leak posture."""
+    """A 404, never a 403: the existence-leak posture. Where no research tier is in reach (a wheel),
+    every not-found says so alike, since a research name is not found there by construction."""
 
-    def __init__(self, name: str) -> None:
-        super().__init__(f"Dataset '{name}' not found")
+    def __init__(self, name: str, *, research_tier: bool) -> None:
+        said = f"Dataset '{name}' not found"
+        if not research_tier:
+            said += (
+                ". This install has no research tier: research definitions (an L4 panel among "
+                "them) live in a source checkout's research/datasets/, which a wheel does not carry"
+            )
+        super().__init__(said)
         self.name = name
 
 
@@ -305,6 +312,19 @@ class PayloadInvalidError(PotterError):
             raise cls.refusing(exc.errors(), under=under) from exc
 
 
+class SlugTakenError(ConflictError):
+    """A new definition's name a tier already holds, refused before anything is kept."""
+
+    def __init__(self, slug: str, suggested: str) -> None:
+        super().__init__(
+            f"A dataset named '{slug}' already exists. Suggested slug: {suggested}.",
+            code="slug_collision",
+            details={"slug": slug, "suggested_slug": suggested},
+        )
+        self.slug = slug
+        self.suggested = suggested
+
+
 def _located(errors: Iterable[Mapping[str, Any]], under: tuple[str, ...]) -> list[dict[str, Any]]:
     """Each failing field by its path and rule, never its value (a refused field may be a secret);
     a validator's own sentence where one raised."""
@@ -333,55 +353,59 @@ class ServiceUnavailableError(PotterError):
     code = "service_unavailable"
 
 
-class StoredConfigInvalidError(PotterError):
-    """500, not 422: the request was fine and the caller cannot fix a file the server persisted."""
+class FileKind(enum.Enum):
+    """What a file the store refuses whole IS: its code, status and remedy, said here once."""
 
-    http_status = 500
-    code = "stored_config_invalid"
+    def __init__(self, code: str, http_status: int, remedy: str) -> None:
+        self.code = code
+        self.http_status = http_status
+        self.remedy = remedy
 
-    def __init__(self, *, path: str, reason: str) -> None:
+    STORE = ("file_unreadable", 409, "No reader repairs it.")
+    BANK = (
+        "bank_unreadable",
+        409,
+        "No reader repairs it: delete it, and a dataset with a source re-fetches it on its next "
+        "start.",
+    )
+    EXPORT = ("export_unreadable", 409, "An export is disposable: re-run the cycle to export it.")
+    # Never migrated: the run data it belongs to is wiped whole.
+    MANIFEST = (
+        "manifest_unreadable",
+        409,
+        "No migration exists: `python -m promptpotter reset` wipes it with the rest of the run "
+        "data.",
+    )
+    JOB = ("job_unreadable", 409, "No migration exists: delete it once no run it names is live.")
+    # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
+    STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
+    # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.
+    OPTIMIZER_PROMPT = (
+        "optimizer_prompt_invalid",
+        500,
+        "Fix its template: it fills only the slots its node declares.",
+    )
+
+
+class FileUnreadableError(PotterError):
+    """THE refusal of a file that is not a ledger, carrying its path and its `FileKind`: no reader
+    yields its bytes as a dict or reads past them. Never a `ValueError`: a survey reads this type
+    by name and lists its one subject unreadable, and every other door answers it as itself."""
+
+    def __init__(self, kind: FileKind, *, path: str, reason: str) -> None:
+        self.kind = kind
         super().__init__(
-            f"{path} is no longer readable by this build: {reason}. Fix the file.",
+            f"{path} is unreadable by this build ({reason}). {kind.remedy}",
             details={"path": path, "reason": reason},
         )
 
+    @property
+    def code(self) -> str:  # type: ignore[override]  # derived from `kind`, its one holder
+        return self.kind.code
 
-class ManifestUnreadableError(ConflictError):
-    """A campaign manifest is never migrated: one this build cannot read is refused by name."""
-
-    code = "manifest_unreadable"
-
-    def __init__(self, *, path: str, reason: str) -> None:
-        super().__init__(
-            f"{path} was written in a shape this build does not read ({reason}). No migration "
-            "exists: `python -m promptpotter reset` wipes it with the rest of the run data.",
-            details={"path": path, "reason": reason},
-        )
-
-
-class JobUnreadableError(ConflictError):
-    """A job file is never migrated: one this build cannot read refuses every reader of the jobs dir by name."""
-
-    code = "job_unreadable"
-
-    def __init__(self, *, path: str, reason: str) -> None:
-        super().__init__(
-            f"{path} was written in a shape this build does not read ({reason}). No migration "
-            "exists: delete it once no run it names is live.",
-            details={"path": path, "reason": reason},
-        )
-
-
-class FileUnreadableError(ConflictError):
-    """A store file that is not a ledger, refused by name: no reader yields its bytes as a dict or reads past them."""
-
-    code = "file_unreadable"
-
-    def __init__(self, *, path: str, reason: str) -> None:
-        super().__init__(
-            f"{path} is unreadable by this build ({reason}). No reader repairs it.",
-            details={"path": path, "reason": reason},
-        )
+    @property
+    def http_status(self) -> int:  # type: ignore[override]
+        return self.kind.http_status
 
 
 class LedgerUnreadableError(ConflictError):

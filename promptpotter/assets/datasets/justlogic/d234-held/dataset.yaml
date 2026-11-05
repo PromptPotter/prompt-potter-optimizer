@@ -1,3 +1,7 @@
+card:
+  title: JustLogic — head-to-head bench
+  summary: Deductive reasoning on a 150-row bench, sized to compare two optimizers.
+
 source:
   depths: [2, 3, 4]
   held_tail: true

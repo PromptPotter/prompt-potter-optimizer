@@ -2,20 +2,21 @@
 
 PromptPotter optimizing **its own optimizer prompts**. The outer cycle is a normal cycle; each outer
 *sample* runs a whole inner campaign on a pinned benchmark seed. Connector
-`application/runner/inner/connector.py`; dataset `promptpotter/assets/datasets/promptpotter-self/`;
-CLI/headless only. The goal is a **distributable `promptpotter-self`** an operator runs with `new` at
-bounded, visible cost.
+`application/runner/inner/connector.py`; dataset `research/datasets/promptpotter-self/` (the research tier, a checkout's only);
+CLI/headless only. A wheel ships only what a user may start, so `promptpotter-self` is never
+distributed: a checkout's operator runs it with `new promptpotter-self/panel` at bounded, visible
+cost, and a wheel refuses the name as a research one it does not carry.
 
 **This file says what is TRUE. How to run and read one is the `potter-self` skill's**
 (`.claude/skills/potter-self/`); every knob value is `dataset.yaml`'s.
 
 ## The measurand
 
-`mean_bench_lift` — the MEAN over the inner rounds of the headline accuracy of the prompt the search had
+`held_out_lift` — the MEAN over the inner rounds of the headline accuracy of the prompt the search had
 **adopted** by that round on the cell's **held-out** rows, minus the origin's on the same rows
 (`domain/l4/proxies.py::bench_level_series` over `application/runner/bench.py::line_bench_series`, a
 rebase's discarded rounds included). The held-out rows are drawn beside the origin bank under the cell's
-seed (`application/diagnostics/seed_screen.py::draw_bench`), marked `bench_only`, reached by no inner
+seed (`application/diagnostics/seed_screen.py::draw_bench`), marked `held_out`, reached by no inner
 node. `campaign.scoring.per_sample` re-anchors it `x + 0.5`, so the paired estimator's effect IS the mean
 held-out lift.
 
@@ -35,9 +36,12 @@ nothing; null with `series_reason` where the series differences nothing.
 - **θ is paired on one ruler** (`domain/ruler.py::RulerScope`); each cell reads the tenant ruler at the
   version its outer round opened on (`infrastructure/store/archive_queries.py::CellOf`), less its own
   parent line.
-- **ONE term scores.** An outer cell's `pipeline_data` holds `mean_bench_lift` plus `inner`, one
+- **ONE term scores.** An outer cell's report (`PipelineData.cell_report`) holds the
   `InnerCellFacts` (`domain/l4/inner_facts.py`) the recursion alone writes — levels, peak,
-  `mean_round_delta` and SE, round count, stop reason, `sent_usd` — REPORTING channels, never terms. A
+  `mean_round_delta` and SE, round count, stop reason, `sent_usd`: a lens reads levels, lifts and
+  rounds under its `promptpotter` connector term (`domain/l4/proxies.py::INNER_CELL_TERMS`),
+  `sent_usd` and tokens under the core `cost` and `tokens` (`proxies.py::INNER_REPORTED_KEYS`), the
+  rest under `inner` (`proxies.py::inner_cell_report`); only the family's `per_sample` scores. A
   term that cannot move with the candidate gets no vote; no term divides by dollar cost (both caches are
   content-addressed, so a cost denominator measures how often the candidate ran before); no peak reading
   and no declared target.
@@ -73,7 +77,7 @@ nothing; null with `series_reason` where the series differences nothing.
   ENVIRONMENT axis; `reasoning_effort`, `max_tokens` and `temperature` are rails.
 - **The held-out rows are identical across arms**; a dataset must hold `n_samples_origin + n_samples_bench`
   rows or its cells are refused before any send. A held-out ENVIRONMENT (`panel` `held_out: true`) is
-  seated as a `bench_only` outer sample (`application/runner/inner/connector.py::_extract_experiment`) and declares
+  seated as a `held_out` outer sample (`application/runner/inner/connector.py::_extract_experiment`) and declares
   `dataset_split: {bench: 0}` (`partition_bank` refuses otherwise).
 - **The instrument is decided per CELL** (`domain/cells.py::Seat`); two cells running one node under
   different overlays refuse (`tasks.py::InnerCells.owners`). A cell runs the optimizer its own dataset

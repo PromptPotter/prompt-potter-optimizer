@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, computed_field
 
+from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.default_claim import is_host
@@ -70,7 +71,7 @@ assert _READ_ON_L4_ROWS <= UNREAD_PIPELINE_KEYS
 
 
 def _protected_pipeline_fields(pipeline: PipelineData) -> frozenset[str]:
-    return _READ_ON_L4_ROWS if pipeline.inner is not None else frozenset()
+    return _READ_ON_L4_ROWS if inner_facts_of(pipeline) is not None else frozenset()
 
 
 def _parsed(lines: Iterable[str]) -> list[tuple[str, FiledAnswer]]:

@@ -109,7 +109,7 @@ deploy-linux/*.local.md
 
 # Nothing under promptpotter/assets/datasets/ is ignored: it holds only the shipped templates. An operator's own
 # definitions, a fetched bank, a built panel and its task directories land in the tenant tier under
-# .promptpotter/ (`infrastructure/store/CLAUDE.md` § Dataset content has two tiers). A stray file
+# .promptpotter/ (`infrastructure/store/CLAUDE.md` § Dataset content has three tiers). A stray file
 # there is a bug to see, never one to hide.
 
 # Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable

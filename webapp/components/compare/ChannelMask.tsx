@@ -3,6 +3,7 @@ import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import type { ReadFailure } from "@/lib/hooks/useRead";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { NO_DIALS, lensOf, type ScoringMask } from "@/lib/scoring-mask";
 
 export function ChannelMask({
@@ -22,9 +23,10 @@ export function ChannelMask({
   );
   const [samples, setSamples] = useState((subject.mask?.samples ?? []).join(","));
 
+  const { cellTerms } = useConnector();
   const commit = (next: ScoringMask, nextSamples: string) => {
     const address = maskedSubject(subject, {
-      lens: lensOf(next),
+      lens: lensOf(next, cellTerms),
       samples: nextSamples.trim(),
     });
     if (address !== subject.key) onApply(subject.key, address);

@@ -43,7 +43,10 @@ from promptpotter.application.pipeline_responses import (
     optimizer_setup,
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization
-from promptpotter.application.scoring.formula.compiler import split_scoring_block
+from promptpotter.application.scoring.formula.compiler import (
+    campaign_terms,
+    split_scoring_block,
+)
 from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
@@ -107,15 +110,16 @@ from promptpotter.infrastructure.store.dataset_access import (
     resolve_dataset,
     runnable_definition,
 )
+from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
 from promptpotter.shared.errors import (
     BadRequestError,
     DatasetAccessError,
+    FileKind,
+    FileUnreadableError,
     LedgerUnreadableError,
-    ManifestUnreadableError,
     PayloadInvalidError,
-    StoredConfigInvalidError,
     validation_reason,
 )
 from promptpotter.shared.hashing import stable_hash
@@ -350,7 +354,7 @@ def _draft_local(stores: Stores, draft: DraftCampaign) -> dict[str, Any]:
         case UploadBasis() as upload:
             return committed_pipeline_json(draft, upload)
         case DatasetBasis(dataset=name):
-            return runnable_definition(resolve_dataset(stores, name).directory).pipeline
+            return runnable_definition(resolve_dataset(stores, name)).pipeline
         case _:
             assert_never(draft.basis)
 
@@ -361,7 +365,7 @@ def draft_backend_type(stores: Stores, draft: DraftCampaign) -> str:
         case UploadBasis(connector=connector):
             return connector
         case DatasetBasis(dataset=name):
-            return runnable_definition(resolve_dataset(stores, name).directory).backend_type
+            return runnable_definition(resolve_dataset(stores, name)).backend_type
         case _:
             assert_never(draft.basis)
 
@@ -378,7 +382,7 @@ async def dataset_pipeline(
     stores: Stores, dataset: ResolvedDataset, *, experiment: Mapping[str, Any] | None
 ) -> dict[str, Any]:
     """A dataset's pipeline outside a run, over the experiment its panel holds today."""
-    definition = runnable_definition(dataset.directory)
+    definition = runnable_definition(dataset)
     connector = connectors.CONNECTORS.get(definition.backend_type)
     served = await served_pipeline(stores, connector, experiment=experiment)
     return served.over(definition.pipeline)
@@ -448,12 +452,12 @@ def _apply_starting_prompts(
     *,
     filtered: PipelineSchema,
     active: list[str],
-    dataset_dir: Path,
+    dataset: ResolvedDataset,
     dataset_name: str,
 ) -> None:
     """Assumes the caller checked ``has_dataset_prompts``."""
     prompt_nodes = [n for n in filtered.prompt_nodes() if n.name in active]
-    authored = declared_origin_prompts(dataset_dir, prompt_nodes)
+    authored = declared_origin_prompts(dataset, prompt_nodes)
     for pnode in prompt_nodes:
         if pnode.name not in authored:
             continue
@@ -601,15 +605,15 @@ def _draft_declared(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
         return with_optimization(
             default_campaign_config(draft, draft.basis), draft.optimization_overrides
         )
-    dataset_dir = resolve_dataset(stores, draft.basis.dataset).directory
-    declared = load_dataset_campaign_config(dataset_dir)
+    declared = load_dataset_campaign_config(resolve_dataset(stores, draft.basis.dataset))
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
     update: dict[str, Any] = {
         "pipeline_overlay": {**declared.pipeline_overlay, **overrides},
         "optimizer_narrowing": {**declared.optimizer_narrowing, **narrowing},
     }
     # The file's block carries anchors a draft's two fields cannot: it stands until they move.
-    if scoring_choice(declared.scoring) != (draft.scoring_matcher, draft.scoring_dials):
+    terms = campaign_terms(draft_backend_type(stores, draft))
+    if scoring_choice(declared.scoring, terms) != (draft.scoring_matcher, draft.scoring_dials):
         update["scoring"] = draft_scoring_block(draft)
     return with_optimization(declared, draft.optimization_overrides).model_copy(update=update)
 
@@ -629,8 +633,11 @@ def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> Cy
     try:
         declared = effective_config(campaign.declaration)
     except ValidationError as exc:
-        raise ManifestUnreadableError(
-            path=f"campaigns/{campaign.campaign_id}/campaign.json::declaration",
+        raise FileUnreadableError(
+            FileKind.MANIFEST,
+            path=str(
+                CampaignLayout(stores.campaigns.campaign_root_dir(campaign.campaign_id)).manifest
+            ),
             reason=validation_reason(exc, shown=1),
         ) from exc
     campaigns = stores.campaigns
@@ -831,6 +838,7 @@ def _response(
         connector=connector,
         backend_type=backend_type,
         self_optimization=is_self_optimization(backend_type),
+        cell_terms=list(connectors.CONNECTORS.get(backend_type).cell_terms),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
         params=folded.params,
@@ -971,8 +979,8 @@ async def resolve_pipeline_for_dataset(
     dataset = resolve_dataset(stores, dataset_name)
     experiment = experiment_outside_run(stores, dataset)
     declared = await dataset_pipeline(stores, dataset, experiment=experiment)
-    cfg = load_dataset_campaign_config(dataset.directory)
-    definition = runnable_definition(dataset.directory)
+    cfg = load_dataset_campaign_config(dataset)
+    definition = runnable_definition(dataset)
     schema = parse_pipeline_response(declared)
     _, filtered = _resolve_active_schema(
         schema,
@@ -995,9 +1003,8 @@ _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
 # The typed refusals a root's own data raises; any other exception is a defect and propagates.
 _ROOT_UNRESOLVED = (
     DatasetAccessError,
-    StoredConfigInvalidError,
+    FileUnreadableError,
     LedgerUnreadableError,
-    ManifestUnreadableError,
     PayloadInvalidError,
     ScoringFormulaError,
 )
@@ -1100,7 +1107,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     exclude = list(campaign_config.exclude_nodes)
     dataset_name = session.measured_dataset
     dataset = session.dataset
-    dataset_dir = None if dataset is None else dataset.directory
 
     active, filtered = _resolve_active_schema(
         session.pipeline_schema,
@@ -1126,7 +1132,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     ).fold()
     pipeline_params = folded.params
 
-    ships_prompts = dataset_dir is not None and has_dataset_prompts(dataset_dir)
+    ships_prompts = dataset is not None and has_dataset_prompts(dataset)
     _validate_prompt_reach(
         filtered=filtered,
         active=active,
@@ -1135,12 +1141,12 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         dataset_name=dataset_name,
     )
 
-    if dataset_dir is not None and ships_prompts:
+    if dataset is not None and ships_prompts:
         _apply_starting_prompts(
             pipeline_params,
             filtered=filtered,
             active=active,
-            dataset_dir=dataset_dir,
+            dataset=dataset,
             dataset_name=dataset_name,
         )
 

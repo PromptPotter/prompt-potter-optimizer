@@ -14,6 +14,7 @@ import io
 import json
 import random
 import re
+import sys
 import zipfile
 from dataclasses import replace
 from datetime import date
@@ -35,6 +36,7 @@ from factories import (
     samples,
     seat,
     set_cycle,
+    stored_campaign,
 )
 from offline_world import Router
 
@@ -47,15 +49,22 @@ from promptpotter.application.bench.children import (
 )
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import declare_steered_values
-from promptpotter.application.bench.task_context import campaign_framing
+from promptpotter.application.bench.task_context import campaign_framing, checkin_template
+from promptpotter.application.commands import launching
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
-from promptpotter.application.datasets import ingest, loaders, tabular_ingest
+from promptpotter.application.datasets import ingest, loaders, startability, tabular_ingest
+from promptpotter.application.datasets.authored import (
+    campaign_file_block,
+    dataset_campaign_block,
+    validated_campaign_config,
+)
 from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
+from promptpotter.application.hierarchy import entries_version, list_hierarchy
 from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
@@ -69,6 +78,7 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -99,6 +109,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import l1_shots_in_demo_pool
+from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
     ParamLayers,
     campaign_admits,
@@ -122,6 +133,8 @@ from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
 )
+from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
+from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
 from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
@@ -147,6 +160,8 @@ from promptpotter.domain.command_kinds import (
     SubmittedArm,
 )
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
+from promptpotter.domain.dataset_name import validate_dataset_name
+from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import (
@@ -196,6 +211,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.identity import blocklist, grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
@@ -204,23 +220,39 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import fo
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
+    DatasetCard,
     ResolvedDataset,
+    backend_type_of_dataset,
+    install_dataset,
+    list_readable_datasets,
     read_dataset_pipeline,
     resolve_dataset,
+    runnable_definition,
 )
-from promptpotter.infrastructure.store.io import write_json, write_yaml
+from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
+from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
+from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError
+from promptpotter.presentation.cli import campaign_runner
+from promptpotter.shared.errors import (
+    ConflictError,
+    DatasetAccessError,
+    FileKind,
+    FileUnreadableError,
+    PayloadInvalidError,
+    SlugTakenError,
+)
 from promptpotter.shared.hashing import dataset_hash, source_facts, stable_hash
 from promptpotter.shared.identity import default_identity
 
 _L1 = Variation(node="potter:l1_generate", mode="llm")
 _DATASETS = install_datasets_root()
+_RESEARCH = Path(__file__).resolve().parents[1] / "research" / "datasets"
 
 
 def _install(name: str) -> ResolvedDataset:
-    return ResolvedDataset(name, _DATASETS / name, "install")
+    return install_dataset(_DATASETS, name)
 
 
 _SPEC = InnerTaskSpec(
@@ -243,7 +275,11 @@ def _connector_config(**fields: Any) -> CampaignConfig:
 
 
 def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_other(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    built_stores: Stores,
+    offline: Router,
 ) -> None:
     # A value the canonical form cannot spell is refused, never stringified into a stored key.
     with pytest.raises(TypeError):
@@ -778,9 +814,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "tasks": [{"kind": "seat", "id": "seed-0"}],
     }
     campaign = {"optimization": {"budget": {"rounds": 2}, "degradation_threshold": 0.4}}
-    for name in ("innerbench", "otherbench"):
+    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
+    for root in (tenant_copy, built_stores.install_datasets_root / "otherbench"):
         write_yaml(
-            built_stores.install_datasets_root / name / DEFINITION_FILE,
+            root / DEFINITION_FILE,
             {"pipeline": {"nodes": {"llm_only": {"config": {"model": "a"}}}}, "campaign": campaign},
         )
 
@@ -803,13 +840,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert after["seed-0"] == before["seed-0"] and grown_fingerprint == fingerprint, (
         "adding an inner dataset re-keyed a banked cell"
     )
-    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
     write_yaml(
         tenant_copy / DEFINITION_FILE,
         {"pipeline": {"nodes": {"llm_only": {"config": {"model": "b"}}}}, "campaign": campaign},
     )
     edited, _ = keyed(grown)
-    assert edited["seed-0"] != before["seed-0"], "identity hashed the wrong tier"
+    assert edited["seed-0"] != before["seed-0"], "an edit to a seat's dataset re-keyed nothing"
     assert edited["other"] == after["other"], "one seat's edit re-keyed another seat"
     sandbox = build_stores(
         built_stores.identity,
@@ -886,7 +922,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         },
     )
     hubcut = resolve_dataset(built_stores, "hubcut")
-    hub_source = loaders.definition_source(hubcut.directory)
+    hub_source = loaders.definition_source(hubcut)
     assert hub_source is not None
     hub_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
     built_stores.tenant_datasets.record_cut(hub_source.identity, hub_bank)
@@ -894,6 +930,332 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert held_cut is not None and held_cut.dataset_hash == hub_bank.dataset_hash, (
         "a recorded cut was not held"
     )
+    # A held bank opens without its source's extra, which only a fetch needs; one not held is
+    # refused for that extra before a fetch is tried.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("hubfresh") / DEFINITION_FILE,
+        {
+            "source": {
+                "recipe": "columns",
+                "hub": "org/repo",
+                "rev": "c2",
+                "split": "test",
+                "query": "q",
+                "truth": "t",
+            },
+            "pipeline": {"backend_type": "termnorm"},
+        },
+    )
+    with monkeypatch.context() as uninstalled:
+        uninstalled.setattr(startability, "installed", lambda _extra: False)
+        assert startability.dataset_reading(built_stores, "hubcut") == (
+            startability.DatasetReading(1, None)
+        ), "a held bank was refused for the extra only its fetch needs"
+        assert startability.checkin_bank(built_stores, "hubcut").dataset_hash == (
+            hub_bank.dataset_hash
+        ), "a check-in on a held bank did not open on it"
+        fresh = startability.dataset_reading(built_stores, "hubfresh")
+        assert fresh.block is StartBlock.MISSING_EXTRA, "an unheld bank listed as startable"
+        with pytest.raises(DatasetUnstartableError):
+            startability.checkin_bank(built_stores, "hubfresh")
+    assert not offline.unrouted, f"a refused fetch reached the hub: {offline.unrouted}"
+
+    # A name reads from the first tier holding it, an account's own, then the install's, then the
+    # research tier's, and is refused nowhere for a second holder; a card that is not plain title
+    # and summary refuses a run and lists the dataset without one.
+    install_root, research_root = tmp_path / "install", tmp_path / "research"
+    termnorm = {"pipeline": {"backend_type": "termnorm"}}
+    for root, name, definition in (
+        (install_root, "twin", termnorm),
+        (research_root, "twin", {"pipeline": {"backend_type": "promptpotter"}}),
+        (research_root, "solo", termnorm),
+        (install_root, "carded", {**termnorm, "card": {"title": "T", "summary": "Two  words."}}),
+        (install_root, "miscarded", {**termnorm, "card": {"title": "T"}}),
+    ):
+        write_yaml(root / name / DEFINITION_FILE, definition)
+    tiered = build_stores(
+        default_identity(),
+        projects_root=tmp_path / "tiered",
+        install_datasets_root=install_root,
+        research_datasets_root=research_root,
+    )
+    # An account's own written before the install shipped its name: a survivor, read as its own.
+    write_yaml(tiered.tenant_datasets.dataset_dir("carded") / DEFINITION_FILE, termnorm)
+    assert {n: resolve_dataset(tiered, n).tier for n in ("twin", "carded", "solo")} == {
+        "twin": "install",
+        "carded": "yours",
+        "solo": "research",
+    }, "a name was read from another tier than the first holding it"
+    assert backend_type_of_dataset(tiered, "twin") == "termnorm", "a shadowed tier answered"
+    # Nothing a name's second holder blocks: every campaign lists, and so does every origin.
+    for campaign_id, name in (("camp-twice", "carded"), ("camp-beside", "miscarded")):
+        hop = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{name}0000")
+        stored_campaign(
+            tiered, minted_campaign(hop, dataset_name=name, root_content_hash=f"origin-{name}")
+        )
+        tiered.campaigns.mint_cycle(hop)
+    shadowed = entries_version([tiered])
+    sidebar = list_hierarchy(
+        tiered,
+        inside=(),
+        dataset=None,
+        lifecycle="all",
+        campaign_id=None,
+        attached_only=False,
+        depth=0,
+    )
+    assert sorted(entry.label for entry in sidebar.entries) == ["carded", "miscarded"], (
+        "a campaign on a shadowing name failed the sidebar, or hid its neighbour"
+    )
+    assert sorted(origin.dataset_name for origin in list_origins(tiered)) == [
+        "carded",
+        "miscarded",
+    ], "the origins survey dropped an origin whose name another tier also holds"
+
+    # The one writer (a compile's too) refuses a name another tier holds, and lands nothing; an
+    # account re-writes a name it holds in place, its survivor over the install's included.
+    def write_own(name: str) -> Path:
+        return tiered.write_own_definition(
+            name,
+            source={"recipe": "rows", "items": []},
+            pipeline=termnorm["pipeline"],
+            campaign={},
+            description="d",
+            framing=TaskDecomposition(),
+            origin={},
+        )
+
+    for name in ("twin", "solo", "miscarded"):
+        with pytest.raises(SlugTakenError):
+            write_own(name)
+        assert not tiered.tenant_datasets.slug_exists(name), f"a write landed over {name}"
+    for name in ("mine", "mine", "carded"):
+        write_own(name)
+        assert resolve_dataset(tiered, name).tier == "yours", f"a re-write of {name} was refused"
+    for name in ("carded", "mine"):
+        rmtree_robust(tiered.tenant_datasets.dataset_dir(name))
+    assert resolve_dataset(tiered, "carded").tier == "install", "a name lost its next holder"
+    assert entries_version([tiered]) != shadowed, (
+        "the sidebar's validator missed the holder a name resolves to: a 304 serves the old one on"
+    )
+    # A draft names a dataset no tier holds, an account's own included, and is told a free name.
+    write_yaml(research_root / "solo-2" / DEFINITION_FILE, termnorm)
+    write_yaml(tiered.tenant_datasets.dataset_dir("own") / DEFINITION_FILE, termnorm)
+    for slug, free in (("miscarded", "miscarded-2"), ("solo", "solo-3"), ("own", "own-2")):
+        with pytest.raises(SlugTakenError) as taken:
+            asyncio.run(
+                ingest.ingest_draft(stores=tiered, blob=b"a,b\n1,2\n", filename="t.csv", slug=slug)
+            )
+        assert taken.value.suggested == free, f"an upload over {slug} was offered a held name"
+    # One torn definition file, one answer, whichever door reads it.
+    for read_miscarded in (
+        lambda: runnable_definition(resolve_dataset(tiered, "miscarded")),
+        lambda: dataset_campaign_block(resolve_dataset(tiered, "miscarded")),
+    ):
+        with pytest.raises(FileUnreadableError) as miscarded:
+            read_miscarded()
+        assert (miscarded.value.kind, miscarded.value.details["path"]) == (
+            FileKind.STORED_CONFIG,
+            str(install_root / "miscarded" / DEFINITION_FILE),
+        ), "a malformed card ran, or one file answered two ways"
+    cards = {ref.dataset.name: ref.card for ref in list_readable_datasets(tiered)}
+    assert cards == {
+        "own": None,
+        "twin": None,
+        "carded": DatasetCard("T", "Two words."),
+        "miscarded": None,
+    }, "the listing misread a card, or listed the research tier"
+    # What the checkout ships: its install and research tiers hold no name in common, so no
+    # install name is shadowed by research and no research name by the install.
+    shipped = [
+        {p.parent.relative_to(root).as_posix() for p in root.rglob(DEFINITION_FILE)}
+        for root in (paths.install_datasets_root(), paths.research_datasets_root())
+        if root is not None
+    ]
+    assert len(shipped) == 2 and all(shipped), "this checkout lost a tier"
+    assert not set.intersection(*shipped), f"both shipped tiers hold {set.intersection(*shipped)}"
+    # An unoffered name's 404 reads as an absent one's, so the answer never says which it is.
+    with monkeypatch.context() as unoffered:
+        unoffered.setattr(startability, "offered", lambda _stores, _name: False)
+        with pytest.raises(DatasetAccessError) as hidden:
+            startability.offered_dataset(tiered, "twin")
+    with pytest.raises(DatasetAccessError) as absent:
+        resolve_dataset(tiered, "nowhere")
+    assert str(hidden.value).replace("twin", "nowhere") == str(absent.value), (
+        "an unoffered name's 404 said more, or less, than an absent one's"
+    )
+    # `new` says the refusal's own words: on a wheel the research-tier sentence is all that tells
+    # an operator where L4's panel lives.
+    with monkeypatch.context() as wheel:
+        wheel.setattr(paths, "research_datasets_root", lambda: None)
+        wheel.setenv("OPENROUTER_API_KEY", "not-a-key")
+        wheel.setattr(sys, "argv", ["promptpotter", "new", "promptpotter-self/panel"])
+        with pytest.raises(SystemExit) as refused_new:
+            campaign_runner.main()
+    assert "no research tier" in str(refused_new.value.code), (
+        "`new` on a wheel dropped why the L4 panel is not found"
+    )
+    # So does an upload `new` refuses: the slug's own reason, never a parse failure in its place.
+    upload = tmp_path / "rows.csv"
+    upload.write_text("q,a\nx,1\n", encoding="utf-8")
+    with pytest.raises(ValueError) as bad_slug:
+        validate_dataset_name("bad slug!")
+    with monkeypatch.context() as cli:
+        cli.setenv("OPENROUTER_API_KEY", "not-a-key")
+        cli.setattr(sys, "argv", ["promptpotter", "new", str(upload), "--slug", "Bad Slug!"])
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
+            campaign_runner.main()
+    assert f"Error: {bad_slug.value}" in capsys.readouterr().err.splitlines(), (
+        "`new` reworded an upload's refusal"
+    )
+    # A check-in renamed onto a name the install holds is refused, in the claim's own words, and
+    # told its draft is kept.
+    with monkeypatch.context() as cli:
+        cli.setenv("OPENROUTER_API_KEY", "not-a-key")
+        cli.setattr(
+            sys, "argv", ["promptpotter", "new", str(upload), "--set", "slug=email-tagging"]
+        )
+        with pytest.raises(SystemExit) as renamed:
+            campaign_runner.main()
+    said = str(renamed.value.code)
+    assert said.startswith(
+        "ERROR: A dataset named 'email-tagging' already exists. Suggested slug: email-tagging-2."
+    ), f"a check-in took an install name, or `new` reworded the claim: {said!r}"
+    assert "discard-draft" in said, "`new` dropped that the refused check-in is kept"
+
+    # Every file the store refuses whole is refused as what it IS, by its path, through the door
+    # that serves it: its code, its status and the remedy that fits it.
+    beside = CycleHop(campaign_id="camp-beside", cycle_id="cycle_miscarded0000")
+    held_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
+    tiered.tenant_datasets.put_bank(held_bank)
+    write_yaml(install_root / "badconfig" / DEFINITION_FILE, termnorm)
+    config_file = install_root / "badconfig" / DEFINITION_FILE
+    grants_file, blocks_file = tmp_path / "grants.json", tmp_path / "blocklist.json"
+    draft_file = tiered.drafts.draft_dir("torn") / DRAFT_FILE
+    draft_file.parent.mkdir(parents=True)
+    store = ("file_unreadable", 409, "No reader repairs it.")
+    stored_config = ("stored_config_invalid", 500, "Fix the file.")
+    manifest_file = CampaignLayout(tiered.campaigns.campaign_root_dir("camp-beside")).manifest
+    manifest = json.loads(manifest_file.read_bytes())
+    manifest["declaration"]["loop"]["no_such_knob"] = 1
+    checkin_file = paths.user_data_root() / "checkin" / "pipeline.yaml"
+
+    def beside_config() -> CycleConfig:
+        campaign = tiered.campaigns.load_campaign("camp-beside")
+        assert campaign is not None
+        return cycle_config(tiered, campaign, None)
+
+    shipped_checkin = (paths.checkin_assets_root() / "pipeline.yaml").read_text(encoding="utf-8")
+    for torn_file, torn, door, (code, status, remedy) in (
+        (
+            tiered.campaigns.layout(beside).export,
+            b"{not an export",
+            lambda: tiered.campaigns.read_export(beside),
+            ("export_unreadable", 409, "An export is disposable: re-run the cycle to export it."),
+        ),
+        (
+            tiered.tenant_datasets._bank_path(held_bank.dataset_hash),
+            b'{"items": 3}',
+            lambda: tiered.tenant_datasets.bank(held_bank.dataset_hash),
+            (
+                "bank_unreadable",
+                409,
+                "No reader repairs it: delete it, and a dataset with a source re-fetches it on "
+                "its next start.",
+            ),
+        ),
+        (
+            CampaignLayout(tiered.campaigns.campaign_root_dir("camp-beside")).manifest,
+            b"{not a manifest",
+            lambda: tiered.campaigns.load_campaign("camp-beside"),
+            (
+                "manifest_unreadable",
+                409,
+                "No migration exists: `python -m promptpotter reset` wipes it with the rest of "
+                "the run data.",
+            ),
+        ),
+        (
+            manifest_file,
+            json.dumps(manifest).encode(),
+            beside_config,
+            (
+                "manifest_unreadable",
+                409,
+                "No migration exists: `python -m promptpotter reset` wipes it with the rest of "
+                "the run data.",
+            ),
+        ),
+        (
+            checkin_file,
+            shipped_checkin.replace(
+                "{{consultation_instruction}}", "{{consultation_instruction}} {{no_such_slot}}"
+            ).encode(),
+            checkin_template,
+            (
+                "optimizer_prompt_invalid",
+                500,
+                "Fix its template: it fills only the slots its node declares.",
+            ),
+        ),
+        (
+            tiered.jobs_dir / "torn.json",
+            b'{"job_id": 3}',
+            lambda: JobRegistry.attach(tiered.jobs_dir).get("torn"),
+            ("job_unreadable", 409, "No migration exists: delete it once no run it names is live."),
+        ),
+        (
+            config_file,
+            b"campaign: [unclosed",
+            lambda: dataset_campaign_block(resolve_dataset(tiered, "badconfig")),
+            stored_config,
+        ),
+        (
+            config_file,
+            b"campaign: [unclosed",
+            lambda: campaign_file_block(config_file),
+            stored_config,
+        ),
+        (
+            config_file,
+            b"campaign: 3\n",
+            lambda: campaign_file_block(config_file),
+            stored_config,
+        ),
+        (
+            config_file,
+            b"campaign:\n  optimization: 3\n",
+            lambda: validated_campaign_config(campaign_file_block(config_file), path=config_file),
+            stored_config,
+        ),
+        (
+            blocks_file,
+            b'{"emails": "ada@x.com"}',
+            lambda: blocklist.block_email(
+                blocks_file, "eve@x.com", actor="o", audit_path=tmp_path / "audit.jsonl"
+            ),
+            stored_config,
+        ),
+        (grants_file, b'{"grants": 3}', lambda: grants.list_grants(grants_file), stored_config),
+        (draft_file, b"{not a draft", lambda: tiered.drafts.read_draft("torn"), store),
+    ):
+        kept = torn_file.read_bytes() if torn_file.is_file() else None
+        torn_file.parent.mkdir(parents=True, exist_ok=True)
+        torn_file.write_bytes(torn)
+        with pytest.raises(FileUnreadableError) as unread_file:
+            door()
+        said_of = unread_file.value
+        assert (said_of.code, said_of.http_status, said_of.details["path"]) == (
+            code,
+            status,
+            str(torn_file),
+        ), f"{torn_file.name} was refused as another file, or unnamed"
+        assert str(said_of).endswith(f"). {remedy}"), f"{torn_file.name} was told another remedy"
+        if kept is None:
+            torn_file.unlink()
+        else:
+            torn_file.write_bytes(kept)
 
     for recipe, imported, why in (
         ("table", {loaders, tabular_ingest}, "a recipe's identity missed code it imports"),
@@ -1525,7 +1887,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
     # Answering in TEXT sends no contract to answer INTO.
-    text_pipeline = read_dataset_pipeline(_DATASETS / "justlogic" / "d234")
+    text_pipeline = read_dataset_pipeline(_install("justlogic/d234"))
     assert text_pipeline is not None
     text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
@@ -1584,8 +1946,12 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
     # An invented param is rejected, and so is the individual a variation wrote it on.
-    outer = _install("promptpotter-self/panel")
+    # A checkout resolves its research tier with no setting: the L4 panel needs no landing line.
     outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
+    outer = resolve_dataset(outer_stores, "promptpotter-self/panel")
+    assert (outer.tier, outer.tier_root) == ("research", _RESEARCH), (
+        "a checkout did not resolve the L4 panel from its own research tier"
+    )
     outer_schema = parse_pipeline_response(
         asyncio.run(
             dataset_pipeline(
@@ -1959,9 +2325,9 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert len(doubled.bench) == 2 * split.bench, "a held-out sample's copy was searched"
     # A declared bench row moves no other row, so widening a bench keeps every paid cell's pool.
     extra = [
-        Sample(id=60 + i, query=f"held {i}", ground_truth="TRUE", bench_only=True) for i in range(9)
+        Sample(id=60 + i, query=f"held {i}", ground_truth="TRUE", held_out=True) for i in range(9)
     ]
-    assert extra[0].key == extra[0].model_copy(update={"bench_only": False}).key, (
+    assert extra[0].key == extra[0].model_copy(update={"held_out": False}).key, (
         "declaring a row bench-only re-keyed it"
     )
     wide = partition_bank([*bank, *extra], split, seed=0)
@@ -1969,7 +2335,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert wide.bench == (*part.bench, *extra), "a declared bench row was not held out"
     for unsplittable, declared_split in (
         ([*bank, *extra], None),
-        ([*bank, bank[0].model_copy(update={"id": 60, "bench_only": True})], split),
+        ([*bank, bank[0].model_copy(update={"id": 60, "held_out": True})], split),
     ):
         with pytest.raises(ValueError):
             partition_bank(unsplittable, declared_split, seed=0)
@@ -1997,7 +2363,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert extract is not None
     seated, drawn = samples_from_dicts(extract(resolved({**task, "held_out": True}, other)))
     searched, _ = samples_from_dicts(extract(resolved(task, other)))
-    assert seated.bench_only and not searched.bench_only, "a held-out environment was searched"
+    assert seated.held_out and not searched.held_out, "a held-out environment was searched"
     assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
     )
@@ -2009,7 +2375,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     # A cycle's diagnostics read the partition its run init drew: an L4 cell's held-out rows ride
     # its bank as bench-only copies, so re-drawing off its config alone searches them.
-    l4_bank = [*bank[:30], *(s.model_copy(update={"bench_only": True}) for s in bank[30:50])]
+    l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0), seed=0)
     back = restored_partition(bank, cell_drawn.record(dataset_hash="d"))
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
@@ -2038,6 +2404,75 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert resumed.bank == drawn_bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )
+    # A bank whose rows declare another field is refused by its path: read as unflagged rows, its
+    # held tail is searched. The listing, a survey, lists its one dataset UNREADABLE beside the rest.
+    stale = [
+        {"bench_only": True, **{k: v for k, v in row.items() if k != "held_out"}}
+        if "held_out" in row
+        else row
+        for row in drawn_bank.banked()
+    ]
+    stale_bank = Bank.of(Sample(id=i, query=f"stale {i}", ground_truth="T") for i in range(3))
+    write_json(built_stores.tenant_datasets._bank_path(stale_bank.dataset_hash), {"items": stale})
+    stale_path = str(built_stores.tenant_datasets._bank_path(stale_bank.dataset_hash))
+    for read in (
+        lambda: built_stores.tenant_datasets.bank(stale_bank.dataset_hash),
+        lambda: built_stores.tenant_datasets.rows(stale_bank.dataset_hash, [35]),
+    ):
+        with pytest.raises(FileUnreadableError) as unread:
+            read()
+        assert (unread.value.kind, unread.value.details["path"]) == (FileKind.BANK, stale_path), (
+            "a stale bank was refused unnamed"
+        )
+    for name, held_hash in (
+        ("stalebank", stale_bank.dataset_hash),
+        ("goodbank", recut.dataset_hash),
+    ):
+        write_yaml(
+            built_stores.tenant_datasets.dataset_dir(name) / DEFINITION_FILE,
+            {"pipeline": {"backend_type": "termnorm"}},
+        )
+        built_stores.tenant_datasets.relabel(name, held_hash)
+    # A materialized panel this build cannot read is the store's one refusal too.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("brokenpanel") / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "promptpotter"}},
+    )
+    panel_file = built_stores.tenant_datasets.materialized_panel_dir("brokenpanel") / "panel.yaml"
+    panel_file.parent.mkdir(parents=True)
+    panel_file.write_text("cells: [unclosed", encoding="utf-8")
+    listed = {entry.name: entry for entry in list_datasets(built_stores)}
+    for unreadable in ("stalebank", "brokenpanel"):
+        assert listed[unreadable].start_block is StartBlock.UNREADABLE, (
+            f"{unreadable} listed readable"
+        )
+    assert (listed["goodbank"].n_samples, listed["goodbank"].start_block) == (41, None), (
+        "an unreadable dataset beside it hid a readable one"
+    )
+    # Every other door answers the refusal as itself, by its path: never a 422 that drops it.
+    stale_scope = cells_scope(
+        built_stores,
+        "stalebank",
+        scope="dataset",
+        campaign_id=None,
+        cycle_id=None,
+        descend=(),
+        at=None,
+    )
+    with pytest.raises(FileUnreadableError) as unread_log:
+        measurement_log(
+            stale_scope,
+            limit=5,
+            max_unmeasured=None,
+            order=None,
+            candidate_id=None,
+            round=None,
+            status=None,
+        )
+    assert (unread_log.value.code, unread_log.value.details["path"]) == (
+        "bank_unreadable",
+        stale_path,
+    ), "the dataset-scope leaderboard answered a stale bank as another refusal"
     index = SampleIndex(bank=Bank.of(bank), sample_ids=part.admitted_ids)
     for n in range(12):
         index.replay_row(
@@ -2104,6 +2539,32 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         assert not built_stores.tenant_datasets.slug_exists(uploaded.slug), (
             f"the {attempt} refused Start committed its dataset"
         )
+    # A name the install gained since the draft claimed it is refused at Start, leaving nothing
+    # behind: no cut, no bank, no definition.
+    write_yaml(
+        built_stores.install_datasets_root / "email-tagging" / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}},
+    )
+    built_stores.drafts.write_draft(
+        uploaded.draft_id,
+        owned_draft(built_stores, uploaded.draft_id).patch(slug="email-tagging").to_disk(),
+    )
+    monkeypatch.setattr(launching, "assert_origin_ready", lambda _draft, _pipeline: None)
+    held_before = built_stores.tenant_datasets.held_version("email-tagging")
+    with pytest.raises(SlugTakenError):
+        asyncio.run(
+            dispatch_start_checkin(
+                built_stores,
+                CommandCall(StartCheckinPayload(draft_id=uploaded.draft_id), "onto-install"),
+                inline=Inline(),
+            )
+        )
+    assert not built_stores.tenant_datasets.slug_exists("email-tagging"), (
+        "a Start landed an account's definition over the install's"
+    )
+    assert built_stores.tenant_datasets.held_version("email-tagging") == held_before, (
+        "a refused Start recorded a cut"
+    )
     opened = asyncio.run(
         checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
     )

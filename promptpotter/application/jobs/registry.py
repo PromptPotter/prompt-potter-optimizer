@@ -42,7 +42,8 @@ from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
-    JobUnreadableError,
+    FileKind,
+    FileUnreadableError,
     NotFoundError,
     ServiceUnavailableError,
     validation_reason,
@@ -348,8 +349,8 @@ class JobRegistry:
         try:
             return JOB_ADAPTER.validate_json(raw)
         except ValidationError as exc:
-            raise JobUnreadableError(
-                path=str(path), reason=validation_reason(exc, shown=1)
+            raise FileUnreadableError(
+                FileKind.JOB, path=str(path), reason=validation_reason(exc, shown=1)
             ) from exc
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:

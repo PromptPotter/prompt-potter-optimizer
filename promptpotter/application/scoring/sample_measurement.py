@@ -51,6 +51,7 @@ from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, Send
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.connectors.protocol import Connector
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode, PipelineSchema
     from promptpotter.infrastructure.backend import CellBilling
 
@@ -127,7 +128,6 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "turns",
         "outcome_note",
         "step_phases",
-        "inner",
     }
 )
 assert _INFRA_KEYS <= PIPELINE_KEYS, (
@@ -530,6 +530,7 @@ async def measure_sample(
             )
 
         pd = _observations(data, ranked, pipeline_schema, spent)
+        pd["cell_report"] = _cell_report(data, session.backend_client.connector)
         # The envelope's final reading, taken AFTER its scope closed.
         pd["unworked_s"] = envelope.unworked
         pd.update(_candidate_and_sample_facts(sample, pipeline_schema, pipeline_params or {}))
@@ -551,11 +552,6 @@ async def measure_sample(
         terms = await materialize_sample_values(
             pipeline_schema, result, extra=session.state.scoring.judges
         )
-        if declared := PIPELINE_KEYS & terms.values.keys():
-            raise ValueError(
-                f"evaluator terms {sorted(declared)} carry the names of `PipelineData` fields: "
-                "banked beside them, each would be read back as the field"
-            )
         return replace(
             result,
             pipeline=replace(
@@ -660,6 +656,13 @@ def _observations(
     if reached is not None:
         pd["terminal_node"] = reached
     return pd
+
+
+def _cell_report(data: Mapping[str, Any], connector: Connector) -> dict[str, Any]:
+    """The connector's declaration is the gate: a dataset observation of a term's name is no term."""
+    return {
+        key: value for key in connector.cell_report_keys if (value := data.get(key)) is not None
+    }
 
 
 def _candidate_and_sample_facts(

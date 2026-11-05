@@ -2,22 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
-from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.sample import Bank, Sample, banked_row
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
-    FRAMING_FILE,
     MATERIALIZED_PANEL_FILE,
-    ORIGIN_FILE,
-    render_framing_file,
 )
 from promptpotter.infrastructure.store.io import (
     parse_yaml,
@@ -29,8 +26,15 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
-from promptpotter.infrastructure.store.read_model import append_row, derived, file_sig, read_rows
+from promptpotter.infrastructure.store.read_model import (
+    append_row,
+    derived,
+    file_sig,
+    read_file,
+    read_rows,
+)
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import FileKind
 
 # Panels a definition's `source:` built for this tenant, and the task directories they name.
 MATERIALIZED_DIR = "materialized"
@@ -91,14 +95,6 @@ class TenantDatasetStore:
         except ValueError:
             return False
 
-    def suggest_free_slug(self, slug: str) -> str:
-        n = 2
-        while True:
-            candidate = f"{slug}-{n}"
-            if not self.slug_exists(candidate):
-                return candidate
-            n += 1
-
     def _labels_path(self) -> Path:
         return self._base_dir / BANKS_DIR / LABELS_FILE
 
@@ -131,17 +127,17 @@ class TenantDatasetStore:
         return self.labels().get(label)
 
     def _banked_rows(self, digest: str) -> list[dict[str, Any]] | None:
-        raw = read_bytes_optional(self._bank_path(digest))
-        return None if raw is None else _bank_items(raw)
+        return _read_bank_file(self._bank_path(digest), list)
 
     def bank(self, digest: str) -> Bank | None:
-        rows = self._banked_rows(digest)
-        return None if rows is None else Bank.read(rows)
+        return _read_bank_file(self._bank_path(digest), Bank.read)
 
     def rows(self, digest: str, slots: Iterable[int]) -> dict[int, Sample] | None:
         """Only *slots* validated: a page of a big bank builds the rows it shows and no others."""
-        rows = self._banked_rows(digest)
-        return None if rows is None else {slot: Sample(id=slot, **rows[slot]) for slot in slots}
+        return _read_bank_file(
+            self._bank_path(digest),
+            lambda rows: {slot: banked_row(slot, rows[slot]) for slot in slots},
+        )
 
     def held_version(self, name: str) -> tuple[object, ...]:
         """Stats only: what moves the bank *name* holds, a bank's own rows being its hash."""
@@ -208,28 +204,6 @@ class TenantDatasetStore:
         write_yaml(path, framing.to_dict())
         return path
 
-    def write_definition(
-        self,
-        slug: str,
-        *,
-        source: dict[str, Any],
-        pipeline: dict[str, Any],
-        campaign: dict[str, Any],
-        description: str,
-        framing: TaskDecomposition,
-        origin: dict[str, dict[str, Any]],
-    ) -> Path:
-        """WHOLE files: the tenant tier lays no defaults or family under a definition."""
-        dst = self.dataset_dir(slug)
-        write_text(dst / FRAMING_FILE, render_framing_file(description, framing))
-        if origin:
-            write_yaml(dst / ORIGIN_FILE, origin)
-        # Last: the definition file is what makes the directory a dataset.
-        write_yaml(
-            dst / DEFINITION_FILE, {"source": source, "pipeline": pipeline, "campaign": campaign}
-        )
-        return dst
-
     def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:
         path = self.dataset_dir(slug) / CANDIDATE_LIBRARY_FILE
         write_text(path, "\n".join(library))
@@ -251,6 +225,11 @@ def read_bank(raw: bytes) -> Bank:
     return Bank.read(_bank_items(raw))
 
 
+def _read_bank_file[R](path: Path, read: Callable[[list[dict[str, Any]]], R]) -> R | None:
+    """Every store read of a bank file, refused as a bank where its bytes or a row are not this build's."""
+    return read_file(path, lambda raw: read(_bank_items(raw)), FileKind.BANK)
+
+
 def _keys(path: Path) -> frozenset[str]:
-    raw = read_bytes_optional(path)
-    return frozenset() if raw is None else frozenset(s.key for s in read_bank(raw).samples)
+    bank = _read_bank_file(path, Bank.read)
+    return frozenset() if bank is None else frozenset(s.key for s in bank.samples)

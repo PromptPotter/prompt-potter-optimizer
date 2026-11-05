@@ -1,13 +1,13 @@
 # assets/datasets/ — the shipped template definitions
 
-Each `dataset.yaml` directory is a definition named by its path, read-only in the wheel; a tenant definition resolves first. The roster is the tree:
+Each `dataset.yaml` directory is a definition named by its path, read-only in the wheel; a tenant definition resolves first. **The wheel ships only what a user may start**: research and test tooling (L4's `promptpotter-self`) is the checkout's [`research/datasets/`](../../../research/datasets/CLAUDE.md), never listed. The roster is the tree:
 
 ```
 assets/datasets/
 ├── defaults.yaml          # {pipeline:, campaign:} — laid under every definition
 ├── {family}/family.yaml   # shared sections; the family itself is no dataset
 └── {name}/                # nested any depth; a plain directory between is a path segment
-    ├── dataset.yaml       # source: / pipeline: / campaign: / panel: — only what differs from above
+    ├── dataset.yaml       # source: / pipeline: / campaign: / panel: / card: — only what differs from above
     ├── task.md            # L1's framing input: front matter = committed framing, body = description
     ├── origin.yaml        # the starting prompts, per node (optional)
     └── README.md          # operator-facing: source, split, every model screen
@@ -30,7 +30,3 @@ Rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a n
 ## Sole route for backend tunable changes
 
 **The backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature or any `optimizer.param_keys` tunable — never edit the backend repo**, TermNorm included. An LLM node declaring no `model` raises at `configure_and_apply_pipeline`. `route_order` is [`infrastructure/llm/CLAUDE.md`](../../infrastructure/llm/CLAUDE.md)'s.
-
-## L4 — `promptpotter-self`
-
-Its `pipeline` declares no nodes: the connector serves the graph from the manifest the panel's cells run, so any preset can be an inner. The inner instrument is `justlogic/d234`; each depth cut has its own δ scale, so a new cut is a new `justlogic/dNNN/`.

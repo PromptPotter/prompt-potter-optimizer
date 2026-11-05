@@ -1,3 +1,7 @@
+card:
+  title: Email Tagging
+  summary: Sort inbound emails into financial, actionable, informational or other.
+
 # Hand-authored: PCRM_root_TestObject - Entries.tsv, anonymized, a reconstructed hard-sample subset.
 source:
   recipe: rows
@@ -111,16 +115,16 @@ source:
     ground_truth: financial
 
 pipeline:
+  # Pilot: a single llm_only node against TermNorm /matches, exact-match scoring; mirrors the live
+  # n8n subject-classifier-LM tagging decision.
   description: >-
-    Pilot: classify an inbound email into one of four routing categories (financial, actionable, informational,
-    other). Single llm_only node against TermNorm /matches, exact-match scoring. Mirrors the
-    live n8n subject-classifier-LM tagging decision.
+    Classify an inbound email into one routing category: financial, actionable, informational or
+    other.
   available_models:
     - openai/gpt-oss-20b
   nodes:
     llm_only:
-      description: >-
-        Direct LLM generation: read the email, emit one category label.
+      description: Reads the email and answers with one category label.
       config:
         provider: openrouter
         model: openai/gpt-oss-20b

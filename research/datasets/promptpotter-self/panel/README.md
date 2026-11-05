@@ -7,7 +7,7 @@ inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/i
 Each outer "sample" is one entry in `dataset.yaml::panel`: it mints and runs a full inner campaign on
 `justlogic/d234`. Each inner run reports a vector of proxy measurements
 (`domain/l4/proxies.py::OuterSampleProxies`); the outer formula in `dataset.yaml::campaign.scoring`
-re-anchors **one** of them — `mean_bench_lift`, read on rows the inner search never saw — into
+re-anchors **one** of them — `held_out_lift`, read on rows the inner search never saw — into
 [0,1] and nothing else, the quality terms having carried more SEED variance than arm variance while
 holding authority over the ordering. The rationale lives on `OuterSampleProxies`.
 

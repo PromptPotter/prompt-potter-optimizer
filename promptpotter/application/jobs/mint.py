@@ -212,7 +212,7 @@ def declare(
         campaign_config,
         purpose=purpose,
         dataset_hash=session.bank.dataset_hash,
-        connector=runnable_definition(session.dataset.directory).backend_type,
+        connector=runnable_definition(session.dataset).backend_type,
         bench_defaults_pin=bench_defaults_pin(),
     )
 
@@ -262,7 +262,7 @@ def resolve_cycle_plan(
         schema=schema,
         pipeline_params=pipeline_params,
         origin=resolve_origin_opt_search_point(
-            dataset_dir=None if session.dataset is None else session.dataset.directory,
+            dataset=session.dataset,
             seed=cycle.origin,
             pipeline_params=pipeline_params,
             schema=schema,
@@ -688,7 +688,7 @@ def _description_to_decompose(
         return None
     if committed_task_context(session.store, session.dataset):
         return None
-    return read_dataset_framing(session.dataset.directory).description or None
+    return read_dataset_framing(session.dataset).description or None
 
 
 async def mint_framed_cycle(

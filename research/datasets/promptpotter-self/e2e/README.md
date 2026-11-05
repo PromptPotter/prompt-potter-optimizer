@@ -9,7 +9,7 @@ one cell, one inner round, one inner variant, two samples, one outer round of tw
 are its own `dataset.yaml::panel`'s — the only place a per-cell cost may be read off.
 
 At one cell PoBB can never reach its elimination floor of four, so nothing is ever eliminated
-and the outer δ ruler never warms. At one inner round `mean_bench_lift` is a single difference
+and the outer δ ruler never warms. At one inner round `held_out_lift` is a single difference
 with no series behind it. At two samples the inner θ is noise, and at one held-out row the scored
 lift is a coin. **Every number this emits is an artefact of that geometry.**
 

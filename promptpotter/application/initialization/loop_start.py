@@ -24,6 +24,10 @@ from promptpotter.application.runner.inner.spawn_context import (
     retarget_inner_spawn,
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
+from promptpotter.application.scoring.evaluators import (
+    connector_report_owner,
+    observation_owner,
+)
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.application.views.ingress import init_enter, init_exit
@@ -106,6 +110,7 @@ def populate_session_scoring(
 ) -> None:
     """The one writer of ``state.scoring``, built whole: `{}` judges declares none, never "keep"."""
     session.state.source = source
+    connector = session.backend_client.connector
     session.state.scoring = ScorerSetup(
         scorer=scorer_of(
             campaign_config,
@@ -114,7 +119,14 @@ def populate_session_scoring(
         display_metric=campaign_config.display_metric,
         partition=partition,
         degradation_checks=tuple(build_degradation_checks(campaign_config)),
-        judges=tuple(build_evaluators(campaign_config.judges, cache=session.store.judge_reuse)),
+        judges=build_evaluators(
+            campaign_config.judges,
+            beside=(
+                connector_report_owner(connector.name, connector.cell_report_keys),
+                observation_owner(session.pipeline_schema.observation_keys),
+            ),
+            cache=session.store.judge_reuse,
+        ),
     )
 
 

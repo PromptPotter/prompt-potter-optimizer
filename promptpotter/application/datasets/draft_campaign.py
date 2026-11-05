@@ -23,7 +23,10 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import TenantId, safe_name
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from promptpotter.connectors.protocol import Connector
+    from promptpotter.domain.cell_terms import CellTerm
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 DEFAULT_SCORING_MATCHER = "label_match"
@@ -218,13 +221,16 @@ def draft_scoring_block(draft: DraftCampaign) -> str | dict[str, str]:
     return {"per_sample": per_sample, DIALS_KEY: draft.scoring_dials}
 
 
-def scoring_choice(scoring: str | dict[str, str] | None) -> tuple[str, str]:
+def scoring_choice(
+    scoring: str | dict[str, str] | None, terms: Mapping[str, CellTerm]
+) -> tuple[str, str]:
     """The matcher and dials a draft holds of a scoring block; a pinned formula's anchors are lost."""
     spec = split_scoring_block(scoring, judge_instrument=None)
     matcher = (spec.per_sample or "").split("(", 1)[0].strip() or DEFAULT_SCORING_MATCHER
-    declared = parse_dials(scoring.get(DIALS_KEY, "")) if isinstance(scoring, dict) else {}
+    declared = parse_dials(scoring.get(DIALS_KEY, ""), terms) if isinstance(scoring, dict) else {}
     pinned = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
-    return matcher, spell_dials(declared or {name: d.weight for name, d in (pinned or {}).items()})
+    weights = declared or {name: d.weight for name, d in (pinned or {}).items()}
+    return matcher, spell_dials(weights, terms)
 
 
 def default_campaign_config(draft: DraftCampaign, upload: UploadBasis) -> CampaignConfig:

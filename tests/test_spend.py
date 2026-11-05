@@ -168,7 +168,11 @@ from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, EmbeddedRun
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
-from promptpotter.domain.l4.proxies import inner_cell_facts
+from promptpotter.domain.l4.proxies import (
+    OuterSampleProxies,
+    inner_cell_facts,
+    inner_cell_report,
+)
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
@@ -398,7 +402,9 @@ async def _grade_twice(
     offline.llm.sent.clear()
     cache = LLMReuseCache(tmp_path, "judge_reuse")
     judge = JudgeStage(model="grader-1", provider="openai")
-    (ev,) = build_evaluators({"answer": JudgeSpec(name="sealqa", stages=[judge])}, cache=cache)
+    (ev,) = build_evaluators(
+        {"answer": JudgeSpec(name="sealqa", stages=[judge])}, beside=(), cache=cache
+    )
     graded = CycleEventLog(tmp_path / "graded.jsonl")
     with _billing_on(graded, unbounded_spend_book()):
         for _ in range(2):
@@ -1167,6 +1173,8 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             inner_sandbox_root=inner_sandbox(built_stores, owner.campaign_id, owner.cycle_id),
             identity=built_stores.identity,
             shared_root=built_stores.shared_root,
+            install_datasets_root=built_stores.install_datasets_root,
+            research_datasets_root=None,
             spawn_campaign_id=owner.campaign_id,
             spawn_cycle_id=owner.cycle_id,
             enclosing=(),
@@ -1905,7 +1913,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         }
     )
     heads = plan.heads()
-    on_disk = load_dataset_campaign_config(offered_dataset(built_stores, "ds1").directory)
+    on_disk = load_dataset_campaign_config(offered_dataset(built_stores, "ds1"))
     configs = [
         mint.arm_config(on_disk, head.head_to_head, arm)
         for head in heads
@@ -2230,7 +2238,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         query="q",
         predicted="",
         ground_truth="",
-        pipeline=PipelineData(inner=facts),
+        pipeline=PipelineData(
+            cell_report=inner_cell_report(facts, OuterSampleProxies(held_out_lift=0.0))
+        ),
     )
     assert cell_channels_of(inner_row, None)["cost"] == pytest.approx(0.02), (
         "an inner campaign whose provider reported no bill read as a free cell"

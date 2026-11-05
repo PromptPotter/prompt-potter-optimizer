@@ -23,10 +23,8 @@ from promptpotter.application.datasets.authored import (
     validated_campaign_config,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.datasets.ingest import SlugTakenError
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import CHECKLIST_FIELDS, origin_readiness
-from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.application.pipeline_resolve import draft_pipeline, draft_served
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.account_words import refusal_words
@@ -58,7 +56,11 @@ from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args, build_parser
-from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError, PotterError
+from promptpotter.shared.errors import (
+    DatasetAccessError,
+    PayloadInvalidError,
+    PotterError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
@@ -195,18 +197,10 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
             "slug": args.slug,
         },
     )
-    try:
-        outcome = await CommandDispatcher(stores).answer(
-            workspace_edits.ingest_upload, CommandCall(payload)
-        )
-        draft = outcome.result
-    except IngestError as exc:
-        raise SystemExit(f"ERROR: could not parse {file_path.name}: {exc.message}") from None
-    except SlugTakenError as exc:
-        raise SystemExit(
-            f"ERROR: slug '{exc.slug}' already exists. Try --slug {exc.suggested}."
-        ) from None
-
+    # A refusal is `campaign_runner.main`'s to say, in its own words, as every verb's.
+    draft = (
+        await CommandDispatcher(stores).answer(workspace_edits.ingest_upload, CommandCall(payload))
+    ).result
     _checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({draft.draft_id})")
     return draft.draft_id
 
@@ -302,20 +296,17 @@ async def _new(args: argparse.Namespace) -> CommandResult:
 
 
 @contextlib.contextmanager
-def _named_dataset(
-    stores: Stores, mint: MintCampaignPayload | MintHeadToHeadPayload
-) -> Iterator[None]:
+def _named_dataset(stores: Stores) -> Iterator[None]:
+    """The refusal's own words, then what this account can start: a rewrite would drop its reason."""
     try:
         yield
-    except DatasetAccessError:
-        raise SystemExit(
-            f"ERROR: no dataset named {mint.dataset_name!r}.\n\n" + no_dataset_hint(stores)
-        ) from None
+    except DatasetAccessError as refused:
+        raise SystemExit(f"ERROR: {refusal_words(refused)}.\n\n{no_dataset_hint(stores)}") from None
 
 
 async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
     dispatcher = CommandDispatcher(stores, inline=inline)
-    with _named_dataset(stores, mint):
+    with _named_dataset(stores):
         launched = (await dispatcher.dispatch(CommandCall(mint))).result
     held = held_run(launched)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
@@ -403,7 +394,7 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
-    with _named_dataset(stores, payload):
+    with _named_dataset(stores):
         launched = (
             await dispatcher.answer(launching.mint_head_to_head, CommandCall(payload))
         ).result

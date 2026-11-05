@@ -122,11 +122,12 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
         stores = local_stores(tenant=None)
-        dataset_dir = self._write_definition(stores, items)
+        self._write_definition(stores, items)
         session = await open_session(self.dataset_name, stores=stores, program=program)
         try:
             # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
-            config = load_dataset_campaign_config(dataset_dir)
+            assert session.dataset is not None, "open_session resolves the dataset it names"
+            config = load_dataset_campaign_config(session.dataset)
             session, result = await run_campaign(
                 session,
                 config,
@@ -144,7 +145,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         return _with_instructions(student, self.export.render(PROGRAM_NODE))
 
     def _write_definition(self, stores: Stores, items: list[dict[str, str]]) -> Path:
-        return stores.tenant_datasets.write_definition(
+        return stores.write_own_definition(
             self.dataset_name,
             # In trainset order: the connector reads a sample's example off its position.
             source={"recipe": "rows", "shuffled": False, "items": items},

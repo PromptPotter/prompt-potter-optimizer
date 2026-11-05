@@ -137,6 +137,12 @@ def install_datasets_root() -> Path:
     return PACKAGE_ROOT / "assets" / "datasets"
 
 
+def research_datasets_root() -> Path | None:
+    """A checkout's `research/datasets/`: definitions no wheel ships, so an install has none."""
+    checkout = source_checkout_root()
+    return None if checkout is None else checkout / "research" / "datasets"
+
+
 def webapp_static_root() -> Path:
     """May not exist (`--no-webapp`): the mount guards on existence."""
     checkout = source_checkout_root()

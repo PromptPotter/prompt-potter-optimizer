@@ -23,18 +23,21 @@ class DatasetIndexEntry(StrictModel):
     """One row in the dataset registry — backs the Dashboard ``New campaign`` view."""
 
     name: str = Field(description="The definition's path under its tier, `/`-separated.")
-    title: str | None = Field(default=None, description="Display title (from `README.md`).")
+    title: str | None = Field(
+        default=None, description="Display title: the definition's `card.title`."
+    )
     tier: DatasetTier = Field(
         description=(
             "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
             "``install`` = content that ships with the product at ``assets/datasets/{name}/`` "
-            "(benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by "
-            "anyone using the install. A ``yours`` slug shadows an ``install`` one."
+            "(benchmarks, demos), readable by anyone using the install. ``research`` = a "
+            "checkout's ``research/datasets/`` (L4's ``promptpotter-self``), resolved by name and "
+            "never listed. A name reads from the first tier holding it: yours, install, research."
         ),
     )
     summary: str | None = Field(
         default=None,
-        description="What the dataset is, in one plain sentence (the first under `README.md`'s title).",
+        description="What the dataset is, in one plain sentence: the definition's `card.summary`.",
     )
     n_samples: int | None = Field(
         default=None,
@@ -55,9 +58,9 @@ def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
     return [
         DatasetIndexEntry(
             name=ref.dataset.name,
-            title=ref.title,
+            title=None if ref.card is None else ref.card.title,
             tier=ref.dataset.tier,
-            summary=ref.summary,
+            summary=None if ref.card is None else ref.card.summary,
             n_samples=reading.n_held,
             start_block=reading.block,
         )

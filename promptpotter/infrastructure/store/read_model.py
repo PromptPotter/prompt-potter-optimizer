@@ -33,7 +33,12 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import FileUnreadableError, LedgerUnreadableError, validation_reason
+from promptpotter.shared.errors import (
+    FileKind,
+    FileUnreadableError,
+    LedgerUnreadableError,
+    validation_reason,
+)
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
 EVERY_ARM: tuple[type[StrictModel], ...] = get_args(get_args(CycleRecord)[0])
@@ -68,7 +73,7 @@ def parse_rows[R](
                 rows.append(read(raw))
             except _ROW_ERRORS as exc:
                 reason = f"the line at byte {at}: {_reason(exc)}"
-                raise FileUnreadableError(path=str(path), reason=reason) from exc
+                raise FileUnreadableError(FileKind.STORE, path=str(path), reason=reason) from exc
         at += len(raw)
     return rows
 
@@ -84,15 +89,18 @@ def read_rows[R](path: Path, read: Callable[[bytes], R]) -> list[R]:
     return read_rows_past(path, read, ABSENT).rows
 
 
-def read_file[R](path: Path, read: Callable[[bytes], R]) -> R | None:
-    """A whole file that is no ledger: ``None`` where none is, and refused by name where *read* refuses it."""
+def read_file[R](
+    path: Path, read: Callable[[bytes], R], kind: FileKind = FileKind.STORE
+) -> R | None:
+    """THE whole-file read of one that is no ledger: ``None`` where none is, and refused as a
+    *kind* by its path where *read* refuses it."""
     raw = read_bytes_optional(path)
     if raw is None:
         return None
     try:
         return read(raw)
     except _ROW_ERRORS as exc:
-        raise FileUnreadableError(path=str(path), reason=_reason(exc)) from exc
+        raise FileUnreadableError(kind, path=str(path), reason=_reason(exc)) from exc
 
 
 def append_row(path: Path, *rows: dict[str, Any]) -> range:

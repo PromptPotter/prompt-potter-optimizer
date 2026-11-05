@@ -99,11 +99,11 @@ async def _probe(backend_type: str) -> None:
 
 
 async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
-    await _probe(runnable_definition(dataset.directory).backend_type)
+    await _probe(runnable_definition(dataset).backend_type)
     session = await init_services(
         dataset_name=dataset.name, identity=stores.identity, stores=stores
     )
-    return DatasetArms(session, load_dataset_campaign_config(dataset.directory))
+    return DatasetArms(session, load_dataset_campaign_config(dataset))
 
 
 async def checkin_arms(

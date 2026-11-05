@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.task_context import campaign_framing
@@ -19,6 +18,7 @@ from promptpotter.application.scoring.arm_states import (
 from promptpotter.application.scoring.closed_rounds import closed_round
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
+    campaign_terms,
     origin_anchors,
     parse_dials,
     realize_dials,
@@ -41,7 +41,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE
+from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE, ResolvedDataset
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -72,7 +72,10 @@ def lock_criterion(
     block = campaign_config.scoring
     if not isinstance(block, dict) or DIALS_KEY not in block:
         return None
-    formula = realize_dials(parse_dials(block[DIALS_KEY]), origin_anchors(origin_rows))
+    terms = campaign_terms(session.backend_id)
+    formula = realize_dials(
+        parse_dials(block[DIALS_KEY], terms), origin_anchors(origin_rows, terms), terms
+    )
     locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
     if (ledger := session.state.ledger) is not None:
         ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
@@ -170,7 +173,7 @@ assert set(_SEED_ORIGIN_LINEAGE) == OPERATOR_ORIGIN_SOURCES
 
 
 def resolve_origin_opt_search_point(
-    dataset_dir: Path | None = None,
+    dataset: ResolvedDataset | None = None,
     *,
     seed: CycleSeed | None = None,
     pipeline_params: dict[str, Any] | None,
@@ -185,8 +188,8 @@ def resolve_origin_opt_search_point(
         origin = OptSearchPoint(prompts=prompts).as_origin(
             changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source]
         )
-    elif dataset_dir is not None and (
-        authored := declared_origin_prompts(dataset_dir, schema.prompt_nodes())
+    elif dataset is not None and (
+        authored := declared_origin_prompts(dataset, schema.prompt_nodes())
     ):
         origin = OptSearchPoint(prompts=authored).as_origin(
             changes_description=f"Origin from the dataset's {ORIGIN_FILE} ({', '.join(authored)})"
@@ -207,7 +210,7 @@ async def establish_campaign_origin(
     listener: RunCallbacks,
 ) -> CampaignOrigin:
     resolved_origin = resolve_origin_opt_search_point(
-        dataset_dir=None if session.dataset is None else session.dataset.directory,
+        dataset=session.dataset,
         seed=cycle.origin,
         pipeline_params=session.pipeline_params,
         schema=session.pipeline_schema,

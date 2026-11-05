@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
@@ -9,10 +10,18 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_FILE,
+    FRAMING_FILE,
+    ORIGIN_FILE,
+    claim_own_definition,
+    render_framing_file,
+)
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.draft_store import DraftStore
-from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.io import validate_path_component, write_text, write_yaml
 from promptpotter.infrastructure.store.layout import (
     ArchiveHome,
     archive_home,
@@ -40,6 +49,8 @@ class Stores:
     projects_root: Path
     shared_root: Path
     install_datasets_root: Path
+    # Resolved after the install, never listed; ``None`` where this deployment holds none.
+    research_datasets_root: Path | None
     identity: IdentityContext
     archive_home: ArchiveHome
     tenant_datasets: TenantDatasetStore
@@ -77,6 +88,29 @@ class Stores:
         """An L4 inner run's sandbox: every cycle under it answers every run verb for itself."""
         return in_inner_sandbox(self.projects_root)
 
+    def write_own_definition(
+        self,
+        slug: str,
+        *,
+        source: dict[str, Any],
+        pipeline: dict[str, Any],
+        campaign: dict[str, Any],
+        description: str,
+        framing: TaskDecomposition,
+        origin: dict[str, dict[str, Any]],
+    ) -> Path:
+        """THE writer of an account's definition, here since only the stores see every tier its
+        name is claimed over. WHOLE files: the tenant tier lays no defaults or family under it."""
+        claim_own_definition(self, slug, new=False)
+        dst = self.tenant_datasets.dataset_dir(slug)
+        write_text(dst / FRAMING_FILE, render_framing_file(description, framing))
+        if origin:
+            write_yaml(dst / ORIGIN_FILE, origin)
+        # Last: the definition file is what makes the directory a dataset.
+        definition = {"source": source, "pipeline": pipeline, "campaign": campaign}
+        write_yaml(dst / DEFINITION_FILE, definition)
+        return dst
+
 
 def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
     """Another user's campaign is NOT FOUND, never forbidden: existence leakage is a violation."""
@@ -103,9 +137,12 @@ def build_stores(
     *,
     projects_root: Path,
     install_datasets_root: Path | None = None,
+    research_datasets_root: Path | None | Literal["checkout"] = "checkout",
     shared_root: Path | None = None,
 ) -> Stores:
-    """``projects_root`` takes no default: one would address the real workspace from a sandbox."""
+    """``projects_root`` takes no default: one would address the real workspace from a sandbox.
+    The research root is the checkout's where a fresh build asks for it (``checkout``); a
+    carried one, ``None`` included, is kept as carried."""
     root = projects_root
     tenant_dir = tenant_workspace(root, identity.tenant_id)
     shared = shared_root if shared_root is not None else root
@@ -116,6 +153,11 @@ def build_stores(
         projects_root=root,
         shared_root=shared,
         install_datasets_root=install_datasets_root or paths.install_datasets_root(),
+        research_datasets_root=(
+            paths.research_datasets_root()
+            if research_datasets_root == "checkout"
+            else research_datasets_root
+        ),
         identity=identity,
         archive_home=home,
         # Rooted at the account beside the caches: a sandbox isolates campaign STATE, and a
@@ -147,7 +189,13 @@ def inner_sandbox_store(
     )
     if not (sandbox_root / stores.tenant_id).is_dir():
         return None
-    return build_stores(stores.identity, projects_root=sandbox_root, shared_root=stores.shared_root)
+    return build_stores(
+        stores.identity,
+        projects_root=sandbox_root,
+        install_datasets_root=stores.install_datasets_root,
+        research_datasets_root=stores.research_datasets_root,
+        shared_root=stores.shared_root,
+    )
 
 
 def descend_store(stores: Stores, hops: CyclePath) -> Stores:

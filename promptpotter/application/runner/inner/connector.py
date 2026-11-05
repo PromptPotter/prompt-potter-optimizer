@@ -24,7 +24,11 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
-from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
+from promptpotter.domain.l4.proxies import (
+    INNER_CELL_TERMS,
+    INNER_REPORTED_KEYS,
+    INNER_RESULT_KEY,
+)
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import module_source_digest, stable_hash
@@ -144,7 +148,9 @@ CONNECTOR = Connector(
     cell_envelope_s=_cell_envelope_s,
     cell_hop=_cell_hop,
     measured_unit="cell",
-    required_observation_keys=(INNER_RESULT_KEY, *OUTER_PROXY_KEYS),
+    required_observation_keys=(INNER_RESULT_KEY,),
+    cell_terms=INNER_CELL_TERMS,
+    reported_keys=INNER_REPORTED_KEYS,
     resolve_experiment=_resolve_panel,
     # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
     pipeline_declaration=_pipeline_declaration,

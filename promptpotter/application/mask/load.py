@@ -14,6 +14,7 @@ from promptpotter.application.mask.record import (
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.formula.compiler import (
+    campaign_terms,
     origin_anchors,
     parse_dials,
     realize_dials,
@@ -46,19 +47,24 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from promptpotter.application.bench.difficulty import DifficultyView
+    from promptpotter.domain.cell_terms import CellTerm
 
 
 def lens_overrides(formula: str | None) -> ConfigOverrides:
     return ConfigOverrides(scoring={"per_cell": formula}) if formula else ConfigOverrides()
 
 
-def _dial_anchors(config: CampaignConfig, origin_rows: list[GradedCell]) -> dict[str, float]:
+def _dial_anchors(
+    config: CampaignConfig, origin_rows: list[GradedCell], terms: Mapping[str, CellTerm]
+) -> dict[str, float]:
     """The criterion's own anchors win, so a lens left at the active weights reads the record back exactly."""
     spec = split_scoring_block(config.scoring, judge_instrument=judge_instrument(config.judges))
     active = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
     locked = {name: d.anchor for name, d in (active or {}).items() if d.anchor is not None}
-    return {**origin_anchors(origin_rows), **locked}
+    return {**origin_anchors(origin_rows, terms), **locked}
 
 
 def mask_reading(sheet: CellSheet, scorer: Scorer) -> MaskReading | None:
@@ -207,9 +213,11 @@ def load_mask_record(
         origin_rows = [
             cell for sheet in (origin_file.cells if origin_file else {}).values() for cell in sheet
         ]
+        terms = campaign_terms(campaign.backend_id)
         formula = realize_dials(
-            parse_dials(lens.body),
-            _dial_anchors(cycle_config(stores, campaign, None).config, origin_rows),
+            parse_dials(lens.body, terms),
+            _dial_anchors(cycle_config(stores, campaign, None).config, origin_rows, terms),
+            terms,
         )
     overrides = lens_overrides(formula)
 

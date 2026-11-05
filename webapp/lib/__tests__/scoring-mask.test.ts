@@ -3,12 +3,12 @@ import { NO_DIALS, dialsOf, dialsText, lensOf, servedMask } from "../scoring-mas
 
 describe("dials — the one spelling the draft, the scoring block and the lens share", () => {
   it("drops a dial at 0 and orders by the served vocabulary, so one set is one string", () => {
-    expect(dialsText({ tokens: 0.08, latency: 0.1, cost: 0 })).toBe("latency=0.1,tokens=0.08");
-    expect(dialsText({})).toBe("");
+    expect(dialsText({ tokens: 0.08, latency: 0.1, cost: 0 }, [])).toBe("latency=0.1,tokens=0.08");
+    expect(dialsText({}, [])).toBe("");
   });
 
   it("drops a name that is not a dialable term rather than sending it", () => {
-    expect(dialsText({ fitness: 0.5, nonsense: 0.2, cached: 0.1 })).toBe("cached=0.1");
+    expect(dialsText({ fitness: 0.5, nonsense: 0.2, cached: 0.1 }, [])).toBe("cached=0.1");
   });
 
   it("reads back what the server canonicalized, skipping a malformed pair", () => {
@@ -20,18 +20,18 @@ describe("dials — the one spelling the draft, the scoring block and the lens s
 
 describe("lensOf", () => {
   it("mints a `dials:` lens and never a formula — the server owns the anchors", () => {
-    expect(lensOf({ kind: "dials", weights: { tokens: 0.08 } })).toBe("dials:tokens=0.08");
+    expect(lensOf({ kind: "dials", weights: { tokens: 0.08 } }, [])).toBe("dials:tokens=0.08");
   });
 
   it("is null when nothing is asked: every dial off, a blank expression, no mask", () => {
-    expect(lensOf(NO_DIALS)).toBeNull();
-    expect(lensOf({ kind: "dials", weights: { tokens: 0 } })).toBeNull();
-    expect(lensOf({ kind: "expression", lens: "  " })).toBeNull();
-    expect(lensOf(null)).toBeNull();
+    expect(lensOf(NO_DIALS, [])).toBeNull();
+    expect(lensOf({ kind: "dials", weights: { tokens: 0 } }, [])).toBeNull();
+    expect(lensOf({ kind: "expression", lens: "  " }, [])).toBeNull();
+    expect(lensOf(null, [])).toBeNull();
   });
 
   it("passes an expression through verbatim", () => {
-    expect(lensOf({ kind: "expression", lens: " abort:floor " })).toBe("abort:floor");
+    expect(lensOf({ kind: "expression", lens: " abort:floor " }, [])).toBe("abort:floor");
   });
 });
 
