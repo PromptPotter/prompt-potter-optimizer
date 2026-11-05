@@ -1,4 +1,9 @@
-"""A slots dataclass as its OWN wire record; a field is SPARSE unless its ``metadata`` says not."""
+"""A slots dataclass as its OWN wire record; a field is SPARSE unless its ``metadata`` says not.
+
+Kept over plain frozen pydantic models for speed alone, measured (2026-11-05): with the six classes as
+pydantic models writing byte-identical JSON, a cold fold of 100k records takes 1.27x as long over a
+ledger and 1.43x over the archive.
+"""
 
 from __future__ import annotations
 

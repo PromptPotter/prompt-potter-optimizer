@@ -97,11 +97,6 @@ later arc deletes. **Rides with:** the arc each group names, in [`roadmap.md`](r
   the pipeline response whole; `ConnectorView` and `PipelineStatus` go and `useConnector` returns the read
   result. The one node editor, with the strict parser, is U1b's. **Re-test:**
   `git grep -c "scoring_dials" -- promptpotter`; `git grep -n "interface ConnectorView" -- webapp`.
-- **EM: `domain/wire_record.py::WireRecord` is a second model framework beside pydantic**: a
-  source generator (exec plus linecache) behind six classes, each shadowed by a `TypedDict` and bridged
-  back through `__get_pydantic_core_schema__`. What varies is speed only ("no per-cell field loop").
-  Action: time a cold fold of a large ledger both ways; where pydantic holds, the generator goes and the
-  six classes are plain frozen models. **Re-test:** `git grep -n "class WireRecord" -- promptpotter`.
 
 **Batch 3: the run's start (U2) and the potter arc (U1b with EP).**
 - **Five doors and three job lifecycles meet in one `HeldRun`.** `jobs/launcher/launch.py::_hold`
@@ -232,12 +227,12 @@ by an exhaustive table or state-machine test. Each is a pattern a mature project
 with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-11-04).
 
 **Decided once, read by every arc before a leap.**
-- No arc before Q1 holds a command's state anywhere but the record `commands/dispatcher.py` writes.
-- No arc before Q2 adds a cadence, a `revalidate` list or a cross-invalidation; a new read polls on
-  the descriptor it has, and A4's conversation opens no second `EventSource`.
+- No arc before Q1 holds a command's state anywhere but the record `commands/dispatcher.py` writes
+  and the MCP task memory batch E leaves standing (`host_surface.py::HostSession._tasks`).
+- No arc before Q2 adds a cadence, a `revalidate` list or a cross-invalidation beyond batch E's; a new
+  read polls on the descriptor it has, and A4's conversation opens no second `EventSource`.
 - No arc before Q3 adds a `logger.warning` in `application/`: a new fault is a record kind with a reader.
-- Batch E closes EA's command states and EW's failed-read cadence at "no regression against main";
-  Q1 and Q2 delete them.
+- Batch E lands no command state and keeps every read at main's cadence; Q1 and Q2 delete what stands.
 
 - **Q1: one command log.** The fact: what was asked of the system and where it stands. Today it is
   split: `run_records.py::CommandRecord` and `run_records.py::CommandAckRecord` land on whichever
@@ -246,8 +241,13 @@ with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-1
   from `jobs/mint.py::_mint_campaign`), a deleted cycle's go to the root's, the loop reads its
   standing commands off its own ledger (`runtime_flags.py::standing_controls`), the trail folds
   command lines out of every ledger and a tombstone's copies (`store/account_trail.py`), idempotency
-  is a ledger scan (`commands/dispatcher.py::_find_idempotent_command`), a running act's status lives
-  in MCP memory (EA), and whether the filer is alive is asked beside all of it. Sites:
+  is a ledger scan (`commands/dispatcher.py::_find_idempotent_command`), and whether the filer is alive
+  is asked beside all of it. A running act's status and stop live only in MCP memory
+  (`host_surface.py::HostSession._tasks`, `HostSession._cancel_task`, `host_surface.py::cancel_acts`):
+  REST serves no job read, and the webapp has no stop for verify or bench. A pass's stop address is
+  built per door (`commands/measuring.py::pass_pause`, `cancel_acts`, the CLI's Ctrl+C in
+  `cli/commands/launch.py`, `new.py` and `noise_floor.py`), and the answer a door returns
+  (`command_kinds.py::CommandAcceptedBody`) does not name the address the dispatcher resolved. Sites:
   `git grep -l "CommandRecord\|CommandAckRecord\|standing_controls(" -- promptpotter`. Owner: one
   account-scoped append-only log; a command is one record stream in it (filed, applied, refused,
   voided, cancelled), each event written with its filing in one step, its status a fold of its own
@@ -256,8 +256,8 @@ with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-1
   (`RunPhaseRecord`, the effects); the log keeps what was ASKED. The pattern: event sourcing's
   per-aggregate stream with status a fold (EventStoreDB, Axon). Deletes: the two record kinds from
   the ledger, `ledger_scan.py`'s command fold, the trail's per-ledger walk and
-  `run_records.py::TrailTombstoneRecord`'s copied commands, the idempotency scan, EA's index and
-  `host_surface.py::_cancel_task`; a pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`)
+  `run_records.py::TrailTombstoneRecord`'s copied commands, the idempotency scan, `HostSession._tasks`
+  and `_cancel_task`, the per-door stop addresses; a pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`)
   is addressed by its command id, so its stop is one command at every entry point. Shares with U2:
   the adopt step and U2's one launch answer, which is a log read. Edges inside: the loop's pending
   read becomes a by-subject read of the log, so the log keeps its own per-subject offsets, a fold,
@@ -265,19 +265,28 @@ with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-1
   the fold reads the filer's OS lock (§0.5) to derive "filed, filer gone". Invariant tests: the
   exhaustive `(status, event)` table yields one status or a refusal for every pair; for any
   interleaving of file, apply, refuse, cancel and void with any ledger move or delete, the fold after
-  the move equals the fold before. Amends [`../architecture.md`](../architecture.md) § Control-remote
-  and [`../decisions.md`](../decisions.md) § 0001 in its commit: both place the record on the cycle's
-  ledger. **Re-test:** `git grep -n "class CommandRecord" -- promptpotter/domain/run_records.py`.
+  the move equals the fold before. Its acceptance table is the command-state table of
+  `b79e18678:tests/test_security.py` § 5, "The command state machine" (branch `arc/ea-8`, cut from
+  batch E), plus a
+  `RunState.scoring` row: a sandbox's pause, and a line run selecting. Amends
+  [`../architecture.md`](../architecture.md) § Control-remote and [`../decisions.md`](../decisions.md)
+  § 0001 in its commit: both place the record on the cycle's ledger. **Re-test:**
+  `git grep -n "class CommandRecord" -- promptpotter/domain/run_records.py`;
+  `git grep -n "def _cancel_task" -- promptpotter`.
 - **Q2: one change feed — the server says what moved.** The fact: that a served subject moved. The
-  webapp guesses it at many sites: a cadence per read (`cadence.ts`, read through
-  `useRead.ts::useRead`'s `intervalMs`), a re-ask per write (`useCommand.ts::useCommand`'s
-  `revalidate` and the `read-cache.ts::invalidateReads` calls beside it), the dashboard poll's phase
-  re-ask and slow beat (`api/reads.ts::onViewedPhaseChange`, `poll.tsx::viewedIntervalMs`),
-  `useEvidence.ts`'s and `AccountSpend.tsx`'s own re-asks, focus, visibility and online revalidation in
-  `read-cache.ts`, and its failed-read cadence (`cadence.ts::RECONNECT_POLL_MS`); the
-  server guesses beside it with mtimes and clock edges (`runtime_flags.py::run_state_stamps`) and one
-  store-wide version (`application/hierarchy.py::entries_version`). Sites:
-  `git grep -l "intervalMs\|invalidateReads(\|revalidate" -- webapp/lib webapp/components`. The server
+  webapp guesses it at many sites: a cadence per read (a descriptor's `cadence` on
+  `read-cache.ts`'s beat, or the `intervalMs` its caller reads off another read; the constants in
+  `cadence.ts`), a re-ask per write (`useCommand.ts::useCommand`'s `revalidate` and the
+  `read-cache.ts::invalidateReads` calls beside it), the viewed dashboard's phase re-ask and slow beat
+  (`api/reads.ts::onViewedPhaseChange`, `poll.tsx::viewedIntervalMs`), `useEvidence.ts`'s pulse and
+  the listing's bill re-ask of the coupon (`api/reads.ts::hierarchyRead`'s `onChange`), focus,
+  visibility and online revalidation in `read-cache.ts`, twice on a tab return, and its failed-read
+  cadence (`cadence.ts::RECONNECT_POLL_MS`); the server guesses beside it with mtimes and clock edges
+  (`runtime_flags.py::run_state_stamps`) and one store-wide version
+  (`application/hierarchy.py::entries_version`). A settled read rests until its subject's version
+  moves: EW built that resting on the listing's poll and cut it (operator, 2026-11-05), because only
+  the server serves a per-subject version; its subject names are the stream's. Sites:
+  `git grep -lE "intervalMs|cadence: |invalidateReads\(|revalidate" -- webapp/lib webapp/components`. The server
   writes every ledger and runs every command, so it knows. Owner: a version per subject, the length
   of the ledgers the subject folds, from the one producer door (U3's `scope.ledger.append`), plus the
   moves no append makes (a process gone, a beat stale), published by the sweep that detects them. The
@@ -289,8 +298,8 @@ with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-1
   table: before U3 that table is the convention site this leap removes, so it waits on U3. The
   pattern: server-pushed invalidation with the fetch as truth (Phoenix LiveView, Firestore listeners;
   the client half is SWR / React Query's `invalidateQueries`). Deletes: the read intervals,
-  `intervalMs`, `invalidateReads`, `revalidate`, the phase re-ask, the slow beat, the focus and
-  visibility hooks, the second channel, `run_state_stamps`' clock edges, the store-wide version. In
+  `intervalMs`, `invalidateReads`, `revalidate`, the phase re-ask, the slow beat, the bill re-ask, the
+  pulse, the focus, visibility and online hooks, the second channel, `run_state_stamps`' clock edges, the store-wide version. In
   U4, U5, W2, B and A4 nothing is added beyond a descriptor; U5's arm row and A4's conversation ride
   the one stream. One failure rule: the stream lost → reconnect, then re-ask every mounted read once.
   Edges inside: an event before, after or without the read it hints, or twice: harmless by
@@ -299,7 +308,7 @@ with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-1
   reorderings, drops and duplicates, the cache's body equals the server's at the last read and never
   regresses in version; on the server, every record kind a projection consumes names a subject in a
   table derived from U3's projection roster, and every input `run_state_stamps` reads today is an
-  append or a sweep publication. **Re-test:** `git grep -n "intervalMs" -- webapp/lib/hooks/useRead.ts`.
+  append or a sweep publication. **Re-test:** `git grep -nE "intervalMs|cadence" -- webapp/lib/api/reads.ts`.
 - **Q3: one fault channel — a fault is a value.** The fact: a step failed or was skipped, and why.
   Today it is a log line at many sites, each kept honest by remembering to serve it: engine decisions
   narrated into `logger.warning` (§ Config resolution item 10, moved here: `bench/resume_and_fork/repair.py`,
@@ -322,6 +331,43 @@ with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-1
   `domain/` that neither raises nor hands its fault on (an append through the door, or a return whose
   type carries it), and the list is empty; every fault kind has one projection reader and one word
   row. **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
+- **RS: one running set — which nodes a run reaches.** The fact: the nodes a run calls, which are its
+  chain, its phase pipelines and the declared nodes off the chain, less the excluded ones. The rule:
+  a which-nodes question reads the running set, and an order question reads the chain. Today most
+  readers ask the chain (`pipeline_schema.py::PipelineSchema.active_steps`), so a phase or off-chain node
+  is missing from:
+  - run init (`pipeline_resolve.py::_validate_model_ownership`, `_validate_prompt_reach`,
+    `_apply_starting_prompts`) and the Start gate (`origin_readiness.py::_check_node_models`): a phase
+    LLM node with no model passes;
+  - every reader of `PipelineSchema.prompt_nodes`;
+  - potter's view (`dispatch/prompts.py::effective_optimizer_prompts`, `injections/wounds.py::_writable`,
+    `layer_state.py::critique_axes`, `layer_state.py::_r_rebase_capability`);
+  - `children.py::carried_writes`, which admits over one set and refuses over another;
+  - the price and fence (`preflight.py::task_routes`, `application/free_tier.py::outside_free_tier`),
+    `pipeline_resolve.py::_runs_with`, the scoring role questions (`scoring/evaluators.py`,
+    `measurement_log.py`) and the CLI's `cli/commands/launch.py::pipeline_summary`.
+
+  Others ask the un-narrowed chain where they should ask the narrowed one
+  (`wiring.py::_warn_if_labels_have_no_ranker`, `_verify_required_observation_keys`,
+  `jobs/mint.py::_mint_after_framing`). Some rules are spelled twice: "phase" names both
+  `phase_pipelines` and the escalation buckets; the default-is-every-node rule sits in
+  `pipeline_parsing.py` and `dataset_access.py::declared_pipelines`; "the one node" sits in
+  `draft_build.py`'s `is_single_node`, `node_context.py::Target.prompt_node`, and the webapp's
+  `PipelineFlow.tsx` and `nests[0]` picks.
+
+  Sites: `git grep -n "active_steps" -- promptpotter`. Owner: one `running` set, derived once on the
+  resolved schema. Every which-nodes reader reads it, and the phases are laid once, by the optimizer's
+  manifest, escalation buckets included.
+
+  Batch E's EN tried this rule in-layer and was cut back to main (operator, 2026-11-05). Its last review
+  is the spec. Hold each door with a test that fails when its fix is reverted: run init through the
+  mint, the campaign door, the dataset door under `exclude_nodes`, the origin reopen with a seed
+  overlay and a narrowing, phases declared out of name order, and one draft edit that picks a Mode and
+  narrows the node it adds and the node it drops. A node off the chain is drawn on its own rail row.
+
+  It moves what L4 decides: potter's `l2_context` and `l3_plan` become L1 levers, and the next paid run
+  misses the L4 cache once. The operator answers that at the arc's start. **Re-test:**
+  `git grep -c "active_steps" -- promptpotter`.
 
 **Weighed and left.** Liveness (a verification orphaned at two seams, `started_at === null` in the
 browser): `runtime_flags.py::derive_run_state` is the owner §0 already names, the sites are U3's and
@@ -879,6 +925,65 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 - **`config/settings.py::_git_head` answers `UNVERSIONED` silently** for a ref in neither the loose
   refs nor `packed-refs` (a reftable repo, corrupt refs). Action: the landing's refusal names the
   checkout it could not version. **Re-test:** a landing from a reftable clone names why.
+
+### Batch E's census (2026-11-05)
+
+What batch E's reviews found outside the arc under review, grouped by shape.
+
+**A. A file read past its store's one reader.** **Rides with:** K3a.
+- `identity/blocklist.py::_read`, `identity/grants.py::_read`, `jobs/registry.py::JobRegistry._read`,
+  `wallet_store.py::GrantStore` and `wallet_store.py::TenantApiKeyStore` load their files raw, and so do
+  `tenant_dataset_store.py::load_task_context`, `default_claim.py` and
+  `intelligence/hard_sample_sorter.py`. `dataset_access.py::_named` reads `task.md` and `origin.yaml`
+  itself, so one malformed `dataset.yaml` gets four answers. Action: each file reads through its
+  store's typed row, and a file the store cannot read is refused once. **Re-test:**
+  `git grep -nE "def _read\b" -- promptpotter/infrastructure promptpotter/application`.
+- `tenant_dataset_store.py::banks_sharing` fails the whole survey on one bad entry. The survey catches
+  in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
+  `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
+  and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
+
+**B. A refusal spelled per door.** **Rides with:** Q3.
+- `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and
+  `shared/errors.py::LedgerUnreadableError` stand beside the one refusal type. A taken slug is refused
+  twice, as `LaunchError` and as `shared/errors.py::SlugTakenError`.
+  `injections/registry.py::validate_template` raises `KeyError`. Action: one type, its kind a row.
+  **Re-test:** `git grep -nE "class (OIDCConfigError|PackRefusal)\b" -- promptpotter`.
+- The CLI rewrites refusals: `parsers.py::_budget_axis` and `verbs.py::_rescore_count_arg` word their
+  own, and `cli/commands/new.py`, `ab.py` and `resume_command.py` print `ERROR:` beside `Error:`.
+  Action: the CLI prints the refusal's served sentence. **Re-test:**
+  `git grep -n '"ERROR:' -- promptpotter/presentation/cli`.
+
+**C. One address resolved twice.** **Rides with:** Q1.
+- `cycle_addressing.py::resolve_campaign_id` is a second resolver over `resolve_subject`'s matcher,
+  read by `cli/commands/ab.py` and `noise_floor.py` off the dispatcher. The CLI's cycle verbs resolve
+  CLI-side. The matcher falls back to a substring, and the dispatcher walks `descend` twice.
+  `run_records.py::BankedSubject` is a second address. Action: one resolution, at the dispatcher, by
+  exact id or prefix. **Re-test:** `git grep -n "resolve_campaign_id(" -- promptpotter`.
+
+**D. Spelled by hand beside the rows.** **Rides with:** the next read added.
+- `api/deps.py::_NAMED` and `read_input`'s pattern, `cli/parsers.py`' read help,
+  `complexity_ledger.py::_TERMINAL_VIEW`, and the 29 hand-written URLs of `webapp/lib/api/reads.ts`
+  each restate `ReadKind`'s rows. The webapp re-asks reads by an untyped name (`invalidateReads("…")`).
+  Action: each derives from the rows, and a read's name is a type. **Re-test:**
+  `git grep -c '\`${API}/' -- webapp/lib/api/reads.ts`.
+
+**E. Webapp read state.** **Rides with:** Q2.
+- A `/me` failure is reported twice: by the cache's failure and by the auth catch, which treats a 401
+  as an incident, and a 401 rests. `read-cache.ts::dropCachedRead` on a mounted read clears it with
+  no re-ask. `api/reads.ts::couponRead` has no validator, and evidence computes its ETag after the
+  build. `channel-hooks.ts::usePickedPoint` reads null mid-scoring. `ChannelDetail.tsx` shows its
+  pending copy on a failed read. `read-cache.ts`'s `syncBeat` is latent. The round in flight is spelled
+  in `round-candidates.ts`, `search-point.ts` (three sites) and `round-reading.ts`. Callers' cadences
+  and `poll.tsx::useDashboard`'s viewed check are held by no test. Action: Q2 deletes the cadences.
+  The rest get one owner each. **Re-test:** `git grep -n "dropCachedRead(" -- webapp/lib webapp/components`.
+
+**F. Singles.**
+- `domain/scoring.py::turn_scalars` overwrites `n_turns` with the count of a step named `n`. Action:
+  the per-step terms take a namespace the totals cannot meet. **Re-test:** a turn list with a step
+  `n` keeps its total.
+- `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
+  replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
 
 ## Open — multi-arc
 
