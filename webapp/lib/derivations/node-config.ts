@@ -10,11 +10,27 @@ import {
 
 export type ConfigMode = "search-space" | "values";
 
-export interface ConfigRow {
+// What a typed-in value is read as: the served row's kind and bounds; `nested` round-trips as JSON.
+export type ValueType = Pick<
+  NodeConfigParam,
+  "kind" | "integer" | "nullable" | "minimum" | "exclusive_minimum" | "maximum" | "exclusive_maximum"
+>;
+
+function valueType(p: NodeConfigParam): ValueType {
+  return {
+    kind: p.kind,
+    integer: p.integer,
+    nullable: p.nullable,
+    minimum: p.minimum,
+    exclusive_minimum: p.exclusive_minimum,
+    maximum: p.maximum,
+    exclusive_maximum: p.exclusive_maximum,
+  };
+}
+
+export interface ConfigRow extends ValueType {
   node: string;
   key: string;
-  // "model" | "enum" | "number" | "bool" | "string" | "nested" | "prompt"; `nested` round-trips as JSON.
-  kind: string;
   options: string[];
   value: string;
   baseValue: string;
@@ -67,17 +83,6 @@ function asRowValue(kind: string, value: unknown): string {
   return kind === "nested" ? JSON.stringify(value, null, 1) : String(value);
 }
 
-// `undefined` = unrepresentable (a bad nested draft), which the emitters drop; `""` = inherit.
-function coerce(kind: string, raw: string): unknown {
-  if (kind === "number") {
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : raw;
-  }
-  if (kind === "bool") return raw === "true";
-  if (kind === "nested") return parseNested(raw);
-  return raw;
-}
-
 export function parseNested(raw: string): unknown {
   if (raw.trim() === "") return "";
   try {
@@ -87,12 +92,13 @@ export function parseNested(raw: string): unknown {
   }
 }
 
-// The draft's own overlay, never the served resolution, which is empty while the node is `text`.
+// Off the served `params` (what each node runs, a reused dataset's own contract included), never
+// `node_output_schema`, which is empty while the node answers as `text`.
 export function authoredOutputSchema(
   overlay: Record<string, unknown>,
   node: string,
 ): Record<string, unknown> | undefined {
-  const schema = asObj(asObj(asObj(overlay[node]).config).output_schema);
+  const schema = asObj(asObj(overlay[node]).output_schema);
   return Object.keys(schema).length > 0 ? schema : undefined;
 }
 
@@ -100,7 +106,7 @@ export function authoredAnswerFields(
   overlay: Record<string, unknown>,
   node: string,
 ): string[] | undefined {
-  const fields = asObj(asObj(overlay[node]).config).answer_fields;
+  const fields = asObj(overlay[node]).answer_fields;
   return Array.isArray(fields) ? fields.filter((f): f is string => typeof f === "string") : undefined;
 }
 
@@ -127,9 +133,9 @@ export function configRows(
       const baseValue = asRowValue(p.kind, p.value);
       if (mode === "search-space") {
         rows.push({
+          ...valueType(p),
           node: n,
           key: p.key,
-          kind: p.kind,
           options: p.options,
           value: baseValue,
           baseValue,
@@ -146,9 +152,9 @@ export function configRows(
         const inSeed = p.key in nodeSeed;
         const seedVal = inSeed ? nodeSeed[p.key] : p.value;
         rows.push({
+          ...valueType(p),
           node: n,
           key: p.key,
-          kind: p.kind,
           options: p.options,
           value: asRowValue(p.kind, seedVal),
           baseValue,
@@ -172,38 +178,29 @@ export function rowIntents(rows: ConfigRow[]): ParamIntent[] {
   return rows.map((r) => ({ key: r.key, open: !r.locked, allowed: r.allowed }));
 }
 
-export function nodeOverlayPatch(
-  base: Record<string, unknown>,
-  node: string,
-  rows: ConfigRow[],
-): DraftPatch {
+// Only the node's changed knobs: the server lays `config` over the draft's by its paths.
+export function nodeOverlayPatch(node: string, rows: ConfigRow[]): DraftPatch {
   const config: Record<string, unknown> = {};
   for (const r of rows) {
     if (r.value !== r.baseValue && r.value !== "") {
-      const value = coerce(r.kind, r.value);
+      const value = parseParam(r, r.value);
       if (value !== undefined) config[r.key] = value;
     }
   }
   const narrowing = { node_narrowing: { [node]: rowIntents(rows) } };
   if (Object.keys(config).length === 0) return narrowing;
-  const prev = asObj(base[node]);
-  return {
-    pipeline_overlay: { ...base, [node]: { ...prev, config: { ...asObj(prev.config), ...config } } },
-    ...narrowing,
-  };
+  return { config: { pipeline_overlay: { [node]: config } }, ...narrowing };
 }
 
 export function nodeLockPatch(
   schema: Record<string, NodeConfigParam[]> | null,
-  overlay: Record<string, unknown>,
   node: string,
   keys: readonly string[],
   locked: boolean,
 ): DraftPatch {
   return nodeOverlayPatch(
-    overlay,
     node,
-    configRows(schema, overlay, "search-space", node).map((r) =>
+    configRows(schema, {}, "search-space", node).map((r) =>
       keys.includes(r.key) ? { ...r, locked } : r,
     ),
   );
@@ -264,7 +261,7 @@ export function seedOverlayFromRows(
     if (!r.inSeed && (edit === undefined || edit === r.value)) continue;
     const raw = edit ?? r.value;
     if (raw === "") continue;
-    const value = coerce(r.kind, raw);
+    const value = parseParam(r, raw);
     if (value === undefined) continue;
     (overlay[r.node] ??= {})[r.key] = value;
   }
@@ -294,7 +291,7 @@ export function knobText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function withinBounds(knob: NodeConfigParam, n: number): boolean {
+function withinBounds(knob: ValueType, n: number): boolean {
   return (
     (knob.minimum === null || n >= knob.minimum) &&
     (knob.exclusive_minimum === null || n > knob.exclusive_minimum) &&
@@ -312,16 +309,17 @@ export function knobRange(knob: NodeConfigParam): string | null {
   return `${open}${low ?? "−∞"}, ${high ?? "∞"}${close}`;
 }
 
-export function parseKnob(knob: NodeConfigParam, text: string): unknown {
+// The one reading of a typed-in value, by the served row's type: `undefined` is unrepresentable
+// (off its bounds, a bad nested draft), which every emitter drops; a blank is null where legal.
+export function parseParam(type: ValueType, text: string): unknown {
   const t = text.trim();
-  if (knob.kind === "string") return t === "" && knob.nullable ? null : text;
-  if (t === "") return knob.nullable ? null : undefined;
-  if (knob.kind === "number") {
+  if (type.kind === "number" || type.kind === "nested") {
+    if (t === "") return type.nullable ? null : undefined;
+    if (type.kind === "nested") return parseNested(t);
     const n = Number(t);
-    if (!Number.isFinite(n)) return undefined;
-    if (knob.integer && !Number.isInteger(n)) return undefined;
-    return withinBounds(knob, n) ? n : undefined;
+    if (!Number.isFinite(n) || (type.integer && !Number.isInteger(n))) return undefined;
+    return withinBounds(type, n) ? n : undefined;
   }
-  const parsed = parseNested(t);
-  return parsed === "" ? undefined : parsed;
+  if (type.kind === "bool") return t === "true";
+  return t === "" && type.nullable ? null : text;
 }

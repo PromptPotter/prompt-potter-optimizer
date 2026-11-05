@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import type { HierarchyCampaign, HierarchyCandidate, SubjectReading } from "@/lib/api/types";
-import type { NodeSchemaReading } from "@/lib/types";
 import { useCampaignPipeline } from "@/lib/hooks/useConnector";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
@@ -9,12 +8,12 @@ import {
   candidatesAtPath,
   descendantsOf,
   mainLineOf,
-  pipelineReadStatus,
   type CompareItem,
   type LineageIndex,
+  nodeSchemaReading,
 } from "@/lib/derivations";
 import { useCells, type CellsPreset } from "@/lib/hooks/useCells";
-import { readyData, shownData } from "@/lib/hooks/useRead";
+import { shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
 import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
@@ -141,17 +140,7 @@ export function usePickedPoint(
   );
   const pickedCampaign = path?.at(-1)?.campaignId ?? "";
   const pipelineRead = useCampaignPipeline(at ? pickedCampaign || null : null, at);
-  const pipeline = readyData(pipelineRead);
-  const pipelineStatus = pipelineReadStatus(pipelineRead);
-  const schema = useMemo<NodeSchemaReading>(
-    () => ({
-      status: pipelineStatus,
-      config: pipeline?.node_config_schema ?? null,
-      output: pipeline?.node_output_schema ?? null,
-      isSingleNode: !!pipeline?.is_single_node,
-    }),
-    [pipelineStatus, pipeline],
-  );
+  const schema = nodeSchemaReading(pipelineRead);
   const id = selected?.facts.individual ?? null;
   const armKey = selected?.facts.reading.arm.key ?? null;
   const cfg = useMemo(

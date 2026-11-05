@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 from pydantic import BaseModel, SecretStr
 
 from promptpotter.application.cycle_addressing import resolve_subject
+from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_kinds import (
     CampaignPayload,
@@ -43,7 +44,6 @@ from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
     Stores,
     owned_campaign,
-    owned_draft_data,
     resolve_cycle_path,
 )
 from promptpotter.shared.errors import (
@@ -347,7 +347,7 @@ class CommandDispatcher:
     async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any, DraftPayload]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
         # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
-        owned_draft_data(self.stores, call.payload.draft_id)
+        owned_draft(self.stores, call.payload.draft_id)
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
             applier = await self._applier(DispatchedToDraft(self, call.payload, claim))

@@ -84,7 +84,7 @@ from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import run_init
@@ -1049,22 +1049,21 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     def steered_fork(hop: CycleHop, model: str) -> CycleHop:
         seed = parse_cycle_seed(
-            ForkSeed(pipeline_overlay={"a": {"model": model}}),
-            cycle_config(stores, campaign, None).config,
-            stores,
-            campaign,
-            hop,
+            ForkSeed(pipeline_overlay={"a": {"model": model}}), stores, campaign, hop
         )
         cycle_id = mint_operator_fork(
             stores=stores, hop=hop, from_round=2, seed=seed, keep_rounds=True
         )
         return hop.model_copy(update={"cycle_id": cycle_id})
 
+    permitted = permitted_narrowing(stores, campaign)
     babysat = steered_fork(applied, "x")
-    assert cycle_config(stores, campaign, babysat).babysat, "an unpermitted steer forked clean"
+    assert cycle_config(stores, campaign, babysat).steers_outside(permitted), (
+        "an unpermitted steer forked clean"
+    )
     back = steered_fork(babysat, "m")
     onward = cycle_config(stores, campaign, back)
-    assert (onward.seed_overlay, onward.babysat, onward.config.scoring) == (
+    assert (onward.seed_overlay, onward.steers_outside(permitted), onward.config.scoring) == (
         {"a": {"model": "m"}},
         True,
         criterion,

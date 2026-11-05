@@ -1,7 +1,5 @@
 import { useEffect, type CSSProperties } from "react";
-import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
-import { useLeafSubject } from "@/lib/hooks/useLeafDatasetName";
 import { SIDEBAR_WIDTH, useSidebarCollapsed, useSidebarWidth } from "@/lib/prefs/sidebar";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
@@ -10,7 +8,7 @@ import { Sidebar } from "@/components/shell/sidebar/Sidebar";
 import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
 import { SelectionProvider } from "@/lib/SelectionContext";
-import { IngestFlowProvider, useCheckinDraft } from "@/lib/ingest-flow";
+import { IngestFlowProvider } from "@/lib/ingest-flow";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/remote/RemoteControl";
@@ -29,9 +27,7 @@ export function AppShell() {
 }
 
 function AppShellInner() {
-  const { viewedPath, leafCampaignId, leafCycleId, views } = useWorkspace();
-  const draft = useCheckinDraft();
-  const connectorAt = useLeafSubject();
+  const { viewedPath, leafCycleId, views } = useWorkspace();
   const [sidebarCollapsed] = useSidebarCollapsed();
   // Applied inline only while expanded, so the collapsed rail's class rule still wins.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
@@ -43,7 +39,6 @@ function AppShellInner() {
   return (
     // Every surface reading the viewed tree composes `sampleSet` into the masked read.
     <SelectionProvider cycleId={leafCycleId}>
-    <ConnectorProvider campaignId={leafCampaignId} at={connectorAt} draft={draft}>
     <div
       className={cx(
         "shell",
@@ -80,7 +75,6 @@ function AppShellInner() {
       <RemoteControl />
       <VendorSprite />
     </div>
-    </ConnectorProvider>
     </SelectionProvider>
   );
 }

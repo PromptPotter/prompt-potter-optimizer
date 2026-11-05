@@ -1,26 +1,24 @@
 import { cx } from "@/lib/cx";
 import { PLACEHOLDER } from "@/lib/format";
 import { connectorReachability, interiorNodes } from "@/lib/derivations";
-import type { ConnectorView } from "@/lib/types";
+import { useBackend, useConnector } from "@/lib/hooks/useConnector";
+import { shownData } from "@/lib/hooks/useRead";
 
 const SECURITY_DOC_URL =
   "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md#connection-security";
 
-interface Props {
-  view: ConnectorView;
-}
-
-export function ConnectorInspector({ view }: Props) {
-  const {
-    connector,
-    backendType,
-    selfOptimization: selfOpt,
-    view: pipelineView,
-    others,
-    baseUrl,
-    isTls,
-    health,
-  } = view;
+export function ConnectorInspector() {
+  const read = useConnector();
+  const backend = useBackend();
+  const served = shownData(read);
+  const connector = served?.connector ?? null;
+  const backendType = served?.backend_type ?? null;
+  const selfOpt = served?.self_optimization ?? false;
+  // Before the pipeline lands, the other backends are listed only once its read has failed.
+  const others = served || read.status === "failed" ? backend.others : [];
+  const { health } = backend;
+  const baseUrl = backend.active?.base_url ?? null;
+  const isTls = baseUrl ? baseUrl.startsWith("https://") : null;
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
   // No resolved connector is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
   const noBackend = connector == null && !selfOpt;
@@ -35,7 +33,7 @@ export function ConnectorInspector({ view }: Props) {
         : reachable
           ? `checked ${new Date(health.checked_at).toLocaleTimeString()}`
           : health.detail;
-  const interior = interiorNodes(pipelineView);
+  const interior = interiorNodes(served?.view ?? null);
 
   // A div host, not a span: the popover below is flow content, which no inline element may hold.
   return (

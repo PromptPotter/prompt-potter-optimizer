@@ -1,19 +1,17 @@
 import { optimizerRosterRead } from "@/lib/api";
-import type { DraftCampaignWire, DraftPatch } from "@/lib/api/types";
-import { useRead } from "@/lib/hooks/useRead";
+import type { DraftPatch } from "@/lib/api/types";
+import { useConnector } from "@/lib/hooks/useConnector";
+import { shownData, useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
 import { ReadState, SegmentedControl } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 
-export function OptimizerSetupSection({
-  draft,
-  onApply,
-}: {
-  draft: DraftCampaignWire;
-  onApply: (patch: DraftPatch) => void;
-}) {
-  const { optimizer } = draft.optimization_overrides;
+// Reads the connector read its knobs panel and graph read: a check-in's draft is its transport.
+export function OptimizerSetupSection({ onApply }: { onApply: (patch: DraftPatch) => void }) {
+  const pipeline = shownData(useConnector());
+  const optimizer = pipeline?.optimizer ?? null;
+  const setup = pipeline?.optimizer_setup ?? null;
   const rosterRead = useRead(optimizerRosterRead());
   const { close } = useWorkspace();
 
@@ -34,11 +32,11 @@ export function OptimizerSetupSection({
                   value: o.name,
                   label: o.name === roster.default ? `${o.name} · default` : o.name,
                 }))}
-                value={optimizer}
+                value={optimizer ?? ""}
                 onChange={(name) => {
                   if (name === optimizer) return;
                   close("node");
-                  onApply({ optimization_overrides: { optimizer: name } });
+                  onApply({ config: { optimization: { optimizer: name } } });
                 }}
                 ariaLabel="Optimizer"
               />
@@ -56,21 +54,23 @@ export function OptimizerSetupSection({
         }}
       </ReadState>
 
-      <NodeKnobsPanel onChange={(patch) => onApply({ optimization_overrides: { nodes: patch } })} />
+      <NodeKnobsPanel onChange={(patch) => onApply({ config: { optimization: { nodes: patch } } })} />
 
-      <PipelineFlow
-        layer={{
-          view: draft.optimizer_setup.view,
-          status: "ok",
-          connector: "PromptPotter",
-          reach: draft.optimizer_setup.reach,
-          scope: "optimizer",
-          nestsNode: draft.optimizer_setup.measurement_node,
-          activeNode: null,
-          isLive: false,
-        }}
-        tone="neutral"
-      />
+      {setup && (
+        <PipelineFlow
+          layer={{
+            view: setup.view,
+            read: { status: "ready", data: setup },
+            connector: "PromptPotter",
+            reach: setup.reach,
+            scope: "optimizer",
+            nestsNode: setup.measurement_node,
+            activeNode: null,
+            isLive: false,
+          }}
+          tone="neutral"
+        />
+      )}
     </>
   );
 }

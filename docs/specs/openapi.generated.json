@@ -5315,7 +5315,7 @@
         "description": "A check-in's draft as every check-in route answers it; Start mints its campaign.\n\nNo ``tenant_id`` rides it (decisions.md § 0002).",
         "properties": {
           "active_steps": {
-            "description": "The pipeline this draft runs. Who may move a node's axes is `node_config_schema`'s answer alone.",
+            "description": "The pipeline this draft runs. Who may move a node's axes is `pipeline.node_config_schema`'s answer alone.",
             "items": {
               "type": "string"
             },
@@ -5351,13 +5351,17 @@
             "description": "The input header; null until one is set.",
             "title": "Column Query"
           },
-          "connector": {
-            "title": "Connector",
-            "type": "string"
+          "config": {
+            "$ref": "#/components/schemas/CampaignConfig",
+            "description": "What Start declares: the draft's partial config laid over its basis (`pipeline_resolve.draft_pipeline`'s config, a free account's tier laid last). An `EditDraftPatch.config` addresses it by the same paths, but for `scoring`, which also takes a check-in's pick (`matcher`, `dials`); an upload's `pipeline_overlay` is its definition's, read in `pipeline`, never here."
           },
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "criterion": {
+            "$ref": "#/components/schemas/DraftCriterion",
+            "description": "`config.scoring` read as the matcher and dials a check-in picks; no client rebuilds a scoring block from them."
           },
           "dependencies": {
             "items": {
@@ -5385,10 +5389,6 @@
             "title": "Headers",
             "type": "array"
           },
-          "is_single_node": {
-            "title": "Is Single Node",
-            "type": "boolean"
-          },
           "launch_refusal": {
             "anyOf": [
               {
@@ -5400,52 +5400,9 @@
             ],
             "description": "`admit_launch`'s refusal of Start at the declared budget; null where it admits."
           },
-          "model_capabilities": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "$ref": "#/components/schemas/ModelCapability"
-              },
-              "type": "object"
-            },
-            "description": "A null `reasoning_efforts` is UNKNOWN, never unsupported.",
-            "title": "Model Capabilities",
-            "type": "object"
-          },
           "n_samples": {
             "title": "N Samples",
             "type": "integer"
-          },
-          "node_config_schema": {
-            "additionalProperties": {
-              "items": {
-                "$ref": "#/components/schemas/NodeConfigParam"
-              },
-              "type": "array"
-            },
-            "title": "Node Config Schema",
-            "type": "object"
-          },
-          "node_output_schema": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/NodeOutputSchema"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "title": "Node Output Schema",
-            "type": "object"
-          },
-          "optimization_overrides": {
-            "$ref": "#/components/schemas/OptimizationOverrides",
-            "description": "The draft's overrides, its `budget` the one Start declares: `pipeline_resolve.draft_pipeline`'s config, a free account's tier laid last."
-          },
-          "optimizer_setup": {
-            "$ref": "#/components/schemas/OptimizerSetup",
-            "description": "The optimizer as this draft's config runs it, as a campaign serves it."
           },
           "origin_prompts": {
             "additionalProperties": {
@@ -5458,20 +5415,8 @@
             "title": "Origin Prompts",
             "type": "object"
           },
-          "pipeline_overlay": {
-            "additionalProperties": true,
-            "title": "Pipeline Overlay",
-            "type": "object"
-          },
-          "pipeline_view": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PipelineView"
-              },
-              {
-                "type": "null"
-              }
-            ],
+          "pipeline": {
+            "$ref": "#/components/schemas/CampaignPipelineResponse",
             "description": "`GET /campaigns/{id}/pipeline`'s answer, computed from the draft: a pre-commit check-in has no dataset dir, so its pipeline is never fetched by slug."
           },
           "raw_task_description": {
@@ -5485,13 +5430,6 @@
             ],
             "description": "The task; null until one is set.",
             "title": "Raw Task Description"
-          },
-          "reach": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeReach"
-            },
-            "title": "Reach",
-            "type": "object"
           },
           "readiness": {
             "$ref": "#/components/schemas/OriginReadiness",
@@ -5512,15 +5450,6 @@
             },
             "title": "Sample Preview",
             "type": "array"
-          },
-          "scoring_dials": {
-            "description": "`term=weight` dials joined by commas; empty scores correctness alone.",
-            "title": "Scoring Dials",
-            "type": "string"
-          },
-          "scoring_matcher": {
-            "title": "Scoring Matcher",
-            "type": "string"
           },
           "scoring_matchers": {
             "description": "The matchers a check-in may pick between — the compiler's own set.",
@@ -5546,14 +5475,11 @@
           "slug",
           "sample_preview",
           "n_samples",
-          "connector",
-          "scoring_matcher",
           "scoring_matchers",
-          "scoring_dials",
-          "optimization_overrides",
-          "optimizer_setup",
+          "criterion",
+          "config",
+          "pipeline",
           "raw_task_description",
-          "pipeline_overlay",
           "headers",
           "column_query",
           "column_ground_truth",
@@ -5562,12 +5488,6 @@
           "candidate_library_size",
           "created_at",
           "active_steps",
-          "pipeline_view",
-          "node_config_schema",
-          "node_output_schema",
-          "reach",
-          "is_single_node",
-          "model_capabilities",
           "dependencies",
           "readiness",
           "launch_refusal",
@@ -5575,6 +5495,35 @@
           "setup_schema"
         ],
         "title": "DraftCampaignWire",
+        "type": "object"
+      },
+      "DraftCriterion": {
+        "additionalProperties": false,
+        "description": "The criterion a draft runs, read once off its laid ``config.scoring``: what a check-in\npicks from. An edit sends these keys back as ``EditDraftPatch.config.scoring``.",
+        "properties": {
+          "dials": {
+            "description": "The composite's weights, `term=weight` joined by commas: the declared dials, or a pinned formula's own; empty scores correctness alone.",
+            "title": "Dials",
+            "type": "string"
+          },
+          "matcher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The matcher the per-sample formula calls; null where it calls none or several.",
+            "title": "Matcher"
+          }
+        },
+        "required": [
+          "matcher",
+          "dials"
+        ],
+        "title": "DraftCriterion",
         "type": "object"
       },
       "DraftDependency": {
@@ -5624,7 +5573,7 @@
             "description": "What the last resolver turn left, as `resolve-origin` answered it."
           },
           "resolution_pending": {
-            "description": "Its task is on file but no resolver turn ever set it up (`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes over authored prompts.",
+            "description": "Its task is on file but no resolver turn ever set it up (`checkin_draft.py::DraftFile.resolution_pending`): the one case a reopen sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes over authored prompts.",
             "title": "Resolution Pending",
             "type": "boolean"
           },
@@ -5719,6 +5668,19 @@
             ],
             "title": "Column Query"
           },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A partial `CampaignConfig`, by its own paths, laid over the draft's by `campaign_config.py::merge_config_layers`; its `optimization` reads as an `OptimizationOverrides`. A string `scoring` names the criterion whole; a `scoring` mapping is folded into the criterion the draft runs, key by key: `matcher` picks the per-sample matcher, `dials` the composite's weights (the empty string clears them), `per_sample` and `per_cell` set those formulas.",
+            "title": "Config"
+          },
           "connector": {
             "anyOf": [
               {
@@ -5759,18 +5721,6 @@
               }
             ]
           },
-          "optimization_overrides": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Optimization Overrides"
-          },
           "origin_prompts": {
             "anyOf": [
               {
@@ -5788,32 +5738,6 @@
             ],
             "title": "Origin Prompts"
           },
-          "pipeline_overlay": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Overlay"
-          },
-          "pipeline_steps": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Steps"
-          },
           "raw_task_description": {
             "anyOf": [
               {
@@ -5826,31 +5750,6 @@
               }
             ],
             "title": "Raw Task Description"
-          },
-          "scoring_dials": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scoring Dials"
-          },
-          "scoring_matcher": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scoring Matcher"
           },
           "slug": {
             "anyOf": [
@@ -7140,7 +7039,7 @@
             "type": "object"
           },
           "steer": {
-            "description": "`clean` where the overlay stays inside the campaign's declared `optimizer_narrowing`. Outside it — a responder never sanctioned, or a cost lever no permitted set can sanction — the fork is the babysit act: `babysat` for a caller holding `campaign.babysit` (the branch is graded C), `refused` for any other.",
+            "description": "`clean` where the overlay stays inside what each node permits: its recorded schema's value spaces, the dataset's optimizer blocks among them, under the campaign's narrowing. Outside it — a responder never sanctioned, or a cost lever no permitted set can sanction — the fork is the babysit act: `babysat` for a caller holding `campaign.babysit` (the branch is graded C), `refused` for any other.",
             "enum": [
               "clean",
               "babysat",
@@ -11440,7 +11339,7 @@
       },
       "OptimizationOverrides": {
         "additionalProperties": false,
-        "description": "The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal\n``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it.",
+        "description": "An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.\nIts ``budget.rounds`` bound is theirs alone; a dataset's own block is never read through it,\nso a reused dataset may exceed it.",
         "properties": {
           "arm_gate": {
             "default": "off",
@@ -19801,7 +19700,7 @@
     },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
-        "description": "Sparse-patch a `DraftCampaign` and return its full post-mutation shape.",
+        "description": "Sparse-patch a `DraftFile` and return its full post-mutation shape.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
           {

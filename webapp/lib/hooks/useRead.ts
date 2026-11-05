@@ -21,6 +21,12 @@ export function failureOf<T>(read: ReadResult<T>): ReadFailure | null {
   return read.status === "failed" ? read.failure : null;
 }
 
+// What a read stands in for while it has nothing to show; null once it shows a body, a kept one
+// included (a failed revalidation keeps the body it painted over).
+export function readGap<T>(read: ReadResult<T>): Exclude<ReadResult<T>, { status: "ready" }> | null {
+  return read.status === "ready" || shownData(read) !== null ? null : read;
+}
+
 type Untyped = ReadDescriptor<unknown>;
 
 // The one hook on the cache: everything that varies per read is its descriptor's.

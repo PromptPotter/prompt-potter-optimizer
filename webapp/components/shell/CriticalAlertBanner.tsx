@@ -3,7 +3,7 @@ import { BACKEND_REACHABILITY_INFO, TONES, type Said as SaidRow } from "@/lib/ap
 import { cycleAddress, postCommand } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useConnector } from "@/lib/hooks/useConnector";
+import { useBackend } from "@/lib/hooks/useConnector";
 import { failureOf } from "@/lib/hooks/useRead";
 import { connectionSaid, useViewedDashboard } from "@/lib/poll";
 import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
@@ -17,7 +17,7 @@ export function CriticalAlertBanner() {
   const registryFailure = failureOf(useRegistry().read);
   const pointerFailure = failureOf(useActivePointer().read);
   const pause = useCommand<"pause-cycle">("critical-alert", { scope: cycleId });
-  const { health } = useConnector();
+  const { health } = useBackend();
 
   // The workspace's verdict wins: the dashboard has already reset onto another address. With no
   // unit in view, the reads that list and point at runs are the connection.

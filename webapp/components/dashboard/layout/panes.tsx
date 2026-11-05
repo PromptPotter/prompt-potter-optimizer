@@ -4,6 +4,7 @@ import { CardFrame, Said } from "@/components/ui";
 import { HEALTH_GRADE_INFO } from "@/lib/api/types";
 import { useViewedDashboard } from "@/lib/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { shownData } from "@/lib/hooks/useRead";
 import { useCandidatesState } from "@/lib/state/candidates";
 import { useSelection } from "@/lib/SelectionContext";
 import { hasTag } from "@/lib/derivations";
@@ -84,7 +85,7 @@ export function CandidatesPane() {
 
 // An L4 unit has no sample roster — its samples ARE the inner campaigns.
 export function HeatmapPane() {
-  if (useConnector().selfOptimization) return null;
+  if (shownData(useConnector())?.self_optimization) return null;
   return (
     <CardFrame title="Heatmap" headingTag="h2" span="full">
       <HardSamplesHeatmap />

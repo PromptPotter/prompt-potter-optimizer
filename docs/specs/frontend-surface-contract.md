@@ -70,7 +70,7 @@ invariants:
   I9_pipeline_resolution_server_owned: 'What config a node RUNS has ONE answer: GET
                       /campaigns/{id}/pipeline?at=<subject>
                       (application/pipeline_resolve.py::resolve_pipeline_for_campaign; a draft takes
-                      resolve_pipeline_for_draft on the draft response). ConnectorProvider''s `draft`
+                      resolve_pipeline_for_draft on the draft response). useConnector''s `draft`
                       and `CampaignFacts.runs_with` are TRANSPORTS of it, never sources a row may
                       re-merge or diff. Every param carries a served `source`
                       (domain/pipeline_schema.py::ParamSource); a badge, fold or lock derived from a

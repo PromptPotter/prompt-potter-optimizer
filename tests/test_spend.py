@@ -3046,24 +3046,27 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     ), "a dollar ceiling would admit a route no rate prices"
     oss = "openai/gpt-oss-20b:nitro"
     config = _budgeted(Budget(usd=None))
-    layered = free_tier.with_free_tier_layer(config, {"llm_only": {"model": oss}}, boxed)
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_only": {
+                    "config": {"model": oss},
+                    "optimizer": {
+                        "param_keys": ["reasoning_effort"],
+                        "observation_mappings": [{"pipeline_key": "answer", "is_llm": True}],
+                    },
+                }
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    )
+    layered = free_tier.with_free_tier_layer(config, schema, boxed)
     assert (
         layered.sp_budget_origin,
         layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
         layered.pipeline_overlay,
     ) == (20, 20, {"llm_only": {"reasoning_effort": "low"}}), (
         "a free check-in measured on more cells, or launched above its model's lowest rung"
-    )
-    schema = parse_pipeline_response(
-        {
-            "nodes": {
-                "llm_only": {
-                    "config": {"model": oss},
-                    "optimizer": {"param_keys": ["reasoning_effort"]},
-                }
-            },
-            "pipelines": {"default": ["llm_only"]},
-        }
     )
 
     def optimizer_on(effort: str) -> CampaignConfig:
@@ -3610,7 +3613,6 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         return draft_dir
 
     draft = new_draft(
-        tenant_id=stores.identity.tenant_id,
         owner_user_id=str(stores.identity.user_id),
         slug="drafted",
         basis=DatasetBasis(dataset="drafted"),
@@ -3618,7 +3620,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         sample_preview=[],
         headers=[],
     )
-    stores.drafts.write_draft(draft.draft_id, draft.to_disk())
+    stores.drafts.write_draft(draft)
     undrafted = account_usd()
     draft_dir = spent_draft(draft.draft_id, 0.04)
     with_draft = account_usd()

@@ -3,7 +3,7 @@ import { useSelection } from "@/lib/SelectionContext";
 import { useLeafIsL4, useWorkspace } from "@/lib/workspace";
 import { useRound } from "@/lib/hooks/useRound";
 import { useViewedLineage } from "@/lib/lineage";
-import { innerPanelIndex, panelCellKey } from "@/lib/derivations";
+import { innerPanelIndex, nodeSchemaReading, panelCellKey } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { type CellRow, type HierarchyCourse, ARM_END_INFO } from "@/lib/api/types";
@@ -33,7 +33,8 @@ export function MeasurementRun({
   round: number;
 }) {
   const { dash, isLive } = useViewedDashboard();
-  const cv = useConnector();
+  const read = useConnector();
+  const schema = nodeSchemaReading(read);
   const { viewedPath, leafCycleId, navigate } = useWorkspace();
   // The DECLARED backend type, not "the tree found inner runs": minting cells would tally as misses.
   const isL4 = useLeafIsL4();
@@ -261,7 +262,7 @@ export function MeasurementRun({
                       node={null}
                       point={g.spec}
                       overlay={g.spec.pipeline_overlay}
-                      schema={cv.schema}
+                      schema={schema}
                       mode="values"
                       compact
                     />

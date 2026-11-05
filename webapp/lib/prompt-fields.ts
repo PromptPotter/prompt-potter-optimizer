@@ -40,7 +40,7 @@ export function draftPrompts(
 }
 
 // One node's fields after an edit, as the draft patch the check-in sends. A target edit REPLACES
-// `origin_prompts` whole; an optimizer edit is the sparse `nodes.{node}.config.{field}` overlay a knob
+// `origin_prompts` whole; an optimizer edit is the sparse `config.optimization.nodes.{node}.config.{field}` overlay a knob
 // rides, carrying only the fields that moved.
 export function promptFieldsPatch(
   scope: NodeScope,
@@ -53,7 +53,7 @@ export function promptFieldsPatch(
     const config = Object.fromEntries(
       Object.entries(fields).filter(([k, v]) => before === undefined || before.fields[k] !== v),
     );
-    return { optimization_overrides: { nodes: { [node]: { config } } } };
+    return { config: { optimization: { nodes: { [node]: { config } } } } };
   }
   const next: Record<string, Record<string, string>> = {};
   for (const [name, p] of Object.entries(prompts)) next[name] = p.fields;

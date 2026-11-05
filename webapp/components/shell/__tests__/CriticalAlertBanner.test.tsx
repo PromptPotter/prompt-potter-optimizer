@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_VIEWS, formatAddress } from "@/lib/address";
-import { ConnectorProvider } from "@/lib/hooks/useConnector";
+import { ThreadProvider } from "@/lib/chat/thread";
+import { IngestFlowProvider } from "@/lib/ingest-flow";
 import { clearReadCache } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
@@ -32,9 +33,11 @@ function view() {
     <AuthProvider>
       <ViewMemoryProvider>
         <WorkspaceProvider>
-          <ConnectorProvider campaignId={null} at={null} draft={null}>
-            <CriticalAlertBanner />
-          </ConnectorProvider>
+          <ThreadProvider>
+            <IngestFlowProvider>
+              <CriticalAlertBanner />
+            </IngestFlowProvider>
+          </ThreadProvider>
         </WorkspaceProvider>
       </ViewMemoryProvider>
     </AuthProvider>,

@@ -16,7 +16,7 @@
 | `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts` | the round (`RoundView`); `round_NNNN.json` is shown only as raw text in Files |
 | `…/rounds/{n}/audit` (AUDIT TWIN) | `lib/hooks/useRoundNodes.ts` | per-node LLM I/O; selects on `round === current_round.round` here alone |
 | `/datasets/{name}/cells` | `lib/hooks/useCells.ts::useCells` | every list of measured cells; one answer opens off `/cells/{answer}` |
-| `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts` → `ConnectorProvider` | every config row, model chip, lock glyph, provenance badge; a check-in's `draft` and `CampaignFacts.runs_with` are other transports of the same answer (`I9`) |
+| `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts::useConnector` | every config row, model chip, lock glyph, provenance badge; a check-in's `draft` and `CampaignFacts.runs_with` are other transports of the same answer (`I9`) |
 
 - **No stitch**: never merge in-flight with historical or fall back to a round file; where two are one series the SERVER merges. Take a WHOLE candidate row from one half.
 - **A prop names WHICH campaign/round, never WHERE to read**; provenance is the served `source`, never a client diff.

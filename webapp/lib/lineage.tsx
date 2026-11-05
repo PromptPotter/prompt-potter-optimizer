@@ -6,7 +6,7 @@ import type { Said, SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
 import { LINEAGE_POLL_MS, MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
 import { courseAt, indexLineage, phaseIs, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useMaskState, type MaskState } from "@/lib/scoring-mask";
-import { useConnector } from "@/lib/hooks/useConnector";
+import { useCellTerms } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import type { ReadResult } from "@/lib/read-cache";
@@ -93,7 +93,7 @@ function useViewedTreeKey(maskState: MaskState): TreeKey {
   const lens = useLens(campaignId);
   // Every reader names the same seed, seeding or not: the viewed cycle once seeded, else null.
   const seed = seededForCycle === cycleId ? cycleId : null;
-  const { cellTerms } = useConnector();
+  const cellTerms = useCellTerms();
   const maskLens = useSettledLens(seed, maskOpen ? lensOf(mask, cellTerms) : null);
   const lensParam = maskOpen ? maskLens : lens || null;
   const samples = sampleSet && sampleSet.length > 0 ? sampleSet : null;

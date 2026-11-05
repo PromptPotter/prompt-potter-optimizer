@@ -258,7 +258,8 @@ class ForkPreviewResponse(StrictModel):
 
     steer: SteerVerdict = Field(
         description=(
-            "`clean` where the overlay stays inside the campaign's declared `optimizer_narrowing`. "
+            "`clean` where the overlay stays inside what each node permits: its recorded schema's "
+            "value spaces, the dataset's optimizer blocks among them, under the campaign's narrowing. "
             "Outside it — a responder never sanctioned, or a cost lever no permitted set can "
             "sanction — the fork is the babysit act: `babysat` for a caller holding "
             "`campaign.babysit` (the branch is graded C), `refused` for any other."
