@@ -1274,7 +1274,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
 
 **Rides with:** "The optimizer climbs" in [`roadmap.md`](roadmap.md) § Sequence.
 
-- **PoBB locks in a leader the election then refuses (high-accuracy regime)**: seen on tenant
+- **PoBB's lock-in reads the election's bar after every cell (optional stopping); the switch is off by
+  default** (`pobb` `lock_in`, [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)).
+  Stream, 2026-11-06, round 2: `leader locked q4/20 p_best=93.8% >= admission=85%`, the election admitted
+  the arm on those 4 cells, and its verify read 1.000 → 0.600. Earlier, on tenant
   `inbox-requires-action-v6` round 1 (parent 92.5% of 40). The round order puts the parent's misses first
   (`build_round_order`, "win-opportunities first"), so after 6 cells a candidate that fixes them reads
   `P(c>p)=93.8%` and `pobb` locks it in at `theta_election.admission: 0.85` (C1.2 locked at q6, C1.4 at
@@ -1285,8 +1288,9 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   the whole ruler. Action: the lock-in asks the election's own question (would `theta_election` admit
   this arm now?), or a locked leader keeps buying cells until it does or the round's budget ends; a lock
   at q6 against a 92.5% parent needs at least the cells that could show one parent-level error.
-  **Rides with:** any change to `early_stop` / `Selector.admission`. **Re-test:** rerun round 1 of
-  `inbox-requires-action-v6__e1bda1`; an arm that is locked in is either elected or not locked.
+  **Rides with:** M19 ([`roadmap.md`](roadmap.md) § The right winner, its anytime-valid bound). **Re-test:**
+  with `lock_in` on, rerun round 1 of `inbox-requires-action-v6__e1bda1`; an arm that is locked in is
+  either elected or not locked.
 - **A run reads every campaign's ledger, so one stale campaign crashes another**: `crm-extract-names__29f63f`
   crashed entering round 1 on `LedgerUnreadableError` for `inbox-requires-action-v6__e1bda1`'s ledger. The bill
   no longer reads a ledger and `land-data` refuses a tree holding one that does not load, but a desk tree is

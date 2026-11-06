@@ -2468,13 +2468,42 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
         return check.check(sheet(measurements([1.0] * wins + [0.0] * (n - wins))).cells)
 
     assert ahead_of_parent(6, 1) is None, "one discordant cell locked an arm in"
-    locked = ahead_of_parent(6, 6)
+    locked = ahead_of_parent(6, 6, lock_in=True)
     assert locked is not None and locked.outcome == "locked_in", (
         "an arm clearly ahead of the parent kept spending"
     )
     assert locked.check_result["admission"] == bar, "the lock-in archives the bar it met"
-    assert ahead_of_parent(6, 6, early_stop=False) is None, "early_stop off still locked in"
-    assert ahead_of_parent(6, 6, admission=None) is None, "a selector with no bar locked in"
+    assert ahead_of_parent(6, 6, lock_in=True, admission=None) is None, (
+        "a selector with no bar locked in"
+    )
+    assert ahead_of_parent(6, 6, lock_in=True, epsilon_stop=False) is not None, (
+        "the elimination switch turned the lock-in off"
+    )
+    assert behind_perfect_prior(9, 2) is not None, "the lock-in switch turned elimination off"
+
+    # The high-accuracy stream (2026-11-06): 4/4 on four cells its parent read 1/4 met the bar
+    # (p_best 93.8% >= 85%), and its verify read 1.000 -> 0.600. The lock-in re-reads the bar
+    # after every cell (optional stopping), so the shipped manifest keeps it off.
+    def four_cells(**bend: Any) -> tuple[Any, int | None]:
+        check = PoBBCheck(
+            pobb_knobs(**bend), n_min=4, n_samples=20, ruler=None, parent=parent, admission=bar
+        )
+        check.register_completed(sheet(measurements([1.0] + [0.0] * 19)), key=parent)
+        check.set_current(ArmKey("arm"))
+        read = sheet(measurements([1.0] * 4)).cells
+        return check.check(read), check.earliest_stop(read, [(s, None) for s in samples(20)[4:]])
+
+    stop, horizon = four_cells()
+    # Only ε's worst case (every cell ahead a miss) may still bound the walk, never the next cell.
+    assert stop is None and (horizon is None or horizon > 5), (
+        f"the shipped lock-in stopped a 4-cell leader ({stop}) or capped its walk at {horizon}"
+    )
+    stop, horizon = four_cells(lock_in=True)
+    assert stop is not None and stop.outcome == "locked_in", "the switch on no longer locks"
+    assert stop.check_result["p_best"] == pytest.approx(0.938, abs=1e-3), (
+        "switched on, the lock-in is no longer main's rule"
+    )
+    assert horizon == 5, f"switched on, the walk launched past the lock-in: {horizon}"
 
     # A locked-in leader is the bar every later arm races: one level with the parent and behind
     # the leader is cut, never walked to its end against the parent alone.
@@ -2486,7 +2515,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(
         _PEER_HOP,
         monkeypatch,
         "potter",
-        {"l1_generate": {"config": {"n_variants": 2}}},
+        {"l1_generate": {"config": {"n_variants": 2}}, "pobb": {"config": {"lock_in": True}}},
         ace_or_as_parent,
     ) as (cycle, callbacks):
         offline.llm.says = _potter_says("Ace.", "Same.")

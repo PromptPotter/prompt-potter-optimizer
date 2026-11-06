@@ -411,11 +411,13 @@ Round 4 elected nobody, although C4.4 and C4.3 each read 12/20 against the paren
 
 1. **Closed: L2 sees the elections and can re-elect** — `fork_proposal.stand_on` behind `reelect_capability` ([`../../promptpotter/application/optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) § The layer-control channel — `fork_proposal` + `terminate_proposal`). Check: `tests/test_scoring.py::test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved`, a fork standing on an unelected arm re-elects it.
 2. **Then, at the root: the election picks the right winner with lock-in on.**
-   - **Lock in only past an anytime-valid bound.** The pilot's rule is a mixture likelihood ratio on θ at level α/K per arm. PoBB's per-cell posterior bar stops being a lock rule. This pulls Sequence item 4's "anytime-valid confidence sequences as the default stopping rule" forward.
+   - **Lock in only past an anytime-valid bound.** The pilot's rule is a mixture likelihood ratio on θ at level α/K per arm. PoBB's per-cell posterior bar stops being a lock rule. This pulls Sequence item 4's "anytime-valid confidence sequences as the default stopping rule" forward. Until it lands, potter's `pobb` `lock_in` switch ships off. A review of a first build measured what the bound must do:
+     - (a) read the verdict direction as the election does;
+     - (b) split α over the round's actual K, not the most arms a round could race;
+     - (c) read the parent pair on cells the parent's grades did not choose: the hard-first walk otherwise breaks Ville's guarantee (false locks 31.5% against 2.0% at α = 0.5);
+     - (d) expect little power: about 1% for a +1-logit arm within 20 cells at 15%.
    - **The standing pick's evidence pools across rounds.** Its reads as parent on each round's fresh subset count toward its θ, so a lucky lock-in is dethroned by the same election (C5.6 by round 7).
    - **A near-miss carries forward.** A round's best challenger that cannot yet be separated from the parent re-enters the next round's panel and accumulates paired cells, instead of being dropped (C4.4 and C4.3 in round 4).
-   - **`early_stop` splits back into its two stops**, elimination and lock-in, each with its own switch. Folding `lock_in` / `leader_lock_in` into it (`24a05c2bf`) hid a selection behind a stop.
-
 Each change moves what the loop decides: diff it with [`../developer/offline-run.md`](../developer/offline-run.md). A changed ledger shape wipes run data (from 2026-11-03).
 
 **Closes when:**

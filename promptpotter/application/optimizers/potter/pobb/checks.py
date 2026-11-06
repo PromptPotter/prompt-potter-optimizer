@@ -96,7 +96,8 @@ class PoBBCheck:
         self.n_min = n_min
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
-        self.early_stop = knobs.early_stop
+        self.epsilon_stop = knobs.epsilon_stop
+        self.lock_in = knobs.lock_in
         # The selector's own promotion bar (`Selector.admission`); ``None`` locks no leader in.
         self.admission = admission
         self.n_samples = n_samples
@@ -171,7 +172,7 @@ class PoBBCheck:
                 )
             )
 
-        if not self.early_stop:
+        if not (self.epsilon_stop or self.lock_in):
             return None
         context: EliminationContext = {
             "p_best": float(fit.p_best),
@@ -181,7 +182,7 @@ class PoBBCheck:
             "n_priors": len(fit.priors),
         }
         # Past the selector's own bar on every prior, the round's parent among them, it is decided.
-        if self.admission is not None and fit.p_best >= self.admission:
+        if self.lock_in and self.admission is not None and fit.p_best >= self.admission:
             return PoBBStop(
                 self.name,
                 "locked_in",
@@ -191,7 +192,7 @@ class PoBBCheck:
             )
         # ε is the ONLY futility gate; the priors include the round's parent (`potter/race.py`).
         bar = self.epsilon_at(read)
-        if fit.p_best >= bar:
+        if not self.epsilon_stop or fit.p_best >= bar:
             return None
         return PoBBStop(
             self.name,
@@ -209,7 +210,7 @@ class PoBBCheck:
         unresolved: Mapping[ArmKey, Iterable[GradedCell]] | None = None,
     ) -> int | None:
         """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
-        if not self.early_stop:
+        if not (self.epsilon_stop or self.lock_in):
             return None
         measured = [cell for cell in results if cell.scored]
         grades = paired_grades(measured)
@@ -242,7 +243,8 @@ class PoBBCheck:
             low, high = elimination_p_best_bounds(
                 cells, grades, priors, self.ruler, settled=settled
             )
-            locks = self.admission is not None and high >= self.admission
-            if locks or low < self.epsilon_at(read):
+            locks = self.lock_in and self.admission is not None and high >= self.admission
+            cuts = self.epsilon_stop and low < self.epsilon_at(read)
+            if locks or cuts:
                 return m
         return None
