@@ -57,37 +57,25 @@ def _listed(ids: list[str]) -> str:
     return f"{', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}"
 
 
-def _campaign_matches(stores: Stores, needle: str, inside: CyclePath) -> list[str]:
-    """Refuses on ambiguity: picking one of several is worse than resolving none."""
-    candidates = descend_store(stores, inside).campaigns.match_campaign_ids(needle)
-    if len(candidates) > 1:
-        raise BadRequestError(
-            f"{needle!r} matches {len(candidates)} campaigns: {_listed(candidates)}. "
-            "Pass the full id.",
-            code="ambiguous_id",
-        )
-    return candidates
-
-
-def resolve_campaign_id(stores: Stores, needle: str, *, inside: CyclePath = ()) -> str:
-    matches = _campaign_matches(stores, needle, inside)
-    if not matches:
-        raise NotFoundError(f"no campaign matches {needle!r}.")
-    return matches[0]
-
-
 def resolve_subject(stores: Stores, subject: Subject) -> Subject:
     """Every door's one resolution of an addressed campaign id prefix, in the chain it names; left
-    UNCHANGED where nothing matches, so the read or command it rides answers ``not_found``."""
-    matches = _campaign_matches(stores, subject.campaign_id, subject.inside)
-    return subject._replace(campaign_id=next(iter(matches), subject.campaign_id))
+    UNCHANGED where nothing matches, so the read or command it rides answers ``not_found``.
+    Refuses on ambiguity: picking one of several is worse than resolving none."""
+    needle = subject.campaign_id
+    matches = descend_store(stores, subject.inside).campaigns.match_campaign_ids(needle)
+    if len(matches) > 1:
+        raise BadRequestError(
+            f"{needle!r} matches {len(matches)} campaigns: {_listed(matches)}. Pass the full id.",
+            code="ambiguous_id",
+        )
+    return subject._replace(campaign_id=next(iter(matches), needle))
 
 
 def cycle_target(stores: Stores, campaign: str, cycle: str) -> CycleHop:
     """A terminal's named cycle: a named campaign (an id prefix) never takes the pointer's cycle,
     and a cycle named alone is the active campaign's; each a prefix of its id."""
     if campaign:
-        campaign_id = resolve_campaign_id(stores, campaign)
+        campaign_id = resolve_subject(stores, Subject(campaign)).campaign_id
         return CycleHop(
             campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, cycle or None)
         )

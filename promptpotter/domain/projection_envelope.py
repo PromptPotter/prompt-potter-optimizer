@@ -16,8 +16,6 @@ ProjectionKind = Literal[
     "bank_partition",
     "campaign_ceiling",
     "decision",
-    "command",
-    "command_ack",
     "cycle_final",
     "cycle_minted",
     "cycle_seed",

@@ -41,7 +41,7 @@ from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MAN
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.ruler import RulerFold
-from promptpotter.domain.run_records import RECORD_ADAPTER
+from promptpotter.domain.run_records import COMMAND_EVENT_ADAPTER, RECORD_ADAPTER
 from promptpotter.domain.sample import ArchiveConfig
 from promptpotter.infrastructure.identity.blocklist import Blocklist
 from promptpotter.infrastructure.identity.grants import GrantsFile
@@ -51,6 +51,7 @@ from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
+from promptpotter.infrastructure.store.command_log import COMMAND_CHECK_LOCK, COMMAND_LOG_FILE
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -437,6 +438,18 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         TypeAdapter(CycleHop),
     ),
     Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, RECORD_ADAPTER),
+    # What the account asked: no SURVIVOR fact lives only here (consent, grants, keys and charges
+    # each keep their own file).
+    Kind(
+        "command log",
+        _WS,
+        f"{WORKSPACE_STATE_DIR}/{COMMAND_LOG_FILE}",
+        Fate.RUN,
+        COMMAND_EVENT_ADAPTER,
+    ),
+    Kind(
+        "command log check lock", _WS, f"{WORKSPACE_STATE_DIR}/{COMMAND_CHECK_LOCK}", Fate.MACHINE
+    ),
     Kind(
         "head-to-head",
         _WS,

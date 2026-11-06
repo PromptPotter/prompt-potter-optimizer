@@ -25,6 +25,7 @@ from promptpotter.application.backend_listing import (
     list_backends,
 )
 from promptpotter.application.caller import Caller
+from promptpotter.application.commands.command_reading import CommandStatus, command_status
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.cycle_addressing import (
     ActiveSessionResponse,
@@ -646,6 +647,19 @@ class HeadToHeadPriceParams(
 
     async def answer(self, caller: Caller) -> HeadToHeadPrice:
         return await price_head_to_head(caller.stores, self.plan)
+
+
+class CommandStatusParams(
+    ReadParams, read=ReadKind.COMMAND_STATUS, route="/commands/{command_id}/status"
+):
+    """Where a command the caller filed stands, by the id its filing answered: working, completed,
+    failed or cancelled, in its own words; a launch's, as each job it launched reads. Not found for
+    an id the caller never filed."""
+
+    command_id: str = Field(min_length=1, max_length=128)
+
+    def answer(self, caller: Caller) -> CommandStatus:
+        return command_status(caller.stores, caller.jobs, self.command_id)
 
 
 class DraftParams(ReadParams, read=ReadKind.DRAFT, route="/drafts/{draft_id}"):

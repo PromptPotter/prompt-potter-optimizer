@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.ab_replay import ab_replay_cycle
 from promptpotter.application.cycle_addressing import (
     active_pointer,
-    resolve_campaign_id,
+    cycle_target,
     resolve_cycle_id,
+    resolve_subject,
 )
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.initialization.loop_start import open_diagnostic
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
@@ -24,12 +25,10 @@ if TYPE_CHECKING:
 
 
 def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
+    if args.campaign and args.cycle:
+        return cycle_target(stores, args.campaign, args.cycle)
     if args.campaign:
-        campaign_id = resolve_campaign_id(stores, args.campaign)
-        if args.cycle:
-            return CycleHop(
-                campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, args.cycle)
-            )
+        campaign_id = resolve_subject(stores, Subject(args.campaign)).campaign_id
         campaign = stores.campaigns.load_campaign(campaign_id)
         if campaign is None:
             raise SystemExit(f"ERROR: campaign {campaign_id!r} has no manifest on disk.")

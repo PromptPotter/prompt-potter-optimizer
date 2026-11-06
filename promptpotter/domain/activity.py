@@ -22,7 +22,6 @@ from promptpotter.domain.round_health import HEALTH_CAUSE_INFO, DegradationHealt
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
-    CommandAckRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -56,7 +55,6 @@ ActivityRecord = (
     | ErrorRecord
     | ProviderHoldRecord
     | ProviderEasedRecord
-    | CommandAckRecord
 )
 
 ActivityKind = Literal[
@@ -390,17 +388,6 @@ class ActivityFeed:
                 return self._hold(item_id, record)
             case ProviderEasedRecord():
                 return self._eased(item_id, record)
-            case CommandAckRecord():
-                if record.status != "rejected":
-                    return None
-                return ActivityItem(
-                    id=item_id,
-                    kind="warning",
-                    icon="⚠",
-                    label="control rejected",
-                    detail=record.detail or None,
-                    tone="warn",
-                )
             case LLMCallProgressRecord():
                 waiting = record.detail or (
                     None if record.inner is None else f"inner campaign {record.inner.campaign_id}"

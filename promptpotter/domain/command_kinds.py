@@ -248,6 +248,14 @@ class CommandKind(StrEnum):
         anyone("cancel-queued"),
         True,
     )
+    # A host presses it through MCP `tasks/cancel`, its task being the command it cancels.
+    CANCEL_COMMAND = (
+        "cancel-command",
+        "measuring:cancel_command",
+        None,
+        person("cancel"),
+        True,
+    )
     DELETE_CYCLE = (
         "delete-cycle",
         "cycle_cleanup:delete_cycle",
@@ -371,7 +379,7 @@ class CommandKind(StrEnum):
 
 
 # Filled as each model declares the kind it carries: the ONE kind → payload table. Keyed `str`,
-# so a `CommandRecord.kind` read back off the ledger finds its row.
+# so a `CommandFiled.kind` read back off the command log finds its row.
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
 
 
@@ -399,7 +407,7 @@ class CommandPayload(RequestBody):
         PAYLOAD_MODEL_FOR_KIND[kind] = cls
 
     def recorded(self) -> tuple[dict[str, JsonValue], str]:
-        """The act as its `CommandRecord` keeps it, and what an idempotency key names, so one key
+        """The act as its `CommandFiled` keeps it, and what an idempotency key names, so one key
         never answers two acts: that one dump and the raw value of each excluded field, each hashed
         as its bytes. A secret's text enters no stored digest: the kind carrying one replays
         nothing (`set-api-key`), so no retry is matched on it."""
@@ -748,6 +756,19 @@ class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED_RUN)
     )
 
 
+class CancelCommandPayload(CommandPayload, kind=CommandKind.CANCEL_COMMAND):
+    """Stop a command still acting, by the id it was filed under: a paid pass in flight paused
+    under its own hold, each job a launch launched by its own act (a queued one withdrawn, a
+    running one paused). A command that already ended is left as it ended."""
+
+    command_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="The command's id, as its filing answered it.",
+    )
+
+
 class SetConcurrentCyclesPayload(CommandPayload, kind=CommandKind.SET_CONCURRENT_CYCLES):
     """How many campaigns this account may hold at once, queued launches included; at most the
     machine's capacity, and an account on the host's key cannot move its own."""
@@ -842,7 +863,7 @@ class ArmRequest(StrictModel):
 
     @model_serializer(mode="wrap")
     def _record_what_was_sent(self, handler: SerializerFunctionWrapHandler) -> dict[str, JsonValue]:
-        """The ``CommandRecord`` carries this dump; a default there records a knob nobody set."""
+        """The ``CommandFiled`` carries this dump; a default there records a knob nobody set."""
         data: dict[str, JsonValue] = handler(self)
         data["optimization"] = self.optimization_sent
         return data
@@ -961,7 +982,7 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
 
     @model_serializer(mode="wrap")
     def _record_what_was_sent(self, handler: SerializerFunctionWrapHandler) -> dict[str, JsonValue]:
-        """The ``CommandRecord`` carries this dump; a default there records a knob nobody set."""
+        """The ``CommandFiled`` carries this dump; a default there records a knob nobody set."""
         data: dict[str, JsonValue] = handler(self)
         data["optimization"] = self.optimization_sent or None
         declared = self.campaign_config
@@ -1057,9 +1078,14 @@ if _lax := sorted(
 
 
 class CommandAcceptedBody(StrictModel):
-    """What a command whose applied form answers nothing returns: the record it appended."""
+    """What a command whose applied form answers nothing returns: the command it filed, at the
+    address the dispatcher resolved."""
 
-    command_id: str = Field(description="Stable id of the appended `CommandRecord`.")
+    command_id: str = Field(description="Stable id of the command filed on the account's log.")
+    subject: str = Field(
+        description="The address the dispatcher resolved and filed it on: `campaign/cycle`, a "
+        "campaign id, `drafts/<id>`, or empty for the workspace."
+    )
 
 
 class ReadKind(StrEnum):
@@ -1093,6 +1119,7 @@ class ReadKind(StrEnum):
     # A read on a POST: no LLM call is made and nothing is minted.
     HEAD_TO_HEAD_PRICE = "head-to-head-price"
     DRAFT = "draft"
+    COMMAND_STATUS = "command-status"
     CAMPAIGN_PIPELINE = "campaign-pipeline"
     # A read on a POST: nothing is written.
     FORK_PREVIEW = "fork-preview"

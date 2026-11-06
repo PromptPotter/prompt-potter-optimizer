@@ -2666,6 +2666,25 @@
         "title": "CampaignRunsWith",
         "type": "object"
       },
+      "CancelCommandPayload": {
+        "additionalProperties": false,
+        "description": "Stop a command still acting, by the id it was filed under: a paid pass in flight paused\nunder its own hold, each job a launch launched by its own act (a queued one withdrawn, a\nrunning one paused). A command that already ended is left as it ended.",
+        "properties": {
+          "command_id": {
+            "description": "The command's id, as its filing answered it.",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Command Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id"
+        ],
+        "title": "CancelCommandPayload",
+        "type": "object"
+      },
       "CancelQueuedRunPayload": {
         "additionalProperties": false,
         "description": "Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent.",
@@ -3741,18 +3760,68 @@
       },
       "CommandAcceptedBody": {
         "additionalProperties": false,
-        "description": "What a command whose applied form answers nothing returns: the record it appended.",
+        "description": "What a command whose applied form answers nothing returns: the command it filed, at the\naddress the dispatcher resolved.",
         "properties": {
           "command_id": {
-            "description": "Stable id of the appended `CommandRecord`.",
+            "description": "Stable id of the command filed on the account's log.",
             "title": "Command Id",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The address the dispatcher resolved and filed it on: `campaign/cycle`, a campaign id, `drafts/<id>`, or empty for the workspace.",
+            "title": "Subject",
             "type": "string"
           }
         },
         "required": [
-          "command_id"
+          "command_id",
+          "subject"
         ],
         "title": "CommandAcceptedBody",
+        "type": "object"
+      },
+      "CommandStatus": {
+        "additionalProperties": false,
+        "description": "One command as every door reads it: where it stands, in the words of its task status,\nread afresh off the account's command log and, for a launch, each job it launched.",
+        "properties": {
+          "command_id": {
+            "title": "Command Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_updated_at": {
+            "title": "Last Updated At",
+            "type": "string"
+          },
+          "said": {
+            "title": "Said",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command_id",
+          "kind",
+          "subject",
+          "status",
+          "said",
+          "created_at",
+          "last_updated_at"
+        ],
+        "title": "CommandStatus",
         "type": "object"
       },
       "CompactArchivePayload": {
@@ -13062,8 +13131,6 @@
               "bank_partition",
               "campaign_ceiling",
               "decision",
-              "command",
-              "command_ack",
               "cycle_final",
               "cycle_minted",
               "cycle_seed",
@@ -16913,6 +16980,16 @@
         ],
         "type": "string"
       },
+      "TaskStatus": {
+        "enum": [
+          "working",
+          "input_required",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
+      },
       "TermsConsent": {
         "additionalProperties": false,
         "description": "The consent state after an accept, in the fields ``/me`` reports it.",
@@ -19157,7 +19234,7 @@
     },
     "/api/v1/commands/accept-terms": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "accept_terms_api_v1_commands_accept_terms_post",
         "parameters": [
           {
@@ -19212,7 +19289,7 @@
     },
     "/api/v1/commands/archive-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "archive_campaign_api_v1_commands_archive_campaign_post",
         "parameters": [
           {
@@ -19267,7 +19344,7 @@
     },
     "/api/v1/commands/bank-snippet": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "bank_snippet_api_v1_commands_bank_snippet_post",
         "parameters": [
           {
@@ -19320,9 +19397,64 @@
         ]
       }
     },
+    "/api/v1/commands/cancel-command": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
+        "operationId": "cancel_command_api_v1_commands_cancel_command_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelCommandPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Cancel-Command",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/cancel-queued-run": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "cancel_queued_run_api_v1_commands_cancel_queued_run_post",
         "parameters": [
           {
@@ -19377,7 +19509,7 @@
     },
     "/api/v1/commands/change-run-limits": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "change_run_limits_api_v1_commands_change_run_limits_post",
         "parameters": [
           {
@@ -19432,7 +19564,7 @@
     },
     "/api/v1/commands/cleanup-empty-cycles": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "cleanup_empty_cycles_api_v1_commands_cleanup_empty_cycles_post",
         "parameters": [
           {
@@ -19487,7 +19619,7 @@
     },
     "/api/v1/commands/compact-archive": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "compact_archive_api_v1_commands_compact_archive_post",
         "parameters": [
           {
@@ -19542,7 +19674,7 @@
     },
     "/api/v1/commands/delete-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "delete_campaign_api_v1_commands_delete_campaign_post",
         "parameters": [
           {
@@ -19597,7 +19729,7 @@
     },
     "/api/v1/commands/delete-cycle": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "delete_cycle_api_v1_commands_delete_cycle_post",
         "parameters": [
           {
@@ -19652,7 +19784,7 @@
     },
     "/api/v1/commands/discard-draft": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "discard_draft_api_v1_commands_discard_draft_post",
         "parameters": [
           {
@@ -19762,7 +19894,7 @@
     },
     "/api/v1/commands/fork-cycle": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "fork_cycle_api_v1_commands_fork_cycle_post",
         "parameters": [
           {
@@ -19817,7 +19949,7 @@
     },
     "/api/v1/commands/grade-bench": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "grade_bench_api_v1_commands_grade_bench_post",
         "parameters": [
           {
@@ -19927,7 +20059,7 @@
     },
     "/api/v1/commands/mint-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "mint_campaign_api_v1_commands_mint_campaign_post",
         "parameters": [
           {
@@ -20037,7 +20169,7 @@
     },
     "/api/v1/commands/open-dataset-draft": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "open_dataset_draft_api_v1_commands_open_dataset_draft_post",
         "parameters": [
           {
@@ -20092,7 +20224,7 @@
     },
     "/api/v1/commands/open-origin-draft": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "open_origin_draft_api_v1_commands_open_origin_draft_post",
         "parameters": [
           {
@@ -20147,7 +20279,7 @@
     },
     "/api/v1/commands/origin-gate-decision": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "origin_gate_decision_api_v1_commands_origin_gate_decision_post",
         "parameters": [
           {
@@ -20202,7 +20334,7 @@
     },
     "/api/v1/commands/pause-cycle": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "pause_cycle_api_v1_commands_pause_cycle_post",
         "parameters": [
           {
@@ -20257,7 +20389,7 @@
     },
     "/api/v1/commands/remove-api-key": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "remove_api_key_api_v1_commands_remove_api_key_post",
         "parameters": [
           {
@@ -20367,7 +20499,7 @@
     },
     "/api/v1/commands/set-api-key": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "set_api_key_api_v1_commands_set_api_key_post",
         "parameters": [
           {
@@ -20422,7 +20554,7 @@
     },
     "/api/v1/commands/set-campaign-label": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "set_campaign_label_api_v1_commands_set_campaign_label_post",
         "parameters": [
           {
@@ -20477,7 +20609,7 @@
     },
     "/api/v1/commands/set-concurrent-cycles": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "set_concurrent_cycles_api_v1_commands_set_concurrent_cycles_post",
         "parameters": [
           {
@@ -20532,7 +20664,7 @@
     },
     "/api/v1/commands/set-sample-lookahead": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "set_sample_lookahead_api_v1_commands_set_sample_lookahead_post",
         "parameters": [
           {
@@ -20587,7 +20719,7 @@
     },
     "/api/v1/commands/set-user-settings": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "set_user_settings_api_v1_commands_set_user_settings_post",
         "parameters": [
           {
@@ -20642,7 +20774,7 @@
     },
     "/api/v1/commands/skip-searchpoint": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "skip_searchpoint_api_v1_commands_skip_searchpoint_post",
         "parameters": [
           {
@@ -20760,7 +20892,7 @@
     },
     "/api/v1/commands/start-run": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "start_run_api_v1_commands_start_run_post",
         "parameters": [
           {
@@ -20815,7 +20947,7 @@
     },
     "/api/v1/commands/step-cycle": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "step_cycle_api_v1_commands_step_cycle_post",
         "parameters": [
           {
@@ -20870,7 +21002,7 @@
     },
     "/api/v1/commands/submit-arms": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "submit_arms_api_v1_commands_submit_arms_post",
         "parameters": [
           {
@@ -20925,7 +21057,7 @@
     },
     "/api/v1/commands/unarchive-campaign": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "unarchive_campaign_api_v1_commands_unarchive_campaign_post",
         "parameters": [
           {
@@ -20980,7 +21112,7 @@
     },
     "/api/v1/commands/verify-candidate": {
       "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandAcceptedBody` naming the command it filed.",
         "operationId": "verify_candidate_api_v1_commands_verify_candidate_post",
         "parameters": [
           {
@@ -21038,6 +21170,51 @@
         "summary": "Verify-Candidate",
         "tags": [
           "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/{command_id}/status": {
+      "get": {
+        "description": "Where a command the caller filed stands, by the id its filing answered: working, completed,\nfailed or cancelled, in its own words; a launch's, as each job it launched reads. Not found for\nan id the caller never filed.",
+        "operationId": "command_status_api_v1_commands__command_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Command Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Command-Status",
+        "tags": [
+          "Reads"
         ]
       }
     },

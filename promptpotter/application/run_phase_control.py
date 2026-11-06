@@ -11,10 +11,9 @@ from promptpotter.domain.phases import (
     PauseCause,
     StopReason,
 )
-from promptpotter.domain.run_records import NoEffect
-from promptpotter.infrastructure.llm.telemetry import emit_command_ack
+from promptpotter.domain.run_records import CommandApplied
 from promptpotter.infrastructure.runtime_flags import requested_lookahead, standing_controls
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import Controls
+from promptpotter.infrastructure.store.command_log import CommandLog, Controls
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,7 +71,7 @@ class FlightGauge:
 
 @dataclass(frozen=True)
 class RunControl:
-    """Every ``take_*`` / ``spend_*`` acks on the run's own ledger: call inside the launch that bound it."""
+    """Every ``take_*`` / ``spend_*`` marks the command it took applied, on the account's log."""
 
     cycle_dir: Path | None = None
     # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
@@ -83,6 +82,10 @@ class RunControl:
 
     def _inbox(self) -> Controls:
         return Controls() if self.cycle_dir is None else standing_controls(self.cycle_dir)
+
+    def _took(self, command_id: str) -> None:
+        assert self.cycle_dir is not None, "a command is taken off a cycle's inbox"
+        CommandLog.of_cycle(self.cycle_dir).append(CommandApplied(command_id=command_id))
 
     def pause_requested(self) -> bool:
         """A pause is a CLEAN EXIT: poll it only where work already done is on disk."""
@@ -103,7 +106,7 @@ class RunControl:
         """``None`` where nothing on a ledger asked: a signal or a cancellation, which the caller names."""
         asked = self._inbox().pause
         if asked is not None:
-            emit_command_ack(command_id=asked.command_id, status="applied", effect=NoEffect())
+            self._took(asked.command_id)
             return PauseCause.COMMAND, f"pause-cycle by {asked.issued_by.display}"
         for outer in reversed(self.enclosing):
             if standing_controls(outer).pause is not None:
@@ -117,7 +120,7 @@ class RunControl:
         skips = self._inbox().skips
         if not skips:
             return False
-        emit_command_ack(command_id=skips[0], status="applied", effect=NoEffect())
+        self._took(skips[0])
         return True
 
     def take_gate_decision(self) -> GateDecision | None:
@@ -125,7 +128,7 @@ class RunControl:
         if not standing:
             return None
         command_id, asked = standing[0]
-        emit_command_ack(command_id=command_id, status="applied", effect=NoEffect())
+        self._took(command_id)
         return cast("GateDecision", asked)
 
     def standing_submission(self) -> tuple[str, SubmitArmsPayload] | None:
@@ -134,7 +137,7 @@ class RunControl:
         return standing[0] if standing else None
 
     def take_submission(self, command_id: str) -> None:
-        emit_command_ack(command_id=command_id, status="applied", effect=NoEffect())
+        self._took(command_id)
 
     def sample_lookahead(self) -> int:
         if self.held_lookahead is not None:
@@ -147,7 +150,7 @@ class RunControl:
             return
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
-            emit_command_ack(command_id=asked.command_id, status="applied", effect=NoEffect())
+            self._took(asked.command_id)
 
 
 def budget_stop(book: SpendBook) -> StopReason | None:

@@ -955,17 +955,14 @@ def run_terminal(
     campaign_runner.main()
 
 
-def _commands(ledger: Path) -> dict[str, list[dict[str, Any]]]:
-    records = _jsonl(ledger)
-    applied = {
-        r["command_id"]
-        for r in records
-        if r.get("record_type") == "command_ack" and r.get("status") == "applied"
-    }
+def _commands(workspace: Path, subject: str) -> dict[str, list[dict[str, Any]]]:
+    """The applied commands the account's command log filed on *subject*, by kind."""
+    events = _jsonl(workspace / ".workspace" / "commands.jsonl")
+    applied = {e["command_id"] for e in events if e["event"] == "applied"}
     out: dict[str, list[dict[str, Any]]] = {}
-    for r in records:
-        if r.get("record_type") == "command" and r["command_id"] in applied:
-            out.setdefault(r["kind"], []).append(r["payload"])
+    for e in events:
+        if e["event"] == "filed" and e["subject"] == subject and e["command_id"] in applied:
+            out.setdefault(e["kind"], []).append(e["payload"])
     return out
 
 
@@ -982,13 +979,14 @@ def interrupted(
         return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
     if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
         return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
-    (mint,) = _commands(cycle.parents[3] / ".workspace" / "events.jsonl")["mint-campaign"]
+    (mint,) = _commands(cycle.parents[3], "")["mint-campaign"]
     if not mint["campaign_config"]:
         return False, f"the mint-campaign record carries no config: {sorted(mint)}"
     if rc := spawn_terminal(workspace, "resume", 0):
         return False, f"`resume` after {interrupts} SIGINT exited {rc}"
     ended = derive_run_state(cycle)
-    started = _commands(cycle / ".runtime" / "ledger.jsonl").get("start-run", [])
+    hop = f"{cycle.parents[1].name}/{cycle.name}"
+    started = _commands(cycle.parents[3], hop).get("start-run", [])
     if ended.run_phase is not RunPhase.TERMINAL or len(started) != 1:
         return False, f"`resume` left the cycle {ended.run_phase} on {len(started)} start-run"
     return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"

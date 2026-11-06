@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 async def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Applier[ArchiveReport]:
-    """`inventory` has no arm on purpose: this highway records a `CommandRecord` per call, which would bill a read."""
+    """`inventory` has no arm on purpose: this highway files a `CommandFiled` per call, which would bill a read."""
     stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
     async def _apply() -> ArchiveReport:

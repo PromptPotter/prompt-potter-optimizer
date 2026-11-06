@@ -7,8 +7,8 @@ arguments as the row's own model off the event loop, and runs a command through 
 or a read through its `ReadParams.answer`. A kind its row answers as a task
 (`CommandKind.answering`) answers a `HostTask`, the MCP Tasks handle: its status is what its run
 returned (`Job.ending`, worded by `STOP_REASON_INFO`) or how its job lapsed, as its release
-stamped it, a reaped job's included, its result the answer its one dispatch recorded, and its cancel each job's own
-command. Transports: in-process (call `answer`) and `presentation/mcp/`.
+stamped it, a reaped job's included, its result the answer its one dispatch recorded, and its cancel the one `cancel-command`. A task IS its
+command: its id is the command's, and its status is read off the account's command log. Transports: in-process (call `answer`) and `presentation/mcp/`.
 """
 
 from __future__ import annotations
@@ -17,12 +17,10 @@ import asyncio
 import functools
 import inspect
 import json
-import secrets
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Any, Literal, cast, get_origin
+from dataclasses import dataclass
+from typing import Any, cast, get_origin
 from urllib.parse import quote, unquote
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -30,21 +28,25 @@ from pydantic_core import to_jsonable_python
 
 from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.caller import Caller
+from promptpotter.application.commands.command_reading import (
+    TERMINAL,
+    CommandStatus,
+    TaskStatus,
+    command_status,
+    owned_command,
+)
 from promptpotter.application.commands.dispatcher import (
     MAX_IDEMPOTENCY_KEY_CHARS,
     CommandCall,
     CommandDispatcher,
     CommandOutcome,
-    addressed,
     command_answer,
 )
-from promptpotter.application.commands.measuring import pass_pause, stop_pass
-from promptpotter.application.jobs.launcher.admission import PassHold, PassStoppedError
+from promptpotter.application.jobs.launcher.admission import PassHold
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
-    HeadToHeadLaunched,
 )
-from promptpotter.application.jobs.launcher.launch import Admitted, Launched
+from promptpotter.application.jobs.launcher.launch import Admitted
 from promptpotter.application.jobs.quota import refuse_request_rate
 from promptpotter.application.read_params import (
     PARAMS_FOR_READ,
@@ -54,34 +56,20 @@ from promptpotter.application.read_params import (
 )
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
-    CancelQueuedRunPayload,
+    CancelCommandPayload,
+    CommandAcceptedBody,
     CommandKind,
     CommandPayload,
-    PauseCyclePayload,
     ReadKind,
 )
-from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
-from promptpotter.domain.job import UNRESOLVED_HOP, InnerRun, Job
-from promptpotter.domain.phases import (
-    INNER_PAUSE_REFUSAL,
-    STOP_REASON_INFO,
-    StopCategory,
-    StopOutcome,
-    StopReason,
-)
-from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.layout import cycle_dir_for
-from promptpotter.shared.clock import utcnow_iso
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.shared.errors import (
+    ConflictError,
     NotFoundError,
     PayloadInvalidError,
-    PotterError,
-    TaskUncancellableError,
 )
-from promptpotter.shared.identity import acting_principal
 from promptpotter.shared.named_rows import returned
 
 # A command tool's one argument beside its payload: what a retried call is recognised by.
@@ -227,65 +215,8 @@ def _jsonable(value: object) -> JsonValue:
     return to_jsonable_python(value, by_alias=True)  # type: ignore[no-any-return]
 
 
-type TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
-
-# Past its run's end a task's status is how the run ended, and a pause the operator asked for is a
-# cancel; a run held at a gate waits on its requester.
-_ENDED: dict[StopOutcome, TaskStatus] = {
-    StopOutcome.SUCCESS: "completed",
-    StopOutcome.HALTED: "failed",
-    StopOutcome.FAILED: "failed",
-    StopOutcome.PAUSED: "failed",
-}
-_LAPSED: dict[str, TaskStatus] = {
-    "refused": "failed",
-    "withdrawn": "cancelled",
-    "orphaned": "failed",
-}
-# One job held or working holds the task open; past that, the worst ending speaks for it.
-_PRECEDENCE: tuple[TaskStatus, ...] = (
-    "input_required",
-    "working",
-    "failed",
-    "cancelled",
-    "completed",
-)
-_TERMINAL = frozenset[TaskStatus]({"completed", "failed", "cancelled"})
-
-
-def _ended(what: str, ending: StopReason, *, stepped: bool) -> tuple[TaskStatus, str]:
-    info = STOP_REASON_INFO[ending]
-    if stepped:
-        return "completed", f"{what}: stepped its rounds. {info.next_step}"
-    status = _ENDED[info.outcome]
-    if info.outcome is StopOutcome.PAUSED and info.category is StopCategory.OPERATOR:
-        status = "cancelled"
-    return status, f"{what}: {info.label}. {info.next_step}"
-
-
-def job_status(job: Job, *, held: bool) -> tuple[TaskStatus, str]:
-    """One job's task status and its words; *held* is its cycle holding at a gate for an answer."""
-    if job.ending is not None:
-        return _ended(job.what, job.ending, stepped=job.stepped)
-    if job.lapse is not None:
-        return _LAPSED[job.lapse], f"{job.what}: {job.refusal or job.lapse}"
-    if job.released:
-        return "completed", f"{job.what}: returned"
-    if held:
-        return "input_required", f"{job.what}: holding at a gate for its answer"
-    return "working", f"{job.what}: {job.stage}"
-
-
-def _held(job: Job) -> bool:
-    """Its cycle holds at a gate (`RunState.gate`) while the run waits on an answer."""
-    if job.released or job.hop == UNRESOLVED_HOP:
-        return False
-    cycle_dir = cycle_dir_for(WorkspaceDir(Path(job.workspace)), job.hop)
-    return derive_run_state(cycle_dir).gate is not None
-
-
 class HostTask(FrozenModel):
-    """A task-answered call as the MCP Tasks extension tracks it, read afresh each time it is asked."""
+    """A task-answered call as the MCP Tasks extension tracks it: its command, read afresh."""
 
     task_id: str
     status: TaskStatus
@@ -293,36 +224,22 @@ class HostTask(FrozenModel):
     created_at: str
     last_updated_at: str
 
-
-def _launches(result: object) -> list[LaunchedJob] | None:
-    """What a launch's answer records of each job it launched; ``None`` for any other answer."""
-    match result:
-        case Launched(launch=launch):
-            return [launch]
-        case HeadToHeadLaunched(launches=launches):
-            return list(launches)
-        case _:
-            return None
+    @classmethod
+    def of(cls, read: CommandStatus) -> HostTask:
+        return cls(
+            task_id=read.command_id,
+            status=read.status,
+            status_message=f"{read.kind}: {read.said}",
+            created_at=read.created_at,
+            last_updated_at=read.last_updated_at,
+        )
 
 
 async def _launched(result: object) -> object:
-    """An admission's launch, awaited, so a task names the jobs it launched."""
+    """An admission's launch, awaited, so the jobs its command names are launched."""
     if isinstance(result, Admitted | AdmittedHeadToHead):
         return await result.launched()
     return result
-
-
-@dataclass(slots=True)
-class _Tracked:
-    """A task-answered call: the call, the hold of any paid pass it runs, its dispatch in flight,
-    and what that dispatch recorded — its outcome and each job it launched."""
-
-    tool: HostTool
-    call: CommandCall[CommandPayload]
-    hold: PassHold
-    dispatching: asyncio.Task[tuple[CommandOutcome[Any, Any], list[LaunchedJob] | None]]
-    created_at: str = field(default_factory=utcnow_iso)
-    dispatched_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,7 +302,7 @@ class TaskStatusOf(HostRequest[HostTask]):
     task_id: str
 
     async def answered_by(self, session: HostSession) -> HostTask:
-        return await session._status(self.task_id)
+        return HostTask.of(await session.command_status(self.task_id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,8 +319,7 @@ class TaskResultOf(HostRequest[tuple[str, HostAnswer]]):
 
 @dataclass(frozen=True, slots=True)
 class CancelTask(HostRequest[HostTask]):
-    """What every other door stops it by: a paid pass in flight paused under its own hold
-    (`stop_pass`), and each job a launch launched by its own act (`cancel_acts`)."""
+    """What every other door stops it by: its command's `cancel-command`."""
 
     task_id: str
 
@@ -412,7 +328,7 @@ class CancelTask(HostRequest[HostTask]):
         return False
 
     async def answered_by(self, session: HostSession) -> HostTask:
-        return await session._cancel_task(self.task_id)
+        return HostTask.of(await session.cancel_command(self.task_id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,12 +357,11 @@ class RenderPrompt(HostRequest[str]):
 
 
 class HostSession:
-    """One caller's host requests, and the tasks its task-answered calls opened. Every request
-    enters at `answer`, admitted there once at the caller's request rate."""
+    """One caller's host requests. Every request enters at `answer`, admitted there once at the
+    caller's request rate; a task it opened is its command, read off the account's log."""
 
     def __init__(self, caller: Caller) -> None:
         self.caller = caller
-        self._tasks: dict[str, _Tracked] = {}
 
     async def answer[A](self, request: HostRequest[A]) -> A:
         refuse_request_rate(self.caller.stores.identity, read=request.reads)
@@ -460,107 +375,64 @@ class HostSession:
         if isinstance(sent, ReadParams):
             return HostAnswer(_jsonable(await sent.answered(self.caller)))
         if tool.as_task:
-            return HostAnswer(task=await self._open(tool, sent))
+            return HostAnswer(task=await self._open(sent))
         outcome = await self._dispatcher().dispatch(sent)
         return HostAnswer(_jsonable(outcome.accepted if tool.answers() is None else outcome.result))
 
-    async def _open(self, tool: HostTool, sent: CommandCall[CommandPayload]) -> HostTask:
-        """Tracked as the dispatcher acts on it (`addressed`), so its stop names the cycle the pass
-        holds even once another campaign shares the prefix it was sent by."""
-        task_id, hold = secrets.token_urlsafe(12), PassHold()
-        acted = await _off_loop(lambda: addressed(self.caller.stores, sent.payload))
-        call = replace(sent, payload=acted)
+    async def _open(self, sent: CommandCall[CommandPayload]) -> HostTask:
+        """Its act runs on past the answer, under the hold any stop of its pass takes; the task
+        answered is the command it filed, or the first act's where the call was a retry."""
+        hold = PassHold()
 
-        async def _dispatch() -> tuple[CommandOutcome[Any, Any], list[LaunchedJob] | None]:
-            with hold.bound():
-                outcome = await self._dispatcher().dispatch(call)
-            return outcome, _launches(await _launched(outcome.result))
+        async def _dispatch() -> CommandOutcome[Any, Any]:
+            with hold.bound(sent.command_id):
+                outcome = await self._dispatcher().dispatch(sent)
+            await _launched(outcome.result)
+            return outcome
 
-        tracked = _Tracked(tool, call, hold, asyncio.create_task(_dispatch()))
-        tracked.dispatching.add_done_callback(lambda _: _stamp(tracked))
-        self._tasks[task_id] = tracked
-        return await self._status(task_id)
+        running = asyncio.create_task(_dispatch())
+        _ACTING.add(running)
+        running.add_done_callback(_settled)
+        log = CommandLog(self.caller.stores.base_dir)
+        while await _off_loop(lambda: log.state(sent.command_id)) is None and not running.done():  # noqa: ASYNC110 — its filing lands off the loop
+            await asyncio.sleep(_FILED_POLL_S)
+        command_id = sent.command_id
+        if await _off_loop(lambda: log.state(sent.command_id)) is None:
+            # Ended before it was filed: refused, or answered as a retry of the first act.
+            command_id = (await running).accepted.command_id
+        return HostTask.of(await self.command_status(command_id))
 
-    def _tracked(self, task_id: str) -> _Tracked:
-        if (tracked := self._tasks.get(task_id)) is None:
-            raise NotFoundError(f"no task {task_id!r}")
-        return tracked
-
-    def _jobs(self, launches: list[LaunchedJob]) -> list[Job]:
-        """The caller's own launches, by the principal that launched them; another's is absent."""
-        principal = acting_principal(self.caller.stores.identity).id
-        job_ids = [launch.job_id for launch in launches]
-        jobs = self.caller.jobs.launched_by(job_ids, principal_id=principal)
-        if jobs is None:
-            raise NotFoundError(f"no jobs {','.join(job_ids)!r}")
-        return jobs
-
-    def _launch_reads(self, launches: list[LaunchedJob]) -> list[tuple[TaskStatus, str, str]]:
-        """Each launched job's status, words and last update, as its registry reads it."""
-        return [
-            (*job_status(job, held=_held(job)), job.released_at or job.started_at or job.created_at)
-            for job in self._jobs(launches)
-        ]
-
-    async def _status(self, task_id: str) -> HostTask:
-        tracked = self._tracked(task_id)
-        running = tracked.dispatching
-        updated = tracked.dispatched_at or tracked.created_at
-        status: TaskStatus
-        if not running.done():
-            status, said = "working", f"{tracked.tool.name}: running"
-        elif running.cancelled():
-            status, said = "cancelled", f"{tracked.tool.name}: cancelled"
-        elif isinstance(exc := running.exception(), PassStoppedError):
-            status, said = "cancelled", f"{tracked.tool.name}: {exc}"
-        elif exc is not None:
-            code = exc.code if isinstance(exc, PotterError) else type(exc).__name__
-            status, said = "failed", f"{tracked.tool.name}: {code}: {exc}"
-        elif (launches := running.result()[1]) is None:
-            status, said = "completed", f"{tracked.tool.name}: answered"
-        else:
-            read = await _off_loop(lambda: self._launch_reads(launches))
-            status = next(s for s in _PRECEDENCE if s in {r[0] for r in read})
-            said = "; ".join(r[1] for r in read)
-            updated = max([updated, *(r[2] for r in read)])
-        return HostTask(
-            task_id=task_id,
-            status=status,
-            status_message=said,
-            created_at=tracked.created_at,
-            last_updated_at=updated,
-        )
+    async def command_status(self, command_id: str) -> CommandStatus:
+        stores, jobs = self.caller.stores, self.caller.jobs
+        return await _off_loop(lambda: command_status(stores, jobs, command_id))
 
     async def _task_result(self, task_id: str) -> tuple[str, HostAnswer]:
-        tracked = self._tracked(task_id)
-        outcome, launches = await asyncio.shield(tracked.dispatching)
-        # Polled: its jobs end in their own processes, which no signal here carries.
-        while launches is not None and (await self._status(task_id)).status not in _TERMINAL:  # noqa: ASYNC110 — a cross-process job wait
-            await asyncio.sleep(_SETTLE_POLL_S)
-        answer = outcome.accepted if tracked.tool.answers() is None else outcome.result
-        return tracked.tool.name, HostAnswer(_jsonable(answer))
+        """Polled to its end: its act runs in whichever process filed it, and its jobs in their own."""
+        while (read := await self.command_status(task_id)).status not in TERMINAL:  # noqa: ASYNC110 — a cross-process wait
+            await asyncio.sleep(_SETTLE_POLL_S if read.status != "working" else _FILED_POLL_S)
+        tool = host_tool(read.kind)
+        state = await _off_loop(lambda: owned_command(self.caller.stores, task_id))
+        if tool.answers() is None:
+            accepted = CommandAcceptedBody(command_id=task_id, subject=read.subject)
+            return tool.name, HostAnswer(_jsonable(accepted))
+        if read.status != "completed":
+            raise ConflictError(
+                f"{read.kind}: {read.said}",
+                code=f"command_{read.status}",
+                details={"command_id": task_id},
+            )
+        payload = PAYLOAD_MODEL_FOR_KIND[read.kind].model_validate(state.filed.payload)
+        replayed = await self._dispatcher().dispatch(
+            CommandCall(payload, state.filed.idempotency_key)
+        )
+        return tool.name, HostAnswer(_jsonable(replayed.result))
 
-    async def _cancel_task(self, task_id: str) -> HostTask:
-        """A pass's stop is sent under its hold, in one step; a launch's acts are each resolved
-        before any is dispatched, each keyed so a retried cancel acts once."""
-        tracked = self._tracked(task_id)
-        stores = self.caller.stores
-        if tracked.tool.answers() is not None:
-            if not tracked.dispatching.done():
-                pause = await _off_loop(
-                    lambda: pass_pause(stores, tracked.call.payload, reason=_CANCELLED)
-                )
-                await stop_pass(
-                    stores, tracked.hold, CommandCall(pause, f"host-task-cancel:{task_id}")
-                )
-            return await self._status(task_id)
-        _, launches = await asyncio.shield(tracked.dispatching)
-        jobs = [] if launches is None else await _off_loop(lambda: self._jobs(launches))
-        acts = await _off_loop(lambda: cancel_acts(jobs, stores.campaigns.workspace))
-        dispatcher = self._dispatcher()
-        for act in acts:
-            await dispatcher.dispatch(act)
-        return await self._status(task_id)
+    async def cancel_command(self, command_id: str) -> CommandStatus:
+        """Its one `cancel-command`, keyed by it so a retried cancel acts once."""
+        await self.command_status(command_id)
+        cancel = CommandCall(CancelCommandPayload(command_id=command_id), f"cancel:{command_id}")
+        await self._dispatcher().dispatch(cancel)
+        return await self.command_status(command_id)
 
     async def _host_resources(self) -> list[HostResource]:
         listing = await HierarchyParams().answered(self.caller)
@@ -593,48 +465,19 @@ class HostSession:
         return template.compile_prompt(consultation_instruction=instruction)
 
 
-_CANCELLED = "host task cancelled"
-
-
-def cancel_acts(jobs: list[Job], workspace: WorkspaceDir) -> list[CommandCall[CommandPayload]]:
-    """Each live job's own cancel, resolved for every job before any is dispatched: a queued one
-    withdrawn, a running run or paid pass paused on its own cycle in *workspace*, each keyed by
-    the job so a retried cancel acts once. A job no command of *workspace* cancels now — its cycle
-    refusing the pause (`RunState.pause_refusal`) among them — refuses them all."""
-    acts: list[CommandCall[CommandPayload]] = []
-    for job in jobs:
-        key = f"host-task-cancel:{job.job_id}"
-        if job.released:
-            continue
-        if job.queued:
-            acts.append(CommandCall(CancelQueuedRunPayload(job_id=job.job_id), key))
-            continue
-        if isinstance(job.holder, InnerRun):
-            raise TaskUncancellableError(f"{job.what}: {INNER_PAUSE_REFUSAL}")
-        if job.hop == UNRESOLVED_HOP:
-            raise TaskUncancellableError(f"{job.what} names no cycle to pause yet; cancel again")
-        if job.workspace != str(workspace):
-            raise TaskUncancellableError(
-                f"{job.what} runs in a workspace this caller does not hold"
-            )
-        if refusal := derive_run_state(cycle_dir_for(workspace, job.hop)).pause_refusal:
-            raise TaskUncancellableError(f"{job.what}: {refusal}")
-        pause = PauseCyclePayload(
-            campaign_id=job.campaign_id, cycle_id=job.cycle_id, reason=_CANCELLED
-        )
-        acts.append(CommandCall(pause, key))
-    return acts
-
-
-# How often a launch's task result re-reads its jobs while they run.
+# How often a task's result re-reads its command while its jobs run, and while its act does.
 _SETTLE_POLL_S = 2.0
+_FILED_POLL_S = 0.05
+
+# A task's act in flight in this process, kept from collection until it ends.
+_ACTING: set[asyncio.Task[Any]] = set()
 
 
-def _stamp(tracked: _Tracked) -> None:
-    """Its dispatch ended: stamped, and its exception taken here, as the task's status reads it."""
-    tracked.dispatched_at = utcnow_iso()
-    if not tracked.dispatching.cancelled():
-        tracked.dispatching.exception()
+def _settled(running: asyncio.Task[Any]) -> None:
+    """Its act ended: what it raised is on its command's log, taken here."""
+    _ACTING.discard(running)
+    if not running.cancelled():
+        running.exception()
 
 
 # Prompts: what a host is told to do, seeded from the bench's own check-in text.

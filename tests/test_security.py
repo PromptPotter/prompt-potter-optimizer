@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, NamedTuple, cast, override
 
 import pytest
 from factories import (
@@ -54,7 +54,8 @@ from starlette.types import Message, Receive, Scope, Send
 from promptpotter.application import account, health, site_records
 from promptpotter.application.app_visits import APP_VISITS
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands import measuring
+from promptpotter.application.commands import dispatcher, measuring
+from promptpotter.application.commands.command_reading import CommandStatus, job_status
 from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.datasets.draft_campaign import new_draft
@@ -64,13 +65,12 @@ from promptpotter.application.host_surface import (
     HostSession,
     TaskResultOf,
     TaskStatusOf,
-    cancel_acts,
-    job_status,
 )
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
 from promptpotter.application.jobs.launcher.admission import (
+    PassStoppedError,
     paid_pass,
     request_jobs,
     withdraw_queued,
@@ -93,6 +93,8 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner.campaign_result import line_run
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
@@ -105,17 +107,24 @@ from promptpotter.domain.command_kinds import (
     BankSnippetPayload,
     CancelQueuedRunPayload,
     CommandKind,
+    DeleteCampaignPayload,
+    DeleteCyclePayload,
     MintCampaignPayload,
+    PauseCyclePayload,
     ReadKind,
+    SkipSearchpointPayload,
     StepCyclePayload,
+    VerifyCandidatePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
+    INNER_PAUSE_REFUSAL,
     PRODUCER_STATE_INFO,
+    RUN_PHASE_INFO,
     ProducerState,
     RunPhase,
     StopReason,
@@ -130,7 +139,15 @@ from promptpotter.domain.prompt_block import (
     snippet_id,
 )
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
-from promptpotter.domain.run_records import CommandRecord, RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.run_records import (
+    COMMAND_EVENT_ADAPTER,
+    COMMAND_STATUSES,
+    COMMAND_TRANSITIONS,
+    CommandFiled,
+    CommandSubject,
+    RunPhaseRecord,
+    RunWiringRecord,
+)
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
@@ -164,6 +181,7 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
@@ -181,7 +199,7 @@ from promptpotter.infrastructure.store.site_records import (
     SiteRecordStore,
     default_site_record_store,
 )
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     User,
@@ -211,6 +229,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     IdempotencyKeyReusedError,
     NotFoundError,
+    PayloadInvalidError,
     PotterError,
     ServiceUnavailableError,
     TaskUncancellableError,
@@ -1123,30 +1142,35 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     stores = workspace(tmp_path, identity)
     account.accept_terms(stores, TERMS_VERSION)
 
-    def command(kind: str, at: str) -> CommandRecord:
-        return CommandRecord(
+    def command(kind: str, subject: str, at: str) -> CommandFiled:
+        return CommandFiled(
             command_id=kind,
             kind=kind,
             idempotency_key=kind,
             act_digest=kind,
             issued_by=SYSTEM_PRINCIPAL,
+            subject=subject,
+            filer="trail",
             timestamp=at,
         )
 
-    # One before every account event and one after, on two ledgers: only a merge by time places both.
+    # One before every account event and one after: only a merge by time places both.
     trail_hop = CycleHop(campaign_id="camp-trail", cycle_id="cycle_trail0000000")
     stores.campaigns.create_campaign(minted_campaign(trail_hop))
     stores.campaigns.mint_cycle(trail_hop)
-    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(trail_hop))).append(
-        command("start-run", "2000-01-01T00:00:00Z")
+    CommandLog(stores.base_dir).append(
+        command("start-run", CommandSubject.cycle(trail_hop), "2000-01-01T00:00:00Z")
     )
-    CycleEventLog.open_workspace(stores.base_dir).append(
-        command("mint-campaign", "2999-01-01T00:00:00Z")
+    CommandLog(stores.base_dir).append(
+        command("mint-campaign", CommandSubject.WORKSPACE, "2999-01-01T00:00:00Z")
     )
-    # A third ledger, off the workspace tree: the campaign's inner sandbox.
+    # A second log, off the workspace tree: the campaign's inner sandbox.
     sandbox = inner_sandbox(stores, trail_hop.campaign_id, trail_hop.cycle_id)
     (inner_cycle,) = sandbox_cycle_dirs(sandbox)
-    CycleEventLog.open(CycleDir(inner_cycle)).append(command("inner-run", "1999-01-01T00:00:00Z"))
+    inner_hop = CycleHop(campaign_id=inner_cycle.parent.parent.name, cycle_id=inner_cycle.name)
+    CommandLog.of_cycle(CycleDir(inner_cycle)).append(
+        command("inner-run", CommandSubject.cycle(inner_hop), "1999-01-01T00:00:00Z")
+    )
     inner_line = ("inner-run", f"camp-trail>{inner_cycle.parent.parent.name}/{inner_cycle.name}")
     trail = account.tenant_trail(stores)
     assert trail.lines[0][1:3] == inner_line, "what ran in a campaign's inner sandbox left no line"
@@ -1209,8 +1233,8 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         hop = CycleHop(campaign_id=campaign_id, cycle_id="cycle_survey000000")
         stores.campaigns.create_campaign(minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
-        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))).append(
-            command(f"run-{campaign_id}", "2001-01-01T00:00:00Z")
+        CommandLog(stores.base_dir).append(
+            command(f"run-{campaign_id}", CommandSubject.cycle(hop), "2001-01-01T00:00:00Z")
         )
     torn = CampaignLayout(stores.campaigns.campaign_root_dir("camp-torn")).manifest
     held_manifest = torn.read_bytes()
@@ -1343,6 +1367,9 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     assert cycle_target(built_stores, "", hop.cycle_id[:3]) == hop, (
         "a cycle prefix named without its campaign was taken as a full id"
     )
+    # A campaign is addressed by exact id or prefix; a substring that is neither acts on nothing.
+    with pytest.raises(NotFoundError):
+        cycle_target(built_stores, SANDBOX_CAMPAIGN[1:], "")
     score = cycle_result([0.4], 0.3, []).bench
 
     async def _graded(_: object) -> Applier[Any]:
@@ -1756,19 +1783,19 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     run_dir = cycle_dir_for(workspace, run_hop)
     run_dir.mkdir(parents=True)
     with pytest.raises(TaskUncancellableError):
-        cancel_acts([queued, running], workspace)
+        measuring._job_cancels([queued, running], workspace)
     CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     hold_cycle(run_dir)
-    acts = cancel_acts([queued, running], workspace)
+    acts = measuring._job_cancels([queued, running], workspace)
     release_cycle(run_dir)
     assert [(a.payload.kind, a.idempotency_key) for a in acts] == [
-        (CommandKind.CANCEL_QUEUED_RUN, f"host-task-cancel:{queued.job_id}"),
-        (CommandKind.PAUSE_CYCLE, f"host-task-cancel:{running.job_id}"),
+        (CommandKind.CANCEL_QUEUED_RUN, f"cancel:{queued.job_id}"),
+        (CommandKind.PAUSE_CYCLE, f"cancel:{running.job_id}"),
     ]
     hold_cycle(run_dir)
     elsewhere = dataclasses.replace(running, workspace=str(tmp_path / "sandbox"))
     with pytest.raises(TaskUncancellableError):
-        cancel_acts([queued, elsewhere], workspace)
+        measuring._job_cancels([queued, elsewhere], workspace)
     release_cycle(run_dir)
     assert registry.cancel_queued(queued.job_id, principal_id=principal)
     assert read(queued) == "cancelled", "a withdrawn launch reads as run"
@@ -1820,3 +1847,361 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         assert not queuing.list_queued(), "a retried launch launched again"
     for detached in list(launcher_launch._DETACHED):
         detached.cancel()
+
+
+# 5. The command state machine
+
+
+class _Seen(NamedTuple):
+    """One command as every door reads it: its status, the `cancel-command` answer, a retry's
+    answer under its id and key, its status after both, and the events its log holds."""
+
+    status: str
+    said: str
+    cancel: str
+    retry: str
+    after: str
+    events: int
+
+
+_ACTS = CycleHop(campaign_id="acts", cycle_id="cycle_acts")
+_FILER_DEAD = "1-gone"
+
+
+async def test_a_command_reads_one_state_at_every_door_and_its_cancel_and_retry_agree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each row is a state a command reaches and the event that put it there; it reads the same
+    through its status, its cancel and a retry. An act whose process died reads terminal, a
+    terminal status never reads working again, and no ledger move or delete moves the log."""
+    # Every (status, event) pair is decided, and the log refuses exactly the pairs it refuses.
+    owed_moves: dict[tuple[str | None, str], str] = {
+        (None, "filed"): "filed",
+        **{("filed", e): e for e in COMMAND_STATUSES if e != "filed"},
+        **{("accepted", e): e for e in COMMAND_STATUSES if e not in ("filed", "accepted")},
+    }
+    statuses: list[str | None] = [None, *COMMAND_STATUSES]
+    assert set(COMMAND_TRANSITIONS) == {(s, e) for s in statuses for e in COMMAND_STATUSES}
+    assert {k: v for k, v in COMMAND_TRANSITIONS.items() if v is not None} == owed_moves
+    machine = CommandLog(WorkspaceDir(tmp_path / "machine"))
+
+    def event(status: str, command_id: str) -> Any:
+        fields: dict[str, Any] = {"event": status, "command_id": command_id}
+        if status == "filed":
+            fields |= {
+                "kind": "verify-candidate",
+                "idempotency_key": command_id,
+                "act_digest": command_id,
+                "issued_by": SYSTEM_PRINCIPAL,
+                "subject": "",
+                "filer": "machine",
+            }
+        return COMMAND_EVENT_ADAPTER.validate_python(fields)
+
+    to_reach: dict[str | None, tuple[str, ...]] = {None: (), "filed": ("filed",)}
+    to_reach |= {s: ("filed", s) for s in COMMAND_STATUSES if s != "filed"}
+    for (was, sent), owed_to in COMMAND_TRANSITIONS.items():
+        command_id = f"{was}-{sent}"
+        for reached in to_reach[was]:
+            machine.append(event(reached, command_id))
+        try:
+            machine.append(event(sent, command_id))
+            took: str | None = sent
+        except ConflictError:
+            took = None
+        landed = machine.state(command_id)
+        stands = None if landed is None else landed.status
+        assert took == owed_to and stands == (owed_to or was), (
+            f"a {was or 'unfiled'} command took {sent} as {took}, owed {owed_to}; it stands {stands}"
+        )
+
+    stores = workspace(tmp_path)
+    host, sender = HostSession(Caller(stores)), CommandDispatcher(stores)
+    stub = CycleHop(campaign_id="acts", cycle_id="cycle_acts_fork_1")
+    stores.campaigns.create_campaign(minted_campaign(_ACTS))
+    for hop in (_ACTS, stub):
+        stores.campaigns.mint_cycle(hop)
+    acts: dict[str, Callable[[], Awaitable[object]]] = {}
+
+    async def _replayed(_: object) -> None:
+        return None
+
+    async def _acting(dispatched: Any) -> Any:
+        named = dispatched.payload.candidate_id
+        if named.startswith("refused"):
+            return Applier.refusing("not this one")
+        return Applier(acts[named], replay=_replayed)
+
+    monkeypatch.setattr(measuring, "verify_candidate", _acting)
+
+    async def _returns() -> None:
+        return None
+
+    def verify(command_id: str, hop: CycleHop = _ACTS) -> CommandCall[Any]:
+        payload = VerifyCandidatePayload(
+            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, candidate_id=command_id
+        )
+        return CommandCall(payload, command_id, command_id)
+
+    def events(command_id: str) -> int:
+        log = CommandLog(stores.base_dir).path
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        return sum(json.loads(line)["command_id"] == command_id for line in lines)
+
+    async def answer(asked: Callable[[], Awaitable[object]]) -> str:
+        try:
+            got = await asked()
+        except PotterError as refused:
+            return type(refused).__name__
+        return got.status if isinstance(got, CommandStatus) else "replayed"
+
+    async def seen(command_id: str, retried: CommandCall[Any] | None) -> _Seen:
+        status = await answer(lambda: host.command_status(command_id))
+        said = "" if status == "NotFoundError" else (await host.command_status(command_id)).said
+        cancel = await answer(lambda: host.cancel_command(command_id))
+        retry = "-" if retried is None else await answer(lambda: sender.dispatch(retried))
+        after = await answer(lambda: host.command_status(command_id))
+        return _Seen(status, said, cancel, retry, after, events(command_id))
+
+    table: dict[tuple[str, str], _Seen] = {}
+
+    acts["done"] = _returns
+    await sender.dispatch(verify("done"))
+    table["applied", "act returned"] = await seen("done", verify("done"))
+
+    async def running(call: CommandCall[Any], name: str) -> tuple[asyncio.Task[Any], asyncio.Event]:
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def _midway() -> None:
+            started.set()
+            await release.wait()
+            if name.startswith("killed"):
+                raise RuntimeError("its process is gone")
+
+        acts[name] = _midway
+        task = asyncio.ensure_future(sender.dispatch(call))
+        await started.wait()
+        return task, release
+
+    task, release = await running(verify("alive"), "alive")
+    table["filed", "act runs, its filer alive"] = await seen("alive", verify("alive"))
+    release.set()
+    await task
+
+    with monkeypatch.context() as killed:
+        killed.setattr(dispatcher, "this_producer", lambda _jobs: _FILER_DEAD)
+        task, release = await running(verify("killed-act"), "killed-act")
+    table["filed", "its filer killed mid-act"] = await seen("killed-act", verify("killed-act"))
+    release.set()
+    with pytest.raises(RuntimeError):
+        await task
+
+    async def _interrupted() -> None:
+        raise KeyboardInterrupt
+
+    async def _exited() -> None:
+        raise SystemExit(1)
+
+    async def _blank() -> None:
+        raise RuntimeError
+
+    for name, raised, act in (
+        ("interrupted", KeyboardInterrupt, _interrupted),
+        ("exited", SystemExit, _exited),
+        ("blank", RuntimeError, _blank),
+    ):
+        acts[name] = act
+        with pytest.raises(raised):
+            await sender.dispatch(verify(name))
+        table["ended", f"{raised.__name__} left its act"] = await seen(name, verify(name))
+    with pytest.raises(ConflictError):
+        await sender.dispatch(verify("refused"))
+    table["refused", "its act refused it"] = await seen("refused", verify("refused"))
+
+    # Two filers of one id, racing: one files it, the other is refused unfiled.
+    acts["raced"] = _returns
+    raced = [CommandCall(verify("raced").payload, key, "raced") for key in ("race-a", "race-b")]
+    ran = await asyncio.gather(*(sender.dispatch(c) for c in raced), return_exceptions=True)
+    outcomes = [type(r).__name__ for r in ran]
+    assert sorted(outcomes) == ["CommandIdReusedError", "CommandOutcome"], ran
+    won = raced[outcomes.index("CommandOutcome")]
+    table["applied", "two filers raced its id"] = await seen(
+        "raced", CommandCall(won.payload, won.idempotency_key, "raced")
+    )
+    table["unfiled", "never sent"] = await seen("never-sent", None)
+
+    # Its owner deleted or its ledger moved: the log the account files on is untouched.
+    for campaign_id, keep in (("kept", True), ("dropped", False)):
+        owner = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{campaign_id}")
+        stores.campaigns.create_campaign(minted_campaign(owner))
+        stores.campaigns.mint_cycle(owner)
+        acts[campaign_id] = _returns
+        await sender.dispatch(verify(campaign_id, owner))
+        folded = CommandLog(stores.base_dir).book()
+        await sender.dispatch(
+            CommandCall(DeleteCampaignPayload(campaign_id=campaign_id, keep_results=keep))
+        )
+        assert CommandLog(stores.base_dir).book().commands.items() >= folded.commands.items(), (
+            f"deleting a campaign (keep_results={keep}) moved what its commands fold to"
+        )
+        table["applied", f"its campaign deleted, keep_results={keep}"] = await seen(
+            campaign_id, verify(campaign_id, owner)
+        )
+    acts["stub"] = _returns
+    await sender.dispatch(verify("stub", stub))
+    folded = CommandLog(stores.base_dir).book()
+    await sender.dispatch(
+        CommandCall(DeleteCyclePayload(campaign_id=stub.campaign_id, cycle_id=stub.cycle_id))
+    )
+    assert CommandLog(stores.base_dir).book().commands.items() >= folded.commands.items()
+    table["applied", "its cycle deleted"] = await seen("stub", verify("stub", stub))
+    adopted = CycleHop(campaign_id="adopted", cycle_id="cycle_adopted")
+    stores.campaigns.create_campaign(minted_campaign(adopted))
+    moved = tmp_path / "moved" / ".runtime" / "ledger.jsonl"
+    moved.parent.mkdir(parents=True)
+    moved.write_text("", encoding="utf-8")
+    folded = CommandLog(stores.base_dir).book()
+    stores.campaigns.adopt_ledger(adopted, moved)
+    assert CommandLog(stores.base_dir).book() == folded, "a ledger's move moved the log"
+
+    # An inner cycle: its own loop's run, and a kind that never addresses it.
+    leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+    sandbox = inner_sandbox(stores, _ACTS.campaign_id, _ACTS.cycle_id)
+    (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+    inner = descend_store(stores, (_ACTS,))
+    inner.campaigns.create_campaign(
+        minted_campaign(leaf, owner_user_id=str(stores.identity.user_id))
+    )
+    inner.campaigns.mint_cycle(leaf)
+    leaf_dir = inner.campaigns.cycle_dir(leaf)
+    into_leaf = Subject.parse(
+        f"course:innerds/{leaf.cycle_id};in={_ACTS.campaign_id}::{_ACTS.cycle_id}"
+    ).command_fields
+    controls: dict[str, str | None] = {}
+    CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(leaf_dir)
+    controls["inner, its own loop running"] = derive_run_state(leaf_dir).admission.refusal
+    release_cycle(leaf_dir)
+
+    held = CycleHop(campaign_id="held", cycle_id="cycle_held")
+    stores.campaigns.create_campaign(minted_campaign(held))
+    stores.campaigns.mint_cycle(held)
+    selecting: list[bool] = []
+
+    async def paused_under_pass(on: Stores, hop: CycleHop, address: dict[str, Any]) -> None:
+        """The control a cycle reads once a pause stands on the pass holding it (RunState.scoring)."""
+        async with paid_pass(stores=on, verb="bench", hop=hop, declared=Budget(), sends=()):
+            await sender.dispatch(CommandCall(PauseCyclePayload(**address, reason="stop")))
+            run = derive_run_state(on.campaigns.cycle_dir(hop))
+            controls[f"{'inner' if run.inner else 'outer'}, paused under a pass"] = (
+                run.admission.refusal
+            )
+            if not run.inner:
+                selecting.append(line_run(stores, hop).selecting)
+            raise asyncio.CancelledError("aborted")
+
+    with pytest.raises(PassStoppedError):
+        await paused_under_pass(stores, held, {"campaign_id": "held", "cycle_id": "cycle_held"})
+
+    # A loop command: accepted by its act, then taken by its loop, or left as its loop ends.
+    looped = CycleHop(campaign_id="looped", cycle_id="cycle_looped")
+    stores.campaigns.create_campaign(minted_campaign(looped))
+    stores.campaigns.mint_cycle(looped)
+    looped_dir = stores.campaigns.cycle_dir(looped)
+    CycleEventLog.open(CycleDir(looped_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    hold_cycle(looped_dir)
+    asked = PauseCyclePayload(campaign_id="looped", cycle_id="cycle_looped", reason="stop")
+    await sender.dispatch(CommandCall(asked, "loop-pause", "loop-pause"))
+    table["accepted", "standing for its loop"] = await seen(
+        "loop-pause", CommandCall(asked, "loop-pause", "loop-pause")
+    )
+    assert RunControl(cycle_dir=looped_dir).take_pause() is not None
+    table["applied", "taken by its loop"] = await seen(
+        "loop-pause", CommandCall(asked, "loop-pause", "loop-pause")
+    )
+    skipped = SkipSearchpointPayload(campaign_id="looped", cycle_id="cycle_looped")
+    await sender.dispatch(CommandCall(skipped, "loop-left", "loop-left"))
+    release_cycle(looped_dir)
+    assert stores.campaigns.mark_producer_vanished(looped), "a dead loop's cycle was not reaped"
+    table["accepted", "its loop ended without taking it"] = await seen(
+        "loop-left", CommandCall(skipped, "loop-left", "loop-left")
+    )
+
+    unaddressed = DeleteCyclePayload(**into_leaf)
+    with pytest.raises(PayloadInvalidError) as static:
+        await sender.dispatch(CommandCall(unaddressed, "inner-422", "inner-422"))
+    assert static.value.code == "inner_cycle_unaddressed"
+    table["unfiled", "a kind no inner cycle takes, sent into one"] = await seen(
+        "inner-422", CommandCall(unaddressed, "inner-422", "inner-422")
+    )
+
+    stuck, reused, gone = "TaskUncancellableError", "CommandIdReusedError", "NotFoundError"
+    # (status, a word its status says, cancel's answer, a retry's answer, its events)
+    owed: dict[tuple[str, str], tuple[str, str | None, str, str, int]] = {
+        ("applied", "act returned"): ("completed", None, "completed", "replayed", 2),
+        ("filed", "act runs, its filer alive"): ("working", None, stuck, "ConflictError", 1),
+        ("filed", "its filer killed mid-act"): ("failed", "filer is gone", "failed", reused, 2),
+        ("ended", "KeyboardInterrupt left its act"): ("cancelled", None, "cancelled", reused, 2),
+        ("ended", "SystemExit left its act"): ("cancelled", None, "cancelled", reused, 2),
+        ("ended", "RuntimeError left its act"): ("failed", "RuntimeError", "failed", reused, 2),
+        ("refused", "its act refused it"): ("failed", "not this one", "failed", reused, 2),
+        ("applied", "two filers raced its id"): ("completed", None, "completed", "replayed", 2),
+        ("unfiled", "never sent"): (gone, None, gone, "-", 0),
+        ("applied", "its campaign deleted, keep_results=True"): (
+            "completed",
+            None,
+            "completed",
+            gone,
+            2,
+        ),
+        ("applied", "its campaign deleted, keep_results=False"): (
+            "completed",
+            None,
+            "completed",
+            gone,
+            2,
+        ),
+        ("applied", "its cycle deleted"): ("completed", None, "completed", gone, 2),
+        ("accepted", "standing for its loop"): ("working", "accepted", stuck, "replayed", 2),
+        ("applied", "taken by its loop"): ("completed", None, "completed", "replayed", 3),
+        ("accepted", "its loop ended without taking it"): (
+            "cancelled",
+            "loop ended",
+            "cancelled",
+            "replayed",
+            2,
+        ),
+        ("unfiled", "a kind no inner cycle takes, sent into one"): (
+            gone,
+            None,
+            gone,
+            "PayloadInvalidError",
+            0,
+        ),
+    }
+    assert set(table) == set(owed), "a row of the table was never reached"
+    wrong = []
+    for row, read in table.items():
+        status, word, cancel, retry, logged = owed[row]
+        if (read.status, read.cancel, read.retry, read.events) != (
+            status,
+            cancel,
+            retry,
+            logged,
+        ) or (word is not None and word not in read.said):
+            wrong.append(f"{row}: read {read}, owed {owed[row]}")
+        if read.status in ("completed", "failed", "cancelled") and read.after != read.status:
+            wrong.append(f"{row}: read {read.status}, then {read.after} past its cancel and retry")
+    parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
+    owed_controls = {
+        "inner, its own loop running": INNER_PAUSE_REFUSAL,
+        "outer, paused under a pass": parked,
+    }
+    wrong += [
+        f"{row}: its run control reads {controls.get(row)!r}, owed {said!r}"
+        for row, said in owed_controls.items()
+        if controls.get(row) != said
+    ]
+    if selecting != [False]:
+        wrong.append(f"a line whose pass is stopping reads as selecting: {selecting}")
+    assert not wrong, "\n".join(wrong)

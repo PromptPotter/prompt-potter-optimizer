@@ -11,10 +11,6 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.run_records import (
     BackendWarningRecord,
-    CommandAckRecord,
-    CommandAckStatus,
-    CommandEffect,
-    CommandRecord,
     CycleRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
@@ -31,7 +27,6 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.scoring import GradedCell, WalkedCell
 from promptpotter.domain.spend import KeySource, TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
-from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole, measured_pass
 
 if TYPE_CHECKING:
@@ -297,39 +292,6 @@ def emit_spend_hold(
             round=current_round(),
         ),
         ledger,
-    )
-
-
-def emit_command(
-    *,
-    command_id: str,
-    kind: str,
-    payload: dict[str, Any],
-    idempotency_key: str,
-    act_digest: str,
-    issued_by: Principal,
-) -> int | None:
-    return _append_record(
-        CommandRecord(
-            command_id=command_id,
-            kind=kind,
-            payload=dict(payload),
-            idempotency_key=idempotency_key,
-            act_digest=act_digest,
-            issued_by=issued_by,
-        )
-    )
-
-
-def emit_command_ack(
-    *,
-    command_id: str,
-    status: CommandAckStatus,
-    detail: str = "",
-    effect: CommandEffect,
-) -> None:
-    _append_record(
-        CommandAckRecord(command_id=command_id, status=status, detail=detail, effect=effect)
     )
 
 

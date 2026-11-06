@@ -99,7 +99,7 @@ A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk
   `host_surface.py::HostSession._open` opens the task before the dispatcher accepts the act, so a
   refusal (an unreadable ledger) answers `working`, then reads `failed` on `tasks/get` 0.1 s later, while
   the CLI exits 1 on the same refusal. The handle it opens names no campaign
-  (`host_surface.py::HostSession._status`: `mint-campaign: running`), so a host whose call accepts
+  (`command_reading.py::command_status`: `running`), so a host whose call accepts
   no task (Claude Code's `tools/call` declares no Tasks extension) holds an id no tool it has can
   read, and finds its run through `hierarchy`. Action: a task opens for an admitted act and names the
   address it acts on; a refusal before admission is the call's answer on every door. **Rides
@@ -262,10 +262,12 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   Pause. `Press` declares terminal and host presence, never the browser's. Action: `Press` names the
   browser door, and a gate check ties each claimed kind to a sender. **Rides with:** a new arc.
   **Re-test:** `git grep -n "submit-arms" -- webapp/components webapp/lib/hooks`.
-- **The idempotency key promises a replay some kinds never give** — `start-checkin`,
-  `set-user-settings`, `accept-terms`, `set-api-key` replay nothing. Action: the description names
-  which kinds replay, until M2's log-keyed idempotency. **Rides with:** M2. **Re-test:** retry a
-  `start-checkin` with its key after a lost answer.
+- **A retried key on a kind with no replay is refused, never answered** — `start-checkin`,
+  `set-user-settings`, `accept-terms`, `set-api-key` keep no answer, so a retry after a lost answer
+  reads `command_already_applied` (`commands/dispatcher.py::_replayed`). Action: each one's
+  `Applier.replay` answers off the effect the log keeps. **Rides with:** the next change to
+  `commands/workspace_edits.py` or `commands/launching.py`. **Re-test:** retry a `start-checkin` with
+  its key after a lost answer.
 
 ### The excision pass (six layer audits and a plan review, 2026-11-05)
 
@@ -422,52 +424,11 @@ by an exhaustive table or state-machine test. Each is a pattern a mature project
 with:** the Q rows of [`roadmap.md`](roadmap.md) § The crunch (operator, 2026-11-04).
 
 **Decided once, read by every arc before a leap.**
-- No arc before Q1 holds a command's state anywhere but the record `commands/dispatcher.py` writes
-  and the MCP task memory batch E leaves standing (`host_surface.py::HostSession._tasks`).
 - No arc before Q2 adds a cadence, a `revalidate` list or a cross-invalidation beyond batch E's; a new
   read polls on the descriptor it has, and A4's conversation opens no second `EventSource`.
 - No arc before Q3 adds a `logger.warning` in `application/`: a new fault is a record kind with a reader.
 - Batch E lands no command state and keeps every read at main's cadence; Q1 and Q2 delete what stands.
 
-- **Q1: one command log.** The fact: what was asked of the system and where it stands. Today it is
-  split: `run_records.py::CommandRecord` and `run_records.py::CommandAckRecord` land on whichever
-  ledger `commands/dispatcher.py::dispatch` picks (the cycle's, its root's for a delete, the draft's,
-  the workspace's), a draft's records move with its ledger (`campaign_store/store.py::adopt_ledger`,
-  from `jobs/mint.py::_mint_campaign`), a deleted cycle's go to the root's, the loop reads its
-  standing commands off its own ledger (`runtime_flags.py::standing_controls`), the trail folds
-  command lines out of every ledger and a tombstone's copies (`store/account_trail.py`), idempotency
-  is a ledger scan (`commands/dispatcher.py::_find_idempotent_command`), and whether the filer is alive
-  is asked beside all of it. A running act's status and stop live only in MCP memory
-  (`host_surface.py::HostSession._tasks`, `HostSession._cancel_task`, `host_surface.py::cancel_acts`):
-  REST serves no job read, and the webapp has no stop for verify or bench. A pass's stop address is
-  built per door (`commands/measuring.py::pass_pause`, `cancel_acts`, the CLI's Ctrl+C in
-  `cli/commands/launch.py`, `new.py` and `noise_floor.py`), and the answer a door returns
-  (`command_kinds.py::CommandAcceptedBody`) does not name the address the dispatcher resolved. Sites:
-  `git grep -l "CommandRecord\|CommandAckRecord\|standing_controls(" -- promptpotter`. Owner: one
-  account-scoped append-only log; a command is one record stream in it (filed, applied, refused,
-  voided, cancelled), each event written with its filing in one step, its status a fold of its own
-  events, its subject the address it was filed on and the one it landed on (a draft's Start lands on
-  the cycle the mint adopts, so the adopt step moves no record). The ledger keeps what HAPPENED
-  (`RunPhaseRecord`, the effects); the log keeps what was ASKED. The pattern: event sourcing's
-  per-aggregate stream with status a fold (EventStoreDB, Axon). Deletes: the two record kinds from
-  the ledger, `ledger_scan.py`'s command fold, the trail's per-ledger walk and
-  `run_records.py::TrailTombstoneRecord`'s copied commands, the idempotency scan, `HostSession._tasks`
-  and `_cancel_task`, the per-door stop addresses; a pass with no cycle (`launcher/admission.py::paid_pass`, `hop=None`)
-  is addressed by its command id, so its stop is one command at every entry point. Shares with U2:
-  the adopt step and U2's one launch answer, which is a log read. Edges inside: the loop's pending
-  read becomes a by-subject read of the log, so the log keeps its own per-subject offsets, a fold,
-  never a file beside it; a command filed by a process that died before applying stays "filed", and
-  the fold reads the filer's OS lock (§0.5) to derive "filed, filer gone". Invariant tests: the
-  exhaustive `(status, event)` table yields one status or a refusal for every pair; for any
-  interleaving of file, apply, refuse, cancel and void with any ledger move or delete, the fold after
-  the move equals the fold before. Its acceptance table is the command-state table of
-  `b79e18678:tests/test_security.py` § 5, "The command state machine" (branch `arc/ea-8`, cut from
-  batch E), plus a
-  `RunState.scoring` row: a sandbox's pause, and a line run selecting. Amends
-  [`../architecture.md`](../architecture.md) § Control-remote and [`../decisions.md`](../decisions.md)
-  § 0001 in its commit: both place the record on the cycle's ledger. **Re-test:**
-  `git grep -n "class CommandRecord" -- promptpotter/domain/run_records.py`;
-  `git grep -n "def _cancel_task" -- promptpotter`.
 - **Q2: one change feed — the server says what moved.** The fact: that a served subject moved. The
   webapp guesses it at many sites: a cadence per read (a descriptor's `cadence` on
   `read-cache.ts`'s beat, or the `intervalMs` its caller reads off another read; the constants in
@@ -1163,12 +1124,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   Action: the CLI prints the refusal's served sentence. **Re-test:**
   `git grep -n '"ERROR:' -- promptpotter/presentation/cli`.
 
-**C. One address resolved twice.** **Rides with:** Q1.
-- `cycle_addressing.py::resolve_campaign_id` is a second resolver over `resolve_subject`'s matcher,
-  read by `cli/commands/ab.py` and `noise_floor.py` off the dispatcher. The CLI's cycle verbs resolve
-  CLI-side. The matcher falls back to a substring, and the dispatcher walks `descend` twice.
-  `run_records.py::BankedSubject` is a second address. Action: one resolution, at the dispatcher, by
-  exact id or prefix. **Re-test:** `git grep -n "resolve_campaign_id(" -- promptpotter`.
+**C. One address resolved twice.** **Rides with:** M14a (`cli/commands/ab.py`).
+- The CLI's `ab` verb resolves CLI-side (`cycle_addressing.py::cycle_target`, off the dispatcher),
+  and the dispatcher walks `descend` twice. `run_records.py::BankedSubject` is a second address. Action: one resolution, at the
+  dispatcher, by exact id or prefix. **Re-test:** `git grep -n "cycle_target(" -- promptpotter`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.
 - `api/deps.py::_NAMED` and `read_input`'s pattern, `cli/parsers.py`' read help,
@@ -1221,8 +1180,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
 - `domain/scoring.py::turn_scalars` overwrites `n_turns` with the count of a step named `n`. Action:
   the per-step terms take a namespace the totals cannot meet. **Re-test:** a turn list with a step
   `n` keeps its total.
-- `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
-  replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
 
 ## Open — multi-arc
 
@@ -1307,9 +1264,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   ones, which L4 inner cells (`bench: 0`) and `justlogic/d234-held` are built on. Open: read the
   definition (`/potter-box`), then decide whether `bench` becomes the total. **Re-test:** a fresh
   `{bench: 100}` campaign on that definition holds out 100.
-- **`noise-floor` lets its pause escape as `PassStoppedError`**, a band over fewer than `k` rescores
-  being no band; the pass's address is Q1's (§ The quantum-leap pass). **Rides with:** any change to
-  `paid_pass`. **Re-test:** stop a `noise-floor` from a second terminal; it banks no band.
 - **A locked-in arm's catch-up cells are read by its race, never its round**: `potter/race.py`
   measures a prior on each later challenger's cells (`RaceCatchUpRecord`), but
   `runner/measurement.py::_walk_population` folds only the arm's own walk into `rows[key]`, so the

@@ -2399,7 +2399,7 @@ export interface LoopWarning {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'decision' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -3867,6 +3867,17 @@ export interface NodeOutputEdit {
   answer_fields: string[] | null;
 }
 
+/** One command as every door reads it: where it stands, in the words of its task status, */
+export interface CommandStatus {
+  command_id: string;
+  kind: string;
+  subject: string;
+  status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
+  said: string;
+  created_at: string;
+  last_updated_at: string;
+}
+
 /** What `POST /commands/fork-cycle` would decide about this steer, asked without forking. */
 export interface ForkPreviewResponse {
   /** `clean` where the overlay stays inside what each node permits: its recorded
@@ -4248,10 +4259,13 @@ export interface ArmStarted {
   hop: CycleHop;
 }
 
-/** What a command whose applied form answers nothing returns: the record it appended. */
+/** What a command whose applied form answers nothing returns: the command it filed, at the */
 export interface CommandAcceptedBody {
-  /** Stable id of the appended `CommandRecord`. */
+  /** Stable id of the command filed on the account's log. */
   command_id: string;
+  /** The address the dispatcher resolved and filed it on: `campaign/cycle`, a
+   * campaign id, `drafts/<id>`, or empty for the workspace. */
+  subject: string;
 }
 
 /** The pass is the fact, the reading a cache of one grading of it. */
@@ -4349,6 +4363,12 @@ export interface BankSnippetPayload {
   text: string;
   /** The campaign or check-in draft it was written in. */
   experiment: string;
+}
+
+/** Stop a command still acting, by the id it was filed under: a paid pass in flight paused */
+export interface CancelCommandPayload {
+  /** The command's id, as its filing answered it. */
+  command_id: string;
 }
 
 /** Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent. */
@@ -4690,6 +4710,7 @@ export interface CommandPayloads {
   "accept-terms": CommandSent<AcceptTermsPayload, "version">;
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
   "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
+  "cancel-command": CommandSent<CancelCommandPayload, "command_id">;
   "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
   "change-run-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
@@ -4727,6 +4748,7 @@ export interface CommandResponses {
   "accept-terms": TermsConsent;
   "archive-campaign": CommandAcceptedBody;
   "bank-snippet": CommandAcceptedBody;
+  "cancel-command": CommandAcceptedBody;
   "cancel-queued-run": CommandAcceptedBody;
   "change-run-limits": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;

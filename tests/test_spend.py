@@ -2105,7 +2105,8 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     wire = _priced_wire(offline)
     wire.flaky = True
     rng = wire.rng
-    burst_ledger = CycleEventLog(tmp_path / "burst.jsonl")
+    (burst_dir := tmp_path / "burst" / ".runtime").mkdir(parents=True)
+    burst_ledger = CycleEventLog(burst_dir / "ledger.jsonl")
     ceiling_usd = 0.05
     book = spend_book(ceiling_usd)
     burst_ledger.bind(book)

@@ -571,7 +571,7 @@ class BankedCommand(FrozenModel):
 
 
 class TrailTombstoneRecord(FrozenModel):
-    """On the WORKSPACE ledger, so deleting what was commanded cannot delete that it was."""
+    """On the WORKSPACE ledger, so deleting a run cannot delete that it stopped."""
 
     record_type: Literal["trail_tombstone"] = "trail_tombstone"
     campaign_id: str = ""
@@ -687,23 +687,6 @@ class AccountEventRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-CommandAckStatus = Literal["accepted", "applied", "rejected"]
-
-
-class CommandRecord(FrozenModel):
-    """``CommandDispatcher`` alone writes it, to the cycle's, its root's or the workspace ledger."""
-
-    record_type: Literal["command"] = "command"
-    command_id: str
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    idempotency_key: str
-    # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
-    act_digest: str
-    issued_by: Principal
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
 class NoEffect(FrozenModel):
     """An ack whose command names no effect beyond having happened."""
 
@@ -768,15 +751,161 @@ CommandEffect = Annotated[
 ]
 
 
-class CommandAckRecord(FrozenModel):
-    """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken."""
+# What was ASKED lives on the account's command log (`store/command_log.py`), never a cycle
+# ledger: the ledger keeps what happened. A command is one stream of these events, its status the
+# fold of them by `COMMAND_TRANSITIONS`, and each event is the status it moves the command to.
+CommandStatus = Literal["filed", "accepted", "applied", "refused", "voided", "cancelled"]
+COMMAND_STATUSES: tuple[CommandStatus, ...] = get_args(CommandStatus)
+# No event follows one of these.
+COMMAND_ENDED: frozenset[CommandStatus] = frozenset({"applied", "refused", "voided", "cancelled"})
 
-    record_type: Literal["command_ack"] = "command_ack"
+
+class CommandSubject:
+    """The one spelling of a command's resolved address on the log: the workspace (``""``), a
+    campaign, a cycle, or a draft."""
+
+    WORKSPACE = ""
+
+    @staticmethod
+    def campaign(campaign_id: str) -> str:
+        return campaign_id
+
+    @staticmethod
+    def cycle(hop: CycleHop) -> str:
+        return f"{hop.campaign_id}/{hop.cycle_id}"
+
+    @staticmethod
+    def draft(draft_id: str) -> str:
+        return f"drafts/{draft_id}"
+
+
+class CommandFiled(FrozenModel):
+    """``CommandDispatcher`` alone files it, before its act runs."""
+
+    event: Literal["filed"] = "filed"
     command_id: str
-    status: CommandAckStatus
-    detail: str = ""
-    effect: CommandEffect
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str
+    # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
+    act_digest: str
+    issued_by: Principal
+    # The address the dispatcher resolved (`CommandSubject`): what the loop and the trail read by.
+    subject: str
+    # The process that files it and runs its act (`interlock.this_producer`): gone while the
+    # command is still ``filed``, its act died with it.
+    filer: str
     timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CommandAccepted(FrozenModel):
+    """Taken in, not yet done: a loop command the loop has not taken, or a Start whose mint has
+    not closed. A loop command's ``run_mark`` is how many runs its cycle had begun or ended when
+    it was accepted (`ledger_scan.py::scan_run_mark`): a later boundary leaves it untaken for good."""
+
+    event: Literal["accepted"] = "accepted"
+    command_id: str
+    run_mark: int | None = None
+    effect: CommandEffect = Field(default_factory=NoEffect)
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CommandApplied(FrozenModel):
+    """It HAPPENED: applied by its act, or taken by the loop."""
+
+    event: Literal["applied"] = "applied"
+    command_id: str
+    effect: CommandEffect = Field(default_factory=NoEffect)
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CommandRefused(FrozenModel):
+    """Its act refused it, or raised: nothing it asked happened."""
+
+    event: Literal["refused"] = "refused"
+    command_id: str
+    detail: str = ""
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CommandVoided(FrozenModel):
+    """What it asked no longer stands: a look-ahead superseded or a filer that died mid-act."""
+
+    event: Literal["voided"] = "voided"
+    command_id: str
+    detail: str = ""
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CommandCancelled(FrozenModel):
+    """Its act was interrupted (a signal, a task's cancel) or a `cancel-command` reached it."""
+
+    event: Literal["cancelled"] = "cancelled"
+    command_id: str
+    detail: str = ""
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+CommandEvent = Annotated[
+    CommandFiled
+    | CommandAccepted
+    | CommandApplied
+    | CommandRefused
+    | CommandVoided
+    | CommandCancelled,
+    Field(discriminator="event"),
+]
+COMMAND_EVENT_ADAPTER: TypeAdapter[CommandEvent] = TypeAdapter(CommandEvent)
+
+
+def _moves(*to: CommandStatus) -> dict[CommandStatus, CommandStatus | None]:
+    return {event: (event if event in to else None) for event in COMMAND_STATUSES}
+
+
+_ROWS: dict[CommandStatus | None, dict[CommandStatus, CommandStatus | None]] = {
+    None: _moves("filed"),
+    "filed": _moves("accepted", "applied", "refused", "voided", "cancelled"),
+    "accepted": _moves("applied", "refused", "voided", "cancelled"),
+    **{ended: _moves() for ended in COMMAND_ENDED},
+}
+# EXHAUSTIVE: every (status, event) pair, ``None`` the unfiled command, a ``None`` value a refusal.
+COMMAND_TRANSITIONS: dict[tuple[CommandStatus | None, CommandStatus], CommandStatus | None] = {
+    (status, event): to for status, row in _ROWS.items() for event, to in row.items()
+}
+
+
+class CommandState(NamedTuple):
+    """One command as its events fold: its filing, where it stands, and the last word on it."""
+
+    filed: CommandFiled
+    status: CommandStatus
+    at: str
+    detail: str = ""
+    effect: CommandEffect = NoEffect()
+    run_mark: int | None = None
+
+    @staticmethod
+    def moved(status: CommandStatus | None, event: CommandStatus) -> CommandStatus:
+        to = COMMAND_TRANSITIONS[status, event]
+        if to is None:
+            raise ValueError(f"a {status or 'unfiled'} command takes no {event} event")
+        return to
+
+    def after(self, event: CommandEvent) -> CommandState:
+        status = self.moved(self.status, event.event)
+        match event:
+            case CommandAccepted(run_mark=mark, effect=effect):
+                return self._replace(
+                    status=status, at=event.timestamp, run_mark=mark, effect=effect
+                )
+            case CommandApplied(effect=effect):
+                return self._replace(status=status, at=event.timestamp, effect=effect)
+            case CommandRefused(detail=detail) | CommandVoided(detail=detail):
+                return self._replace(status=status, at=event.timestamp, detail=detail)
+            case CommandCancelled(detail=detail):
+                return self._replace(status=status, at=event.timestamp, detail=detail)
+            case _:
+                raise ValueError(f"command {self.filed.command_id} is filed once")
 
 
 # A halt is its `StopReason`, and an outcome the loop decided is a field of the record of its step.
@@ -1312,8 +1441,6 @@ CycleRecord = Annotated[
     | CampaignCeilingRecord
     | FlightRecord
     | PricedKeyRecord
-    | CommandAckRecord
-    | CommandRecord
     | CycleFinalRecord
     | CycleMintedRecord
     | CycleSeedRecord

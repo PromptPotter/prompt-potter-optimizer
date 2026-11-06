@@ -1,4 +1,5 @@
-"""What was done in one workspace, read off its consent trail and ledgers; `account_spend.py` reads what it cost."""
+"""What was done in one workspace, read off its consent trail, its command log and its ledgers;
+`account_spend.py` reads what it cost."""
 
 from __future__ import annotations
 
@@ -17,13 +18,13 @@ from promptpotter.domain.run_records import (
     AccountEventRecord,
     BankedCommand,
     BankedSubject,
-    CommandRecord,
     Device,
     RunPhaseRecord,
     TrailTombstoneRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.command_log import CommandLog, cycle_workspace
 from promptpotter.infrastructure.store.layout import (
     DRAFTS_DIR,
     CycleLayout,
@@ -60,7 +61,6 @@ class TrailLine(NamedTuple):
 class _Trail:
     records: ClassVar[RecordClasses] = (
         AccountEventRecord,
-        CommandRecord,
         RunPhaseRecord,
         TrailTombstoneRecord,
     )
@@ -69,9 +69,7 @@ class _Trail:
         self._found: list[TrailLine] = []
         self._banked: set[BankedSubject] = set()
 
-    def feed(
-        self, record: AccountEventRecord | CommandRecord | RunPhaseRecord | TrailTombstoneRecord
-    ) -> None:
+    def feed(self, record: AccountEventRecord | RunPhaseRecord | TrailTombstoneRecord) -> None:
         match record:
             case RunPhaseRecord(stop_reason=StopReason() as reason) if (
                 stop_reason_outcome(reason) is not StopOutcome.SUCCESS
@@ -90,10 +88,6 @@ class _Trail:
                 self._found.append(
                     TrailLine(record.timestamp, record.event, record.subject, record.user_id, "")
                 )
-            case CommandRecord():
-                self._found.append(
-                    TrailLine(record.timestamp, record.kind, "", record.issued_by.id, "")
-                )
             case TrailTombstoneRecord():
                 self._banked.add(record.subject)
                 self._found.extend(
@@ -106,7 +100,7 @@ class _Trail:
 
 
 # A roster is per PROCESS (`LedgerIndex._screened`): once a read names this one, every ledger that
-# process indexes keeps its commands. The admin bot, the `trail` verb and a delete pay that.
+# process indexes keeps its stops. The admin bot, the `trail` verb and a delete pay that.
 _TRAIL_FOLDS = (_Trail,)
 
 
@@ -126,9 +120,20 @@ def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
     ]
 
 
+def _command_lines(workspace: WorkspaceDir, *, inside: str = "") -> Iterator[TrailLine]:
+    """Every command *workspace*'s log filed, at the address it was filed on; no delete reaches
+    the log, so a removed campaign's commands are read here too."""
+    for state in CommandLog(workspace).book().commands.values():
+        filed = state.filed
+        draft = filed.subject.startswith(f"{DRAFTS_DIR}/")
+        where = f"{inside}>{filed.subject}" if inside else filed.subject
+        campaign_id = inside or ("" if draft else filed.subject.partition("/")[0])
+        yield TrailLine(filed.timestamp, filed.kind, where, filed.issued_by.id, campaign_id)
+
+
 def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:
-    """Unordered: the account's consent trail, the workspace's own ledgers, then the cycles of
-    every inner sandbox it owns."""
+    """Unordered: the account's consent trail, its command log, the workspace's own ledgers,
+    then the cycles and logs of every inner sandbox it owns."""
     yield from (
         TrailLine(line.at, line.event, line.subject, line.user_id, "", line.device)
         for line in UserStore(campaigns.workspace).consent_trail()
@@ -137,6 +142,7 @@ def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:
         _Trail
     )
     yield from lines
+    yield from _command_lines(campaigns.workspace)
     for campaign_dir in campaigns.iter_campaign_dirs():
         for cycle_dir in campaigns.campaign_cycle_dirs(campaign_dir.name):
             yield from _cycle_lines(cycle_dir)
@@ -146,8 +152,12 @@ def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:
     for sandbox in sorted(inner.iterdir()) if inner.is_dir() else ():
         owner = read_sandbox_owner(sandbox) if sandbox.is_dir() else None
         if owner is not None and owner.tenant_id == campaigns.workspace.name:
+            inner_workspaces: set[WorkspaceDir] = set()
             for cycle_dir in sandbox_cycle_dirs(sandbox):
+                inner_workspaces.add(cycle_workspace(cycle_dir))
                 yield from _cycle_lines(cycle_dir, inside=owner.campaign_id)
+            for inner_workspace in sorted(inner_workspaces):
+                yield from _command_lines(inner_workspace, inside=owner.campaign_id)
 
 
 def bank_before_removal(
@@ -163,21 +173,39 @@ def bank_before_removal(
 
 
 def bank_trail(*, workspace: WorkspaceDir, cycle_dirs: list[Path], subject: BankedSubject) -> None:
-    """A draft's whole bank: no campaign ceiling counted its calls, and the account's charges hold them."""
-    commands = [
-        BankedCommand(at=line.at, kind=line.what, subject=line.subject, user_id=line.actor)
-        for cycle_dir in cycle_dirs
-        # A cycle outside the workspace is an inner sandbox's, and the campaign names its owner.
-        for line in _cycle_lines(
-            cycle_dir, inside="" if cycle_dir.is_relative_to(workspace) else subject.campaign_id
-        )
+    """A draft's whole bank: no campaign ceiling counted its calls, and the account's charges hold
+    them. What was asked of the workspace's own cycles stays on its log, which no delete reaches;
+    an inner sandbox's log goes with its sandbox, so its commands bank here."""
+    # A cycle outside the workspace is an inner sandbox's, and the campaign names its owner.
+    inner = [cycle_dir for cycle_dir in cycle_dirs if not cycle_dir.is_relative_to(workspace)]
+    lines = [
+        *(
+            line
+            for cycle_dir in cycle_dirs
+            if cycle_dir not in inner
+            for line in _cycle_lines(cycle_dir)
+        ),
+        *(
+            line
+            for cycle_dir in inner
+            for line in _cycle_lines(cycle_dir, inside=subject.campaign_id)
+        ),
+        *(
+            line
+            for inner_workspace in sorted({cycle_workspace(cycle_dir) for cycle_dir in inner})
+            for line in _command_lines(inner_workspace, inside=subject.campaign_id)
+        ),
     ]
-    if not commands:
+    if not lines:
         return
     log = CycleEventLog.open_workspace(workspace)
     _, banked = LedgerIndex.of(log.path, _TRAIL_FOLDS).view(_Trail)
     if subject not in banked:
-        log.append(TrailTombstoneRecord(**subject._asdict(), commands=tuple(commands)))
+        banking = (
+            BankedCommand(at=line.at, kind=line.what, subject=line.subject, user_id=line.actor)
+            for line in lines
+        )
+        log.append(TrailTombstoneRecord(**subject._asdict(), commands=tuple(banking)))
 
 
 def in_time_order(lines: Iterable[TrailLine]) -> list[TrailLine]:

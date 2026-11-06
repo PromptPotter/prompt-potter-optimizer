@@ -74,9 +74,9 @@ from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import (
+    Applier,
     CommandCall,
     CommandDispatcher,
-    CommandOutcome,
 )
 from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
@@ -89,8 +89,6 @@ from promptpotter.application.host_surface import (
     HostSession,
     HostTask,
     TaskStatusOf,
-    _Tracked,
-    host_tool,
 )
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import LaunchClock, Session
@@ -289,8 +287,7 @@ from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
-    CommandAckRecord,
-    CommandRecord,
+    CommandSubject,
     ComparisonExit,
     ForkSpec,
     ForkTrigger,
@@ -344,6 +341,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -1958,9 +1956,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
         def paused_by() -> list[str]:
             return [
-                record.payload["reason"]
-                for _, record in CycleEventLog.open(CycleDir(cycle_dir)).iter()
-                if isinstance(record, CommandRecord) and record.kind == CommandKind.PAUSE_CYCLE
+                state.filed.payload["reason"]
+                for state in CommandLog(stores.base_dir).book().commands.values()
+                if state.filed.kind == CommandKind.PAUSE_CYCLE
             ]
 
         async def _held_pass(stop: Callable[[], Awaitable[object]]) -> None:
@@ -1974,20 +1972,26 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 raise AssertionError("a stop left the pass running")
 
         async def _host_cancel() -> HostTask:
+            """A verify the host task "held" runs, sent by an id prefix, as a terminal names its
+            stop: its cancel still addresses the pass's cycle, by the task's command id."""
             hold = PassHold()
-
-            async def _pass() -> tuple[CommandOutcome[Any, Any], None]:
-                with hold.bound():
-                    await _held_pass(lambda: host.answer(CancelTask("held")))
-                raise AssertionError("a host cancel left the pass running")
-
-            running = asyncio.create_task(_pass())
-            # By an id prefix, as a terminal names its stop: it still addresses the pass's cycle.
-            by_prefix = pause.model_copy(update={"campaign_id": _PEER_HOP.campaign_id[:3]})
-            host._tasks["held"] = _Tracked(
-                host_tool("verify-candidate"), CommandCall(by_prefix), hold, running
+            held = VerifyCandidatePayload(
+                campaign_id=_PEER_HOP.campaign_id[:3],
+                cycle_id=_PEER_HOP.cycle_id,
+                candidate_id="c1",
             )
-            await asyncio.wait([running])
+
+            async def _holding(_: Any) -> Applier[object]:
+                async def _run() -> None:
+                    await _held_pass(lambda: host.answer(CancelTask("held")))
+                    raise AssertionError("a host cancel left the pass running")
+
+                return Applier(_run, replay=None)
+
+            with monkeypatch.context() as patched:
+                patched.setattr(measuring, "verify_candidate", _holding)
+                with hold.bound("held"), pytest.raises(PassStoppedError):
+                    await CommandDispatcher(stores).dispatch(CommandCall(held, command_id="held"))
             return await host.answer(TaskStatusOf("held"))
 
         before = len(paused_by())
@@ -2041,20 +2045,23 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             IDEMPOTENCY_KEY: "verify-by-prefix",
         }
 
+        async def _verify_refused(_: Any) -> Applier[object]:
+            return Applier.refusing("reached")
+
         async def _tracked_by_prefix() -> object:
             opened = await host.answer(CallTool("verify-candidate", sent_by_prefix))
             assert opened.task is not None
-            tracked = host._tasks[opened.task.task_id]
-            await asyncio.wait([tracked.dispatching])
-            return tracked.call.payload
+            filed = CommandLog(stores.base_dir).state(opened.task.task_id)
+            assert filed is not None
+            return filed.filed.payload["campaign_id"], filed.filed.subject
 
         with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _verify_reached)
-            tracked_payload = asyncio.run(_tracked_by_prefix())
-        assert (
-            isinstance(tracked_payload, VerifyCandidatePayload)
-            and tracked_payload.campaign_id == _PEER_HOP.campaign_id
-        ), "a host task tracked the prefix it was sent by, which a later mint can make ambiguous"
+            patched.setattr(measuring, "verify_candidate", _verify_refused)
+            tracked = asyncio.run(_tracked_by_prefix())
+        assert tracked == (_PEER_HOP.campaign_id, CommandSubject.cycle(_PEER_HOP)), (
+            "a host task's command was filed at the prefix it was sent by, which a later mint can "
+            "make ambiguous"
+        )
         by_full_id = GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id)
         assert measuring.pass_pause(stores, bench_by_prefix, reason="stop") == measuring.pass_pause(
             stores, by_full_id, reason="stop"
@@ -3376,10 +3383,11 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         return outcome.accepted.command_id
 
     def acks(command_id: str) -> list[str]:
+        subject = CommandSubject.cycle(command_hop)
         return [
-            record.status
-            for _, record in commands.iter()
-            if isinstance(record, CommandAckRecord) and record.command_id == command_id
+            state.status
+            for moved, state in CommandLog(commanded.base_dir).of_subject(subject)
+            if moved == command_id and state.status != "filed"
         ]
 
     def intervened() -> bool:

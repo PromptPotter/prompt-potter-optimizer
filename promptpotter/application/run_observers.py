@@ -58,7 +58,6 @@ logger = logging.getLogger(__name__)
 UNREPORTED_KINDS: frozenset[str] = frozenset(
     {
         "decision",  # replayed on resume (`resume_and_fork/replayers.py`)
-        "command",  # the dispatcher's idempotency and the command state (`ledger_scan.py`)
         "cycle_seed",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "account_event",  # the account trail's (`store/account_trail.py`)
         "trail_tombstone",  # the account trail's (`store/account_trail.py`)

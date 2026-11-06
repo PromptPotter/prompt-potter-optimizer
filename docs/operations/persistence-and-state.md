@@ -48,7 +48,7 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 | `compact-archive <inventory \| compact \| restore \| purge-cold> [--apply]` | the only verb that can destroy a measurement: `compact` moves `domain/scoring.py::UNREAD_PIPELINE_KEYS` off `panel` answers into `measurements/cold/`, `restore` puts them back, `purge-cold` is irreversible; `origin`/`parent` answers are never eligible |
 | `reset`, `land-data`, `close-admission` | the data-root verbs — [`../decisions.md`](../decisions.md) § 0011 |
 | `reindex`, `pin-roster`, `offer-extras`, `health` | rebuild `measurements/index.jsonl`; pin a Harbor roster; list the extras the offered datasets need; check backends and sign-in providers |
-| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `step-cycle`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
+| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `step-cycle`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each filed on the account's command log (`.workspace/commands.jsonl`) |
 
 Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`). Nothing the loop decides reads a diagnostic. A paid diagnostic or `bench` holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued (`application/jobs/launcher/admission.py::paid_pass`).
 
@@ -112,7 +112,7 @@ Each file's contract is its model; this table says only what the type cannot.
 
 **Ledger tail → `cycles` → process table by command line → only then mtimes.**
 
-1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology, and each `command`'s `command_ack`: `accepted` (armed), `applied` (taken), `rejected` (no loop will).
+1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology. What was asked of it is the account's command log (`.workspace/commands.jsonl`): each command `filed`, then `accepted` (armed), `applied` (taken), `refused`, `voided` or `cancelled`, read by id at `GET /commands/{command_id}/status`.
 2. **`python -m promptpotter cycles`** — derived `run_phase`, the producer reading, the pause cause.
 3. **Process table, by command line** — which process holds the cycle.
 4. **Mtimes** — only to date what the above explained.
@@ -123,9 +123,9 @@ A command is taken at the next **per-sample** checkpoint, so a pause asked mid-c
 
 `domain/phases.py::RunPhase` is the vocabulary. `run_phase` is derived (`infrastructure/runtime_flags.py::derive_run_state`) from the ledger and the producer lock, never written; `dashboard.json::declared_phase` is the runner's own record and says `running` forever after a `kill -9`. `queued` and `starting` read `producer: claimed`, attached to every guard (`launcher/admission.py::claim_cycle`); which verb a cycle admits is served (`RunAdmission`). **Attached is the producer lock (`infrastructure/producer_lock.py`) and nothing else**; `live` / `idle` / `wedged` is graded off the LEDGER's mtime, never `dashboard.json`'s (debounced). `application/jobs/reaper.py` stamps `producer_vanished` only on a `running` cycle whose lock nobody holds.
 
-### Commands ride the ledger
+### Commands ride the account's log
 
-`.runtime/` holds no control file: a command is acked `accepted` into the cycle's inbox (`ledger_scan.py::Controls`) and `applied` at the checkpoint that takes it; a new `running` declaration or any stop clears what stood. The standing budget is the last `standing_budget` record on the cycle's ledger (`runtime_flags.py::standing_budget`); its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
+`.runtime/` holds no control file: a loop command is `accepted` on the account's command log into its cycle's inbox (`command_log.py::standing_on`) and `applied` at the checkpoint that takes it; a new `running` declaration or any stop moves the cycle's run mark (`ledger_scan.py::scan_run_mark`), and what stood under the old one no longer stands. The standing budget is the last `standing_budget` record on the cycle's ledger (`runtime_flags.py::standing_budget`); its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger (`ledger_scan.py::scan_campaign_ceiling`).
 
 ### Where the error text is
 

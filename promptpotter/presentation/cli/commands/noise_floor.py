@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.cycle_addressing import resolve_campaign_id, resolve_cycle_id
+from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
+from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import PauseCyclePayload
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
@@ -15,15 +16,18 @@ from promptpotter.presentation.cli.commands.workspace import open_stores
 async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    campaign_id = resolve_campaign_id(stores, args.campaign)
-    cycle_id = resolve_cycle_id(stores, campaign_id, args.cycle)
+    hop = cycle_target(stores, args.campaign, args.cycle or "")
+    campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
     pause = PauseCyclePayload(campaign_id=campaign_id, cycle_id=cycle_id, reason="Ctrl+C")
 
-    with ctrl_c_stops_pass(stores, pause):
-        outcome = await measure_noise_floor(
-            stores=stores,
-            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
-            k=args.k,
+    try:
+        with ctrl_c_stops_pass(stores, pause):
+            outcome = await measure_noise_floor(stores=stores, hop=hop, k=args.k)
+    except PassStoppedError as stopped:
+        # A band over fewer than k rescores is no band: nothing is banked, and a rerun replays them.
+        said = f"noise-floor {campaign_id}/{cycle_id}: no band banked. {stopped}"
+        return CommandResult(
+            data={"stopped": str(stopped)}, human=said, exit_code=StopOutcome.PAUSED.exit_code
         )
 
     record = outcome.record

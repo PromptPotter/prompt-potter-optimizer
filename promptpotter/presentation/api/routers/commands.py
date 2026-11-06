@@ -143,7 +143,7 @@ async def ingest_upload(
 
 class _Dispatching:
     """The kind's payload is the body; the answer is the model the kind applies, where it applies
-    one, else the `CommandRecord` it appended."""
+    one, else the `CommandAcceptedBody` naming the command it filed."""
 
     def __init__(self, model: type[CommandPayload], answers: object | None) -> None:
         keyword = inspect.Parameter.KEYWORD_ONLY

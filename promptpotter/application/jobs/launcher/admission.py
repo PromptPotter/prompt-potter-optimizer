@@ -588,18 +588,31 @@ class PassHold:
             yield
 
     @contextmanager
-    def bound(self) -> Iterator[None]:
+    def bound(self, command_id: str | None = None) -> Iterator[None]:
         """A paid pass run inside this context holds its cycle through this hold, which the caller
-        that may stop it keeps."""
+        that may stop it keeps; under *command_id*, the command that runs it, any door of this
+        process reaches it by that id (`PassHold.of`) while it is bound."""
         token = _BOUND_HOLD.set(self)
+        if command_id is not None:
+            _HOLDS[command_id] = self
         try:
             yield
         finally:
             _BOUND_HOLD.reset(token)
+            if command_id is not None:
+                _HOLDS.pop(command_id, None)
+
+    @staticmethod
+    def of(command_id: str) -> PassHold | None:
+        """The hold of the pass *command_id* runs in this process, ``None`` where none is bound:
+        an act in flight is held by the process running it, and no other."""
+        return _HOLDS.get(command_id)
 
 
 # The hold of the paid pass a caller's task runs, bound by the caller that may stop it.
 _BOUND_HOLD: ContextVar[PassHold | None] = ContextVar("pass_hold", default=None)
+# Each bound hold by the command that runs it: an asyncio lock lives in one process alone.
+_HOLDS: dict[str, PassHold] = {}
 
 
 @asynccontextmanager

@@ -5,12 +5,15 @@ import types
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, Union, cast, get_args, get_origin
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel
 
 from promptpotter.application.cycle_addressing import resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
+from promptpotter.application.jobs.interlock import producer_alive, this_producer
+from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_kinds import (
     CampaignPayload,
@@ -18,28 +21,26 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
     CyclePayload,
-    DeleteCyclePayload,
     DraftPayload,
     LinePayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, decode_cycle_path
 from promptpotter.domain.run_records import (
-    CommandAckRecord,
-    CommandAckStatus,
+    CommandAccepted,
+    CommandApplied,
+    CommandCancelled,
     CommandEffect,
-    CommandRecord,
+    CommandFiled,
+    CommandRefused,
+    CommandSubject,
+    CommandVoided,
     NoEffect,
 )
-from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import (
-    emit_command,
-    emit_command_ack,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
+from promptpotter.infrastructure.runtime_flags import derive_run_state, run_mark
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
     Stores,
@@ -49,7 +50,6 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
-    IdempotencyKeyReusedError,
     NotFoundError,
     PayloadInvalidError,
 )
@@ -68,52 +68,26 @@ class RejectedError(Exception):
         self.reason = reason
 
 
-class _IdempotentMatch(FrozenModel):
-    command_id: str
-    offset: int
-    ack: CommandAckStatus
-    effect: CommandEffect
-
-
-def _find_idempotent_command(
-    ledger: CycleEventLog, kind: CommandKind, act_digest: str, idempotency_key: str
-) -> _IdempotentMatch | None:
-    """Matched on (kind, act, key), the act its retry names — the whole validated act, by its
-    digest; a key the ledger holds for another act is refused, never replayed. A REJECTED attempt
-    satisfies no key."""
-    keyed: dict[str, int] = {}
-    applied: _IdempotentMatch | None = None
-    # The ledger's OWN offset, never a fork-chain position: the client aligns the SSE tail on it.
-    for offset, record in ledger.iter():
-        if isinstance(record, CommandRecord) and record.idempotency_key == idempotency_key:
-            if record.kind != kind or record.act_digest != act_digest:
-                raise IdempotencyKeyReusedError(
-                    f"Key {idempotency_key!r} already names a {record.kind} command with another "
-                    f"payload on this ledger; send this {kind} under a key of its own.",
-                    details={"command_id": record.command_id},
-                )
-            keyed[record.command_id] = offset
-        elif isinstance(record, CommandAckRecord) and record.status != "rejected":
-            at = keyed.get(record.command_id)
-            if at is not None:
-                applied = _IdempotentMatch(
-                    command_id=record.command_id, offset=at, ack=record.status, effect=record.effect
-                )
-    return applied
-
-
 _HANDLER_PACKAGE = "promptpotter.application.commands"
 # The longest key a door accepts; each declares it on its own wire (a header, a tool's schema).
 MAX_IDEMPOTENCY_KEY_CHARS = 256
+
+# What a command filed by a process gone before its act ended reads as.
+_FILER_GONE = "ended: its filer is gone"
+
+# How a command's act ended where it was applied, read off the applier.
+AckStatus = Literal["accepted", "applied"]
 
 
 @dataclass(frozen=True, slots=True)
 class CommandCall[P: CommandPayload]:
     """A remote door passes the key its caller retries under, and a retry under it answers the
-    first act; an in-process sender sends once, under a fresh one."""
+    first act; an in-process sender sends once, under a fresh one. ``command_id`` is the id the
+    command is filed under: a door that tracks it (a host task) mints it before it dispatches."""
 
     payload: P
     idempotency_key: str = field(default_factory=lambda: uuid.uuid4().hex)
+    command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def __post_init__(self) -> None:
         key = self.idempotency_key.strip()
@@ -140,14 +114,14 @@ async def _no_body(_: CommandEffect) -> None:
 
 @dataclass(frozen=True, slots=True)
 class Applier[R]:
-    """`effect_fn` reads the ack's effect off what `run` applied, and `replay` answers a retry from
-    the first act's; `replay=None` dedupes nothing; `ack="accepted"` leaves `run` the guard alone,
-    the loop acking `applied`."""
+    """`effect_fn` reads the effect off what `run` applied, and `replay` answers a retry from the
+    first act's; `replay=None` answers a retry by refusing it, never acting twice;
+    `ack="accepted"` leaves `run` the guard alone, the loop marking it applied."""
 
     run: Callable[[], Awaitable[R]]
     replay: Callable[[CommandEffect], Awaitable[R]] | None
     effect_fn: Callable[[R], CommandEffect] | None = None
-    ack: CommandAckStatus = "applied"
+    ack: AckStatus = "applied"
     # Set where what `run` answers carries the act on past its ack (a Start's admitted launch holds
     # its slot, and the draft's claim, to its mint): how that answer is given back where the act
     # raises after `run` answered it. A draft command's claim is otherwise the dispatcher's until
@@ -197,7 +171,18 @@ class CommandOutcome[R, P: CommandPayload]:
     payload: P
     accepted: CommandAcceptedBody
     result: R
-    ack: CommandAckStatus
+    ack: AckStatus
+
+
+@dataclass(frozen=True, slots=True)
+class _Filing:
+    """Where a command is filed and its act runs: the log, the address it is filed on, the
+    ledger its act's effects land on, and the cycle a loop command's run mark is read off."""
+
+    log: CommandLog
+    subject: str
+    ledger: CycleEventLog
+    cycle_dir: Path | None = None
 
 
 # A kind's handler: what its row names, typed by the answer its applier carries.
@@ -225,9 +210,15 @@ def handler_of(kind: CommandKind) -> Handler[Any]:
     return cast(Handler[Any], imported(_HANDLER_PACKAGE, kind.handler))
 
 
+def _answers_record(kind: CommandKind) -> bool:
+    """Its handler's `R` is ``object``: every door answers its filing, which the log replays."""
+    (applied,) = get_args(returned(handler_of(kind)))
+    return applied is object
+
+
 def command_answer(kind: CommandKind) -> object | None:
     """The modelled `R` of the kind's handler's `Applier[R]`, what every door answers; `None` where
-    it answers the record instead: an `R` of `object`, or a launch's handle, which a task kind's
+    it answers the filing instead: an `R` of `object`, or a launch's handle, which a task kind's
     doors track as its task. Any other `R` no wire model carries is refused here."""
     (applied,) = get_args(returned(handler_of(kind)))
     if applied is object:
@@ -260,6 +251,11 @@ class CommandDispatcher:
             self._attached = JobRegistry.attach(self.stores.jobs_dir)
         return self._attached
 
+    @property
+    def log(self) -> CommandLog:
+        """The account's command log: every command this dispatcher files lands here."""
+        return CommandLog(self.stores.base_dir)
+
     def run_state(self, hop: CycleHop) -> RunState:
         return derive_run_state(self.stores.campaigns.cycle_dir(hop))
 
@@ -281,8 +277,8 @@ class CommandDispatcher:
         return cast(CommandOutcome[R, P], await self.dispatch(call))
 
     async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[object, Any]:
-        """The payload's address base IS its target ledger, acted on as `addressed` resolves it;
-        `answer` types what it answers."""
+        """Filed on the account's log at the address `addressed` resolves; `answer` types what it
+        answers."""
         acted = await asyncio.to_thread(addressed, self.stores, call.payload)
         if acted is not call.payload:
             call = replace(call, payload=acted)
@@ -296,25 +292,36 @@ class CommandDispatcher:
             case DraftPayload():
                 return await self._on_draft(call)
             case _:
-                ledger = CycleEventLog.open_workspace(self.stores.base_dir)
+                filing = _Filing(
+                    self.log,
+                    CommandSubject.WORKSPACE,
+                    CycleEventLog.open_workspace(self.stores.base_dir),
+                )
                 applier = await self._applier(Dispatched(self, call.payload))
-                return await self._record_and_apply(ledger, call, applier)
+                return await self._record_and_apply(filing, call, applier)
 
     async def _on_campaign(
         self, call: CommandCall[CampaignPayload]
     ) -> CommandOutcome[object, CampaignPayload]:
         owned_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
-        ledger = CycleEventLog.open_workspace(self.stores.base_dir)
+        filing = _Filing(
+            self.log,
+            CommandSubject.campaign(call.payload.campaign_id),
+            CycleEventLog.open_workspace(self.stores.base_dir),
+        )
         applier = await self._applier(Dispatched(self, call.payload))
-        return await self._record_and_apply(ledger, call, applier)
+        return await self._record_and_apply(filing, call, applier)
 
     async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object, LinePayload]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
-        ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(hop)))
+        cycle_dir = self.stores.campaigns.cycle_dir(hop)
+        filing = _Filing(
+            self.log, CommandSubject.cycle(hop), CycleEventLog.open(CycleDir(cycle_dir)), cycle_dir
+        )
         applier = await self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
-        return await self._record_and_apply(ledger, call, applier)
+        return await self._record_and_apply(filing, call, applier)
 
     async def _on_cycle(
         self, call: CommandCall[CyclePayload]
@@ -331,18 +338,21 @@ class CommandDispatcher:
             )
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
-            )._on_cycle(CommandCall(inner, call.idempotency_key))
+            )._on_cycle(replace(call, payload=inner))
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
         campaign = owned_campaign(self.stores, campaign_id)
         if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
-        # Its apply removes the dir AND its ledger, so the record and ack go on the campaign root's.
-        recorded_on = campaign.root_hop if isinstance(payload, DeleteCyclePayload) else hop
-        ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(recorded_on)))
+        cycle_dir = self.stores.campaigns.cycle_dir(hop)
+        # Its effects land on the cycle's own ledger; a delete's apply removes it, and the log,
+        # which no delete reaches, keeps what was asked.
+        filing = _Filing(
+            self.log, CommandSubject.cycle(hop), CycleEventLog.open(CycleDir(cycle_dir)), cycle_dir
+        )
         applier = await self._applier(DispatchedToCycle(self, payload, campaign, hop))
-        return await self._record_and_apply(ledger, call, applier)
+        return await self._record_and_apply(filing, call, applier)
 
     async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any, DraftPayload]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
@@ -352,9 +362,12 @@ class CommandDispatcher:
         try:
             applier = await self._applier(DispatchedToDraft(self, call.payload, claim))
             draft_dir = self.stores.drafts.draft_dir(call.payload.draft_id)
-            outcome = await self._record_and_apply(
-                CycleEventLog.open(CycleDir(draft_dir)), call, applier
+            filing = _Filing(
+                self.log,
+                CommandSubject.draft(call.payload.draft_id),
+                CycleEventLog.open(CycleDir(draft_dir)),
             )
+            outcome = await self._record_and_apply(filing, call, applier)
         except BaseException:
             claim.release()
             raise
@@ -362,58 +375,94 @@ class CommandDispatcher:
             claim.release()
         return outcome
 
+    async def _replayed[P: CommandPayload, R](
+        self, filing: _Filing, call: CommandCall[P], applier: Applier[R], act_digest: str
+    ) -> CommandOutcome[R, P] | None:
+        """A retry under its key answers the first act, off the log, and never acts twice."""
+        kind = call.kind
+        existing = filing.log.keyed(kind, act_digest, call.idempotency_key)
+        if existing is None:
+            return None
+        command_id = existing.filed.command_id
+        if existing.status == "filed" and not producer_alive(
+            self.stores.jobs_dir, existing.filed.filer
+        ):
+            # Its filer died before the act ended: nothing it asked is known done, so a retry acts.
+            filing.log.append(CommandVoided(command_id=command_id, detail=_FILER_GONE))
+            return None
+        if existing.status == "filed":
+            raise ConflictError(
+                f"command {kind} under this key is still being applied; read its status.",
+                code="command_in_flight",
+                details={"command_id": command_id},
+            )
+        accepted = CommandAcceptedBody(command_id=command_id, subject=existing.filed.subject)
+        ack: AckStatus = "accepted" if existing.status == "accepted" else "applied"
+        if applier.replay is not None:
+            result = await applier.replay(existing.effect)
+        elif _answers_record(kind):
+            result = cast(R, None)
+        else:
+            raise ConflictError(
+                f"command {kind} under this key was already {existing.status}; its answer is "
+                "not kept, so send a new act under a key of its own.",
+                code="command_already_applied",
+                details={"command_id": command_id, "status": existing.status},
+            )
+        return CommandOutcome(payload=call.payload, accepted=accepted, result=result, ack=ack)
+
     async def _record_and_apply[P: CommandPayload, R](
-        self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]
+        self, filing: _Filing, call: CommandCall[P], applier: Applier[R]
     ) -> CommandOutcome[R, P]:
-        kind, idempotency_key = call.kind, call.idempotency_key
+        kind, log = call.kind, filing.log
         # Off the loop: an upload's act hashes its bytes.
         payload, act_digest = await asyncio.to_thread(call.payload.recorded)
-        if applier.replay is not None:
-            # The digest holds no secret's text, so a retry would match two secrets as one act.
-            if any(isinstance(value, SecretStr) for value in dict(call.payload).values()):
-                raise TypeError(f"{kind} replays, yet carries a secret its digest cannot name")
-            existing = _find_idempotent_command(ledger, kind, act_digest, idempotency_key)
-            if existing is not None:
-                return CommandOutcome(
-                    payload=call.payload,
-                    accepted=CommandAcceptedBody(command_id=existing.command_id),
-                    result=await applier.replay(existing.effect),
-                    ack=existing.ack,
-                )
+        if (replayed := await self._replayed(filing, call, applier, act_digest)) is not None:
+            return replayed
 
-        command_id = str(uuid.uuid4())
-        token = set_cycle_ledger(ledger)
-        applied: list[R] = []
-        try:
-            emit_command(
+        command_id = call.command_id
+        await asyncio.to_thread(
+            log.append,
+            CommandFiled(
                 command_id=command_id,
                 kind=kind,
                 payload=payload,
-                idempotency_key=idempotency_key,
+                idempotency_key=call.idempotency_key,
                 act_digest=act_digest,
                 issued_by=acting_principal(self.stores.identity),
-            )
-            ack_status: CommandAckStatus = applier.ack
-            ack_detail = ""
+                subject=filing.subject,
+                filer=this_producer(self.stores.jobs_dir),
+            ),
+        )
+        token = set_cycle_ledger(filing.ledger)
+        applied: list[R] = []
+        try:
+            refusal = ""
             try:
                 applied.append(await applier.run())
             except RejectedError as exc:
-                ack_status = "rejected"
-                ack_detail = exc.reason
+                refusal = exc.reason
+            except PassStoppedError as exc:
+                self._ended(log, CommandCancelled(command_id=command_id, detail=str(exc)))
+                raise
             except Exception as exc:
-                emit_command_ack(
-                    command_id=command_id, status="rejected", detail=str(exc), effect=NoEffect()
-                )
+                said = str(exc) or type(exc).__name__
+                self._ended(log, CommandRefused(command_id=command_id, detail=said))
+                raise
+            except BaseException as exc:
+                said = str(exc) or type(exc).__name__
+                self._ended(log, CommandCancelled(command_id=command_id, detail=said))
                 raise
             try:
-                effect = (
-                    applier.effect_fn(applied[0])
-                    if (applier.effect_fn is not None and ack_status != "rejected")
-                    else NoEffect()
-                )
-                emit_command_ack(
-                    command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
-                )
+                if refusal:
+                    log.append(CommandRefused(command_id=command_id, detail=refusal))
+                else:
+                    effect = (
+                        applier.effect_fn(applied[0])
+                        if applier.effect_fn is not None
+                        else NoEffect()
+                    )
+                    log.append(self._acked(filing, applier.ack, command_id, effect))
             except BaseException as exc:
                 # Admitted and never handed on: what the answer holds is given back in this scope.
                 if applied and applier.rides is not None:
@@ -422,33 +471,54 @@ class CommandDispatcher:
         finally:
             reset_cycle_ledger(token)
 
-        if not applied:
+        if refusal:
             raise ConflictError(
-                f"command {kind} rejected: {ack_detail}",
-                details={"command_id": command_id, "reason": ack_detail},
+                f"command {kind} rejected: {refusal}",
+                details={"command_id": command_id, "reason": refusal},
             )
-
         return CommandOutcome(
             payload=call.payload,
-            accepted=CommandAcceptedBody(command_id=command_id),
+            accepted=CommandAcceptedBody(command_id=command_id, subject=filing.subject),
             result=applied[0],
-            ack=ack_status,
+            ack=applier.ack,
         )
 
+    @staticmethod
+    def _acked(
+        filing: _Filing, ack: AckStatus, command_id: str, effect: CommandEffect
+    ) -> CommandAccepted | CommandApplied:
+        if ack == "applied":
+            return CommandApplied(command_id=command_id, effect=effect)
+        mark = None if filing.cycle_dir is None else run_mark(filing.cycle_dir)
+        return CommandAccepted(command_id=command_id, run_mark=mark, effect=effect)
+
+    @staticmethod
+    def _ended(log: CommandLog, event: CommandRefused | CommandCancelled) -> None:
+        """How an act that raised ended, unless a cancel already reached it: that one stands."""
+        held = log.state(event.command_id)
+        if held is not None and held.status == "filed":
+            log.append(event)
+
     def pause_superseded(self, parent: CycleHop, by: CycleHop) -> None:
-        """Rides the ledger bound by the fork command being recorded, which is the parent's."""
+        """Filed on the account's log for the parent the fork supersedes, and accepted there."""
         command_id = str(uuid.uuid4())
         payload, act_digest = PauseCyclePayload(
             campaign_id=parent.campaign_id,
             cycle_id=parent.cycle_id,
             reason=f"superseded by fork {by.cycle_id}",
         ).recorded()
-        emit_command(
-            command_id=command_id,
-            kind=CommandKind.PAUSE_CYCLE,
-            payload=payload,
-            idempotency_key=command_id,
-            act_digest=act_digest,
-            issued_by=acting_principal(self.stores.identity),
+        log = self.log
+        log.append(
+            CommandFiled(
+                command_id=command_id,
+                kind=CommandKind.PAUSE_CYCLE,
+                payload=payload,
+                idempotency_key=command_id,
+                act_digest=act_digest,
+                issued_by=acting_principal(self.stores.identity),
+                subject=CommandSubject.cycle(parent),
+                filer=this_producer(self.stores.jobs_dir),
+            )
         )
-        emit_command_ack(command_id=command_id, status="accepted", effect=NoEffect())
+        mark = run_mark(self.stores.campaigns.cycle_dir(parent))
+        log.append(CommandAccepted(command_id=command_id, run_mark=mark))

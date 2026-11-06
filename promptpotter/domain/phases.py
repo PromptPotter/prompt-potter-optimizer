@@ -258,13 +258,15 @@ INNER_SKIP_REFUSAL = (
 
 class RunState(NamedTuple):
     """``inner``: the cycle is an L4 inner run, which answers every run verb for itself.
+    ``scoring``: a pass holds the cycle, whatever phase a pause asked of it reads as.
 
-    ``gate`` and ``drafts`` are the standing hold's own, set only while the phase is ``gate``."""
+        ``gate`` and ``drafts`` are the standing hold's own, set only while the phase is ``gate``."""
 
     run_phase: RunPhase
     producer: ProducerReading
     pause: PauseReading | None = None
     inner: bool = False
+    scoring: bool = False
     gate: GateKind | None = None
     drafts: int = 0
 

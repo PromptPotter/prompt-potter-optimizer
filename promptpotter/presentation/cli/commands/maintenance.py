@@ -71,7 +71,7 @@ async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
     mode = str(args.mode)
     dataset: str | None = args.dataset
     apply = bool(args.apply)
-    # A read, so off the command highway: a census filed as a `CommandRecord` bills a no-op.
+    # A read, so off the command highway: a census filed as a `CommandFiled` bills a no-op.
     if mode == "inventory":
         inventory = inventory_measurement_archive(stores, dataset=dataset)
         return CommandResult(

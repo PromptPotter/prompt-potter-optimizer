@@ -53,7 +53,7 @@ A long-running call returns a task handle per MCP's Tasks extension
    row's `ReadParams` for a read), each host request admitted once at its entry, and a command under
    the idempotency key its caller sends; a kind its row answers as a task (`CommandKind.answering`)
    answers an `application/host_surface.py::HostTask`, its status what its run returned
-   (`application/host_surface.py::job_status`), a reaped job's as its release stamped it
+   (`application/commands/command_reading.py::job_status`), a reaped job's as its release stamped it
    (`application/jobs/registry.py::JobRegistry.launched_by`), served by `tasks/get`, `tasks/result` and
    `tasks/cancel`; the hierarchy as resources; the "reach the origin gate" prompt. `presentation/mcp/server.py::host_server` speaks it over stdio as `python -m promptpotter mcp`
    (the `mcp` extra), acting as the terminal's own principal.
