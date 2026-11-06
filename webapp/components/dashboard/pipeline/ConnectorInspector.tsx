@@ -12,16 +12,16 @@ export function ConnectorInspector() {
   const backend = useBackend();
   const served = shownData(read);
   const connector = served?.connector ?? null;
-  const backendType = served?.backend_type ?? null;
   const selfOpt = served?.self_optimization ?? false;
   // Before the pipeline lands, the other backends are listed only once its read has failed.
   const others = served || read.status === "failed" ? backend.others : [];
   const { health } = backend;
-  const baseUrl = backend.active?.base_url ?? null;
+  const baseUrl = backend.active?.base_url || null;
+  const authHeader = backend.active?.auth_header ?? null;
   const isTls = baseUrl ? baseUrl.startsWith("https://") : null;
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
   // No resolved connector is a terminal "idle", never a perpetual "probing…" (frontend-surface-contract.md § I1).
-  const noBackend = connector == null && !selfOpt;
+  const noBackend = connector == null;
   const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
   // The head names the state once; the foot says only what the label cannot.
   const footText = selfOpt
@@ -41,13 +41,12 @@ export function ConnectorInspector() {
       <button
         type="button"
         className="connector-dot"
-        aria-label={`Connector ${connector ?? (selfOpt ? "PromptPotter" : PLACEHOLDER)} — ${label}`}
+        aria-label={`Connector ${connector ?? PLACEHOLDER} — ${label}`}
       />
       <div className="connector-pop" role="group" aria-label="Connector state">
         <div className="connector-pop-head">
           <span className="dot" />
-          <span className="name">{connector ?? (selfOpt ? "PromptPotter" : PLACEHOLDER)}</span>
-          {backendType && <span className="kind">{backendType}</span>}
+          <span className="name">{connector ?? PLACEHOLDER}</span>
           <span className="state">{label}</span>
         </div>
         {baseUrl && (
@@ -68,12 +67,11 @@ export function ConnectorInspector() {
               {isTls ? "tls" : "plain"}
             </span>
           )}
-          <span
-            className="sec-chip"
-            title="Authorization: Bearer <TERMNORM_TOKEN> on every request when the env var is set"
-          >
-            auth: bearer
-          </span>
+          {baseUrl && (
+            <span className={cx("sec-chip", !authHeader && "warn")}>
+              {authHeader ? `auth: ${authHeader}` : "no auth"}
+            </span>
+          )}
           <a
             className="sec-doc"
             href={SECURITY_DOC_URL}

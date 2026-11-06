@@ -481,5 +481,4 @@ CONNECTOR = Connector(
     cells_hold_the_machine=True,
     required_observation_keys=(accuracy_key(0),),
     answer_key=ANSWER_KEY,
-    default_pipeline=(WRITER_NODE,),
 )

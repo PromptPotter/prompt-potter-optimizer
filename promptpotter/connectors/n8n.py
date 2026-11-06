@@ -77,7 +77,6 @@ def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None
     return {
         "name": "n8n eval harness",
         "version": "v1",
-        "backend_type": "n8n",
         "nodes": {
             HARNESS_NODE: {
                 "type": "llm",
@@ -106,13 +105,8 @@ async def _preflight(backend_url: str) -> str | None:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(5.0, connect=3.0), verify=tls_context()
     ) as http:
-        try:
-            # Reachability, not health: n8n answers a GET on a POST webhook with a 404.
-            await http.get(backend_url)
-        except httpx.ConnectError as exc:
-            return f"{str(exc).strip() or 'connection refused'} at {backend_url}"
-        except httpx.ConnectTimeout:
-            return "connect timeout"
+        # Reachability, not health: n8n answers a GET on a POST webhook with a 404.
+        await http.get(backend_url)
     return None
 
 

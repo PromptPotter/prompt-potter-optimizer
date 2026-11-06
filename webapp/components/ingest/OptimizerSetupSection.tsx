@@ -1,5 +1,6 @@
 import { optimizerRosterRead } from "@/lib/api";
 import type { DraftPatch } from "@/lib/api/types";
+import { BRAND } from "@/lib/brand";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { useWorkspace } from "@/lib/workspace";
@@ -61,7 +62,7 @@ export function OptimizerSetupSection({ onApply }: { onApply: (patch: DraftPatch
           layer={{
             view: setup.view,
             read: { status: "ready", data: setup },
-            connector: "PromptPotter",
+            connector: BRAND.provider.name,
             reach: setup.reach,
             scope: "optimizer",
             nestsNode: setup.measurement_node,

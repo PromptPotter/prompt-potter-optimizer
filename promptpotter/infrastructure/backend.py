@@ -16,6 +16,7 @@ from promptpotter.config.paths import MACHINE_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
+from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -238,12 +239,12 @@ class BackendClient:
     @property
     def http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
-            token = self._connector.auth_token() if self._connector.auth_token else None
-            scheme = self._connector.auth_scheme()
             self._http = httpx.AsyncClient(
                 timeout=_HTTP_TIMEOUT_S,
-                headers={scheme.header: f"{scheme.prefix}{token}"} if token else None,
-                verify=tls_context(),
+                headers=self._connector.credential_header() or None,
+                transport=httpx.AsyncHTTPTransport(
+                    verify=tls_context(), socket_options=KEEPALIVE_OPTIONS
+                ),
             )
         return self._http
 
@@ -252,28 +253,6 @@ class BackendClient:
             await self._http.aclose()
             self._http = None
 
-    async def check_status(self) -> dict[str, Any]:
-        try:
-            resp = await self.http.get(f"{self.base_url}/status")
-            resp.raise_for_status()
-            status: dict[str, Any] = resp.json()
-            return status
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                logger.info("Backend /status endpoint not found (404)")
-                return {
-                    "status": "not_implemented",
-                    "error": "GET /status not available on this backend",
-                }
-            logger.warning("Backend status check failed: %s", exc)
-            return {"status": "error", "error": str(exc)}
-        except httpx.ConnectError as exc:
-            logger.warning("Backend unreachable: %s", exc)
-            return {"status": "unreachable", "error": str(exc)}
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Backend status check failed: %s", exc)
-            return {"status": "error", "error": str(exc)}
-
     async def _reachable_within(self, down_since: float) -> bool:
         abort = get_abort_check()
         while loop_now() - down_since < _OUTAGE_WAIT_S:
@@ -281,7 +260,7 @@ class BackendClient:
                 raise asyncio.CancelledError("backend outage wait aborted")
             started = loop_now()
             await asyncio.sleep(_OUTAGE_POLL_S)
-            answered = (await self.check_status()).get("status") != "unreachable"
+            answered = await self._connector.unreachable() is None
             report_throttle_stall(loop_now() - started)
             if answered:
                 return True

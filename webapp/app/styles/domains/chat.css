@@ -83,7 +83,6 @@
 .connector.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
 .connector.offline .connector-pop-head .dot{background:var(--color-danger);box-shadow:0 0 4px var(--color-danger)}
 .connector-pop-head .name{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.connector-pop-head .kind{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-secondary);flex-shrink:0}
 .connector-pop-head .state{font-size:var(--text-xs);color:var(--color-text-secondary);flex-shrink:0}
 .connector-pop-url{font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .connector-pop-sec{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:8px}

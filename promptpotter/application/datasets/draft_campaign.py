@@ -14,7 +14,6 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.domain.checkin_draft import DraftBasis, DraftFile, UploadBasis
-from promptpotter.domain.draft_edit import DEFAULT_BUDGET_ROUNDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
@@ -36,6 +35,9 @@ DEFAULT_SCORING_MATCHER = "label_match"
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
 
+UPLOAD_BUDGET_ROUNDS = 5
+"""An upload's rounds before its check-in names any."""
+
 
 def upload_basis_block(upload: UploadBasis) -> dict[str, Any]:
     """What an upload's draft's campaign half is laid over: its connector's defaults."""
@@ -43,7 +45,7 @@ def upload_basis_block(upload: UploadBasis) -> dict[str, Any]:
     return {
         "scoring": f"{DEFAULT_SCORING_MATCHER}(predicted, ground_truth)",
         "optimization": {
-            "budget": {"rounds": DEFAULT_BUDGET_ROUNDS},
+            "budget": {"rounds": UPLOAD_BUDGET_ROUNDS},
             **dict(connector.default_optimization),
         },
     }
@@ -66,7 +68,6 @@ def upload_pipeline_json(
     pipeline: dict[str, Any] = {
         "name": slug,
         "backend_type": connector.name,
-        "backend_name": connector.name,
         "nodes": merge_node_blocks(dict(connector.default_node_config), declared),
     }
     if connector.default_pipeline:

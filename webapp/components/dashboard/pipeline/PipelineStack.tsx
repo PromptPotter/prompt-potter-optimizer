@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { NestedPipelineRef } from "@/lib/api/types";
+import { BRAND } from "@/lib/brand";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/poll";
@@ -12,7 +13,7 @@ interface Layer extends PipelineLayer {
   // The layer it nests in; a level holds one layer per dataset the level above measures.
   parent: string | null;
   level: number;
-  // Not the connector name — pp-self's target and the optimizer both report "PromptPotter".
+  // Not the connector: pp-self's target runs on the optimizer's own.
   label: string;
 }
 
@@ -53,7 +54,7 @@ export function PipelineStack({ datasetName }: Props) {
       label: served ? `the ${served.optimizer} optimization loop` : "the optimization loop",
       view: served?.optimizer_setup.view ?? null,
       read,
-      connector: "PromptPotter",
+      connector: BRAND.provider.name,
       reach: served?.optimizer_setup.reach ?? null,
       scope: "optimizer",
       nestsNode: served?.optimizer_setup.measurement_node ?? null,

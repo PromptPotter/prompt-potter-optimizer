@@ -586,7 +586,6 @@ def stored_campaign(stores: Stores, campaign: Campaign) -> None:
         campaign.root_hop,
         PipelineRead(
             declaration={
-                "backend_name": "termnorm",
                 "nodes": {"a": node},
                 "pipelines": {"default": ["a"]},
             },

@@ -68,7 +68,7 @@ ExperimentResolver = Callable[["Stores", Mapping[str, Any]], dict[str, Any]]
 # `(http, base_url) -> the backend's self-reported revision`, `None` where it is silent.
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 
-# `backend_url -> why the backend is down`, `None` where it is up.
+# `backend_url -> why the backend is down`, `None` where it is up; read through `Connector.unreachable`.
 PreflightFn = Callable[[str], Awaitable[str | None]]
 
 # Read as the client opens its connection, never at import; `None` sends no auth header.
@@ -230,13 +230,13 @@ class Connector:
     """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
 
     default_pipeline: tuple[str, ...] = ()
-    """Seeds a fresh upload's ``pipelines.default``; empty: the backend's own default."""
+    """Seeds a fresh upload's ``pipelines.default``, so only a ``serves_uploads`` connector reads it."""
 
     default_optimization: tuple[tuple[str, Any], ...] = ()
     """Seeds ``campaign.json::optimization``; ``degradation_threshold`` has no schema default."""
 
     node_roles: Mapping[str, NodeRole] = field(default_factory=dict)
-    """Lets ingest detect a pipeline's required inputs BEFORE the backend is reached."""
+    """The node roles ingest reads a pipeline's required inputs from."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
     """Seeds a fresh ``dataset.yaml::pipeline``; its ``param_allowed_values`` is a DEFAULT, never a cost rail."""
@@ -254,3 +254,24 @@ class Connector:
 
     def base_url(self) -> str:
         return self.endpoint().rstrip("/") if self.endpoint is not None else ""
+
+    def credential_header(self) -> dict[str, str]:
+        """The header the operator's credential rides in on every request; empty where config holds none."""
+        token = self.auth_token() if self.auth_token is not None else None
+        if not token:
+            return {}
+        scheme = self.auth_scheme()
+        return {scheme.header: f"{scheme.prefix}{token}"}
+
+    async def unreachable(self) -> str | None:
+        """Why the backend cannot be reached now; ``None`` where it answers or probes nothing. A
+        failed probe's transport error is the reason, so no ``preflight`` catches its own."""
+        if self.preflight is None:
+            return None
+        import httpx
+
+        base_url = self.base_url()
+        try:
+            return await self.preflight(base_url)
+        except httpx.TransportError as exc:
+            return f"{type(exc).__name__} at {base_url}: {str(exc).strip() or 'no answer'}"

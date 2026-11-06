@@ -486,7 +486,7 @@ class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHE
 
 
 class OriginGateDecisionPayload(LoopPayload, kind=CommandKind.ORIGIN_GATE_DECISION):
-    """Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival."""
+    """Answer a cycle holding at the round-0 origin gate; refused where the cycle is not holding."""
 
     inner_refusal: ClassVar[str | None] = INNER_GATE_REFUSAL
     follow_up: ClassVar[str] = "A cycle holding at the gate acts on it within a second."

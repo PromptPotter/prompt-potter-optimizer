@@ -1,5 +1,4 @@
 pipeline:
-  backend_name: PromptPotter
   backend_type: promptpotter
   # What an operator may steer the inner optimizer TO on a babysat fork. It must name the model
   # `assets/optimizers/potter/pipeline.yaml` runs on every node (minimax-m3.1-flash), or every run

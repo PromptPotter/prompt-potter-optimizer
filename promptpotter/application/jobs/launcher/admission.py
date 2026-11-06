@@ -134,11 +134,8 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     connector = connectors.CONNECTORS.get(backend_type)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
-    if connector.preflight is None:
-        return None
-    base_url = connector.base_url()
-    if (down := await connector.preflight(base_url)) is not None:
-        return BackendUnreachableError(connector.name, base_url, down)
+    if (down := await connector.unreachable()) is not None:
+        return BackendUnreachableError(connector.name, connector.base_url(), down)
     return None
 
 

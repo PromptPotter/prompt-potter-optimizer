@@ -17,6 +17,10 @@ class BackendResponse(StrictModel):
     base_url: str = Field(
         description="Where the operator configured it; empty for an in-process one"
     )
+    auth_header: str | None = Field(
+        description="The header the operator's credential rides in on every request; null where "
+        "operator config holds none"
+    )
 
 
 class BackendHealthResponse(StrictModel):
@@ -33,7 +37,11 @@ class BackendHealthResponse(StrictModel):
 
 def list_backends() -> list[BackendResponse]:
     return [
-        BackendResponse(id=name, base_url=connector.base_url())
+        BackendResponse(
+            id=name,
+            base_url=connector.base_url(),
+            auth_header=next(iter(connector.credential_header()), None),
+        )
         for name, connector in sorted(connectors.CONNECTORS.table.items())
     ]
 

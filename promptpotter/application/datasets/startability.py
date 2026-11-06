@@ -139,7 +139,7 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
         held = held_bank(stores, dataset)
     except BackendUnreachableError:
         return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
-    except (FileUnreadableError, ValueError, OSError):
+    except (FileUnreadableError, PayloadInvalidError, ValueError, OSError):
         logger.exception("datasets: %s could not be read for the listing", name)
         return DatasetReading(None, StartBlock.UNREADABLE)
     n_held = None if held is None else len(held.samples)

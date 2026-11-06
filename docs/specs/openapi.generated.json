@@ -1474,6 +1474,18 @@
       "BackendResponse": {
         "additionalProperties": false,
         "properties": {
+          "auth_header": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The header the operator's credential rides in on every request; null where operator config holds none",
+            "title": "Auth Header"
+          },
           "base_url": {
             "description": "Where the operator configured it; empty for an in-process one",
             "title": "Base Url",
@@ -1487,7 +1499,8 @@
         },
         "required": [
           "id",
-          "base_url"
+          "base_url",
+          "auth_header"
         ],
         "title": "BackendResponse",
         "type": "object"
@@ -2475,10 +2488,6 @@
         "additionalProperties": false,
         "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``resolve_dataset`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` § Two resolution seams).",
         "properties": {
-          "backend_type": {
-            "title": "Backend Type",
-            "type": "string"
-          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
@@ -2492,6 +2501,7 @@
             "type": "array"
           },
           "connector": {
+            "description": "The connector the course runs on, as `dataset.yaml::pipeline.backend_type` names it: the id `GET /backends` lists",
             "title": "Connector",
             "type": "string"
           },
@@ -2573,7 +2583,7 @@
             "type": "object"
           },
           "self_optimization": {
-            "description": "This campaign optimizes the optimizer itself (L4): one measured row is a whole inner campaign, so it has no registered backend and no per-sample data of its own",
+            "description": "This campaign optimizes the optimizer itself (L4): its connector is `promptpotter`, and one measured row is a whole inner campaign, so it has no per-sample data of its own",
             "title": "Self Optimization",
             "type": "boolean"
           },
@@ -2593,7 +2603,6 @@
           "cycle_id",
           "dataset_name",
           "connector",
-          "backend_type",
           "self_optimization",
           "optimizer",
           "optimizer_setup",
@@ -4969,6 +4978,7 @@
         "description": "One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology\nonly: the level a ``nests`` pointer names, which no campaign has to have run.",
         "properties": {
           "connector": {
+            "description": "The connector the definition declares, as `CampaignPipelineResponse.connector` names it",
             "title": "Connector",
             "type": "string"
           },
@@ -11311,7 +11321,7 @@
           },
           "origin_gate": {
             "default": "strict",
-            "description": "Halt after round 0 when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) halts on ``critical`` or ``degraded``; ``critical_only`` halts only on a structurally-broken origin; ``off`` disarms the gate. The operator overrides knowingly with a plain ``resume`` — round 0 is already on disk, so the loop skips the gate and goes straight to L1.",
+            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate-decision`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
             "enum": [
               "strict",
               "critical_only",
@@ -11339,7 +11349,7 @@
       },
       "OptimizationOverrides": {
         "additionalProperties": false,
-        "description": "An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.\nIts ``budget.rounds`` bound is theirs alone; a dataset's own block is never read through it,\nso a reused dataset may exceed it.",
+        "description": "An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.\nOnly the fields sent move anything, so no field states a default a reader could take for one\nthat applies. Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read\nthrough it, so a reused dataset may exceed it.",
         "properties": {
           "arm_gate": {
             "default": "off",
@@ -11354,9 +11364,6 @@
           },
           "budget": {
             "$ref": "#/components/schemas/Budget",
-            "default": {
-              "rounds": 5
-            },
             "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
           "halt_at_accuracy": {
@@ -11878,7 +11885,7 @@
       },
       "OriginGateDecisionPayload": {
         "additionalProperties": false,
-        "description": "Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival.",
+        "description": "Answer a cycle holding at the round-0 origin gate; refused where the cycle is not holding.",
         "properties": {
           "campaign_id": {
             "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",

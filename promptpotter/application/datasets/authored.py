@@ -42,9 +42,8 @@ class AuthoredDataset:
     """``task.md``'s body, stripped; ``""`` when the definition has none."""
 
     active_steps: list[str]
-    """``dataset_access.py::declared_pipelines``' default; ``[]`` only with no nodes, when the
-    connector's ``default_pipeline`` applies. A reused dataset's draft seeds the origin prompts
-    of this chain."""
+    """``dataset_access.py::declared_pipelines``' default; ``[]`` only with no nodes. A reused
+    dataset's draft seeds the origin prompts of this chain."""
 
     candidate_library: tuple[str, ...]
     """``candidate_library.txt`` — the per-pipeline origin's target list, part of

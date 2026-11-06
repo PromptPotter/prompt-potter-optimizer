@@ -457,9 +457,12 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
         return None
     connector = connectors.CONNECTORS.table.get(backend_type)
     if connector is None:
-        raise ValueError(
-            f"Dataset {dataset.name!r} declares backend_type {backend_type!r}, which this "
-            f"process has no connector for. Restart the server."
+        raise PayloadInvalidError(
+            f"Dataset {dataset.name!r} declares backend_type {backend_type!r}, which no registered "
+            f"connector is: name one of {sorted(connectors.CONNECTORS.table)} in "
+            f"{dataset.directory / DEFINITION_FILE}.",
+            code="pipeline_config_invalid",
+            details={"dataset_dir": str(dataset.directory)},
         )
     return connector
 

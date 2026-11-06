@@ -1542,5 +1542,4 @@ CONNECTOR = Connector(
     # Per-step rewards are not required: a single-step task emits none.
     required_observation_keys=(REWARD_KEY, SKILL_KEY),
     answer_key=ANSWER_KEY,
-    default_pipeline=(AGENT_NODE,),
 )

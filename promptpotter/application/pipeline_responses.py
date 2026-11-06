@@ -189,11 +189,14 @@ class CampaignPipelineResponse(StrictModel):
     campaign_id: str
     cycle_id: str
     dataset_name: str
-    connector: str
-    backend_type: str
+    connector: str = Field(
+        description="The connector the course runs on, as `dataset.yaml::pipeline.backend_type` "
+        "names it: the id `GET /backends` lists"
+    )
     self_optimization: bool = Field(
-        description="This campaign optimizes the optimizer itself (L4): one measured row is a "
-        "whole inner campaign, so it has no registered backend and no per-sample data of its own"
+        description="This campaign optimizes the optimizer itself (L4): its connector is "
+        "`promptpotter`, and one measured row is a whole inner campaign, so it has no per-sample "
+        "data of its own"
     )
     optimizer: str = Field(
         description="The optimizer manifest the addressed course runs — the one answer a surface "
@@ -274,7 +277,9 @@ class DatasetPipelineResponse(StrictModel):
     """One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology
     only: the level a ``nests`` pointer names, which no campaign has to have run."""
 
-    connector: str
+    connector: str = Field(
+        description="The connector the definition declares, as `CampaignPipelineResponse.connector` names it"
+    )
     view: PipelineView | None
     node_config_schema: dict[str, list[NodeConfigParam]] = Field(
         description="Every param each node carries, valueless — what `reach` is summed over"

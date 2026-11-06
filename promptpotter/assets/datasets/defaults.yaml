@@ -2,7 +2,6 @@ pipeline:
   # The default every `{name}/dataset.yaml::pipeline` is laid over — what a dataset there leaves
   # unsaid, it says this. The merge rule is `assets/datasets/CLAUDE.md` § A dataset file is a partial.
   version: v0.1
-  backend_name: TermNorm
   backend_type: termnorm
   available_models:
     - openai/gpt-oss-20b:nitro

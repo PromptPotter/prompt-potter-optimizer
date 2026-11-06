@@ -659,7 +659,8 @@ _TO_THE_GATE = (
     f"`{CommandKind.EDIT_DRAFT_CAMPAIGN}` where the data decides it, or run "
     f"`{CommandKind.RESOLVE_ORIGIN}` for a resolver turn, citing your evidence as above; ask the "
     f"operator where it does not. When no gap is open, `{CommandKind.START_CHECKIN}` launches the "
-    "run, which holds at the round-0 origin gate: its task reads `input_required` there; read its "
-    f"`{ReadKind.CYCLE_DASHBOARD}` and answer with `{CommandKind.ORIGIN_GATE_DECISION}` only once "
-    "the operator says."
+    "run. It holds at the round-0 origin gate only where the origin's health trips the gate, and "
+    "its task then reads `input_required`; a healthy origin goes straight on into the search. If "
+    f"it holds, read its `{ReadKind.CYCLE_DASHBOARD}` and answer with "
+    f"`{CommandKind.ORIGIN_GATE_DECISION}` only once the operator says."
 )

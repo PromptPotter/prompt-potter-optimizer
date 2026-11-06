@@ -1707,7 +1707,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
                 "param_allowed_values": {"reasoning_effort": rungs, "model": ["m", "n"]},
             },
         }
-        return {"backend_name": "termnorm", "nodes": {"a": node}, "pipelines": {"default": ["a"]}}
+        return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
 
     write_yaml(
         stores.tenant_datasets.dataset_dir("fk") / DEFINITION_FILE,

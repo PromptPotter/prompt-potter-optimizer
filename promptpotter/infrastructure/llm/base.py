@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import socket
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -52,6 +53,15 @@ _R = TypeVar("_R")
 # Per read gap: a reasoning model may think for minutes before its first byte.
 WIRE_TIMEOUT_S = 600.0
 
+# A wait no read clock cuts short (a slow first byte, a remote cell) tells a dropped link from an
+# answer still coming only by TCP keepalive: about 30s of unanswered probes and the read raises
+# a broken connection, which `send_failure.py` resends. A platform lacking a knob keeps its own.
+KEEPALIVE_OPTIONS = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)] + [
+    (socket.IPPROTO_TCP, getattr(socket, knob), value)
+    for knob, value in (("TCP_KEEPIDLE", 15), ("TCP_KEEPINTVL", 5), ("TCP_KEEPCNT", 3))
+    if hasattr(socket, knob)
+]
+
 
 @functools.cache
 def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
@@ -63,8 +73,11 @@ def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=base_url,
         timeout=httpx.Timeout(timeout_s, connect=5.0),
-        limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
-        verify=tls_context(),
+        transport=httpx.AsyncHTTPTransport(
+            verify=tls_context(),
+            limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
+            socket_options=KEEPALIVE_OPTIONS,
+        ),
     )
 
 

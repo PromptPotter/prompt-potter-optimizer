@@ -56,12 +56,12 @@ export function useConnector(): ReadResult<CampaignPipelineResponse> {
 }
 
 export function useBackend(): BackendReading {
-  const backendType = shownData(useConnector())?.backend_type ?? null;
+  const connector = shownData(useConnector())?.connector ?? null;
   // Gated on the session: an anon preview must never fire the protected read (I5).
   const backends = shownData(useRead(backendsRead())) ?? NO_BACKENDS;
   const active = useMemo(
-    () => (backendType ? (backends.find((b) => b.id === backendType) ?? null) : null),
-    [backendType, backends],
+    () => (connector ? (backends.find((b) => b.id === connector) ?? null) : null),
+    [connector, backends],
   );
   // Our own API down is the dashboard banner's to say: a failed read is unknown, not offline.
   const health = readyData(useRead(active ? backendHealthRead(active.id) : null));

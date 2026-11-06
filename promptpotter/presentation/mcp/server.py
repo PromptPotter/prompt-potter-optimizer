@@ -1,10 +1,11 @@
 """The host registry served over MCP: list and call it, read its resources, get its prompts.
 
 Every answer is `application/host_surface.py`'s `HostSession`; this module only words it in MCP's
-types. A task kind's call answers the Tasks extension's handle: claimed (`resultType: "task"`) on a
-connection that speaks the extensions vocabulary, and as the call's structured content on a
-handshake-era one, which has no claimed result to carry it. `tasks/get`, `tasks/result` and
-`tasks/cancel` serve both. A refusal keeps its `PotterError.code` on every answer.
+types. A task kind's call answers the Tasks extension's handle: claimed (`resultType: "task"`) where
+the request itself declares the extension on a 2026-era wire, and as the call's structured content
+everywhere else, since a client MUST reject a claimed result its request did not declare and a
+handshake-era wire carries none. `tasks/get`, `tasks/result` and `tasks/cancel` serve both. A
+refusal keeps its `PotterError.code` on every answer.
 """
 
 from __future__ import annotations
@@ -30,8 +31,17 @@ from promptpotter.application.host_surface import HostAnswer, HostSession, HostT
 from promptpotter.shared.errors import PotterError
 
 TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
+_ACCEPTS_TASKS = types.ClientCapabilities(extensions={TASKS_EXTENSION: {}})
 
 type Ctx = ServerRequestContext[Any, Any]
+
+
+def _claims_task(ctx: Ctx) -> bool:
+    """Per request: a 2026-era envelope declares its own capabilities, so a client advertising the
+    extension at discovery may still send a call that accepts no task."""
+    return ctx.protocol_version in types.version.MODERN_PROTOCOL_VERSIONS and (
+        ctx.session.check_client_capability(_ACCEPTS_TASKS)
+    )
 
 
 def _task(task: HostTask) -> types.Task:
@@ -76,7 +86,8 @@ def host_server(session: HostSession) -> Server[Any]:
                     description=tool.description,
                     input_schema=tool.input_schema(),
                     output_schema=None if tool.as_task else tool.output_schema(),
-                    execution=types.ToolExecution(task_support="required")
+                    # Optional: a call accepting no task gets the handle as its answer.
+                    execution=types.ToolExecution(task_support="optional")
                     if tool.as_task
                     else None,
                     # A command may touch the world past this box (a provider's key): the default.
@@ -100,7 +111,7 @@ def host_server(session: HostSession) -> Server[Any]:
         if answer.task is None:
             return _answered(params.name, answer)
         task = _task_json(answer.task)
-        if ctx.protocol_version in types.version.MODERN_PROTOCOL_VERSIONS:
+        if _claims_task(ctx):
             return {"resultType": "task", "task": task}
         return types.CallToolResult(
             content=_text({"task": task}), structured_content={"task": task}

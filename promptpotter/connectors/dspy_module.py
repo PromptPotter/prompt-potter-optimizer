@@ -420,7 +420,6 @@ def dataset_pipeline(
     }
     return {
         "name": "DSPy",
-        "backend_name": "DSPy",
         "backend_type": "dspy",
         "available_models": sorted({model, *allowed.get("model", [])}),
         "nodes": {PROGRAM_NODE: node},
@@ -442,5 +441,4 @@ CONNECTOR = Connector(
     # Overlapping two buys nothing and doubles peak memory in the host's own process.
     max_cells_in_flight=1,
     required_observation_keys=(RESULT_KEY, SCORE_KEY),
-    default_pipeline=(PROGRAM_NODE,),
 )

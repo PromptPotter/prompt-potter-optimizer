@@ -108,8 +108,6 @@ async def _termnorm_preflight(backend_url: str) -> str | None:
                 "  TermNorm-excel\\start-server-py-LLMs.bat\n\n"
                 "Install guide: docs/manual/02-install.md"
             )
-        except httpx.TransportError as exc:
-            return f"{type(exc).__name__} at {backend_url}: {str(exc).strip() or 'no answer'}"
     return None
 
 

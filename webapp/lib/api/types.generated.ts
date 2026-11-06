@@ -421,6 +421,9 @@ export interface BackendResponse {
   id: string;
   /** Where the operator configured it; empty for an in-process one */
   base_url: string;
+  /** The header the operator's credential rides in on every request; null where
+   * operator config holds none */
+  auth_header: string | null;
 }
 
 export interface BackendHealthResponse {
@@ -3420,13 +3423,14 @@ export interface OptimizationConfig {
    * added anything over what it recombined. An arm with no parent has no
    * reference. */
   lift_reference: 'best_so_far' | 'parents';
-  /** Halt after round 0 when the origin's degradation verdict is non-healthy,
-   * instead of optimizing against a broken floor — the common failure while
-   * bringing up a new connector. ``strict`` (default) halts on ``critical``
-   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
-   * origin; ``off`` disarms the gate. The operator overrides knowingly with a
-   * plain ``resume`` — round 0 is already on disk, so the loop skips the gate
-   * and goes straight to L1. */
+  /** Hold after round 0 for the operator's decision when the origin's degradation
+   * verdict is non-healthy, instead of optimizing against a broken floor —
+   * the common failure while bringing up a new connector. ``strict``
+   * (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds
+   * only on a structurally-broken origin; ``off`` disarms the gate. The
+   * decision (`origin-gate-decision`) proceeds into the search anyway, re-
+   * scores the origin, or aborts the cycle. An origin that scored no cell
+   * halts instead, and starting the cycle again re-measures it. */
   origin_gate: 'strict' | 'critical_only' | 'off';
   /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
    * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
@@ -3457,11 +3461,12 @@ export interface CampaignPipelineResponse {
   campaign_id: string;
   cycle_id: string;
   dataset_name: string;
+  /** The connector the course runs on, as `dataset.yaml::pipeline.backend_type`
+   * names it: the id `GET /backends` lists */
   connector: string;
-  backend_type: string;
-  /** This campaign optimizes the optimizer itself (L4): one measured row is a whole
-   * inner campaign, so it has no registered backend and no per-sample data of
-   * its own */
+  /** This campaign optimizes the optimizer itself (L4): its connector is
+   * `promptpotter`, and one measured row is a whole inner campaign, so it has
+   * no per-sample data of its own */
   self_optimization: boolean;
   /** The optimizer manifest the addressed course runs — the one answer a surface
    * reads which optimizer's graph, knobs and analytics apply by, a check-in's
@@ -3994,6 +3999,8 @@ export interface DatasetIndexEntry {
 
 /** One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology */
 export interface DatasetPipelineResponse {
+  /** The connector the definition declares, as `CampaignPipelineResponse.connector`
+   * names it */
   connector: string;
   view: PipelineView | null;
   /** Every param each node carries, valueless — what `reach` is summed over */
@@ -4489,7 +4496,7 @@ export interface OpenOriginDraftPayload {
   origin_id: string;
 }
 
-/** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */
+/** Answer a cycle holding at the round-0 origin gate; refused where the cycle is not holding. */
 export interface OriginGateDecisionPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its

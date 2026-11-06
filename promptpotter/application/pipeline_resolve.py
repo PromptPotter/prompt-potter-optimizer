@@ -296,9 +296,6 @@ def schema_as_run(
 
 def overlay_dataset_pipeline(served: Mapping[str, Any], local: Mapping[str, Any]) -> dict[str, Any]:
     out = dict(served)
-    # The definition names the backend it runs: what the operator chose outranks a self-description.
-    if local.get("backend_name"):
-        out["backend_name"] = local["backend_name"]
     if pipelines := declared_pipelines(local):
         out["pipelines"] = pipelines
     # The operator's model MENU bounds the L1 enum; dropped, the service's catalogue is searched.
@@ -657,8 +654,7 @@ class _Merge:
 @dataclass(frozen=True)
 class _CampaignMerge(_Merge):
     hop: CycleHop
-    # What its mint recorded run init read: the laid declaration, and the panel it measured.
-    declaration: dict[str, Any]
+    # The panel its mint recorded run init measured.
     experiment: dict[str, Any] | None
 
 
@@ -732,7 +728,6 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
         ),
         free=_task_fenced(stores, campaign.connector),
         hop=hop,
-        declaration=read.declaration,
         experiment=resolved.experiment,
     )
 
@@ -822,7 +817,6 @@ def _response(
     cycle_id: str,
     dataset_name: str,
     connector: str,
-    backend_type: str,
     mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
     rows = _rows(m, folded)
@@ -831,9 +825,8 @@ def _response(
         cycle_id=cycle_id,
         dataset_name=dataset_name,
         connector=connector,
-        backend_type=backend_type,
-        self_optimization=is_self_optimization(backend_type),
-        cell_terms=list(connectors.CONNECTORS.get(backend_type).cell_terms),
+        self_optimization=is_self_optimization(connector),
+        cell_terms=list(connectors.CONNECTORS.get(connector).cell_terms),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace),
         params=folded.params,
@@ -860,7 +853,6 @@ def resolve_pipeline_for_draft(
         cycle_id="",
         dataset_name=draft.slug,
         connector=served.connector,
-        backend_type=served.connector,
         mint=_draft_mint(stores, draft, m),
     )
 
@@ -935,9 +927,7 @@ def resolve_pipeline_for_campaign(
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=m.declaration["backend_name"],
-        # The campaign's DECLARED kind — one definition serves every campaign on the slug.
-        backend_type=campaign.connector,
+        connector=campaign.connector,
         mint=_cycle_mint(stores, m),
     )
 
@@ -1014,7 +1004,7 @@ async def resolve_pipeline_for_dataset(
     )
     rows = filtered.node_config_schema()
     return DatasetPipelineResponse(
-        connector=declared["backend_name"],
+        connector=definition.backend_type,
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),

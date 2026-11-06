@@ -9,19 +9,17 @@ from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 
-DEFAULT_BUDGET_ROUNDS = 5
-"""Matches the M10 prompt-iteration framework default."""
-
 MAX_EDITED_ROUNDS = 100
 
 
 class OptimizationOverrides(OptimizerChoice):
     """An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.
-    Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read through it,
-    so a reused dataset may exceed it."""
+    Only the fields sent move anything, so no field states a default a reader could take for one
+    that applies. Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read
+    through it, so a reused dataset may exceed it."""
 
     budget: Budget = Field(
-        Budget(rounds=DEFAULT_BUDGET_ROUNDS),
+        default_factory=Budget,
         description=OptimizationConfig.model_fields["budget"].description,
     )
     halt_at_accuracy: float | None = Field(

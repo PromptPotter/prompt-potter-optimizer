@@ -28,7 +28,7 @@ Loading one imports it into this process with the API keys, tenant tree and iden
 
 ## The credential rides the connector
 
-`Connector.auth_token()`, `auth_scheme()` and `endpoint()` are operator config, so nothing a request, flag or campaign sets can aim the token elsewhere; core writes the header. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 --> A check-in names only a connector with `serves_uploads` (`draft_patch.py`).
+`Connector.auth_token()`, `auth_scheme()` and `endpoint()` are operator config, so nothing a request, flag or campaign sets can aim the token elsewhere; `protocol.py::Connector.credential_header` builds the header, for the wire and the backends listing alike. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 --> A check-in names only a connector with `serves_uploads` (`draft_patch.py`).
 
 ## Conventions
 

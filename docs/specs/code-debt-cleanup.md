@@ -53,6 +53,220 @@ acting.
 
 **Rides with:** the next arc's first builder wave.
 
+### The n8n launch over MCP (stream rehearsal, 2026-11-06)
+
+A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk last landed before
+`fca59552b`. Each refusal below stopped it; none was patched in code.
+
+- **A connector that reports no price cannot run under the default dollar cap** —
+  `domain/campaign_config.py::_DEFAULT_BUDGET` gives every campaign a dollar ceiling, and an n8n cell is
+  unpriced (`connectors/n8n.py::_pipeline_declaration` serves no `spend_bound`; n8n reports no usage),
+  so `spend_book.py::SpendBook.refuse_unpriced` halts the first send `NO_RATE` — after the mint and run
+  init, leaving a halted campaign. Any connector that serves no spend bound shares it. Action: a
+  connector declares how its sends are bounded and reported, connector-agnostic, and a campaign's budget
+  is checked against that declaration before admission: an unenforceable dollar axis is refused at the
+  mint, never halted at round 0. **Rides with:** M12 (the declaration), M6 (refused before admission).
+  **Re-test:** mint any `backend_type: n8n` dataset that does not declare `budget.usd: null`; it halts
+  `No rate under the spend cap` at round 0.
+- **A connector's endpoint is one per install** — `config/settings.py` `TERMNORM_URL`,
+  `N8N_HARNESS_URL`: no dataset can name which endpoint (which TermNorm, which n8n workflow) it
+  measures. Running a second workflow edits `.env`, re-keys every banked cell of the first
+  (`n8n.py::INSTRUMENT_KEY` hashes the URL), and leaves the first dataset measuring the wrong workflow
+  until `.env` is edited back. Action: operator config holds named endpoints per connector (address and
+  credential), and a dataset names one; the credential never leaves operator config
+  ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The credential rides the
+  connector). **Rides with:** M18. **Re-test:** two n8n datasets on two workflows both run, no `.env`
+  edit between them.
+- **Nothing lands the data root off the box** — `maintenance/landing.py` runs from `land-data` alone,
+  which `deploy-linux/update.sh` calls. A checkout that pulls a reshape keeps running on files the
+  build refuses: every launch here was refused `job_unreadable` (released jobs that
+  `migrations/job_ending.py` maps) and then `ledger_unreadable` (`.workspace/events.jsonl` without
+  `command.act_digest`). Action: the landing runs wherever the code meets a data root it has not
+  landed, one mechanism with `update.sh`'s. **Rides with:** M17. **Re-test:** check out a commit that
+  moves a `Fate.RUN` shape; `new <dataset>` refuses nothing.
+- **`--reset` couples two decisions** — `landing.py::Landing.refusal`: unloadable run data and files no
+  row names are both "in the way — `--reset` drops both", so a run-data reshape cannot land without
+  deleting every unknown file. This desk's unknown files are authored: `block_packs/_sources/` (harvest
+  notes and `build_packs.py`) and `default/banks/`. Action: the landing drops unloadable `Fate.RUN`
+  data by itself; unknown files refuse on their own; `_sources` and its builder move into the checkout.
+  **Rides with:** M17. **Re-test:** `land-data --dry-run` on a desk holding both.
+- **An unreadable file's remedy sends the operator to hand-deletion** — `shared/errors.py` `JOB` ("No
+  migration exists: delete it once no run it names is live"), `LedgerUnreadableError` ("No migration
+  exists: no verb repairs it"), `MANIFEST` (names `reset`), though `job_ending` maps the job and the
+  landing drops run data. Action: one remedy, the landing's. **Rides with:** M17. **Re-test:**
+  `git grep -n "No migration exists" -- promptpotter/shared/errors.py`.
+- **A launch refused before admission reaches a host as a task** —
+  `host_surface.py::HostSession._open` opens the task before the dispatcher accepts the act, so a
+  refusal (an unreadable ledger) answers `working`, then reads `failed` on `tasks/get` 0.1 s later, while
+  the CLI exits 1 on the same refusal. The handle it opens names no campaign
+  (`host_surface.py::HostSession._status`: `mint-campaign: running`), so a host whose call accepts
+  no task (Claude Code's `tools/call` declares no Tasks extension) holds an id no tool it has can
+  read, and finds its run through `hierarchy`. Action: a task opens for an admitted act and names the
+  address it acts on; a refusal before admission is the call's answer on every door. **Rides
+  with:** M6 (the one launch answer). **Re-test:** `mint-campaign` over `promptpotter mcp` against
+  an unreadable workspace ledger answers `isError`, never a task; on a readable one the handle
+  names its campaign and cycle.
+- **A mint takes its budget through three doors** — `command_kinds.py::MintCampaignPayload` carries
+  `budget`, `optimization.budget` and `campaign_config.optimization.budget`; nothing on the tool
+  says which binds when two are sent, and Claude Code reading the schema concluded that sending
+  `optimization` resets the rounds (it does not: only sent fields move). Action: one door for a
+  launch's budget on every kind (`MintCampaignPayload`, `StartCheckinPayload`, `HeadToHeadRequest`),
+  the declaration's budget never a second. **Rides with:** M12. **Re-test:** the `mint-campaign`
+  input schema names `budget` once.
+- **One fact, two words: `backend_type` and `connector`** — the definition key
+  `pipeline.backend_type`, `dataset_access.py::backend_type_of_dataset`,
+  `pipeline_resolve.py::draft_backend_type` and `DraftPipeline.backend_type` name what
+  `Campaign.connector`, `Environment.connector` and `CampaignPipelineResponse.connector` name. Action:
+  one word, `connector`, the definition key included; tenant definitions re-written by the landing.
+  **Rides with:** M4 (the typed pipeline carrier). **Re-test:**
+  `git grep -nw backend_type -- promptpotter` is empty.
+- **A pipeline's `name` and `version` are parsed and read by nothing** —
+  `pipeline_parsing.py::parse_pipeline_response` fills `PipelineSchema.name` and `.version` off a
+  declaration (`defaults.yaml` `version: v0.1`, `n8n.py::_pipeline_declaration`, `dspy_module.py::dataset_pipeline`),
+  and no reader takes either but a debug log. Action: drop both fields and the keys that feed them;
+  a stored `PipelineSchema` is run data, so it lands on the next run-data reshape. **Rides with:** M4.
+  **Re-test:** `git grep -nE "\"(name|version)\":" -- promptpotter/connectors` is empty.
+
+### The connector and entry-point seam audits (two unbiased reads, 2026-11-06)
+
+Fixed in the pass that found them: the outage wait polls the connector's own probe
+(`connectors/protocol.py::Connector.unreachable`, `check_status` deleted); a probe's transport
+error is a reason, never a 500; TCP keepalive on every wire whose wait no read clock bounds
+(`infrastructure/llm/base.py::KEEPALIVE_OPTIONS`); the dead `default_pipeline` on three
+connectors; the origin gate's text on the host prompt, the decision payload and `origin_gate`; the
+false `self_optimization`, `node_roles` and "Restart the server" wording. The rest:
+
+- **Resuming a campaign takes its connector from today's dataset file** —
+  `jobs/launcher/mint_and_start.py` (`ExistingCycle.backend_type`) and `wiring.py::bind_cycle_session`
+  read the definition again, while the spend sends read `Campaign.connector` ("FROZEN at mint"). A
+  slug re-pointed to another connector runs or fails on an origin hash naming no connector: a state
+  the system enters but cannot report. Action: `init_services` takes the Connector from its caller
+  (the campaign's for a bound cycle); a mismatch with the definition is refused, naming both.
+  **Rides with:** M6. **Re-test:** re-point a minted slug's `backend_type`; `start-run` refuses.
+- **The check-in's pipeline step is TermNorm's for every connector** —
+  `webapp/components/ingest/PipelineSetupSection.tsx` hard-codes `llm_only` and "Research + Match";
+  on an n8n definition, picking "LLM only" excludes every node. Action: serve the declaration's named
+  `pipelines` map and render the select from it; delete `LLM_ONLY`. **Rides with:** M5. **Re-test:**
+  `git grep -n "LLM_ONLY" -- webapp/components` is empty.
+- **Two owners, two values, for what a definition leaves unsaid** — `assets/datasets/defaults.yaml`
+  (install and research tiers) against `connectors/termnorm.py` `available_models` /
+  `default_node_config` and `draft_campaign.py::UPLOAD_BUDGET_ROUNDS` /
+  `Connector.default_optimization` (uploads); an upload opens the model axis the install policy
+  closes. `defaults.yaml` also picks `backend_type: termnorm` for every install dataset (the
+  "backend_type missing" 422 is unreachable there) and holds `available_models` and `rounds: 8`
+  that every dataset overrides. Action: a connector's node template is laid under every definition
+  naming it, in any tier; connector-neutral campaign defaults are one file every tier lays under; the
+  four upload-seeding `Connector` fields become one optional upload-defaults declaration whose
+  presence is `serves_uploads`. First step, S: delete the three `defaults.yaml` keys, add
+  `backend_type: termnorm` to `email-tagging/dataset.yaml` and `justlogic/family.yaml`, fix
+  `docs/manual/03-first-campaign.md`, run the full gate. **Rides with:** M18. **Re-test:**
+  `git grep -n "backend_type" -- promptpotter/assets/datasets/defaults.yaml` is empty.
+- **`Campaign.backend_id` / `backend_url` store the connector twice and a URL nothing reads** — one
+  reader of `backend_id` (`mask/load.py`), none of `backend_url`, whose comment claims every later
+  launch runs there. Action: delete both; a run-data reshape (wipe allowed from 2026-11-08).
+  **Rides with:** M4, with the `backend_type`→`connector` row. **Re-test:**
+  `git grep -n "backend_url" -- promptpotter/domain/campaign.py` is empty.
+- **`Session.backend_id` is a test-only archive switch** — production always sets it;
+  `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
+  Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
+  explicitly. **Rides with:** M3. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
+- **`BackendClient` forwards ten `Connector` fields beside its own `.connector`** — two doors to one
+  declaration (`execution`, `measured_unit`, `answer_key`, `cell_attempts`, …). Action: delete the
+  forwarders; about fifteen callers read `.connector.X`. **Rides with:** M3. **Re-test:** count the
+  `@property` forwards in `infrastructure/backend.py`.
+- **Three TermNorm defaults in core** — `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`
+  (repeating the one `serves_uploads` declaration), and `Settings.TERMNORM_URL` defaulting to
+  loopback, so a box with no TermNorm lists it configured and health reports it broken. Connector
+  keys (`TERMNORM_*`, `N8N_HARNESS_*`, `DBLLMBENCH_*`) live in core `Settings`, and the deploy's
+  `BACKEND_*` keys name the TermNorm sibling generically. Action: the upload connector derives from
+  its declaration; no endpoint default; each connector declares its own config model. **Rides
+  with:** M18, with the one-endpoint-per-install row. **Re-test:** `git grep -n "DEFAULT_CONNECTOR" -- promptpotter`.
+- **An unregistered `backend_type` is a bare `KeyError` at fifteen `CONNECTORS.get` sites** — only
+  `dataset_access.py::dataset_connector` refuses it typed (since 2026-11-06); `startability.py` and
+  `backend_listing.py` tolerate it with `.table.get`. Lowercase is documented on `Connector.name`,
+  enforced nowhere, while the dataset reader lowercases. Action: the one reader of the key resolves
+  the Connector and refuses typed, naming the registered set; `_validate` refuses a non-lowercase
+  name; callers take the Connector. **Rides with:** M4. **Re-test:** a dataset naming
+  `backend_type: nope` answers 422 on `new`, `start-run` and the pipeline read.
+- **`Connector.node_roles` repeats the role the served pipeline carries** — `draft_build.py` reads it
+  while `draft_wire` already holds the parsed chain with `PipelineNode.role`. Action: derive from the
+  chain; delete the field (verify TermNorm serves `candidate_source` first). **Rides with:** M5.
+  **Re-test:** `git grep -n "node_roles" -- promptpotter` is empty.
+- **Core computes TermNorm's term index for every connector, pushed by two calls** —
+  `Session.index_terms`, `loop_start.py` and `origin.py`. Action: one call where the session opens,
+  handing the connector's session the bank. **Rides with:** M7. **Re-test:**
+  `git grep -n "index_terms" -- promptpotter`.
+- **`is_self_optimization` is decided by the name `promptpotter`** (`runner/inner/tasks.py`). Action: a
+  `Connector` declaration. **Rides with:** M4. **Re-test:** `git grep -n "\"promptpotter\")" -- promptpotter/application/runner/inner/tasks.py`.
+- **DSPy splits the model string for pricing twice** — `dspy_module.py` meters `inline_route(model)`
+  in the cell while core's `BackendClient.priced_as` splits the same string for the bound; they
+  disagree when a dataset sets `provider`. Action: the cell takes the pair core bound. **Rides
+  with:** M12. **Re-test:** `git grep -n "inline_route" -- promptpotter/connectors/dspy_module.py` is empty.
+- **`backend-integration.md` presents TermNorm's wire as every backend's contract** — "any backend
+  that speaks three endpoints", `/pipeline` "read once at init", its Connection security is TermNorm's
+  env, linked from every connector's inspector. Action: the page states the `Connector` declaration
+  contract; TermNorm's endpoints become one connector's section beside n8n's. **Rides with:** M18.
+  **Re-test:** read the page's first paragraph.
+- **The host prompt and tool schemas mislead a driving model** — `OptimizationOverrides` inherits
+  `optimizer: "potter"` and `arm_gate: "off"` as schema defaults (the head-to-head validator requires
+  `optimizer`); `EditDraftPatch.config` is an untyped `dict`; a "partial `CampaignConfig`" has three
+  wire shapes (that, `MintCampaignPayload.campaign_config`, `OptimizationOverrides`). Action: one
+  partial model with no defaults, generated from `CampaignConfig`, used by all three. **Rides with:**
+  M12, with the three-budget-doors row. **Re-test:** the `mint-campaign` schema shows no
+  `"default": "potter"`.
+- **One act, two names** — 18 of 34 `CommandKind` rows have a `cli_verb` other than the kind, so served
+  refusals and descriptions name `set-limits`, `--max-usd`, `resume`, `new` to a host that has
+  `change-run-limits`, `start-run`, `mint-campaign` (`spend.py`, `jobs/quota.py`, `preflight.py`,
+  `campaign_config.py` budget, `origin_gate.py`'s log). Tool descriptions are developer docstrings
+  ("waits on a click", source paths, "the SSE tail"). Action: every CLI verb is its kind but the
+  composite `new` / `resume`; served text names kinds; `StopReasonInfo.cli_command` becomes a typed
+  next act; a gate check refuses `path::symbol` and CLI-verb backticks in a tool-describing docstring.
+  **Rides with:** a new arc after A3 (the text rewrite alone is S). **Re-test:** `git grep -n
+  "set-limits" -- promptpotter/domain promptpotter/application` is empty.
+- **A gate hold claims `input_required` and sends no input request** — `host_surface.py::HostSession`
+  sets the status; `tasks/result` blocks until the run ends. Action: the hold becomes the task's input
+  request (the gate's `GateDecision`, the arms shape for `submit-arms`), answered as the existing
+  command; otherwise never claim `input_required`. Untested against a live client. **Rides with:**
+  A3/A4. **Re-test:** a host calling `tasks/result` on a held origin gate receives an input request.
+- **A refusal is answered four ways** — MCP `tools/call` drops `details` and `refusal_words`, MCP
+  `tasks/result` raises a JSON-RPC error, REST serves `ErrorEnvelope`, the CLI a third shape and the
+  only door catching `SendRefusedError` / `UngeneratedRequestError` (`RuntimeError`s, a REST 500).
+  Action: one refusal value in `application/` each door only renders. **Rides with:** M14a.
+  **Re-test:** the same refused `start-run` over MCP and REST carries the same `refusal_words`.
+- **`resume --rewind/--steer` with `--max-usd` crashes with a traceback** — `resume_command.py`
+  builds a fork seed's budget on the money axis it refuses; a fork has no launch-budget field
+  (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload` and
+  `StepCyclePayload` take the launch's budget through the one door. **Rides with:** M12.
+  **Re-test:** `resume --rewind 1 --max-usd 1` refuses typed or runs.
+- **`step-cycle` is a second door into `start-run {step_rounds}`** — the difference is the capability
+  rung, and `step_rounds` admits 100 rounds; no webapp sender. Action: delete the kind, payload and
+  handler; the `campaign.step` rung keeps no launch. **Rides with:** M6. **Re-test:**
+  `git grep -n "STEP_CYCLE" -- promptpotter` is empty.
+- **A queued launch dies with the asking process** — the queue wait runs in the caller
+  (`jobs/launcher/launch.py`), so a CLI-derived kind exits and an MCP stdio session ends, while the
+  door reported success. Action: the queued job on disk is promoted by whoever frees the slot.
+  **Rides with:** M6/M2. **Re-test:** queue a `step` from the CLI behind a running cycle; it starts
+  when the slot frees.
+- **Adapter-kept rules that belong under the dispatcher** — the leftover sweep runs before CLI
+  launches and in the API's loop but never for MCP stdio or `embedded_run`; `embedded_run.__all__`
+  hand-keeps four command wrappers (and `cli/commands/maintenance.py` imports from it); two typed
+  REST routes (`edit-draft-campaign`, `resolve-origin`) duplicate the generic loop with a second
+  description; `compact-archive inventory`, `ab` and the tenant `trail` are CLI-only undeclared;
+  `--halt-at` is a second door to `--set halt_at_accuracy`; steer values parse three ways and the
+  server types none. Action: the sweep moves under the one admission; the wrappers and typed routes
+  are deleted; a CLI-only reason sits on the `Verb` row, gate-checked; the server types an overlay
+  against the served `param_types`. **Rides with:** M6 (sweep, wrappers), M4 (steer). **Re-test:**
+  `git grep -n "def compact_archive" -- promptpotter/application/embedded_run.py` is empty.
+- **The webapp lacks kinds whose rows claim every door** — no sender of `submit-arms`,
+  `cancel-queued-run`, `delete-cycle`; an `arm_gate: review` campaign holds in the browser with only
+  Pause. `Press` declares terminal and host presence, never the browser's. Action: `Press` names the
+  browser door, and a gate check ties each claimed kind to a sender. **Rides with:** a new arc.
+  **Re-test:** `git grep -n "submit-arms" -- webapp/components webapp/lib/hooks`.
+- **The idempotency key promises a replay some kinds never give** — `start-checkin`,
+  `set-user-settings`, `accept-terms`, `set-api-key` replay nothing. Action: the description names
+  which kinds replay, until M2's log-keyed idempotency. **Rides with:** M2. **Re-test:** retry a
+  `start-checkin` with its key after a lost answer.
+
 ### The excision pass (six layer audits and a plan review, 2026-11-05)
 
 One read-only audit per layer, each tracing a real path end to end; then four reviewers read the plan
