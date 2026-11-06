@@ -13,6 +13,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
 from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
@@ -26,17 +27,14 @@ _PLAIN_EVIDENCE_VALUES = NODE_LAYOUTS["l1_generate"].possible | frozenset(
 _PLAIN_PARAM_KINDS: frozenset[ParamKind] = frozenset({"model", "enum", "number", "bool"})
 
 
-def _rf_matches_current_config(
-    rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
-) -> bool:
+def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: PipelineParams) -> bool:
     """A failure observed under a superseded provider/model is stale evidence that mis-steers L2."""
     if not rf.node:
         return True
-    current = pipeline_params.get(rf.node)
-    if not isinstance(current, dict):
+    if (current := pipeline_params.nodes.get(rf.node)) is None:
         return False
     observed = rf.observed_config
-    return all(observed.get(k) == current.get(k) for k in WHO_ANSWERS_KEYS if k in observed)
+    return all(observed.get(k) == current.value(k) for k in WHO_ANSWERS_KEYS if k in observed)
 
 
 def _validation_block(b: InjectionBundle) -> str:

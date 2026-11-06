@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
     from promptpotter.domain.connector import ConnectorExecution, MeasuredUnit
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.pipeline_params import NodeParams, PipelineParams
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
@@ -213,28 +214,27 @@ class BackendClient:
     def derives_spend_bounds(self) -> bool:
         return self._connector.sent_spend_bound is not None
 
-    def cell_envelope_s(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
+    def cell_envelope_s(self, sample: Sample, pipeline_params: PipelineParams) -> float:
         return self._connector.cell_envelope_s(sample, pipeline_params)
 
-    def cell_hop(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
+    def cell_hop(self, sample: Sample, pipeline_params: PipelineParams) -> CycleHop | None:
         hop = self._connector.cell_hop
         return None if hop is None else hop(sample, pipeline_params)
 
-    def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
+    def prompt_delivery(self, pipeline_params: PipelineParams) -> Delivery:
         return self._connector.prompt_delivery(pipeline_params)
 
-    def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
+    def node_spend_bound(self, node: PipelineNode, cfg: NodeParams) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
-            return sent(node.name, cfg, self.workload.experiment)
+            return sent(node.name, cfg.dump(), self.workload.experiment)
         return node.spend_bound
 
-    def priced_as(self, cfg: Mapping[str, Any]) -> tuple[str | None, str | None]:
-        model, provider = cfg.get("model"), cfg.get("provider")
-        if not isinstance(model, str):
+    def priced_as(self, cfg: NodeParams) -> tuple[str | None, str | None]:
+        if cfg.model is None:
             return None, None
-        if self._connector.model_names_provider and provider is None:
-            return inline_route(model)
-        return model, provider if isinstance(provider, str) else None
+        if self._connector.model_names_provider and cfg.provider is None:
+            return inline_route(cfg.model)
+        return cfg.model, cfg.provider
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -294,7 +294,7 @@ class BackendClient:
     async def run_query[S](
         self,
         sample: Sample,
-        pipeline_params: dict[str, Any] | None = None,
+        pipeline_params: PipelineParams,
         *,
         bound: SendBound | None,
         billed: CellBilling[S],

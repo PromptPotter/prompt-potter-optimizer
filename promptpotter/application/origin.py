@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.loaders import sample_dataset
@@ -48,6 +48,7 @@ from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRol
 
 if TYPE_CHECKING:
     from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import CellSheet
 
@@ -176,7 +177,7 @@ def resolve_origin_opt_search_point(
     dataset: ResolvedDataset | None = None,
     *,
     seed: CycleSeed | None = None,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
 ) -> OptSearchPoint:
     """Seed → every prompt node's starting prompt in ``origin.yaml`` → empty."""

@@ -610,27 +610,6 @@ facts: a lint over EW's one type door, not a mechanism.
 Grouped by the arc each would ride; workaround comments and dead top-level names came back clean.
 
 **A. The pipeline carrier is typed.** **Rides with:** the next change to `pipeline_resolve.py::ParamLayers`.
-- **`pipeline_params` is an untyped `dict[str, Any]`**: engine keys (`model`, `provider`,
-  `route_order`, `max_tokens`, …) are string-read with mixed tolerance (`cfg["model"]`,
-  `cfg.get("model")`, `str(cfg.get("model", ""))`); the reserved `steps` list shares the bag with the
-  node dicts (`pipeline_overlay.py::node_config_items` skips it by `isinstance`, and `"steps"` is
-  spelled again across connectors and domain, past `domain/CLAUDE.md`'s probe); the prompt is split
-  off its config by `k != "prompt"` beside `search_point.py::strip_rendered_prompt`. Three merges
-  (`campaign_config.py::merge_config_layers` / `merge_node_overlays`, `pipeline_overlay.py::apply_node_overlay`)
-  fold one thing. An optimizer's llm nodes already read `search_point.py::NodeConfig`; the
-  free tier's per-node bounds still land in `CampaignConfig.pipeline_overlay`
-  (`application/free_tier.py::with_free_tier_layer`), read there by ~40 files, so they join `ParamLayers` as a
-  layer of their own only with this sweep. Action: `PipelineParams(steps, nodes: {name: NodeConfig})`
-  parsed once at the overlay seam, engine keys as fields, the backend's params one dict. **It
-  re-keys every optimizer treatment** (measured 2026-11-06, `offline_run.py --digests`):
-  `search_point.py::NodeConfig`, `pipeline_overlay.py::node_config_items` and
-  `RESERVED_PIPELINE_PARAM_KEYS` are `shapes_optimizer_prompt` units, `apply_node_overlay` is reached
-  from potter's `l1/population.py`, and a member module is hashed whole, annotations and imports
-  included; so the sweep is briefed with one decided re-key, never as "digests equal main". Its
-  three merges also differ in kind: `merge_config_layers` merges depth-first, `apply_node_overlay`
-  one level under the route rule, so folding them is a named behaviour change.
-  **Re-test:** `git grep -c -E 'pipeline_params: (dict|Mapping)\[str, Any\]' -- promptpotter`;
-  `git grep -n '"steps"\|k != "prompt"' -- promptpotter`.
 - **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
   `runner/inner/tasks.py::parse_resolved` re-parses at each reader (`dbllmbench.py` reads it with
   `.get("questions") or []`). Action: each connector declares its experiment model; the workload
@@ -1232,13 +1211,15 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   separability on a run that used the tenant ruler, then choose a bar — never tighten one before. **Rides
   with:** [`../../paper/README.md`](../../paper/README.md) § The sequence, stage 3. **Re-test:** a
   tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
-- **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
-  model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
-  per-value lists name only values known to fail; the spend ceiling bounds the rest. That inverts
-  what a SURVIVOR's lists mean (`store/data_root.py`'s "free tier" row, which a data-root copy
-  shadows), so it ships a migration under it. **Rides with:**
-  the next check-in pass. **Re-test:** a free account's model menu equals
-  `free_tier.yaml::task_models`.
+- **The free tier's bounds ride the campaign overlay.** `application/free_tier.py::with_free_tier_layer`
+  writes each node's bounds into `CampaignConfig.pipeline_overlay`, not a `pipeline_resolve.py::ParamLayers`
+  layer of their own: the tier as admitted needs a per-campaign home, and every home on the campaign record
+  is hashed into cycle and L4 identity (`campaign_config.py::CampaignConfig.identity`), so the move
+  re-keys the archive. Its per-value lists still name values allowed, not values known to fail; the
+  inversion has no exact rewrite of a SURVIVOR's lists (`store/data_root.py`'s "free tier" row), since
+  the value space is open. Action: decide the record's home and the lists' meaning together, with a
+  migration. **Rides with:** the next check-in pass. **Re-test:**
+  `git grep -n "pipeline_overlay" -- promptpotter/application/free_tier.py`.
 - **NEXT — the default host pin is a trial with no verdict.** `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host (`infrastructure/llm/registry.py::_MODEL_PROFILES`) into every
   node config; `route_order: []` opts out. **Decided:** a model keeps its pin only where its realized

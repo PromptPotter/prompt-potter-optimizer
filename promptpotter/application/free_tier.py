@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any, NamedTuple
+from collections.abc import Sequence
+from typing import NamedTuple
 
 from promptpotter import connectors
 from promptpotter.application.jobs.coupon import paying_key
@@ -13,7 +13,7 @@ from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER, FreeTier
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.spend import draws_coupon
 from promptpotter.infrastructure.llm.registry import providers
@@ -56,18 +56,25 @@ def with_free_tier_layer(
 ) -> CampaignConfig:
     """The tier's layer where anything the run sends draws the coupon, plus per fenced task node
     of *schema* its model's bounds: each searched axis narrowed to them within what the node
-    permits, and an unset one launched at the lowest. ``None`` reads no node."""
+    permits (the model axis to the tier's models), and an unset one launched at the lowest.
+    ``None`` reads no node."""
     if not fence.task and not fence.providers:
         return config
     tier = free_tier()
     merged = merge_config_layers(config.model_dump(mode="json", exclude_unset=True), tier.campaign)
-    space = schema.narrow(config.optimizer_narrowing) if schema is not None and fence.task else None
-    for node in space.declared_nodes if space is not None else ():
+    if schema is None or not fence.task:
+        return CampaignConfig.model_validate(merged)
+    space = schema.narrow(config.optimizer_narrowing)
+    for node in space.declared_nodes:
         cfg = {**node.current_config, **config.pipeline_overlay.get(node.name, {})}
         if not node.is_llm or not (bounds := tier.task_models.get(str(cfg.get("model")))):
             continue
         kept = node.param_allowed_values
         allowed = {p: [v for v in vs if p not in kept or v in kept[p]] for p, vs in bounds.items()}
+        # A searched model axis offers the tier's models alone, so a free check-in offers none Start refuses.
+        if "model" in node.param_keys:
+            options = space.model_options(node)
+            allowed["model"] = [m for m in tier.task_models if m in options]
         unset = {p: vs[0] for p, vs in bounds.items() if p not in cfg and vs}
         merged = merge_config_layers(
             merged,
@@ -86,7 +93,7 @@ def free_task_models() -> frozenset[str]:
 def outside_free_tier(
     config: CampaignConfig,
     selected: SelectedOptimizer,
-    pipeline_params: Mapping[str, Any],
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
     fence: FreeFence,
 ) -> list[str]:
@@ -96,11 +103,11 @@ def outside_free_tier(
     task = fence.task
     out = [
         f"the node {s}"
-        for s in (pipeline_params.get("steps", ()) if task else ())
+        for s in (pipeline_params.steps or () if task else ())
         if s not in tier.task_nodes
     ]
-    for node, cfg in node_config_items(dict(pipeline_params)) if task else ():
-        if not (model := cfg.get("model")):
+    for node, cfg in pipeline_params.nodes.items() if task else ():
+        if not (model := cfg.model):
             continue
         declared = space.get_node(node)
         searched = set() if declared is None else declared.param_keys
@@ -112,7 +119,7 @@ def outside_free_tier(
                 out.append(f"the task model {m}")
                 continue
             for param, admitted in bounds.items():
-                values = [cfg.get(param, "default")] if m == model else []
+                values = [cfg.value(param, "default")] if m == model else []
                 if declared is not None and param in searched:
                     values += space.param_options(declared, param, model=m) or ["any"]
                 out += [f"{param} {v} on {m}" for v in values if v not in admitted]

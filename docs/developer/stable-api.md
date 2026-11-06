@@ -15,7 +15,7 @@ The frozen dataclass `promptpotter/connectors/protocol.py::Connector`: **the dat
 anything = "my_package.connector:CONNECTOR"
 ```
 
-The object must be a `Connector`; **its `name` field is the registry key**, so a package cannot claim a key its connector does not declare. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py). A plugin is trusted code, not sandboxed ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed); v1 promises entry points never become one. Built-ins are not entry points. Beyond `protocol.py`: wire adapters MUST be pure `(sample, pipeline_params) → dict`, the `identity_config` layer removed before the call · `extract_experiment` MUST return the panel's rows in panel order.
+The object must be a `Connector`; **its `name` field is the registry key**, so a package cannot claim a key its connector does not declare. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py). A plugin is trusted code, not sandboxed ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed); v1 promises entry points never become one. Built-ins are not entry points. Beyond `protocol.py`: wire adapters MUST be pure `(sample, PipelineParams) → dict` over the typed carrier (`promptpotter/domain/pipeline_params.py::PipelineParams`), the `identity_config` layer removed before the call · `extract_experiment` MUST return the panel's rows in panel order.
 
 ---
 

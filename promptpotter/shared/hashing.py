@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NewType, TypedDict
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
     from types import ModuleType
 
 ID_HEX = 16
@@ -271,14 +271,15 @@ def dataset_hash(dataset: Iterable[Any]) -> str:
 
 def content_hash(
     dataset: Iterable[Any],
-    pipeline_params: dict[str, Any] | None,
+    laid_params: Mapping[str, Any],
     *,
     candidate_library: Iterable[str],
 ) -> str:
-    """Each node's rendered ``prompt`` rides its config, so *pipeline_params* covers every prompt."""
+    """*laid_params* is the pipeline params' laid document: each node's rendered ``prompt`` rides
+    its config, so it covers every prompt; an empty one is omitted."""
     blob_dict: dict[str, Any] = {"dataset": dataset_hash(dataset)}
-    if pipeline_params:
-        blob_dict["pipeline_params"] = pipeline_params
+    if laid_params:
+        blob_dict["pipeline_params"] = dict(laid_params)
     if library := sorted(set(candidate_library)):
         blob_dict["candidate_library"] = library
     return stable_hash(blob_dict, length=ADDRESS_HEX)

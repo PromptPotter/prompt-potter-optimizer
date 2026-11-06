@@ -34,6 +34,7 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
     ManifestNodeOverlay,
@@ -965,7 +966,7 @@ class CycleFinal(FrozenModel):
     # The round the optimizer's DECLARED pick was selected in.
     result_round: int
     result_prompt_fields: dict[str, dict[str, str]]
-    result_pipeline_params: dict[str, Any] | None
+    result_pipeline_params: PipelineParams | None
 
 
 class ElectionRecord(Election):

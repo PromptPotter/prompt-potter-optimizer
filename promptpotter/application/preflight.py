@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application import optimizers
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import NodeParams
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import usd_text
 from promptpotter.infrastructure.llm.pricing import route_priced
@@ -19,6 +19,7 @@ from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign import Arm
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
@@ -326,36 +327,35 @@ def refuse_unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -
         raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
 
 
-def optimizer_node_configs(selected: SelectedOptimizer) -> list[tuple[str, Mapping[str, Any]]]:
+def optimizer_node_configs(selected: SelectedOptimizer) -> list[tuple[str, NodeParams]]:
     """Every llm node a run DECLARES beside its pipeline, off the `default` chain too, or an
     escalation node escapes."""
     return [
-        *((n, selected.call_settings(n)) for n in selected.llm_nodes),
-        (CHECKIN_NODE, checkin_manifest().config.call_settings()),
+        *((n, NodeParams.parse(selected.call_settings(n))) for n in selected.llm_nodes),
+        (CHECKIN_NODE, NodeParams.parse(checkin_manifest().config.call_settings())),
     ]
 
 
-def refuse_below_reasoning_floor(node_configs: Iterable[tuple[str, Mapping[str, Any]]]) -> None:
+def refuse_below_reasoning_floor(node_configs: Iterable[tuple[str, NodeParams]]) -> None:
     """Over every node a pass sends to: a run's (`jobs/mint.py::refuse_unrunnable`), or a
     pipeline scored outside every run (`loop_start.py::arm_diagnostic_scoring`). An ABSENT
     ``max_tokens`` is the sanctioned default, never a violation."""
     refused: list[str] = []
     below_floor: list[str] = []
     for node, cfg in node_configs:
-        model = cfg.get("model")
-        if not model:
+        if not (model := cfg.model):
             continue
-        profile = model_profile(str(model))
+        profile = model_profile(model)
         if profile is None:
             continue
-        if (effort := cfg.get("reasoning_effort")) in profile.refuses_efforts:
+        if (effort := cfg.reasoning_effort) in profile.refuses_efforts:
             refused.append(
                 f"node '{node}': model '{model}' is measured to refuse reasoning_effort="
                 f"{effort}, so every call to it fails. Set reasoning_effort to a rung it "
                 f"answers, or another model."
             )
-        max_tokens = cfg.get("max_tokens")
-        if max_tokens is not None and int(max_tokens) < profile.min_max_tokens:
+        max_tokens = cfg.max_tokens
+        if max_tokens is not None and max_tokens < profile.min_max_tokens:
             below_floor.append(
                 f"node '{node}': reasoning model '{model}' is pinned to max_tokens="
                 f"{max_tokens}, below its floor {profile.min_max_tokens}. It will spend the "
@@ -379,13 +379,13 @@ def refuse_below_reasoning_floor(node_configs: Iterable[tuple[str, Mapping[str, 
 Route = tuple[str, str, tuple[str, ...] | None]
 
 
-def task_routes(pipeline_params: Mapping[str, Any], schema: PipelineSchema) -> list[Route]:
+def task_routes(pipeline_params: PipelineParams, schema: PipelineSchema) -> list[Route]:
     """Each task node's model, and each model its axis offers: ``(model, provider, hosts)``."""
     routes: dict[Route, None] = {}
-    for _node, cfg in node_config_items(dict(pipeline_params)):
-        model, provider, hosts = cfg.get("model"), cfg.get("provider"), cfg.get("route_order")
-        if model and provider:
-            routes[str(model), str(provider), tuple(hosts) if hosts else None] = None
+    for cfg in pipeline_params.nodes.values():
+        if cfg.model and cfg.provider:
+            hosts = tuple(cfg.route_order) if cfg.route_order else None
+            routes[cfg.model, cfg.provider, hosts] = None
     for node in schema.nodes:
         if node.provider and "model" in node.param_keys:
             for model in schema.model_options(node):
@@ -396,7 +396,7 @@ def task_routes(pipeline_params: Mapping[str, Any], schema: PipelineSchema) -> l
 def unpriced_routes(
     config: CampaignConfig,
     selected: SelectedOptimizer,
-    pipeline_params: Mapping[str, Any],
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
 ) -> list[str]:
     """Every route a run may send on, the optimizer's too, that no rate prices — under a dollar

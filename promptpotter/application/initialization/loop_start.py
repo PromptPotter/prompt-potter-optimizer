@@ -38,7 +38,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -153,7 +152,7 @@ def arm_diagnostic_scoring(
     source: RunSource,
 ) -> None:
     # A run is refused at its mint (`jobs/mint.py::refuse_unrunnable`); a pass outside one, here.
-    refuse_below_reasoning_floor(node_config_items(dict(session.pipeline_params)))
+    refuse_below_reasoning_floor(session.pipeline_params.nodes.items())
     scope_memory(session)
     populate_session_scoring(
         session,
@@ -282,11 +281,10 @@ async def _emit_preflight_and_init_session(
     origin: CampaignOrigin,
 ) -> None:
 
-    target_node_configs = list(node_config_items(session.pipeline_params))
-    target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
+    target_models = tuple(cfg.model for cfg in session.pipeline_params.nodes.values() if cfg.model)
 
-    bound = await cell_bound(session, session.pipeline_params or {})
-    measured = measured_cell_price(session, session.pipeline_params or {})
+    bound = await cell_bound(session, session.pipeline_params)
+    measured = measured_cell_price(session, session.pipeline_params)
     instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,

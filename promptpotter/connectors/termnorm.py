@@ -7,11 +7,12 @@ import httpx
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, cell_envelope_of
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import STEPS_KEY
 from promptpotter.domain.pipeline_schema import NodeRole
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -22,16 +23,14 @@ _CELL_ENVELOPE_S = 600.0
 
 def termnorm_wire_adapter(
     sample: Sample,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
 
-    _pp = pipeline_params or {}
+    if pipeline_params.steps is not None:
+        payload[STEPS_KEY] = list(pipeline_params.steps)
 
-    if "steps" in _pp:
-        payload["steps"] = _pp["steps"]
-
-    wire_overrides = dict(node_config_items(_pp))
+    wire_overrides = pipeline_params.laid_nodes()
     if wire_overrides:
         payload["node_config"] = wire_overrides
 

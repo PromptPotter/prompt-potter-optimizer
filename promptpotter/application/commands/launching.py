@@ -52,7 +52,6 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import CampaignLaunch
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
@@ -106,7 +105,7 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
             CAMPAIGN_BABYSIT_CAP,
         )
         raise NotFoundError("Not found", code="not_found")
-    for node, cfg in node_config_items(sent.pipeline_overlay):
+    for node, cfg in sent.pipeline_overlay.items():
         allowed = narrowing[node].param_allowed_values if node in narrowing else {}
         for param, value in cfg.items():
             if param in allowed and str(value) not in allowed[param]:

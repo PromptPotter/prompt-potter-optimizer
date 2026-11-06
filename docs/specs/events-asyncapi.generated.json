@@ -2332,14 +2332,12 @@
           "result_pipeline_params": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PipelineParams"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Result Pipeline Params"
+            ]
           },
           "result_prompt_fields": {
             "additionalProperties": {
@@ -5261,10 +5259,8 @@
             "$ref": "#/components/schemas/IndividualLineage"
           },
           "pipeline_params": {
-            "additionalProperties": true,
-            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer.",
-            "title": "Pipeline Params",
-            "type": "object"
+            "$ref": "#/components/schemas/PipelineParams",
+            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer."
           },
           "prompts": {
             "additionalProperties": {
@@ -5993,6 +5989,10 @@
           "event"
         ],
         "title": "PhaseRecord",
+        "type": "object"
+      },
+      "PipelineParams": {
+        "additionalProperties": true,
         "type": "object"
       },
       "PipelineRead": {

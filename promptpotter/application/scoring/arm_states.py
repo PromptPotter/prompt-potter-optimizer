@@ -23,6 +23,7 @@ from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -48,16 +49,16 @@ def _abort_is_config_break(cr: DegradationContext) -> bool:
 def read_breakage(
     signal: BrokenSignal,
     *,
-    effective_pipeline_params: dict[str, Any] | None,
+    effective_pipeline_params: PipelineParams,
     round_num: int,
     changes_description: str,
 ) -> Broken:
     cr = signal.check_result
-    params = effective_pipeline_params or {}
+    params = effective_pipeline_params
     aborted = signal.check_name == SCORING_ERROR_ABORT
     # An abort names an error, not a node, so it shows the whole config.
     node = None if aborted else cr["dominant_warning"].split(":", 1)[0]
-    node_cfg = params if node is None else params.get(node, {})
+    node_cfg = params.dump() if node is None else params.node(node).dump()
     operator_terminal = cr["fatal"] or (aborted and _abort_is_config_break(cr))
     return Broken(
         failure=RuntimeFailure(
@@ -67,7 +68,7 @@ def read_breakage(
             degraded_rate=cr["degraded_rate"],
             degraded_count=cr["degraded_count"],
             total_scored=cr["total_scored"],
-            observed_config=dict(node_cfg),
+            observed_config=node_cfg,
             first_seen_round=round_num,
             changes_description=changes_description,
             owner=NurseOwner.OPERATOR if operator_terminal else NurseOwner.L1,
@@ -94,7 +95,7 @@ def measuring(
         validation_failures=arm.validation_failures,
         # Off the object the gateway hands `archive_entry`: one id for the arm and its cells' filing.
         sp_hash=sp.sp_hash(schema),
-        resolved_params=sp.config_params or {},
+        resolved_params=sp.config_params.dump(),
         sample_order=list(sample_order),
         n_priors=n_priors,
         block=None if block is None else dict(block),

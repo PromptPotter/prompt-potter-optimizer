@@ -17,7 +17,7 @@ from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import NodeParams, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
@@ -92,31 +92,17 @@ def interpolate_prompt(text: str, variables: dict[str, Any]) -> str:
 
 
 def interpolate_pipeline_params(
-    pipeline_params: dict[str, Any],
+    pipeline_params: PipelineParams,
     query_data: dict[str, Any],
-) -> dict[str, Any]:
-    has_templates = False
-    for v in pipeline_params.values():
-        if isinstance(v, dict) and "prompt" in v:
-            prompt = v["prompt"]
-            if isinstance(prompt, str) and _TEMPLATE_VAR_RE.search(prompt):
-                has_templates = True
-                break
-
-    if not has_templates:
-        return pipeline_params
-
-    out = dict(pipeline_params)
-    for node_name, node_cfg in out.items():
-        if not isinstance(node_cfg, dict) or "prompt" not in node_cfg:
+) -> PipelineParams:
+    nodes = dict(pipeline_params.nodes)
+    for node_name, node_cfg in pipeline_params.nodes.items():
+        if node_cfg.prompt is None or not _TEMPLATE_VAR_RE.search(node_cfg.prompt):
             continue
-        prompt = node_cfg["prompt"]
-        if not isinstance(prompt, str):
-            continue
-        interpolated = interpolate_prompt(prompt, query_data)
-        if interpolated is not prompt:
-            out[node_name] = {**node_cfg, "prompt": interpolated}
-    return out
+        interpolated = interpolate_prompt(node_cfg.prompt, query_data)
+        if interpolated is not node_cfg.prompt:
+            nodes[node_name] = node_cfg.laid({"prompt": interpolated})
+    return pipeline_params.with_nodes(nodes)
 
 
 # Kept whatever the schema declares; ``pipeline_params`` is NOT here: the archive lifts it onto the index entry.
@@ -143,9 +129,9 @@ PricedPair = tuple[str | None, str | None]
 _UNROUTED: PricedPair = (None, None)
 
 
-def priced_pairs(session: Session, wire_params: Mapping[str, Any]) -> dict[str, PricedPair]:
+def priced_pairs(session: Session, wire_params: PipelineParams) -> dict[str, PricedPair]:
     priced_as = session.backend_client.priced_as
-    return {name: priced_as(cfg) for name, cfg in wire_params.items() if isinstance(cfg, Mapping)}
+    return {name: priced_as(cfg) for name, cfg in wire_params.nodes.items()}
 
 
 def _reply_spend(data: Mapping[str, Any], pairs: Mapping[str, PricedPair]) -> PipelineData:
@@ -241,10 +227,8 @@ def cell_billing(
     return billed
 
 
-async def _attempt_bound(
-    spend: LLMSpendBound, cfg: Mapping[str, Any], priced_as: PricedPair
-) -> SendBound:
-    reply = int(cfg.get("max_tokens") or spend.max_tokens)
+async def _attempt_bound(spend: LLMSpendBound, cfg: NodeParams, priced_as: PricedPair) -> SendBound:
+    reply = cfg.max_tokens or spend.max_tokens
     reads = spend.input_tokens + FRAMING_TOKENS
     model, provider = priced_as
     ceiling = await hold_ceiling(model, provider, hosts=spend.hosts) if model and provider else None
@@ -261,18 +245,17 @@ async def _attempt_bound(
 
 
 def _node_spends(
-    session: Session, wire_params: Mapping[str, Any]
-) -> list[tuple[PipelineNode, Mapping[str, Any], NodeSpendBound | None]]:
+    session: Session, wire_params: PipelineParams
+) -> list[tuple[PipelineNode, NodeParams, NodeSpendBound | None]]:
     client = session.backend_client
     spends = []
     for node in session.pipeline_schema.nodes:
-        raw_cfg = wire_params.get(node.name)
-        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
+        cfg = wire_params.node(node.name)
         spends.append((node, cfg, client.node_spend_bound(node, cfg)))
     return spends
 
 
-async def attempt_bounds(session: Session, wire_params: Mapping[str, Any]) -> dict[str, SendBound]:
+async def attempt_bounds(session: Session, wire_params: PipelineParams) -> dict[str, SendBound]:
     priced_as = session.backend_client.priced_as
     return {
         node.name: await _attempt_bound(spend, cfg, priced_as(cfg))
@@ -284,13 +267,9 @@ async def attempt_bounds(session: Session, wire_params: Mapping[str, Any]) -> di
 _PRICED_RUNS = 32
 
 
-def measured_cell_price(session: Session, wire_params: Mapping[str, Any]) -> CellPrice | None:
+def measured_cell_price(session: Session, wire_params: PipelineParams) -> CellPrice | None:
     """What a cell BILLED on these models over the archive's newest rows; ``None`` before any."""
-    on_models = {
-        name: {"model": cfg["model"]}
-        for name, cfg in node_config_items(dict(wire_params))
-        if cfg.get("model")
-    }
+    on_models = {name: {"model": cfg.model} for name, cfg in wire_params.nodes.items() if cfg.model}
     costs: list[float] = []
     seconds: list[float] = []
     for m in session.store.archive.measurements_for_config(
@@ -310,7 +289,7 @@ def measured_cell_price(session: Session, wire_params: Mapping[str, Any]) -> Cel
     )
 
 
-async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:
+async def cell_bound(session: Session, wire_params: PipelineParams) -> SendBound | None:
     """``None`` where the backend's own sends are each admitted; a node with no served bound leaves it UNBOUNDED."""
     client = session.backend_client
     if client.holds_own_sends and not client.derives_spend_bounds:
@@ -349,7 +328,7 @@ def _compute_step_tokens(
     reported: Mapping[str, StepUsage],
     resp_data: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
-    wire_params: Mapping[str, Any],
+    wire_params: PipelineParams,
     pairs: Mapping[str, PricedPair],
 ) -> dict[str, StepUsage]:
     out = dict(reported)
@@ -394,11 +373,10 @@ def _at_our_rate(usage: StepUsage) -> StepUsage:
 def _estimated_usage(
     node: PipelineNode,
     resp_data: Mapping[str, Any],
-    wire_params: Mapping[str, Any],
+    wire_params: PipelineParams,
     priced_as: PricedPair,
 ) -> StepUsage:
-    node_cfg = wire_params.get(node.name) or {}
-    in_text = (node_cfg.get("prompt") if isinstance(node_cfg, dict) else None) or ""
+    in_text = wire_params.node(node.name).prompt or ""
     out_text = " ".join(_observed_texts(node, resp_data))
     model, provider = priced_as
     return StepUsage(
@@ -493,20 +471,20 @@ _HTTP_FAILURE_WORDS: dict[ErrorCategory, str] = {
 
 
 def _without_identity(
-    pipeline_params: dict[str, Any], identity_keys: Mapping[str, frozenset[str]]
-) -> dict[str, Any]:
-    return {
-        node: {k: v for k, v in cfg.items() if k not in owned}
-        if (owned := identity_keys.get(node)) and isinstance(cfg, dict)
-        else cfg
-        for node, cfg in pipeline_params.items()
-    }
+    pipeline_params: PipelineParams, identity_keys: Mapping[str, frozenset[str]]
+) -> PipelineParams:
+    return pipeline_params.with_nodes(
+        {
+            node: cfg.without(*owned) if (owned := identity_keys.get(node)) else cfg
+            for node, cfg in pipeline_params.nodes.items()
+        }
+    )
 
 
 async def measure_sample(
     sample: Sample,
     session: Session,
-    pipeline_params: dict[str, Any] | None = None,
+    pipeline_params: PipelineParams,
     /,
 ) -> MeasuredCell:
     """One cell's FACTS — ungraded; the walk grades every row it takes, fresh or replayed."""
@@ -515,7 +493,7 @@ async def measure_sample(
     pipeline_schema = session.pipeline_schema
     try:
         wire_params = interpolate_pipeline_params(
-            _without_identity(pipeline_params or {}, session.identity_keys), sample.model_dump()
+            _without_identity(pipeline_params, session.identity_keys), sample.model_dump()
         )
         pairs = priced_pairs(session, wire_params)
         data, spent, envelope = await _send_cell(sample, session, wire_params, pairs)
@@ -533,7 +511,7 @@ async def measure_sample(
         pd["cell_report"] = _cell_report(data, session.backend_client.connector)
         # The envelope's final reading, taken AFTER its scope closed.
         pd["unworked_s"] = envelope.unworked
-        pd.update(_candidate_and_sample_facts(sample, pipeline_schema, pipeline_params or {}))
+        pd.update(_candidate_and_sample_facts(sample, pipeline_schema, pipeline_params))
         result = MeasuredCell(
             sample_key=sample.key,
             query=sample.query,
@@ -576,7 +554,7 @@ async def measure_sample(
 async def _send_cell(
     sample: Sample,
     session: Session,
-    wire_params: dict[str, Any],
+    wire_params: PipelineParams,
     pairs: Mapping[str, PricedPair],
 ) -> tuple[dict[str, Any], PipelineData, CellEnvelope]:
     query = sample.query
@@ -666,16 +644,15 @@ def _cell_report(data: Mapping[str, Any], connector: Connector) -> dict[str, Any
 
 
 def _candidate_and_sample_facts(
-    sample: Sample, pipeline_schema: PipelineSchema, pipeline_params: Mapping[str, Any]
+    sample: Sample, pipeline_schema: PipelineSchema, pipeline_params: PipelineParams
 ) -> dict[str, Any]:
     facts: dict[str, Any] = {}
     # Off `pipeline_params`, never `wire_params`: no sample's own length may reach a prompt-length term.
     # Summed over every prompt node: the term prices the whole prompt the configuration ships.
     rendered = [
-        cfg["prompt"]
+        prompt
         for node in pipeline_schema.prompt_nodes()
-        if isinstance(cfg := pipeline_params.get(node.name), dict)
-        and isinstance(cfg.get("prompt"), str)
+        if (prompt := pipeline_params.node(node.name).prompt) is not None
     ]
     if rendered:
         facts["target_prompt_chars"] = sum(map(len, rendered))
@@ -731,7 +708,7 @@ def compare_rerun(
 
 def _rerun_would_repeat_token_budget_failure(
     cached_result: MeasuredCell,
-    rerun_pipeline_params: dict[str, Any] | None,
+    rerun_pipeline_params: PipelineParams,
 ) -> bool:
     # The helper `classify_result` stamps its codes with: a second spelling of the node misses silently.
     node = terminal_node(cached_result)
@@ -750,11 +727,11 @@ def _rerun_would_repeat_token_budget_failure(
     if cached_completion <= 0:
         return False
 
-    rerun_max_tokens = ((rerun_pipeline_params or {}).get(node) or {}).get("max_tokens")
+    rerun_max_tokens = rerun_pipeline_params.node(node).max_tokens
     if rerun_max_tokens is None:
         return False
 
-    return int(rerun_max_tokens) <= cached_completion
+    return rerun_max_tokens <= cached_completion
 
 
 async def execute_stale_data_protocol(
@@ -762,7 +739,7 @@ async def execute_stale_data_protocol(
     cached_result: MeasuredCell,
     session: Session,
     *,
-    pipeline_params: dict[str, Any] | None = None,
+    pipeline_params: PipelineParams,
     sample_index: SampleIndex | None = None,
 ) -> tuple[MeasuredCell, str]:
     result = cached_result

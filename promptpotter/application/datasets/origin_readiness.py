@@ -13,7 +13,6 @@ from promptpotter.domain.checkin_draft import (
     SetupStep,
 )
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.worded import Worded
 
@@ -236,9 +235,8 @@ def _check_confirmed(
 
 
 def _check_node_models(pipeline: DraftPipeline, *, gaps: list[FieldGap]) -> None:
-    configs = dict(node_config_items(pipeline.params))
     for node in pipeline.chain.nodes:
-        if node.is_llm and not configs.get(node.name, {}).get("model"):
+        if node.is_llm and not pipeline.params.node(node.name).model:
             gaps.append(
                 FieldGap.of(
                     f"node.{node.name}.model",

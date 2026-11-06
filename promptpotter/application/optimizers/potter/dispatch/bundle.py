@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
@@ -14,6 +14,7 @@ from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
 from promptpotter.domain.results import RoundOutcome, RoundResult
@@ -192,7 +193,7 @@ class CycleSlice:
     l1_stall_depth: int
     ladder: Ladder
     exploration_budget: str
-    pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     composite_formula: str | None = None
     matcher: str | None = None
     budget_rounds: int | None = None

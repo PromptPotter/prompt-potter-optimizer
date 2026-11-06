@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.cell_terms import CellTerm
     from promptpotter.domain.checkin_draft import DraftFile
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -243,13 +244,13 @@ def _folded_scoring(
 
 
 def _authored_contract(
-    config: dict[str, Any], params: dict[str, Any], edit: NodeOutputEdit
+    config: dict[str, Any], params: PipelineParams, edit: NodeOutputEdit
 ) -> dict[str, Any]:
     """*params*, what the node runs before this edit, says whether it already declares a contract:
     a reused dataset's own counts."""
     overlay = _block(config.get("pipeline_overlay"))
     node = _block(overlay.get(edit.node))
-    running = _block(params.get(edit.node))
+    running = params.node(edit.node).dump()
     fields = list(_block(edit.output_schema.get("properties")))
     first = not _block(running.get(OUTPUT_SCHEMA_KEY))
     authored = [f for f in edit.answer_fields or () if f in fields]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics, head_health
@@ -24,7 +24,6 @@ from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import Election, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_records import ResumeCheckpointRecord, RoundProposedRecord
@@ -39,6 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.bench import BenchPasses
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
@@ -126,13 +126,10 @@ def _origin_fit(difficulty: DifficultyView, origin: ReadArm) -> dict[ArmKey, Arm
     }
 
 
-def _assert_overlay_preserved(
-    sp: JobSearchPoint, session_pipeline_params: dict[str, Any] | None
-) -> None:
+def _assert_overlay_preserved(sp: JobSearchPoint, session_pipeline_params: PipelineParams) -> None:
     """``content_hash`` flips on an overlay edit only if those keys survive into ``sp.pipeline_params``."""
-    sp_pp = sp.pipeline_params or {}
-    for node, cfg in node_config_items(session_pipeline_params):
-        missing = set(cfg) - set(sp_pp.get(node, {}))
+    for node, cfg in session_pipeline_params.nodes.items():
+        missing = set(cfg.keys()) - set(sp.pipeline_params.node(node).keys())
         assert not missing, (
             f"overlay keys stripped from {node}: {sorted(missing)} — "
             "the origin must carry session.pipeline_params, not a sparse schema view"

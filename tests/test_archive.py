@@ -119,6 +119,7 @@ from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
@@ -980,7 +981,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             origin_prompts=prompted(**fields).prompts,
             origin_source=OriginSource.FORK_SEED,
         )
-        resolved = resolve_origin_opt_search_point(seed=seed, pipeline_params=None, schema=solving)
+        resolved = resolve_origin_opt_search_point(
+            seed=seed, pipeline_params=PipelineParams(), schema=solving
+        )
         return try_inherit_fork_origin(
             session,
             seed,
@@ -1650,7 +1653,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             "c1",
             slot=ArmSlot(round=1, idx=0, total=1),
             individual=child,
-            resolved_params=sp.config_params or {},
+            resolved_params=sp.config_params.dump(),
             sp_hash=sp.sp_hash(cycle.session.pipeline_schema),
         )
         line = [

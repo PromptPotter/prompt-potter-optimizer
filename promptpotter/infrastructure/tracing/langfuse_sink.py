@@ -266,7 +266,7 @@ class LangfuseSink(TraceSink):
             "prompt_fields_id": event.prompt_fields_id,
         }
         if event.pipeline_params:
-            metadata["pipeline_params"] = event.pipeline_params
+            metadata["pipeline_params"] = event.pipeline_params.dump()
         trace_name = f"{event.schema_name}_pipeline" if event.schema_name else "pipeline"
         trace_id = self._lf.create_trace(
             name=trace_name,

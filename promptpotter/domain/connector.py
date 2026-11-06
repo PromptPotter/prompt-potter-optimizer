@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import httpx
 
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
 
 
@@ -85,7 +86,7 @@ class WireAdapter(Protocol):
     def __call__(
         self,
         sample: Sample,
-        pipeline_params: dict[str, Any] | None,
+        pipeline_params: PipelineParams,
     ) -> dict[str, Any]: ...
 
 
@@ -112,7 +113,7 @@ def data_envelope(body: dict[str, Any]) -> dict[str, Any]:
 class CellEnvelopeSeconds(Protocol):
     """The NUMBER only; the bound it puts in force is ``scoring/cell_envelope.py::CellEnvelope``."""
 
-    def __call__(self, sample: Sample, pipeline_params: dict[str, Any] | None, /) -> float: ...
+    def __call__(self, sample: Sample, pipeline_params: PipelineParams, /) -> float: ...
 
 
 class CellHop(Protocol):
@@ -121,7 +122,7 @@ class CellHop(Protocol):
     def __call__(
         self,
         sample: Sample,
-        pipeline_params: dict[str, Any] | None,
+        pipeline_params: PipelineParams,
     ) -> CycleHop | None: ...
 
 

@@ -321,7 +321,7 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
         l1_stall_depth=stall_depth,
         ladder=ladder,
         exploration_budget=exploration_budget(stall_depth, escalation.l1_patience).value,
-        pipeline_params=dict(frontier.parent_point.pipeline_params),
+        pipeline_params=frontier.parent_point.pipeline_params,
         composite_formula=target.cell_formula,
         matcher=target.matcher,
         budget_rounds=bounds.budget_rounds,

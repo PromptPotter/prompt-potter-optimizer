@@ -11026,6 +11026,10 @@
         "title": "NodeOutputSchema",
         "type": "object"
       },
+      "NodeParams": {
+        "additionalProperties": true,
+        "type": "object"
+      },
       "NodePrompt": {
         "additionalProperties": false,
         "description": "One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``.",
@@ -11183,10 +11187,8 @@
             "$ref": "#/components/schemas/IndividualLineage"
           },
           "pipeline_params": {
-            "additionalProperties": true,
-            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer.",
-            "title": "Pipeline Params",
-            "type": "object"
+            "$ref": "#/components/schemas/PipelineParams",
+            "description": "Its node configuration, resolved: the active steps named, the output contract folded, no rendered prompt. `configured` is the one writer."
           },
           "prompts": {
             "additionalProperties": {
@@ -12617,6 +12619,10 @@
           "at"
         ],
         "title": "PauseReading",
+        "type": "object"
+      },
+      "PipelineParams": {
+        "additionalProperties": true,
         "type": "object"
       },
       "PipelineView": {

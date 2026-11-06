@@ -11,7 +11,7 @@ from pydantic import Field
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import CellSet, instrument_of
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter
@@ -40,7 +40,7 @@ def bench_set_of(
     split: DatasetSplit | None,
     bench_rows: CellSet,
     scorer_id: str,
-    origin_params: Mapping[str, Any] | None,
+    origin_params: PipelineParams | None,
     origin: str,
 ) -> BenchSet:
     return BenchSet(
@@ -50,9 +50,9 @@ def bench_set_of(
         bench_rows=bench_rows,
         scorer_id=scorer_id,
         models={
-            node: str(cfg["model"])
-            for node, cfg in node_config_items(dict(origin_params or {}))
-            if "model" in cfg
+            node: cfg.model
+            for node, cfg in ({} if origin_params is None else origin_params.nodes).items()
+            if cfg.model is not None
         },
         origin=origin,
     )

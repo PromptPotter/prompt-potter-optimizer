@@ -7,7 +7,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.task_context import (
     campaign_framing,
@@ -70,7 +70,7 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     BackendRevision,
@@ -112,7 +112,7 @@ def refuse_unrunnable(
     campaign_config: CampaignConfig,
     selected: SelectedOptimizer,
     dataset: Sequence[Sample],
-    pipeline_params: Mapping[str, Any],
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
     *,
     fence: FreeFence | None,
@@ -130,7 +130,7 @@ def refuse_unrunnable(
     if pools := selected.pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
     refuse_below_reasoning_floor(
-        [*node_config_items(dict(pipeline_params)), *optimizer_node_configs(selected)]
+        [*pipeline_params.nodes.items(), *optimizer_node_configs(selected)]
     )
     refuse_unpriced(unpriced_routes(campaign_config, selected, pipeline_params, schema))
     if fence is not None:
@@ -146,7 +146,7 @@ class CyclePlan:
 
     declaration: RunDeclaration
     schema: PipelineSchema
-    pipeline_params: dict[str, Any]
+    pipeline_params: PipelineParams
     origin: OptSearchPoint
     # What the origin's render splices in, which a mint's check-in may commit after the refusals.
     framing: TaskDecomposition

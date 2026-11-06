@@ -20,6 +20,7 @@ from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_overlay import merge_pipeline_params, steers_disallowed_model
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.scoring import MAX_PASS_ROWS
@@ -568,15 +569,15 @@ class CycleConfig(FrozenModel):
     @classmethod
     def laid(cls, declared: CampaignConfig, spans: Sequence[LaidSpan]) -> CycleConfig:
         config = declared
-        overlay: dict[str, Any] = {}
+        overlay = PipelineParams()
         for span in spans:
             if (seed := span.seed) is not None:
                 config = apply_config_overrides(config, seed.config_overrides)
                 narrowing = _narrowed(config.optimizer_narrowing, seed.optimizer_narrowing)
                 config = config.model_copy(update={"optimizer_narrowing": narrowing})
-                overlay = merge_pipeline_params(overlay, seed.pipeline_overlay, None) or {}
+                overlay = merge_pipeline_params(overlay, seed.pipeline_overlay, None)
             config = scoring_locked(config, span.scoring_lock)
-        return cls(config=config, spans=tuple(spans), seed_overlay=overlay)
+        return cls(config=config, spans=tuple(spans), seed_overlay=overlay.laid_nodes())
 
     def steers_outside(self, permitted: Mapping[str, NodeSearchNarrowing]) -> bool:
         """The babysit act (decisions.md § 0005): a seed of the line steers outside what the nodes

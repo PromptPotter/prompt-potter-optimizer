@@ -18,7 +18,6 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, cell_envelope_of
 from promptpotter.domain.connector import AuthScheme
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import OUTPUT_CONTRACT_KEYS
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.tls import tls_context
@@ -26,6 +25,7 @@ from promptpotter.shared.tls import tls_context
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -46,7 +46,7 @@ def _object_or_text(text: str) -> Any:
     return value if isinstance(value, dict) else text
 
 
-def n8n_wire_adapter(sample: Sample, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
+def n8n_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     # `prompt: ""` is the contract's word for the harness's production text.
     payload: dict[str, Any] = {
         "case_id": sample.key,
@@ -55,11 +55,9 @@ def n8n_wire_adapter(sample: Sample, pipeline_params: dict[str, Any] | None) -> 
         "prompt": "",
         "params": {},
     }
-    for node, cfg in node_config_items(pipeline_params):
-        if node != HARNESS_NODE:
-            continue
-        payload["prompt"] = cfg.get("prompt") or ""
-        payload["params"] = {k: cfg[k] for k in OUTPUT_CONTRACT_KEYS if k in cfg}
+    if (cfg := pipeline_params.nodes.get(HARNESS_NODE)) is not None:
+        payload["prompt"] = cfg.prompt or ""
+        payload["params"] = {k: cfg.value(k) for k in OUTPUT_CONTRACT_KEYS if k in cfg}
     return payload
 
 

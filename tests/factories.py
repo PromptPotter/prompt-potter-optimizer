@@ -91,6 +91,7 @@ from promptpotter.domain.paired_reading import (
     RoundArm,
 )
 from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
     PipelineNode,
@@ -358,7 +359,7 @@ def filed_under(
         config_key=config_key(configs),
         prompt_fields_id=prompt_fields_id,
         node_configs=configs,
-        pipeline_params={},
+        pipeline_params=PipelineParams(),
         dataset_hash=dataset_hash,
     )
 
@@ -518,7 +519,7 @@ def seat(
             "C0",
             slot=ArmSlot(round=0, idx=0, total=1),
             individual=individual,
-            resolved_params=sp.config_params or {},
+            resolved_params=sp.config_params.dump(),
             sp_hash=sp.sp_hash(session.pipeline_schema),
         )
         seated = Cycle.start(

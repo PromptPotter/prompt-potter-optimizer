@@ -36,7 +36,7 @@ BASELINE = {
     # Parameters annotated `Any`.
     "any_params": 42,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 67,
+    "domain_any_maps": 46,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 8,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.

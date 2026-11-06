@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
@@ -199,7 +200,7 @@ LIFT_SIDE_TONE: Worded[LiftSide, Tone] = Worded(
 LiftReference = Literal["best_so_far", "parents"]
 
 
-def instrument_of(dataset_hash: str, pipeline_params: object) -> str:
+def instrument_of(dataset_hash: str, pipeline_params: PipelineParams | None) -> str:
     """*pipeline_params* is any searchpoint of the cycle: the stamp is the cycle's."""
     inner = inner_origin_of(pipeline_params)
     return dataset_hash if inner is None else f"{dataset_hash}@{inner}"

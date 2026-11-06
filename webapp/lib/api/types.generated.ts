@@ -2183,8 +2183,28 @@ export interface OptSearchPoint {
   prompts: Record<string, NodePrompt>;
   /** Its node configuration, resolved: the active steps named, the output contract
    * folded, no rendered prompt. `configured` is the one writer. */
-  pipeline_params: Record<string, unknown>;
+  pipeline_params: PipelineParams;
   lineage: IndividualLineage;
+}
+
+/** What a pipeline runs with: the chain's ``steps`` (``None`` where none is named) and each */
+export interface PipelineParams {
+  steps?: string[] | null;
+  nodes?: Record<string, NodeParams>;
+}
+
+/** One node's laid config: the engine's keys typed as laid (strict, so a value of the wrong */
+export interface NodeParams {
+  provider?: string | null;
+  model?: string | null;
+  route_order?: string[] | null;
+  temperature?: number | number | null;
+  max_tokens?: number | null;
+  reasoning_effort?: string | null;
+  top_p?: number | number | null;
+  seed?: number | null;
+  prompt?: string | null;
+  params?: Record<string, unknown>;
 }
 
 /** The provenance of one mint: its edges, variations and words; it names no individual. */

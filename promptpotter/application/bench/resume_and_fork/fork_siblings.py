@@ -16,7 +16,6 @@ from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -216,7 +215,9 @@ def declare_steered_values(
 ) -> CycleSeed:
     """Without it the fork runs ``model=X`` beside a permitted set that excludes X."""
     declared = dict(seed.optimizer_narrowing)
-    for node, cfg in node_config_items(seed.pipeline_overlay):
+    for node, cfg in seed.pipeline_overlay.items():
+        if not isinstance(cfg, Mapping):
+            continue
         origin = narrowing.get(node)
         listed = origin.param_allowed_values if origin else {}
         own = declared.get(node)

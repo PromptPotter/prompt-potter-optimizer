@@ -41,6 +41,7 @@ from promptpotter.domain.cells import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
+from promptpotter.domain.pipeline_params import NodeParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
@@ -101,20 +102,19 @@ def _row_cell(cell: GradedCell, *, key: str, slot: int) -> CellRow:
 
 def _span(
     node: str,
-    cfg: dict[str, Any],
+    cfg: NodeParams,
     pd: PipelineData,
     recorded: Mapping[str, object],
     variables: dict[str, Any],
     output_keys: list[str],
 ) -> CellSpan:
     usage = pd.step_tokens.get(node)
-    prompt = cfg.get("prompt")
     return CellSpan(
         node=node,
-        model=(usage.model if usage else None) or cfg.get("model"),
-        provider=(usage.provider if usage else None) or cfg.get("provider"),
-        input=interpolate_prompt(prompt, variables) if isinstance(prompt, str) else None,
-        config={k: v for k, v in cfg.items() if k != "prompt"},
+        model=(usage.model if usage else None) or cfg.model,
+        provider=(usage.provider if usage else None) or cfg.provider,
+        input=None if cfg.prompt is None else interpolate_prompt(cfg.prompt, variables),
+        config=cfg.config().dump(),
         outputs={k: recorded[k] for k in output_keys if k in recorded},
         seconds=pd.step_timings.get(node),
         input_tokens=usage.input if usage else None,
@@ -145,7 +145,7 @@ def _assemble(
     }
     outputs_of = {n.name: n.output_keys for n in schema.nodes}
     spans = [
-        _span(node, cfg, pd, recorded, variables, outputs_of.get(node, []))
+        _span(node, NodeParams.parse(cfg), pd, recorded, variables, outputs_of.get(node, []))
         for node, cfg in described.node_configs
     ]
     attributed = {k for s in spans for k in s.outputs} | _SPAN_KEYS

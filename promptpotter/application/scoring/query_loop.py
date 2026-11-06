@@ -559,7 +559,7 @@ async def run_walks[K: Hashable](
     )
     phase.cell = _dearest(
         [
-            await cell_bound(session, walk.ctx.search_point.pipeline_params or {})
+            await cell_bound(session, walk.ctx.search_point.pipeline_params)
             for walk in walks.values()
             if walk is not None
         ]

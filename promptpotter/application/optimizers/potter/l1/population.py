@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_config_not_in_runtime_failures,
@@ -22,6 +22,7 @@ from promptpotter.domain.wounds import RuntimeFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.runner.inner.tasks import InnerCells
+    from promptpotter.domain.pipeline_params import PipelineParams
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 def parse_population(
     proposals: list[Proposal],
     parent: OptSearchPoint,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
     schema: PipelineSchema,
     *,
     runtime_failures: Sequence[RuntimeFailure],
@@ -65,7 +66,7 @@ def parse_population(
                 ),
             ]
         # The MERGED params: a child of a broken parent inherits a severed port without proposing it.
-        failures += l1_inner_placeholders_intact(merged_pp or {}, inner_cells=inner_cells)
+        failures += l1_inner_placeholders_intact(merged_pp, inner_cells=inner_cells)
         # A replayed proposal already carries them: the bench banks the walk's arms validated.
         failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:

@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
@@ -37,6 +36,7 @@ from promptpotter.shared.extras import Extra
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping
 
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -62,14 +62,12 @@ class DspyProgram:
     """In the order its samples were numbered: a sample's ``id`` is its example's position."""
 
 
-def dspy_wire_adapter(sample: Sample, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
+def dspy_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
-    for node, cfg in node_config_items(pipeline_params):
-        if node != PROGRAM_NODE:
-            continue
-        if prompt := cfg.get("prompt"):
-            payload["prompt"] = prompt
-        if params := {k: v for k, v in cfg.items() if k != "prompt"}:
+    if (cfg := pipeline_params.nodes.get(PROGRAM_NODE)) is not None:
+        if cfg.prompt:
+            payload["prompt"] = cfg.prompt
+        if params := cfg.config().dump():
             payload["params"] = params
     return payload
 

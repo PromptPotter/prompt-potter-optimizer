@@ -40,7 +40,7 @@ from promptpotter.connectors.protocol import (
     InProcessWorkload,
     cell_envelope_of,
 )
-from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_params import NodeParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
@@ -94,6 +94,7 @@ if TYPE_CHECKING:
     from harbor.models.trial.result import TrialResult
     from harbor.trial.trial import Trial
 
+    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.value_tree import Delivery
     from promptpotter.infrastructure.store.stores import Stores
@@ -241,8 +242,8 @@ def _skill_delivery(cfg: Mapping[str, Any]) -> SkillDelivery:
     return cast(SkillDelivery, value)
 
 
-def _prompt_delivery(pipeline_params: dict[str, Any] | None) -> Delivery:
-    cfg = dict(node_config_items(pipeline_params)).get(AGENT_NODE, {})
+def _prompt_delivery(pipeline_params: PipelineParams) -> Delivery:
+    cfg = pipeline_params.node(AGENT_NODE).params
     return "request" if _skill_delivery(cfg) == "system_prompt" else "artifact_body"
 
 
@@ -413,37 +414,36 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
 _AGENT_SENDER = "registry-client.ChatRequest"
 
 
-def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
-    if discarded := sorted(cfg.keys() & _DISCARDED_SENDER_KEYS):
+def _agent_fields(cfg: NodeParams) -> dict[str, Any]:
+    if discarded := sorted(set(cfg.keys()) & _DISCARDED_SENDER_KEYS):
         raise ValueError(
             f"harbor connector: `nodes.{AGENT_NODE}.config` sets {discarded}, which configure "
             "terminus-2's own sender; `_AgentModel` sends in its place, so they would reach no "
             "wire. Delete them."
         )
-    fields: dict[str, Any] = {SKILL_DELIVERY_KEY: _skill_delivery(cfg)}
-    if prompt := cfg.get("prompt"):
-        fields["prompt"] = prompt
-    if model := cfg.get("model"):
-        fields["model"] = model
-    if provider := cfg.get("provider"):
-        fields["provider"] = provider
-    if send := {k: cfg[k] for k in _SEND_KEYS if cfg.get(k) is not None}:
+    fields: dict[str, Any] = {SKILL_DELIVERY_KEY: _skill_delivery(cfg.params)}
+    if cfg.prompt:
+        fields["prompt"] = cfg.prompt
+    if cfg.model:
+        fields["model"] = cfg.model
+    if cfg.provider:
+        fields["provider"] = cfg.provider
+    if send := {k: v for k in _SEND_KEYS if (v := cfg.value(k)) is not None}:
         fields["send"] = send
-    if route := cfg.get("route_order"):
-        fields.setdefault("send", {})["route_order"] = list(route)
-    if kwargs := {k: cfg[k] for k in _TERMINUS_KEYS if k in cfg}:
+    if cfg.route_order:
+        fields.setdefault("send", {})["route_order"] = list(cfg.route_order)
+    if kwargs := {k: cfg.value(k) for k in _TERMINUS_KEYS if k in cfg}:
         fields["agent_kwargs"] = kwargs
     return fields
 
 
 def harbor_wire_adapter(
     sample: Sample,
-    pipeline_params: dict[str, Any] | None,
+    pipeline_params: PipelineParams,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
-    for node, cfg in node_config_items(pipeline_params):
-        if node == AGENT_NODE:
-            payload.update(_agent_fields(cfg))
+    if (cfg := pipeline_params.nodes.get(AGENT_NODE)) is not None:
+        payload.update(_agent_fields(cfg))
     return payload
 
 
@@ -485,7 +485,7 @@ def _sent_spend_bound(
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
-    fields = _agent_fields(dict(cfg))
+    fields = _agent_fields(NodeParams.parse(cfg))
     send, agent = fields.get("send") or {}, fields.get("agent_kwargs") or {}
     _refuse_send_faults(_agent_name(experiment), fields.get("model"), fields.get("provider"), send)
     turns, reply, context = (

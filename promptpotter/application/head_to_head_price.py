@@ -152,7 +152,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     config = arm_config(source.declared, first, first.arms[0])
     session = configure_and_apply_pipeline(source.session, CycleConfig.laid(config, []))
     partition = cycle_partition(session, session.bank.samples, config)
-    cell = measured_cell_price(session, session.pipeline_params or {})
+    cell = measured_cell_price(session, session.pipeline_params)
     if cell is None:
         raise PayloadInvalidError(
             f"no archive row prices a cell of {plan.dataset_name} on the models it runs, so "
