@@ -191,9 +191,10 @@ dispatches the same command every other door sends. There is no flag file.
 
 #### Control-remote
 
-Every command, from HTTP or a terminal verb, is a `CommandRecord` on the cycle's ledger written by
-the sole `CommandDispatcher`, naming who sent it and acked by who took it — owned by
-[`decisions.md`](decisions.md) § 0001. **A served GET is not a sixth kind**: it mutates nothing,
+Every command, from HTTP or a terminal verb, is filed on the account's one append-only command
+log by the sole `CommandDispatcher`, naming who sent it, at the address it resolved to, and moved
+on by who took it — owned by [`decisions.md`](decisions.md) § 0001. The cycle's ledger keeps what
+happened; the log keeps what was asked. **A served GET is not a sixth kind**: it mutates nothing,
 but declares its response model first and resolves in `application/` —
 [`developer/adding-a-surface.md`](developer/adding-a-surface.md) § A served read.
 
