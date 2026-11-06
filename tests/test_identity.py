@@ -1034,6 +1034,26 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert sorted(entry.label for entry in sidebar.entries) == ["carded", "miscarded"], (
         "a campaign on a shadowing name failed the sidebar, or hid its neighbour"
     )
+    # A root holding no resolved run serves the refusal it raised on its row, never one sentence
+    # for every refusal, so the reader learns which record to repair.
+    unresolved = build_stores(default_identity(), projects_root=tmp_path / "unresolved")
+    refused_root = CycleHop(campaign_id="camp-bare", cycle_id="cycle_bare00000000")
+    unresolved.campaigns.create_campaign(minted_campaign(refused_root, dataset_name="carded"))
+    unresolved.campaigns.mint_cycle(refused_root)
+    for depth in (0, 1):
+        [entry] = list_hierarchy(
+            unresolved,
+            inside=(),
+            dataset=None,
+            lifecycle="all",
+            campaign_id=None,
+            attached_only=False,
+            depth=depth,
+        ).entries
+        [caveat] = [line for line in entry.lines if line.key == "unresolved"]
+        assert "holds no resolved run" in caveat.label, (
+            f"depth {depth}: a root's refusal was served as {caveat.label!r}, not its own reason"
+        )
     assert sorted(origin.dataset_name for origin in list_origins(tiered)) == [
         "carded",
         "miscarded",

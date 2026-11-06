@@ -603,14 +603,6 @@ facts: a lint over EW's one type door, not a mechanism.
    (`optimizer_manifest.py::_resolved_prompt_parts`) where an unknown overlay is refused
    (`optimizer_manifest.py::_select`); one rule. One L4 re-key.
    **Re-test:** `git grep -n "_BOUND.get()\|_OPTIMIZER_PROMPT_OVERRIDES" -- promptpotter`.
-8. **A root's typed refusal is served as one generic caveat** — `pipeline_resolve.py::campaign_runs_with`
-   and `line_config` answer `None` for any `_ROOT_UNRESOLVED`, and `application/hierarchy.py::_UNRESOLVED`
-   serves the same sentence whichever refusal it was. Action: the refusal rides the row, its message
-   served. **Re-test:** read `application/hierarchy.py::_UNRESOLVED`.
-9. **A minted cycle's dataset layer is read off today's definition** — `pipeline_resolve.py::_campaign_merge`
-   lays the dataset's `node.config` and declared nodes from `dataset.yaml` as it stands; `ResolvedRun`
-   records the laid declaration but not the layer the run sent. Action: run init records the dataset
-   layer; a read lays the recorded one. **Re-test:** `git grep -n "runnable_definition" -- promptpotter/application/pipeline_resolve.py`.
 10. Moved to § The quantum-leap pass (2026-11-05), Q3.
 
 ### The engine swept by shape (debt hunt 2026-11-02)
@@ -629,7 +621,14 @@ Grouped by the arc each would ride; workaround comments and dead top-level names
   free tier's per-node bounds still land in `CampaignConfig.pipeline_overlay`
   (`application/free_tier.py::with_free_tier_layer`), read there by ~40 files, so they join `ParamLayers` as a
   layer of their own only with this sweep. Action: `PipelineParams(steps, nodes: {name: NodeConfig})`
-  parsed once at the overlay seam, engine keys as fields, the backend's params one dict.
+  parsed once at the overlay seam, engine keys as fields, the backend's params one dict. **It
+  re-keys every optimizer treatment** (measured 2026-11-06, `offline_run.py --digests`):
+  `search_point.py::NodeConfig`, `pipeline_overlay.py::node_config_items` and
+  `RESERVED_PIPELINE_PARAM_KEYS` are `shapes_optimizer_prompt` units, `apply_node_overlay` is reached
+  from potter's `l1/population.py`, and a member module is hashed whole, annotations and imports
+  included; so the sweep is briefed with one decided re-key, never as "digests equal main". Its
+  three merges also differ in kind: `merge_config_layers` merges depth-first, `apply_node_overlay`
+  one level under the route rule, so folding them is a named behaviour change.
   **Re-test:** `git grep -c -E 'pipeline_params: (dict|Mapping)\[str, Any\]' -- promptpotter`;
   `git grep -n '"steps"\|k != "prompt"' -- promptpotter`.
 - **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
@@ -1235,7 +1234,9 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
 - **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
   model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
-  per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:**
+  per-value lists name only values known to fail; the spend ceiling bounds the rest. That inverts
+  what a SURVIVOR's lists mean (`store/data_root.py`'s "free tier" row, which a data-root copy
+  shadows), so it ships a migration under it. **Rides with:**
   the next check-in pass. **Re-test:** a free account's model menu equals
   `free_tier.yaml::task_models`.
 - **NEXT — the default host pin is a trial with no verdict.** `domain/pipeline_overlay.py::pin_default_routes`

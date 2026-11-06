@@ -1024,24 +1024,32 @@ _ROOT_UNRESOLVED = (
 )
 
 
-def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
-    """``None`` is a root whose pipeline did not resolve: a broken dataset drops its own row only."""
+class RootRunsWith(NamedTuple):
+    """``runs_with`` ``None`` is a root whose pipeline did not resolve: a broken dataset drops its
+    own row only, and the row serves the refusal it raised."""
+
+    runs_with: CampaignRunsWith | None
+    # The root's typed refusal, as raised; ``None`` where it resolved.
+    unread: str | None
+
+
+def campaign_runs_with(stores: Stores, campaign: Campaign) -> RootRunsWith:
     try:
         key = _root_key(stores, campaign)
-    except _ROOT_UNRESOLVED:
-        logger.exception("runs_with: root of %s did not resolve", campaign.campaign_id)
-        return None
+    except _ROOT_UNRESOLVED as exc:
+        return RootRunsWith(None, str(exc))
 
-    def resolved() -> CampaignRunsWith | None:
+    def resolved() -> RootRunsWith:
         try:
-            return _runs_with(stores, campaign)
-        except _ROOT_UNRESOLVED:
-            logger.exception("runs_with: root of %s did not resolve", campaign.campaign_id)
-            return None
+            return RootRunsWith(_runs_with(stores, campaign), None)
+        except _ROOT_UNRESOLVED as exc:
+            return RootRunsWith(None, str(exc))
 
-    return derived(
+    held = derived(
         ("runs_with", stores.campaigns.cycle_dir(campaign.root_hop)), sig=key, compute=resolved
     )
+    assert held is not None, "a keyed derivation always answers"
+    return held
 
 
 class LineConfig(NamedTuple):

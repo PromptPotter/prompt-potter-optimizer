@@ -6,7 +6,12 @@ from pathlib import Path
 
 from promptpotter.application.datasets.draft_campaign import owned_drafts
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.pipeline_resolve import LineConfig, campaign_runs_with, line_config
+from promptpotter.application.pipeline_resolve import (
+    LineConfig,
+    RootRunsWith,
+    campaign_runs_with,
+    line_config,
+)
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
@@ -74,7 +79,6 @@ _MINT_WORDS: dict[CourseKind, str] = {
     "diag": "diag",
     "inner": "inner run",
 }
-_UNRESOLVED = "Its root pipeline did not resolve, so its settings and bench are unread."
 _UNMINTED = "Its line course has no mint record, so its rounds and standing are unread."
 _UNSCORED = "Its config did not resolve, so its limits and bench are unread."
 
@@ -212,9 +216,14 @@ def _course_figures(
     return rows
 
 
-def _course_lines(runs_with: CampaignRunsWith | None, line: LineConfig) -> list[Said]:
-    if runs_with is None:
-        return [caveat_row("unresolved", _UNRESOLVED)]
+def _unresolved_lines(root: RootRunsWith) -> list[Said]:
+    """A root's refusal is served as it was raised: which data broke is what the reader acts on."""
+    return [] if root.unread is None else [caveat_row("unresolved", root.unread)]
+
+
+def _course_lines(root: RootRunsWith, line: LineConfig) -> list[Said]:
+    if root.unread is not None:
+        return _unresolved_lines(root)
     if line.unread is not None:
         return [caveat_row("unscored", _UNSCORED, detail=line.unread)]
     return []
@@ -275,11 +284,12 @@ def course_entry(
     head: CycleIndex,
     holder: CycleHop,
     moment: Moment | None,
-    runs_with: CampaignRunsWith | None,
+    root: RootRunsWith,
     line: LineConfig,
     bench: BenchScore | None,
 ) -> HierarchyCourse:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
+    runs_with = root.runs_with
     # The producer as it is now: a moment replays the record, never a process.
     run = derive_run_state(cycle_dir)
     limits = binding_run_limits(stores, hop, line.config, run)
@@ -339,7 +349,7 @@ def course_entry(
         tags=tags,
         figures=_course_figures(state.status, facts, cap, runs_with, on_line=hop == holder),
         climb=_course_climb(facts),
-        lines=_course_lines(runs_with, line),
+        lines=_course_lines(root, line),
         state=state,
         span=HierarchySpan(
             opened_at=index.created_at,
@@ -423,7 +433,8 @@ def campaign_entry(
 ) -> HierarchyCampaign:
     moment = held.moment
     holder = stores.campaigns.line_holder(campaign.root_hop, moment=moment)
-    runs_with = campaign_runs_with(stores, campaign)
+    root = campaign_runs_with(stores, campaign)
+    runs_with = root.runs_with
     held_line = line_config(stores, campaign, holder)
     bench: BenchScore | None = None
     # The bench passes are read whole, so a replayed moment has no bench reading, as on the dashboard.
@@ -445,7 +456,7 @@ def campaign_entry(
             head=now,
             holder=holder,
             moment=moment,
-            runs_with=runs_with,
+            root=root,
             line=held_line if hop == holder else line_config(stores, campaign, hop),
             bench=bench if hop == holder else None,
         )
@@ -469,10 +480,7 @@ def campaign_entry(
         figures=[_state_row(state.status), _lifetime_row(spend_lifetime)]
         if line is None
         else [_lifetime_row(spend_lifetime) if row.key == "spend" else row for row in line.figures],
-        lines=[
-            caveat_row("unminted", _UNMINTED),
-            *([] if runs_with is not None else [caveat_row("unresolved", _UNRESOLVED)]),
-        ]
+        lines=[caveat_row("unminted", _UNMINTED), *_unresolved_lines(root)]
         if line is None
         else line.lines,
         state=state,
