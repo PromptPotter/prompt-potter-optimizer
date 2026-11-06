@@ -71,7 +71,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.runner.inner.connector import measurement_modules
 from promptpotter.config.paths import PROJECTS_DIR, default_projects_root, install_datasets_root
 from promptpotter.config.prompt_blocks import PackShelf
-from promptpotter.config.settings import Settings
+from promptpotter.config.settings import CODE_REVISION, Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import (
@@ -106,8 +106,9 @@ from promptpotter.infrastructure.store.archive_queries import (
     load_population,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
+from promptpotter.infrastructure.store.data_root import LANDED_STAMP
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
-from promptpotter.infrastructure.store.io import rmtree_robust
+from promptpotter.infrastructure.store.io import rmtree_robust, write_text
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
@@ -948,6 +949,9 @@ def run_terminal(
         yaml.safe_dump({"campaign": config.model_dump(mode="json", exclude_unset=True)}),
         encoding="utf-8",
     )
+    # This code minted the home, so it is landed: the harness's own files beside the data root are
+    # no row's, and a boot landing would refuse them as an operator's stray file.
+    write_text(default_projects_root().parent / LANDED_STAMP, CODE_REVISION)
     new = ["new", DATASET, f"--config={declared}"]
     sys.argv = ["promptpotter", *(new if verb == "new" else [verb])]
     # A child of a pool thread may inherit SIGINT ignored; a terminal's process never does.
@@ -1606,7 +1610,7 @@ def proven_home(workspace: Path) -> None:
     nothing for a migration to stage."""
     landing = plan_landing(workspace / PROJECTS_DIR, reset=False)
     unknown = [p for p in landing.unknown if not is_harness(p.relative_to(workspace))]
-    refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches)]
+    refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.drops)]
     if unknown or refused or landing.staged:
         raise SystemExit(
             f"offline run: the run wrote what no data-root row names {unknown}, what its row's "

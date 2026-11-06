@@ -5,9 +5,13 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import Field, TypeAdapter
+
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.store.io import read_json_optional, write_json
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import cycle_dir_for
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.infrastructure.tracing.events import (
     CampaignStart,
     DatasetRegistered,
@@ -29,6 +33,20 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+class LangfuseState(StrictModel):
+    """`langfuse/state.json`: the cloud ids a cycle's sink already minted, so a resume reuses them.
+    A node's key is `{round}|{node_id}`, a dataset item's `{dataset}|{query}`."""
+
+    trace_id: str | None = None
+    session_id: str | None = None
+    round_observation_ids: dict[int, str] = Field(default_factory=dict)
+    node_observation_ids: dict[str, str] = Field(default_factory=dict)
+    dataset_item_ids: dict[str, str] = Field(default_factory=dict)
+
+
+LANGFUSE_STATE = TypeAdapter(LangfuseState)
 
 
 class LangfuseSink(TraceSink):
@@ -58,35 +76,35 @@ class LangfuseSink(TraceSink):
         self._state_cycle_id = cycle_id
         hop = CycleHop(campaign_id=self._campaign_id, cycle_id=cycle_id)
         self._state_path = cycle_dir_for(self._base, hop) / "langfuse" / "state.json"
-        existing = read_json_optional(self._state_path)
-        if existing:
-            self.trace_id = existing.get("trace_id", self.trace_id)
-            self._session_id = existing.get("session_id", self._session_id)
-            for key, value in (existing.get("round_observation_ids") or {}).items():
-                self._round_observation_ids[int(key)] = value
-            for key, value in (existing.get("node_observation_ids") or {}).items():
-                rn, nid = key.split("|", 1)
-                self._node_observation_ids[(int(rn) if rn else None, nid)] = value
-            for key, value in (existing.get("dataset_item_ids") or {}).items():
+        existing = read_file(self._state_path, LANGFUSE_STATE.validate_json)
+        if existing is not None:
+            self.trace_id = existing.trace_id
+            self._session_id = existing.session_id
+            for rn, value in existing.round_observation_ids.items():
+                self._round_observation_ids[rn] = value
+            for key, value in existing.node_observation_ids.items():
+                round_key, nid = key.split("|", 1)
+                self._node_observation_ids[(int(round_key) if round_key else None, nid)] = value
+            for key, value in existing.dataset_item_ids.items():
                 dsname, query = key.split("|", 1)
                 self._dataset_item_ids[(dsname, query)] = value
 
     def _persist(self) -> None:
         if self._state_path is None:
             return
-        state: dict[str, Any] = {
-            "trace_id": self.trace_id,
-            "session_id": self._session_id,
-            "round_observation_ids": {str(rn): v for rn, v in self._round_observation_ids.items()},
-            "node_observation_ids": {
+        state = LangfuseState(
+            trace_id=self.trace_id,
+            session_id=self._session_id,
+            round_observation_ids=dict(self._round_observation_ids),
+            node_observation_ids={
                 f"{'' if rn is None else rn}|{nid}": v
                 for (rn, nid), v in self._node_observation_ids.items()
             },
-            "dataset_item_ids": {
+            dataset_item_ids={
                 f"{dsname}|{query}": v for (dsname, query), v in self._dataset_item_ids.items()
             },
-        }
-        write_json(self._state_path, state)
+        )
+        write_json(self._state_path, state.model_dump(mode="json"))
 
     def on_campaign_start(self, event: CampaignStart) -> None:
         self._bind_cycle(event.cycle_id)

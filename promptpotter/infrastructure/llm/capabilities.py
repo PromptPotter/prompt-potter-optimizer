@@ -7,18 +7,18 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.domain.pipeline_schema import CapabilityMenu, ModelCapability, PipelineSchema
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
 from promptpotter.infrastructure.llm.pricing import lookup_rate
 from promptpotter.infrastructure.llm.registry import model_profile
-from promptpotter.infrastructure.store.io import (
-    read_json_tolerant,
-    read_yaml_optional,
-    write_json,
-)
-from promptpotter.infrastructure.store.read_model import derived, file_sig
+from promptpotter.infrastructure.store.io import parse_yaml, write_json
+from promptpotter.infrastructure.store.read_model import derived, file_sig, read_file
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import FileKind
 from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
@@ -37,12 +37,51 @@ STANDARD_EFFORT_LADDER: tuple[str, ...] = ("none", "default", "low", "medium", "
 """``assets/optimizers/potter/pipeline.yaml`` lists exactly these five by hand: change both."""
 
 
+class CapabilityOverride(StrictModel):
+    """The operator's word on one model, over the catalogue: its rungs, or a note alone."""
+
+    reasoning_efforts: list[str] | None = None
+    note: str | None = None
+
+
+# Keyed by the normalized model id; an empty file declares nothing.
+CAPABILITY_OVERRIDES: TypeAdapter[dict[str, CapabilityOverride] | None] = TypeAdapter(
+    dict[str, CapabilityOverride] | None
+)
+
+
+class CatalogueEntry(StrictModel):
+    """One catalogue model as the snapshot keeps it, its card's fields as the gateway sent them."""
+
+    supported_parameters: list[str]
+    name: str | None = None
+    context_length: int | float | str | None = None
+    top_provider: dict[str, Any] | None = None
+    architecture: dict[str, Any] | None = None
+
+
+class CapabilitySnapshot(StrictModel):
+    fetched_at: str
+    models: dict[str, CatalogueEntry]
+
+
+CAPABILITY_SNAPSHOT = TypeAdapter(CapabilitySnapshot)
+
+
+def _overrides(raw: bytes) -> dict[str, CapabilityOverride] | None:
+    return CAPABILITY_OVERRIDES.validate_python(parse_yaml(raw))
+
+
 def _override_path(workspace: Path) -> Path:
     return workspace / CAPABILITY_FILE
 
 
 def _cache_path(workspace: Path) -> Path:
     return workspace / CAPABILITIES_CACHE
+
+
+def _snapshot(path: Path) -> CapabilitySnapshot | None:
+    return read_file(path, CAPABILITY_SNAPSHOT.validate_json)
 
 
 def _per_mtok(per_token: float | None) -> float | None:
@@ -58,14 +97,11 @@ def _as_int(raw: object) -> int | None:
         return None
 
 
-def _card(entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
-    top, arch = (
-        part if isinstance(part := entry.get(key), dict) else {}
-        for key in ("top_provider", "architecture")
-    )
+def _card(entry: CatalogueEntry, fetched_at: str) -> dict[str, Any]:
+    top, arch = entry.top_provider or {}, entry.architecture or {}
     return {
-        "display_name": str(entry.get("name") or ""),
-        "context_length": _as_int(entry.get("context_length")),
+        "display_name": entry.name or "",
+        "context_length": _as_int(entry.context_length),
         "max_output_tokens": _as_int(top.get("max_completion_tokens")),
         "modality": str(arch.get("modality") or ""),
         "fetched_at": fetched_at,
@@ -91,15 +127,14 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
     override = derived(
         ("model_capability_override", override_path),
         sig=file_sig(override_path),
-        compute=lambda: read_yaml_optional(override_path),
+        compute=lambda: read_file(override_path, _overrides, FileKind.STORED_CONFIG),
     )
-    entry = override.get(key) if isinstance(override, dict) else None
-    if isinstance(entry, dict):
-        raw = entry.get("reasoning_efforts")
-        note = str(entry.get("note") or "")
-        if isinstance(raw, list):
+    entry = None if override is None else override.get(key)
+    if entry is not None:
+        note = entry.note or ""
+        if entry.reasoning_efforts is not None:
             return answer(
-                reasoning_efforts=[str(v) for v in raw],
+                reasoning_efforts=entry.reasoning_efforts,
                 reasoning_note=note or f"Declared in {CAPABILITY_FILE} by the operator.",
                 source="override",
             )
@@ -107,17 +142,10 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
             return answer(reasoning_efforts=None, reasoning_note=note, source="override")
 
     path = _cache_path(workspace)
-    cached = (
-        derived(
-            ("model_capabilities", path),
-            sig=file_sig(path),
-            compute=lambda: read_json_tolerant(path, default={}),
-        )
-        or {}
+    cached = derived(
+        ("model_capabilities", path), sig=file_sig(path), compute=lambda: _snapshot(path)
     )
-    models = cached.get("models") if isinstance(cached, dict) else None
-    record = models.get(key) if isinstance(models, dict) else None
-    if not isinstance(record, dict):
+    if cached is None or (record := cached.models.get(key)) is None:
         return answer(
             reasoning_efforts=None,
             reasoning_note=(
@@ -127,17 +155,10 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
             source="unknown",
         )
 
-    raw_params = record.get("supported_parameters")
-    # An absent list is UNKNOWN (`None`), never "supports none".
-    unsupported: list[str] | None
-    if isinstance(raw_params, list):
-        params = [str(p) for p in raw_params]
-        # Listed under `reasoning` alone, a model still honours `reasoning_effort` on the wire.
-        accepted = set(params) | ({_EFFORT_PARAM} if _REASONING_PARAM in params else set())
-        unsupported = sorted(PROVIDER_REQUEST_PARAMS - accepted)
-    else:
-        params = []
-        unsupported = None
+    params = record.supported_parameters
+    # Listed under `reasoning` alone, a model still honours `reasoning_effort` on the wire.
+    accepted = set(params) | ({_EFFORT_PARAM} if _REASONING_PARAM in params else set())
+    unsupported = sorted(PROVIDER_REQUEST_PARAMS - accepted)
     offered = list(STANDARD_EFFORT_LADDER)
     note = (
         "Catalogue lists reasoning_effort."
@@ -162,7 +183,7 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
         indistinct_efforts=indistinct,
         source="openrouter",
         unsupported_params=unsupported,
-        **_card(record, str(cached.get("fetched_at") or "")),
+        **_card(record, cached.fetched_at),
     )
 
 
@@ -183,9 +204,8 @@ def resolve_schema_menu(schema: PipelineSchema, *, workspace: Path | None) -> Ca
 
 async def ensure_model_capabilities(workspace: Path, *, max_age_days: float = 7.0) -> int:
     """0 is "nothing written" — an already-fresh snapshot as much as a failed fetch."""
-    cached = read_json_tolerant(_cache_path(workspace), default={}) or {}
-    fetched = cached.get("fetched_at") if isinstance(cached, dict) else None
-    if isinstance(fetched, str) and fetched:
+    cached = _snapshot(_cache_path(workspace))
+    if cached is not None and (fetched := cached.fetched_at):
         try:
             age = datetime.now(UTC) - datetime.fromisoformat(fetched)
         except ValueError:
@@ -210,7 +230,7 @@ async def refresh_model_capabilities(workspace: Path) -> int:
     entries = payload.get("data")
     if not isinstance(entries, list):
         return 0
-    models: dict[str, dict[str, Any]] = {}
+    models: dict[str, CatalogueEntry] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -218,14 +238,18 @@ async def refresh_model_capabilities(workspace: Path) -> int:
         if not isinstance(mid, str):
             continue
         params = entry.get("supported_parameters")
-        models[normalize_model_id(mid)] = {
-            "supported_parameters": [str(p) for p in params] if isinstance(params, list) else [],
-            "name": entry.get("name"),
-            "context_length": entry.get("context_length"),
-            "top_provider": entry.get("top_provider"),
-            "architecture": entry.get("architecture"),
-        }
+        try:
+            models[normalize_model_id(mid)] = CatalogueEntry(
+                supported_parameters=[str(p) for p in params] if isinstance(params, list) else [],
+                name=entry.get("name"),
+                context_length=entry.get("context_length"),
+                top_provider=entry.get("top_provider"),
+                architecture=entry.get("architecture"),
+            )
+        except ValidationError:
+            continue
     if not models:
         return 0
-    write_json(_cache_path(workspace), {"fetched_at": utcnow_iso(), "models": models})
+    snapshot = CapabilitySnapshot(fetched_at=utcnow_iso(), models=models)
+    write_json(_cache_path(workspace), snapshot.model_dump(mode="json"))
     return len(models)

@@ -10,7 +10,16 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    NamedTuple,
+    Protocol,
+    cast,
+    get_args,
+    runtime_checkable,
+)
 
 from pydantic import ValidationError
 
@@ -31,7 +40,6 @@ from promptpotter.infrastructure.store.io import (
     read_tail,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
-from promptpotter.infrastructure.store.wallet_store import HeldCharge
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import (
     FileKind,
@@ -39,6 +47,10 @@ from promptpotter.shared.errors import (
     LedgerUnreadableError,
     validation_reason,
 )
+
+if TYPE_CHECKING:
+    # The wallet's files read through `read_file`, so the wallet imports this module.
+    from promptpotter.infrastructure.store.wallet_store import HeldCharge
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
 EVERY_ARM: tuple[type[StrictModel], ...] = get_args(get_args(CycleRecord)[0])
@@ -90,11 +102,16 @@ def read_rows[R](path: Path, read: Callable[[bytes], R]) -> list[R]:
 
 
 def read_file[R](
-    path: Path, read: Callable[[bytes], R], kind: FileKind = FileKind.STORE
+    path: Path,
+    read: Callable[[bytes], R],
+    kind: FileKind = FileKind.STORE,
+    *,
+    staged: bytes | None = None,
 ) -> R | None:
-    """THE whole-file read of one that is no ledger: ``None`` where none is, and refused as a
-    *kind* by its path where *read* refuses it."""
-    raw = read_bytes_optional(path)
+    """THE whole-file read of one that is no ledger: ``None`` where none is, and refused ONCE, as a
+    *kind* by its path, where *read*, the file's typed row, refuses it. *staged* is what a landing
+    writes in its place."""
+    raw = read_bytes_optional(path) if staged is None else staged
     if raw is None:
         return None
     try:

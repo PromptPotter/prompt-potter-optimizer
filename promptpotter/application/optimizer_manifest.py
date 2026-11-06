@@ -958,6 +958,18 @@ def checkin_manifest() -> CheckinManifest:
     return _checkin_at(path, _stamp(path))
 
 
+def installed_manifest(shadow: Path) -> SelectedOptimizer | CheckinManifest | None:
+    """What the install's copy at *shadow* loads as, through the reader every run and check-in
+    takes, raising what that reader raises; ``None`` where it shadows no manifest this code ships."""
+    held = shadow.resolve()
+    if checkin_manifest_path().resolve() == held:
+        return checkin_manifest()
+    for name, registered in optimizers.MANIFESTS.table.items():
+        if optimizer_manifest_path(registered.directory).resolve() == held:
+            return select_optimizer(OptimizerChoice(optimizer=name))
+    return None
+
+
 _BOUND: Annotated[contextvars.ContextVar[SelectedOptimizer | None], shapes_optimizer_prompt] = (
     contextvars.ContextVar("selected_optimizer", default=None)
 )

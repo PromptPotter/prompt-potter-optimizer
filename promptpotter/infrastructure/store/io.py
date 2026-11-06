@@ -111,16 +111,6 @@ def unlink_robust(path: Path) -> None:
             time.sleep(0.05 * attempt)
 
 
-def open_text_robust(path: Path) -> IO[str]:
-    """Retried: Windows refuses for the instant another process swaps the file (`_atomic_replace`)."""
-    for attempt in range(3):
-        try:
-            return open(_long_path(path), encoding="utf-8")
-        except PermissionError:
-            time.sleep(0.05 * (attempt + 1))
-    return open(_long_path(path), encoding="utf-8")
-
-
 def rmtree_robust(path: Path) -> None:
     def _onexc(func: Callable[[str], object], target: str, exc: BaseException) -> None:
         if isinstance(exc, PermissionError):
@@ -257,10 +247,21 @@ def write_text(path: Path, content: str) -> None:
     _atomic_write(path, lambda f: f.write(content))
 
 
+def _read_bytes(path: Path) -> bytes:
+    """Retried: Windows refuses for the instant another process swaps the file (`_atomic_replace`)."""
+    for attempt in range(2):
+        try:
+            with open(_long_path(path), "rb") as f:
+                return f.read()
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+    with open(_long_path(path), "rb") as f:
+        return f.read()
+
+
 def read_bytes_optional(path: Path) -> bytes | None:
     try:
-        with open(_long_path(path), "rb") as f:
-            return f.read()
+        return _read_bytes(path)
     except FileNotFoundError:
         return None
 
@@ -402,10 +403,10 @@ class HeldLock:
 
 def _open_lock(name: str) -> int:
     try:
-        return os.open(name, os.O_RDWR | os.O_CREAT)
+        return _private(name, os.O_RDWR | os.O_CREAT)
     except FileNotFoundError:
         os.makedirs(os.path.dirname(name), exist_ok=True)
-        return os.open(name, os.O_RDWR | os.O_CREAT)
+        return _private(name, os.O_RDWR | os.O_CREAT)
 
 
 def take_lock(path: Path, *, wait_s: float) -> HeldLock | None:
@@ -477,13 +478,19 @@ def append_line(path: Path, line: bytes) -> range:
     data = line + b"\n"
     name = _long_path(path)
     with _write_lock(path):
-        with open(name, "ab") as f:
+        with open(name, "ab", opener=_private) as f:
             st = os.fstat(f.fileno())
             if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):
                 return _landed(name, f, data)
         _cut_unterminated(name)
-        with open(name, "ab") as f:
+        with open(name, "ab", opener=_private) as f:
             return _landed(name, f, data)
+
+
+def _private(name: str, flags: int) -> int:
+    """Owner-only, as `mkstemp` makes every atomic write's file: whichever process creates a file
+    sets its mode, never that process's umask."""
+    return os.open(name, flags, 0o600)
 
 
 def _landed(name: str, f: IO[bytes], data: bytes) -> range:

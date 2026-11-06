@@ -77,24 +77,18 @@ A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk
   ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The credential rides the
   connector). **Rides with:** M18. **Re-test:** two n8n datasets on two workflows both run, no `.env`
   edit between them.
-- **Nothing lands the data root off the box** — `maintenance/landing.py` runs from `land-data` alone,
-  which `deploy-linux/update.sh` calls. A checkout that pulls a reshape keeps running on files the
-  build refuses: every launch here was refused `job_unreadable` (released jobs that
-  `migrations/job_ending.py` maps) and then `ledger_unreadable` (`.workspace/events.jsonl` without
-  `command.act_digest`). Action: the landing runs wherever the code meets a data root it has not
-  landed, one mechanism with `update.sh`'s. **Rides with:** M17. **Re-test:** check out a commit that
-  moves a `Fate.RUN` shape; `new <dataset>` refuses nothing.
-- **`--reset` couples two decisions** — `landing.py::Landing.refusal`: unloadable run data and files no
-  row names are both "in the way — `--reset` drops both", so a run-data reshape cannot land without
-  deleting every unknown file. This desk's unknown files are authored: `block_packs/_sources/` (harvest
-  notes and `build_packs.py`) and `default/banks/`. Action: the landing drops unloadable `Fate.RUN`
-  data by itself; unknown files refuse on their own; `_sources` and its builder move into the checkout.
-  **Rides with:** M17. **Re-test:** `land-data --dry-run` on a desk holding both.
-- **An unreadable file's remedy sends the operator to hand-deletion** — `shared/errors.py` `JOB` ("No
-  migration exists: delete it once no run it names is live"), `LedgerUnreadableError` ("No migration
-  exists: no verb repairs it"), `MANIFEST` (names `reset`), though `job_ending` maps the job and the
-  landing drops run data. Action: one remedy, the landing's. **Rides with:** M17. **Re-test:**
-  `git grep -n "No migration exists" -- promptpotter/shared/errors.py`.
+- **Authored files sit where no data-root row names them** — this desk's `block_packs/_sources/`
+  (harvest notes and `build_packs.py`) is unknown to `data_root.py::KINDS`, so it refuses every
+  landing until it moves or `land-data --reset` drops it with all run data. Action: `_sources` and its
+  builder move into the checkout. **Re-test:** `land-data --dry-run` on this desk lists no `unknown`.
+- **A file's remedy prose is hashed into the treatment digests** — `shared/errors.py::FileKind`
+  `JOB` ("No migration exists: delete it once…") and `MANIFEST` (names `reset`) still send the
+  operator to hand-deletion, though the landing drops unloadable run data
+  (`landing.py::plan_landing`); `source_scan.py::optimizer_prompt_shapers` reaches `FileKind` whole
+  from potter's and capo-pobb's shapers, so rewording a remedy re-keys every L4 inner cell. Action:
+  refusal prose leaves the hashed units, then both remedies name `land-data`. **Re-test:**
+  `git grep -n "No migration exists" -- promptpotter/shared/errors.py` is 0 and
+  `offline_run.py --digests` equals the base.
 - **A launch refused before admission reaches a host as a task** —
   `host_surface.py::HostSession._open` opens the task before the dispatcher accepts the act, so a
   refusal (an unreadable ledger) answers `working`, then reads `failed` on `tasks/get` 0.1 s later, while
@@ -958,18 +952,6 @@ fixtures.
   service; `channel:telegram` caught it at deploy. One file must serve both. Either the CLI reads
   `ENV_FILE`, which needs read access for the login user, or the services read the checkout file,
   which SELinux denies under `$HOME`. That choice is the operator's.
-- **A site-record file's mode is the writing process's umask**: `store/site_records.py::SiteRecordStore.keep`
-  appends through `store/io.py::append_jsonl`, which sets no mode. On the box the admin bot wrote
-  `app_visit_digests.jsonl` 0644 beside the API's 0600 tables. The store must create its files private
-  itself, whichever service writes first.
-- **A landing proves an install-shadowed manifest by its shape, not its reader**: `data_root.py`'s
-  "optimizer manifest" and "check-in manifest" rows type the YAML (call keys included), but a knob or
-  roster fault in an optimizer shadow, or a parse fault in the check-in (`optimizer_manifest.py::_parse`),
-  passes `land-data --dry-run` and stops only the API boot (`wiring.py::complete_registries`), after the
-  data root has landed: `update.sh` then reports the services down and rolls nothing back. The readers
-  live in `application/`, which `infrastructure/store/` cannot import. Action: the landing proves each
-  shadow present through its own reader, refused with its path as a survivor that does not load.
-  **Re-test:** a shadow `checkin/pipeline.yaml` with `optimizer.param_keys: 5` under `land-data --dry-run`.
 - **The first visits digest told a window nothing recorded**: `app_visits.py::due_digest` reads the last
   24 h whenever no digest is kept for today, so the deploy that began recording sent "last 24 h … Nobody"
   at 22:53. The window must start where recording did, which no record holds yet.
@@ -1034,14 +1016,14 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   moved** (`jobs/registry.py::JobRegistry.close_for_landing`), so a busy box may never land. Action:
   key it on a digest of the `CycleRecord` schema the code writes, not the commit. **Re-test:** a
   landing that moves no record shape refuses while a run is live.
-- **Run files read as dicts outside `store/` have no shape row**: `data_root.py::KINDS` proves
-  `rounds/round_*.json`, the `diagnostics/` sidecar, `rates.json` (`llm/pricing.py`), the langfuse
-  mirror (`tracing/langfuse_sink.py`) and both model-capability files (`llm/capabilities.py`) by
-  presence alone, because their readers walk `dict`s. A reshape there passes `land-data` and is read
-  around. Action: each reader takes its model through `store/read_model.py::read_file`, its row that
-  model's `TypeAdapter`. **Rides with:** § The engine swept by shape B for `evidence/read.py` (its
-  `campaign.json` reads, already an entry there), D for the three `llm/` and `tracing/` readers.
-  **Re-test:** `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py`.
+- **Write-only run files have no shape row**: `data_root.py::KINDS` proves the `diagnostics/` sidecar
+  (`diagnostics/seed_screen.py` writes a dict), the langfuse mirror's events, traces, observations
+  and scores (`tracing/file_sink.py`) and `rounds/round_*.json` by presence alone, as no reader holds
+  a model for them; the round checkout is `results.py::RoundResult` dumped, which does not validate
+  back from JSON (its cells check `isinstance`). Action: each writer writes a model that loads from
+  its own JSON, its row that model's `TypeAdapter`. **Re-test:**
+  `git grep -n "Fate.RUN),$" -- promptpotter/infrastructure/store/data_root.py` lists only files that
+  are not JSON.
 - **`cycle_addressing.py::ActiveSessionResponse` serves two nullable ids for `CycleHop | None`**, so
   the webapp re-tests a pair. Action: one nullable `hop`. **Rides with:** the next webapp pass.
   **Re-test:** `git grep -n "class ActiveSessionResponse" -A4 -- promptpotter`.
@@ -1140,17 +1122,16 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 What batch E's reviews found outside the arc under review, grouped by shape.
 
 **A. A file read past its store's one reader.** **Rides with:** K3a.
-- `identity/blocklist.py::_read`, `identity/grants.py::_read`, `jobs/registry.py::JobRegistry._read`,
-  `wallet_store.py::GrantStore` and `wallet_store.py::TenantApiKeyStore` load their files raw, and so do
-  `tenant_dataset_store.py::load_task_context`, `default_claim.py` and
-  `intelligence/hard_sample_sorter.py`. `dataset_access.py::_named` reads `task.md` and `origin.yaml`
-  itself, so one malformed `dataset.yaml` gets four answers. Action: each file reads through its
-  store's typed row, and a file the store cannot read is refused once. **Re-test:**
-  `git grep -nE "def _read\b" -- promptpotter/infrastructure promptpotter/application`.
-- `tenant_dataset_store.py::banks_sharing` fails the whole survey on one bad entry. The survey catches
-  in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
-  `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
-  and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
+- `intelligence/hard_sample_sorter.py::read_hard_samples` loads its export raw, so a torn
+  `hard_samples.json` raises a `JSONDecodeError` or `ValidationError`, never `FileKind.EXPORT`.
+  `source_scan.py::optimizer_prompt_shapers` hashes the function into potter's and capo-pobb's
+  treatment digests, so moving it onto `read_model.py::read_file` re-keys every L4 inner cell. Action:
+  the reader's I/O leaves the hashed unit, then it reads through `read_file`. **Re-test:**
+  `git grep -n "read_json_optional" -- promptpotter/application/intelligence/hard_sample_sorter.py`.
+- `tenant_dataset_store.py::banks_sharing` fails the whole survey on one bad entry. What a torn bank
+  means for holdout counting is its caller's (`archive_queries.py::_configurations_on`). Action: a
+  survey serves a bad row with its fault. **Re-test:** a tenant tree with one unreadable bank lists
+  the rest.
 
 **B. A refusal spelled per door.** **Rides with:** Q3.
 - `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and

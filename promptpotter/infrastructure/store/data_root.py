@@ -48,7 +48,13 @@ from promptpotter.infrastructure.identity.grants import GrantsFile
 from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, DefaultClaim, IdentityPaths
 from promptpotter.infrastructure.identity.provider_config import ProviderConfigBundle
 from promptpotter.infrastructure.identity.session import SessionData
-from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
+from promptpotter.infrastructure.llm.capabilities import (
+    CAPABILITIES_CACHE,
+    CAPABILITY_FILE,
+    CAPABILITY_OVERRIDES,
+    CAPABILITY_SNAPSHOT,
+)
+from promptpotter.infrastructure.llm.pricing import RATES_FILE
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
@@ -118,6 +124,7 @@ from promptpotter.infrastructure.store.wallet_store import (
     ChargeRecord,
     CouponGrant,
 )
+from promptpotter.infrastructure.tracing.langfuse_sink import LANGFUSE_STATE
 from promptpotter.shared.errors import validation_reason
 from promptpotter.shared.hashing import SourceFacts
 from promptpotter.shared.worded import Worded
@@ -129,7 +136,7 @@ class Fate(Enum):
     SURVIVOR = "SURVIVOR"
     # Content-keyed and paid for: kept while it loads, and dropped by a landing once it does not.
     CACHE = "CACHE"
-    # Dropped by a reset; one that does not load refuses a landing not asked to reset.
+    # Dropped by a reset, and by a landing once it does not load.
     RUN = "RUN"
     # A lock or marker the box's processes hold: kept, never parsed.
     MACHINE = "MACHINE"
@@ -200,6 +207,18 @@ _IDENTITY = IdentityPaths(root=Path(IDENTITY_DIR))
 _BLOCK_PACK = f"{BLOCK_PACKS_DIR}/*/{PACK_FILE}"
 _INSTALL, _SURVIVOR = Scope.INSTALL, Fate.SURVIVOR
 
+# The code that last landed this data root, by `CODE_REVISION`: a process on other code lands it first.
+LANDED_STAMP = f"{JOBS_DIR}/.landed"
+
+# An operator's copy shadowing what the install ships: typed here, and proven by the reader every
+# run takes (`landing.py`), which lives where this module cannot import it.
+OPTIMIZER_SHADOW = Kind(
+    "optimizer manifest", _INSTALL, "optimizers/*/pipeline.yaml", _SURVIVOR, AUTHORED_MANIFEST
+)
+CHECKIN_SHADOW = Kind(
+    "check-in manifest", _INSTALL, "checkin/pipeline.yaml", _SURVIVOR, CHECKIN_MANIFEST
+)
+
 INSTALL_KINDS: tuple[Kind, ...] = (
     Kind(
         "sign-in providers",
@@ -230,11 +249,9 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("install block pack", _INSTALL, _BLOCK_PACK, _SURVIVOR, TypeAdapter(BlockPack)),
     Kind("environment", _INSTALL, ".env", _SURVIVOR),
     Kind("free tier", _INSTALL, "free_tier.yaml", _SURVIVOR, FREE_TIER_ADAPTER),
-    Kind(
-        "optimizer manifest", _INSTALL, "optimizers/*/pipeline.yaml", _SURVIVOR, AUTHORED_MANIFEST
-    ),
-    Kind("check-in manifest", _INSTALL, "checkin/pipeline.yaml", _SURVIVOR, CHECKIN_MANIFEST),
-    Kind("model rates", _INSTALL, "rates.json", Fate.CACHE),
+    OPTIMIZER_SHADOW,
+    CHECKIN_SHADOW,
+    Kind("model rates", _INSTALL, "rates.json", Fate.CACHE, RATES_FILE),
     # Under the data root where the install cache is its `.cache` (an install with no checkout).
     Kind(
         "source facts",
@@ -250,6 +267,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("ended job", _INSTALL, f"{JOBS_DIR}/{ENDED_JOBS_DIR}/*.json", Fate.RUN, JOB_ADAPTER),
     Kind("job log", _INSTALL, f"{JOBS_DIR}/{JOB_LOGS_DIR}/*.log", Fate.RUN),
     Kind("landing", _INSTALL, f"{JOBS_DIR}/{LANDING_FILE}", Fate.MACHINE),
+    Kind("landed", _INSTALL, LANDED_STAMP, Fate.MACHINE),
     Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE),
     Kind("producer lock", _INSTALL, f"{JOBS_DIR}/{PRODUCERS_DIR}/*.lock", Fate.MACHINE),
     Kind("machine slot", _INSTALL, f"{JOBS_DIR}/{MACHINE_DIR}/*/*.lock", Fate.MACHINE),
@@ -292,7 +310,7 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     *_authored("task context", f"{TASK_CONTEXT_DIR}/*.yaml", read_task_context),
     *_authored("bank labels", f"{BANKS_DIR}/{LABELS_FILE}", TypeAdapter(BankLabel)),
     *_authored("account block pack", _BLOCK_PACK, TypeAdapter(BlockPack)),
-    *_authored("model capability override", CAPABILITY_FILE),
+    *_authored("model capability override", CAPABILITY_FILE, CAPABILITY_OVERRIDES),
 )
 
 
@@ -380,7 +398,13 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
             TypeAdapter(RoundAudit),
         ),
         CampaignRow(f"{where} langfuse events", f"{lf}/events.jsonl", Leaf.TRACE, keepsake=True),
-        CampaignRow(f"{where} langfuse state", f"{lf}/state.json", Leaf.TRACE, keepsake=True),
+        CampaignRow(
+            f"{where} langfuse state",
+            f"{lf}/state.json",
+            Leaf.TRACE,
+            LANGFUSE_STATE,
+            keepsake=True,
+        ),
         CampaignRow(f"{where} langfuse trace", f"{lf}/traces/*.json", Leaf.TRACE, keepsake=True),
         CampaignRow(
             f"{where} langfuse observation",
@@ -462,7 +486,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     ),
     Kind("materialized dataset", _WS, f"{MATERIALIZED_DIR}/**", Fate.RUN),
     Kind("bank cuts", _WS, f"{BANKS_DIR}/{CUTS_FILE}", Fate.RUN, TypeAdapter(BankCut)),
-    Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN),
+    Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN, CAPABILITY_SNAPSHOT),
 )
 
 # What `delete` guards a cycle by: a live producer holds it.

@@ -18,7 +18,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import (
     parse_yaml,
-    read_bytes_optional,
     validate_path_component,
     write_bytes,
     write_json,
@@ -193,8 +192,8 @@ class TenantDatasetStore:
         return self._base_dir / TASK_CONTEXT_DIR / f"{dataset_id_prefix(name)}.yaml"
 
     def load_task_context(self, name: str) -> TaskDecomposition:
-        raw = read_bytes_optional(self.task_context_path(name))
-        return TaskDecomposition() if raw is None else read_task_context(raw)
+        held = read_file(self.task_context_path(name), read_task_context, FileKind.STORED_CONFIG)
+        return TaskDecomposition() if held is None else held
 
     def save_task_context(self, name: str, framing: TaskDecomposition) -> Path | None:
         """`None` on an empty record: this tier shadows the definition's committed framing, and an empty file buries it."""

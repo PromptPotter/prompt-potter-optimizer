@@ -184,7 +184,8 @@ fi
 WEBAPP_TOUCHED=1
 build_webapp || roll_back "the webapp build failed"
 # The data root lands last of all, with nothing writing it: a run is its own process and stays up,
-# and `--reset` refuses while one is live. It plans again and writes only what it proved; exit 3 is
+# and a drop of its run data (one that no longer loads, or all of it with `--reset`) refuses while
+# it is live. It plans again and writes only what it proved; exit 3 is
 # that refusal, with nothing written (`presentation/cli/commands/reset.py::REFUSED`).
 sudo systemctl stop "$SERVICE_NAME"
 if has_bot; then sudo systemctl stop "$BOT_SERVICE_NAME"; fi

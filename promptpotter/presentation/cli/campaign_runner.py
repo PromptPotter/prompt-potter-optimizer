@@ -8,7 +8,7 @@ import contextlib
 import importlib
 import json
 import sys
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -48,6 +48,24 @@ def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, Co
     )
 
 
+def _refused(
+    args: argparse.Namespace, exc: UngeneratedRequestError | SendRefusedError | PotterError
+) -> NoReturn:
+    said = refusal_words(exc)
+    if args.json_output and isinstance(exc, PotterError):
+        print(json.dumps({"error": exc.code, "message": said, **exc.details}, default=str))
+    print(f"Error: {said}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _land_unlanded() -> None:
+    """Every verb that reads the data root lands it first where another code landed it last."""
+    landing = importlib.import_module("promptpotter.application.maintenance.landing")
+    landed = landing.land_unlanded()
+    if landed is not None:
+        print("\n".join(landing.landing_lines(landed, written=True)), file=sys.stderr)
+
+
 def main() -> None:
 
     parser = _PARSER
@@ -75,8 +93,10 @@ def main() -> None:
 
     # Named as a string like the handlers: `--help` loads no use case.
     if args.command in _COMPLETING:
-        wiring = importlib.import_module("promptpotter.application.initialization.wiring")
-        wiring.complete_registries(every_treatment=False)
+        try:
+            _land_unlanded()
+        except PotterError as exc:
+            _refused(args, exc)
     # A launch verb's handler runs its preamble and THEN answers the coroutine: all of it happens here, outside the runner.
     run = _handler(args.command)(args)
 
@@ -85,11 +105,7 @@ def main() -> None:
         result = runner.run(run)
     except (UngeneratedRequestError, SendRefusedError, PotterError) as exc:
         runner.close()
-        said = refusal_words(exc)
-        if args.json_output and isinstance(exc, PotterError):
-            print(json.dumps({"error": exc.code, "message": said, **exc.details}, default=str))
-        print(f"Error: {said}", file=sys.stderr)
-        sys.exit(1)
+        _refused(args, exc)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.
         with contextlib.suppress(RuntimeError, KeyboardInterrupt):

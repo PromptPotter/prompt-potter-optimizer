@@ -11,8 +11,6 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import (
     AdmissionGate,
@@ -38,15 +36,14 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import LaunchStage, RunPhase, StopReason
 from promptpotter.domain.spend import Budget
-from promptpotter.infrastructure.store.io import open_text_robust, unlink_robust, write_json
+from promptpotter.infrastructure.store.io import unlink_robust, write_json
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     FileKind,
-    FileUnreadableError,
     NotFoundError,
     ServiceUnavailableError,
-    validation_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -323,7 +320,7 @@ class JobRegistry:
         ``None`` where any is unknown or another's launch. A live job whose producer is gone reads
         `orphaned` here before the sweep releases it: a reader never waits on one that will not
         end."""
-        jobs = [self.get(job_id) or self._read(self._ended_path(job_id)) for job_id in job_ids]
+        jobs = [self.get(job_id) or self._job(self._ended_path(job_id)) for job_id in job_ids]
         known = [job for job in jobs if job is not None and job.principal_id == principal_id]
         if not job_ids or len(known) != len(jobs):
             return None
@@ -333,32 +330,20 @@ class JobRegistry:
         return known
 
     def get(self, job_id: str) -> Job | None:
-        return self._read(self._path(job_id))
+        return self._job(self._path(job_id))
 
-    def _read(self, path: Path) -> Job | None:
+    def _job(self, path: Path) -> Job | None:
         """``None``: no such job, or one deleted since the listing; a file that does not load raises."""
-        raw: str | bytes
-        if (staged := self._staged.get(path)) is not None:
-            raw = staged
-        else:
-            try:
-                with open_text_robust(path) as fh:
-                    raw = fh.read()
-            except FileNotFoundError:
-                return None
-        try:
-            return JOB_ADAPTER.validate_json(raw)
-        except ValidationError as exc:
-            raise FileUnreadableError(
-                FileKind.JOB, path=str(path), reason=validation_reason(exc, shown=1)
-            ) from exc
+        return read_file(
+            path, JOB_ADAPTER.validate_json, FileKind.JOB, staged=self._staged.get(path)
+        )
 
     def list_all(self, *, user_id: str | None = None) -> list[Job]:
         """Released jobs included, until `reap_orphans` ends one launched before today."""
         out = [
             job
             for path in self._dir.glob("*.json")
-            if (job := self._read(path)) is not None and user_id in (None, job.user_id)
+            if (job := self._job(path)) is not None and user_id in (None, job.user_id)
         ]
         out.sort(key=lambda j: j.created_at, reverse=True)
         return out
@@ -451,9 +436,7 @@ class JobRegistry:
         kept_from = iso_z(datetime.now(UTC) - _ENDED_KEPT)
         with self.admission_gate():
             for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
-                if (ended := self._read(path)) is not None and (
-                    ended.released_at or ""
-                ) < kept_from:
+                if (ended := self._job(path)) is not None and (ended.released_at or "") < kept_from:
                     unlink_robust(path)
             for job in self.list_all():
                 if job.released:

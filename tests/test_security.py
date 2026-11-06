@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import stat
 import subprocess
 import sys
 import threading
@@ -79,7 +80,11 @@ from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import library
-from promptpotter.application.maintenance.landing import apply_landing, plan_landing
+from promptpotter.application.maintenance.landing import (
+    apply_landing,
+    land_unlanded,
+    plan_landing,
+)
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
@@ -96,7 +101,11 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
-from promptpotter.config.paths import block_packs_root, default_projects_root
+from promptpotter.config.paths import (
+    block_packs_root,
+    checkin_assets_root,
+    default_projects_root,
+)
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign_config import OptimizerChoice
@@ -164,7 +173,15 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import sandbox_cycle_dirs
-from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_jsonl
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.data_root import LANDED_STAMP
+from promptpotter.infrastructure.store.io import (
+    append_jsonl,
+    read_yaml,
+    write_json,
+    write_jsonl,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -184,9 +201,12 @@ from promptpotter.infrastructure.store.site_records import (
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
+    USER_FILE,
+    Torn,
     User,
     UserStore,
     count_accounts,
+    read_accounts,
 )
 from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
 from promptpotter.presentation.api.deps import (
@@ -239,7 +259,7 @@ import sys
 from pathlib import Path
 from promptpotter.application.maintenance.landing import plan_landing
 landing = plan_landing(Path(sys.argv[1]) / "projects", reset=False)
-sys.exit(0 if landing.proven and not landing.refused and not landing.caches else repr(landing))
+sys.exit(0 if landing.proven and not landing.refused and not landing.drops else repr(landing))
 """
 
 # 1. Leaks and the perimeter
@@ -431,6 +451,16 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         ({"state": "confirmed"}, "ada@x.com"),
     ):
         records.keep("mixed", SiteRecord(at=long_ago, key=key, row=row))
+    # A site record is private whichever service writes it first, under any umask.
+    loose = os.umask(0o022)
+    try:
+        records.keep("first", SiteRecord(at=long_ago, key="", row={}))
+    finally:
+        os.umask(loose)
+    if os.name != "nt":
+        assert stat.S_IMODE((tmp_path / "site_records" / "first.jsonl").stat().st_mode) == 0o600, (
+            "a site record took its writer's umask: another account on the box reads it"
+        )
     fresh = site_records.keep_site_record(
         "mixed", site_records.SiteRecordBody(row={"path": "/new"})
     )
@@ -1431,7 +1461,7 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     built_stores.drafts.write_draft(held_draft)
     data_root = built_stores.projects_root.parent
     written = plan_landing(built_stores.projects_root, reset=False)
-    assert not written.refused and not written.caches and not written.staged, (
+    assert not written.refused and not written.drops and not written.staged, (
         f"a writer files what no data-root row names, or what its reader refuses: {written}"
     )
     with built_stores.drafts.hold(held_draft.draft_id):
@@ -1451,8 +1481,8 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         "a reset refilled the account's daily launch quota"
     )
 
-    # A cache this build cannot read is dropped by a landing unasked; a file no row names
-    # refuses it, and goes only with `--reset`, which keeps the account.
+    # A cache this build cannot read is dropped by a landing unasked; a file no row names refuses
+    # it on its own, and goes only with `--reset`, which keeps the account.
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
     UserStore(campaigns.workspace).save(user)
     fold = built_stores.archive.path(ArchiveFile.SAMPLE_FOLD, "0" * ADDRESS_HEX)
@@ -1461,34 +1491,53 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     write_json(stray, {})
     found = plan_landing(built_stores.projects_root, reset=False)
     assert list(found.unknown) == [stray] and found.refused, "a file no row names was landed"
-    assert [one.path for one in found.caches] == [fold], "a cache this build cannot read was kept"
-    stray.unlink()
-    cache_only = plan_landing(built_stores.projects_root, reset=False)
-    assert not cache_only.refused, "a cache that does not load refused a landing"
-    apply_landing(cache_only)
-    assert not fold.exists(), "a landing kept a cache this build cannot read"
+    assert [one.path for one in found.drops] == [fold], "a cache this build cannot read was kept"
+    reset_landing = plan_landing(built_stores.projects_root, reset=True)
+    assert not reset_landing.refused, f"a reset landing refused: {reset_landing.refusal}"
+    apply_landing(reset_landing)
+    assert not stray.exists() and not fold.exists(), "a reset landing kept what it drops"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
 
-    # A landing stages a survivor a reshape moved, proves the tree as it would stand, and writes
-    # nothing while a run file refuses: the old code never runs on a migrated survivor.
+    # A landing stages a survivor a reshape moved and drops the run file whose lines no longer
+    # load, unasked; it writes nothing while a survivor refuses, here an install's shadow of the
+    # check-in manifest that its reader refuses (a knob its YAML types past), so the old code
+    # never runs on a migrated survivor and the API never meets the shadow first at boot.
     events = CycleEventLog.workspace_path(campaigns.workspace)
     old = {"record_type": "account_event", "user_id": "u", "timestamp": "2026-01-02T00:00:00Z"}
     append_jsonl(events, old | {"event": "signed_in", "subject": "google", "device": "phone"})
     append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
+    shadow = data_root / "checkin" / "pipeline.yaml"
+    knobbed = read_yaml(checkin_assets_root() / "pipeline.yaml")
+    knobbed["nodes"]["checkin"]["optimizer"]["param_keys"] = 5
+    write_yaml(shadow, knobbed)
     users = UserStore(campaigns.workspace)
     before = users.consent_trail()
     refused = plan_landing(built_stores.projects_root, reset=False)
-    assert refused.refused and [u.path for u in refused.unloadable] == [events]
+    assert refused.refused and [u.path for u in refused.unloadable] == [shadow], (
+        f"a shadow its reader refuses was landed: {refused}"
+    )
     with pytest.raises(ConflictError):
         apply_landing(refused)
     assert refused.staged and users.consent_trail() == before, "a refused landing wrote"
-    landed = plan_landing(built_stores.projects_root, reset=True)
-    assert not landed.refused, f"a reset landing refused: {landed}"
-    apply_landing(landed)
+    # A process meeting a data root another code landed lands it first, or refuses having
+    # written nothing; one this code landed is not planned again.
+    (data_root / LANDED_STAMP).unlink()
+    with pytest.raises(ConflictError):
+        land_unlanded()
+    assert events.is_file() and users.consent_trail() == before, "a refused boot landing wrote"
+    shadow.unlink()
+    landed = land_unlanded()
+    assert landed is not None and [u.path for u in landed.drops] == [events], (
+        f"a run file that does not load was kept, or refused the landing: {landed}"
+    )
+    assert not events.exists(), "a landing kept a run file this build cannot read"
     trail = users.consent_trail()
     assert [line.device for line in trail if line.at == old["timestamp"]] == ["phone"], (
         "a sign-in was lost from the account's consent trail"
     )
+    write_yaml(shadow, knobbed)
+    assert land_unlanded() is None, "a landed data root was planned again"
+    shadow.unlink()
     again = plan_landing(built_stores.projects_root, reset=False)
     assert not again.staged and not again.refused and users.consent_trail() == trail, (
         "a second landing migrated again, or left the tree unproven"
@@ -1549,6 +1598,22 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
         check=False,
     )
     assert fresh.returncode == 0, f"a fresh process could not prove a banked state: {fresh.stderr}"
+
+    # A survey serves a file it cannot read as that row's fault, and lists every other.
+    surveyed = tmp_path / "survey"
+    write_json(surveyed / "torn" / USER_FILE, {"user_id": 7})
+    UserStore(WorkspaceDir(surveyed / "whole")).save(user)
+    torn_account, whole_account = read_accounts(surveyed)
+    assert isinstance(torn_account.user, Torn) and whole_account.user == user, (
+        "one torn account hid the others, or read as an account"
+    )
+    shelf = CampaignStore(WorkspaceDir(surveyed / "whole"))
+    kept = CycleHop(campaign_id="kept__aaaaaa", cycle_id="cycle-0")
+    shelf.create_campaign(minted_campaign(kept))
+    write_json(shelf._manifest_path("torn__bbbbbb"), {"campaign_id": 7})
+    assert [c.campaign_id for c in shelf.list_campaigns(lifecycle="all")] == [kept.campaign_id], (
+        "one torn manifest hid the account's other campaigns"
+    )
 
 
 # 4. The host surface

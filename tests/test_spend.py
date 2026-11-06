@@ -22,6 +22,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast, get_args
 from unittest import mock
 
@@ -201,6 +202,7 @@ from promptpotter.domain.run_records import (
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
+    LLMCallProgressRecord,
     RoundEnteredRecord,
     RunPhaseRecord,
     SampleScoredRecord,
@@ -227,6 +229,7 @@ from promptpotter.infrastructure.backend import CELL, BackendClient
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
+from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S, heartbeat
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
@@ -287,6 +290,8 @@ from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     ErrorCategory,
+    FileKind,
+    FileUnreadableError,
     HostAllowanceExhaustedError,
     LaunchRefusalReason,
     LedgerUnreadableError,
@@ -2311,6 +2316,35 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         f"{attempts} attempts on one grading: a grading opens its own budget, and spends that"
     )
     wire.down = False
+
+    # A beat's I/O fault never fails the call it beats for, nor stops the beats after it.
+    beats: list[LLMCallProgressRecord] = []
+
+    def torn_append(record: LLMCallProgressRecord) -> None:
+        beats.append(record)
+        raise OSError("disk full")
+
+    def torn_read() -> str | None:
+        raise FileUnreadableError(FileKind.STORE, path="x", reason="torn")
+
+    async def beating() -> bool:
+        beat = asyncio.create_task(
+            heartbeat(
+                cast("CycleEventLog", SimpleNamespace(append=torn_append)),
+                call_id="c",
+                node="n",
+                round_num=None,
+                start_monotonic=0.0,
+                detail_fn=torn_read,
+            )
+        )
+        await asyncio.sleep(HEARTBEAT_INTERVAL_S * 2.5)
+        alive = not beat.done()
+        beat.cancel()
+        return alive
+
+    assert jumping_clock(beating()), "a beat's fault ended the heartbeat"
+    assert [b.detail for b in beats] == [None, None], "a torn read or append cost a later beat"
 
     # A backend cell is never sent again while it may still bill.
     cell_ledger = CycleEventLog(tmp_path / "termnorm.jsonl")

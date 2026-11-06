@@ -712,14 +712,15 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         help="A landing's one write to the data root, under THIS code: stage each survivor "
         "migration (`application/maintenance/migrate.py::MIGRATIONS`), load every file under the "
         "data root as its row of `infrastructure/store/data_root.py` shapes it would then stand, and "
-        "write the migrations and drop each cache file that no longer loads only if nothing refuses. "
-        "A file no row names, or a survivor or run file that does not load, refuses: exit 3, "
-        "nothing written. Zero spend.",
+        "write the migrations and drop each cache and run file that no longer loads only if "
+        "nothing refuses. A file no row names, a survivor that does not load, or a drop where a run "
+        "is live refuses: exit 3, nothing written. Every verb reading the data root, and the API's "
+        "boot, lands it first where other code landed it last. Zero spend.",
         args=(
             Arg(
                 "--reset",
                 action="store_true",
-                help="Also drop every account's run data and every file no row names, as "
+                help="Also drop every file no row names, with every account's run data, as "
                 "`reset --all-tenants` does; refused while a run is live.",
             ),
             Arg(

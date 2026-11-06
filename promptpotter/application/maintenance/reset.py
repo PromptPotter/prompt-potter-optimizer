@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections import Counter
 from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -73,7 +74,7 @@ def _drop(path: Path, size: int, data_root: Path) -> Drop | None:
     return Drop(path, size, found.kind) if found.kind.fate is Fate.RUN else None
 
 
-def _live(
+def live_refusal(
     projects_root: Path,
     roots: tuple[Path, ...],
     drops: tuple[Drop, ...],
@@ -131,7 +132,7 @@ def plan_reset(
         workspaces,
         held,
         kept,
-        _claimed(workspaces) or _live(projects_root, roots, held, staged),
+        _claimed(workspaces) or live_refusal(projects_root, roots, held, staged),
         staged,
     )
 
@@ -148,7 +149,8 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
             for draft in draft_dirs(workspace):
                 held.enter_context(DraftStore(workspace).hold(draft.name))
                 claims.add(draft_claim_path(workspace, draft.name))
-        if (live := _live(plan.projects_root, plan.roots, plan.drops, plan.staged)) is not None:
+        live = live_refusal(plan.projects_root, plan.roots, plan.drops, plan.staged)
+        if live is not None:
             raise ConflictError(f"refusing to reset: {live}")
         yield
         for drop in plan.drops:
@@ -162,6 +164,25 @@ def resetting(plan: ResetPlan) -> Iterator[None]:
             with contextlib.suppress(OSError):
                 root.rmdir()
     logger.info("reset: removed %d file(s), kept %d", len(plan.drops), plan.kept)
+
+
+def reset_lines(plan: ResetPlan) -> str:
+    lines = [f"reset under: {', '.join(str(root) for root in plan.roots)}"]
+    counts: Counter[str] = Counter()
+    sizes: Counter[str] = Counter()
+    for drop in plan.drops:
+        if drop.kind is not None:
+            counts[drop.kind.name] += 1
+            sizes[drop.kind.name] += drop.size
+    lines += [
+        f"  - {counts[name]:,} {name} file(s), {sizes[name] / 1_048_576:.1f} MiB"
+        for name in sorted(counts)
+    ]
+    lines += [f"  ? unknown {drop.path}" for drop in plan.drops if drop.kind is None]
+    lines.append(f"  kept: {plan.kept:,} survivor, cache and machine file(s)")
+    if plan.refusal is not None:
+        lines.append(f"  refused: {plan.refusal}")
+    return "\n".join(lines)
 
 
 def apply_reset(plan: ResetPlan) -> None:

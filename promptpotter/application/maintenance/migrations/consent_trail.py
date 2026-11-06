@@ -1,6 +1,6 @@
 """A workspace ledger older than the consent trail holds the account's sign-ins, openings and terms
 acceptances: each is staged onto its `consent.jsonl`. The ledger is run data and is never rewritten;
-its account lines do not load, so the landing that carries them is asked to reset."""
+its account lines do not load, so the landing that carries them drops it."""
 
 from __future__ import annotations
 

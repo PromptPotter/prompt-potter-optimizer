@@ -6,12 +6,11 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.io import append_jsonl, read_bytes_optional, write_json
+from promptpotter.infrastructure.store.io import append_jsonl, write_json
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
+from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 logger = logging.getLogger(__name__)
 
@@ -30,25 +29,17 @@ def _norm_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _read(path: Path) -> list[str] | None:
+def _blocked(path: Path) -> list[str] | None:
     """``None`` = absent; a file that does not validate, an empty one included, raises."""
-    raw = read_bytes_optional(path)
-    if raw is None:
-        return None
-    try:
-        emails = Blocklist.model_validate_json(raw).emails
-    except ValidationError as exc:
-        raise FileUnreadableError(
-            FileKind.STORED_CONFIG, path=str(path), reason=validation_reason(exc, shown=1)
-        ) from exc
-    return sorted({_norm_email(e) for e in emails if e.strip()})
+    held = read_file(path, Blocklist.model_validate_json, FileKind.STORED_CONFIG)
+    return None if held is None else sorted({_norm_email(e) for e in held.emails if e.strip()})
 
 
 def check_blocklist(path: Path, email: str | None) -> BlocklistDecision:
     """Invalid, an empty file included, blocks EVERYONE: absent and invalid are opposite security
     answers, and invalid is never the wider."""
     try:
-        blocked = _read(path)
+        blocked = _blocked(path)
     except FileUnreadableError:
         logger.warning("blocklist.json does not validate; treating as block-all")
         return BlocklistDecision(blocked=True, reason="blocklist_invalid")
@@ -92,7 +83,7 @@ def _normalize(email: str) -> str:
 
 
 def list_blocked(path: Path) -> list[str]:
-    return _read(path) or []
+    return _blocked(path) or []
 
 
 def block_email(path: Path, email: str, *, actor: str, audit_path: Path) -> list[str]:

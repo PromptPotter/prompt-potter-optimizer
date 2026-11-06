@@ -198,7 +198,7 @@ Delete from the plan:
 | **M14** faults | Q3 | a: census B, one refusal type; b: `logging` leaves `application/` and `domain/` | — | a small; b ~65 files, mechanical | b: M9 |
 | **M15** change feed | Q2 | Q2, census E | a subject is the `Subject` path (yes) | ~30 files | M2, M9 |
 | **M16** webapp | swept C, U5 | a: lineage reads the served tree; b: one arm row, the selection in the hash | b: a swiped-in column stays blank until its reads land (yes) | a ~12, b ~40 files | b: M15 |
-| **M17** store hygiene | K3a rest | census A's `_read` copies, `banks_sharing`, the file mode, the landing proving a manifest, the `Fate.RUN` dict rows, `MAX_PATH` | read through `io.py`'s readers (yes) | ~20 files | — |
+| **M17** store hygiene | K3a rest | rest: `banks_sharing`, the hashed `read_hard_samples` and `FileKind` remedies, the write-only `Fate.RUN` rows, `MAX_PATH` | read through `io.py`'s readers (yes) | ~10 files | M8 (the digest reach) |
 | **M18** an upload without a backend | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording, § Bypasses | the operator's go to edit TermNorm | — | M4 |
 | **M19** the election | D | the election root, PoBB's lock-in, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
 

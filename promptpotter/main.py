@@ -29,6 +29,7 @@ from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.quota import RateLimitedError
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.landing import land_unlanded, landing_lines
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.paths import (
     default_projects_root,
@@ -95,6 +96,9 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     silence_proactor_disconnect_noise()
     complete_registries()
+    # Before anything reads the data root: where another code landed it last, this code lands it.
+    if (landed := land_unlanded()) is not None:
+        logger.info("\n".join(landing_lines(landed, written=True)))
     bundle = build_identity_bundle(default_identity_paths())
     app.state.identity_bundle = bundle
     # Before any user can find out: what is broken is told now, not at its first use.

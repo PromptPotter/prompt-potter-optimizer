@@ -1,5 +1,5 @@
 {
-  "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns\nunder the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before\n`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by\n`update.sh <ref> --reset`.\n",
+  "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nEvery SURVIVOR and CACHE row of `promptpotter/infrastructure/store/data_root.py`, by its patterns\nunder the data root: a diff in a SURVIVOR's shape is a box's file that must be rewritten before\n`deploy-linux/update.sh` lands the code that reads it; a CACHE file that stops loading is dropped by\nthe landing unasked.\n",
   "kinds": {
     "account block pack": {
       "fate": "SURVIVOR",
@@ -2296,14 +2296,191 @@
       "patterns": [
         "projects/*/model_capabilities.yaml"
       ],
-      "shape": null
+      "shape": {
+        "$defs": {
+          "CapabilityOverride": {
+            "additionalProperties": false,
+            "description": "The operator's word on one model, over the catalogue: its rungs, or a note alone.",
+            "properties": {
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Note"
+              },
+              "reasoning_efforts": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning Efforts"
+              }
+            },
+            "title": "CapabilityOverride",
+            "type": "object"
+          }
+        },
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/CapabilityOverride"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
     },
     "model rates": {
       "fate": "CACHE",
       "patterns": [
         "rates.json"
       ],
-      "shape": null
+      "shape": {
+        "$defs": {
+          "RateRow": {
+            "additionalProperties": false,
+            "description": "One upstream row as `rates.json` keeps it; a side it does not list is unpriced.",
+            "properties": {
+              "cache_creation_input_token_cost": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Creation Input Token Cost"
+              },
+              "cache_read_input_token_cost": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read Input Token Cost"
+              },
+              "input_cost_per_token": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Input Cost Per Token"
+              },
+              "litellm_provider": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Litellm Provider"
+              },
+              "max_output_tokens": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Output Tokens"
+              },
+              "mode": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Mode"
+              },
+              "output_cost_per_token": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Output Cost Per Token"
+              }
+            },
+            "title": "RateRow",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fetched At"
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/$defs/RateRow"
+            },
+            "title": "Models",
+            "type": "object"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "RatesFile",
+        "type": "object"
+      }
     },
     "optimizer manifest": {
       "fate": "SURVIVOR",

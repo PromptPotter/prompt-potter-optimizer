@@ -15,8 +15,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import TypeAdapter, ValidationError
+
 from promptpotter.config.paths import user_data_root
-from promptpotter.infrastructure.store.io import read_json_optional, write_text
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError
 
 logger = logging.getLogger(__name__)
@@ -84,15 +88,40 @@ _MAX_BODY_BYTES = 8 * 1024 * 1024
 _TTL_SECONDS = 24 * 60 * 60
 
 
-def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+class RateRow(StrictModel):
+    """One upstream row as `rates.json` keeps it; a side it does not list is unpriced."""
+
+    input_cost_per_token: float | None = None
+    output_cost_per_token: float | None = None
+    cache_creation_input_token_cost: float | None = None
+    cache_read_input_token_cost: float | None = None
+    # Upstream's own sample row spells it as prose.
+    max_output_tokens: int | float | str | None = None
+    litellm_provider: str | None = None
+    mode: str | None = None
+
+
+class RatesFile(StrictModel):
+    # The bundled floor's, stamped as it was vendored.
+    fetched_at: str | None = None
+    models: dict[str, RateRow]
+
+
+RATES_FILE = TypeAdapter(RatesFile)
+
+
+def _strip_upstream(raw: dict[str, Any]) -> RatesFile:
+    out: dict[str, RateRow] = {}
     for name, body in raw.items():
         if not isinstance(body, dict):
             continue
         if "input_cost_per_token" not in body or "output_cost_per_token" not in body:
             continue
-        out[name] = {k: body[k] for k in _KEEP_FIELDS if k in body}
-    return out
+        try:
+            out[name] = RateRow.model_validate({k: body[k] for k in _KEEP_FIELDS if k in body})
+        except ValidationError:
+            continue
+    return RatesFile(models=out)
 
 
 def _cache_fresh() -> bool:
@@ -125,9 +154,9 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
         return False
 
     stripped = _strip_upstream(raw)
-    write_text(CACHE_PATH, json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
+    write_text(CACHE_PATH, stripped.model_dump_json(exclude_none=True))
     load_rates.cache_clear()
-    logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
+    logger.info("spend: refreshed %d model rates → %s", len(stripped.models), CACHE_PATH)
     return True
 
 
@@ -135,45 +164,31 @@ def refresh_rates_in_background() -> None:
     threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
-def _read_models(path: Path) -> dict[str, Any] | None:
-    try:
-        raw = read_json_optional(path)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("spend: failed to load %s (%s)", path, exc)
-        return None
-    if not isinstance(raw, dict):
-        return None
-    models = raw.get("models")
-    return models if isinstance(models, dict) else None
+def _read_models(path: Path) -> dict[str, RateRow] | None:
+    held = read_file(path, RATES_FILE.validate_json)
+    return None if held is None else held.models
 
 
-def _optional_cost(body: dict[str, Any], key: str) -> float | None:
-    value = body.get(key)
-    return float(value) if value is not None else None
-
-
-def _models_to_rates(models: dict[str, Any]) -> RateTable:
+def _models_to_rates(models: dict[str, RateRow]) -> RateTable:
     prefixed: dict[tuple[str, str], Rate] = {}
     bare: dict[tuple[str, str], Rate] = {}
     listed_by: dict[str, str] = {}
     for name, body in models.items():
-        if not isinstance(body, dict):
-            continue
-        in_c = body.get("input_cost_per_token")
-        out_c = body.get("output_cost_per_token")
+        in_c = body.input_cost_per_token
+        out_c = body.output_cost_per_token
         if in_c is None or out_c is None:
             continue
         rate = Rate(
-            input=float(in_c),
-            output=float(out_c),
-            cache_write=_optional_cost(body, "cache_creation_input_token_cost"),
-            cache_read=_optional_cost(body, "cache_read_input_token_cost"),
-            max_output=_as_tokens(body.get("max_output_tokens")),
+            input=in_c,
+            output=out_c,
+            cache_write=body.cache_creation_input_token_cost,
+            cache_read=body.cache_read_input_token_cost,
+            max_output=_as_tokens(body.max_output_tokens),
         )
         provider, _, model = name.lower().partition("/")
         if model:
             prefixed[provider, model] = rate
-        elif lister := str(body.get("litellm_provider") or "").lower():
+        elif lister := (body.litellm_provider or "").lower():
             bare[lister, provider] = rate
             listed_by[provider] = lister
     # `prefixed` last: where upstream lists a pair both ways, the row spelling its provider wins.
