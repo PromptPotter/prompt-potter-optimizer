@@ -2535,6 +2535,7 @@ export interface SubjectReading {
   cycle_id: string;
   candidate_id: string;
   label: string;
+  short_labels: SubjectShortLabels;
   dataset_name: string;
   created_at: string;
   comparable: boolean | null;
@@ -2577,6 +2578,13 @@ export interface SubjectReading {
   n_cells: number;
   unscorable_cells: string[];
   levels: Record<string, string>;
+}
+
+/** What a row with no room for an id names the subject's campaign, course and outer campaign by: */
+export interface SubjectShortLabels {
+  campaign: string;
+  course: string;
+  seed_of: string | null;
 }
 
 /** The mask this channel is read under, echoed back. Served rather than left implicit in the */

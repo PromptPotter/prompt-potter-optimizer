@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HierarchyCandidate, SubjectReading } from "@/lib/api/types";
+import type { HierarchyCampaign, HierarchyCandidate, SubjectReading } from "@/lib/api/types";
 import {
   courseTags,
   hierarchyCandidate,
@@ -8,12 +8,15 @@ import {
   subtreeCourse,
 } from "@/lib/test-fixtures";
 import { decodeCyclePath } from "@/lib/ids";
+import { groupByRoot } from "../hierarchy";
 import {
+  courseName,
   datasetAt,
+  editCampaignName,
+  groupOrigin,
   indexLineage,
   spawnParentAt,
   spinesOf,
-  subjectName,
 } from "../lineage-candidates";
 
 const CAMP = "squad__a1b2c3";
@@ -91,21 +94,48 @@ describe("spawnParentAt", () => {
   });
 });
 
-describe("subjectName", () => {
-  const listed = subtreeCampaign({ address: CAMP, short_label: "served-campaign" });
-  const byAddress = new Map([[CAMP, listed]]);
-  const subject = (kind: SubjectReading["kind"], inside: SubjectReading["inside"] = []) =>
-    ({ key: `${kind}:x`, kind, campaign_id: CAMP, label: "the reading's", inside }) as SubjectReading;
+describe("editCampaignName", () => {
+  // A sandboxed campaign is in no listing: only its reading serves the label.
+  const sandboxed = {
+    kind: "candidate",
+    campaign_id: "inner__d4e5f6",
+    inside: [{ campaign_id: CAMP, cycle_id: "cycle_0123456789" }],
+    short_labels: { campaign: "served-inner", course: "served-course", seed_of: "served-outer" },
+  } as SubjectReading;
 
-  it("names a listed campaign by its entry's short label", () => {
-    expect(subjectName(subject("campaign"), byAddress)).toBe("served-campaign");
+  it("names a ranked edit's campaign by the label its subject's reading serves, sandboxed too", () => {
+    expect(editCampaignName([sandboxed], { campaign_id: "inner__d4e5f6" })).toBe("served-inner");
   });
 
-  it("names a course, a candidate and a sandbox's campaign by the reading's label", () => {
-    expect(subjectName(subject("course"), byAddress)).toBe("the reading's");
-    expect(subjectName(subject("candidate"), byAddress)).toBe("the reading's");
-    const sandboxed = subject("campaign", [{ campaign_id: CAMP, cycle_id: "cycle_0123456789" }]);
-    expect(subjectName(sandboxed, byAddress)).toBe("the reading's");
+  it("answers null for a campaign none of the read's subjects reads", () => {
+    expect(editCampaignName([sandboxed], { campaign_id: CAMP })).toBeNull();
+  });
+});
+
+describe("courseName", () => {
+  it("names a root by its dataset and a sibling by its served short label", () => {
+    const index = tree();
+    const root = index.courses.find((c) => c.address === ROOT);
+    const fork = index.courses.find((c) => c.address === FORK);
+    expect([root && courseName(root), fork && courseName(fork)]).toEqual(["squad", "served-fork"]);
+  });
+});
+
+describe("groupOrigin", () => {
+  const listed = (address: string, children: HierarchyCampaign["children"]): HierarchyCampaign => {
+    const c = subtreeCampaign({ address, children: [] });
+    return { ...c, children, facts: { ...c.facts, root: `${address}::cycle_shared` } };
+  };
+  const origin = subtreeCourse({ address: `a__1::cycle_shared`, short_label: "served-origin" });
+
+  it("names a group by its first campaign's served root course", () => {
+    const [group] = groupByRoot([listed("a__1", [origin]), listed("b__2", [])]);
+    expect(group && groupOrigin(group).short_label).toBe("served-origin");
+  });
+
+  it("refuses a group whose first campaign holds no root course", () => {
+    const [group] = groupByRoot([listed("a__1", []), listed("b__2", [])]);
+    expect(() => group && groupOrigin(group)).toThrow(/unlisted origin/);
   });
 });
 
@@ -131,10 +161,20 @@ describe("spinesOf", () => {
 
   it("names the head's course and campaign by their served short labels", () => {
     const [spine] = spinesOf(index, [read("F2.1", "head")]);
-    expect([spine?.campaign?.short_label, spine?.course?.short_label]).toEqual([
+    expect([spine?.campaign.short_label, spine?.course.short_label]).toEqual([
       "served-campaign",
       "served-fork",
     ]);
+  });
+
+  it("draws no spine for a head whose course the tree does not place", () => {
+    const stray = hierarchyCandidate(`${CAMP}::cycle_gone`, { id: "G1.1", round: 1 });
+    stray.facts.main_line = [{ round: 1, candidates: [stray.address] }];
+    const placed = indexLineage(null);
+    const withStray = { ...index, candidates: [...index.candidates, stray] };
+    withStray.byAddress = new Map([...index.byAddress, [stray.address, stray]]);
+    expect(spinesOf(placed, [read("G1.1", "stray")])).toEqual([]);
+    expect(spinesOf(withStray, [read("G1.1", "stray")])).toEqual([]);
   });
 
   it("marks a subject on a prefix of a longer line on that one spine", () => {

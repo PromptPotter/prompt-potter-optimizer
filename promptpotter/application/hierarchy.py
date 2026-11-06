@@ -79,19 +79,27 @@ _UNMINTED = "Its line course has no mint record, so its rounds and standing are 
 _UNSCORED = "Its config did not resolve, so its limits and bench are unread."
 
 
+def _tail(mint: CourseKind, cycle_id: str) -> str:
+    """What tells a course id from its siblings': a root id is `cycle_{origin hash}`, a sibling's
+    the root's plus `_fork_` / `_diag_` and its own suffix."""
+    if mint in ("fork", "diag"):
+        return cycle_id.rpartition(f"_{mint}_")[2]
+    return cycle_id.removeprefix("cycle_")
+
+
 def _course_label(mint: CourseKind, cycle_id: str) -> str:
-    return f"{_MINT_WORDS[mint]} ·{cycle_id.rpartition('_')[2][:6]}"
+    return f"{_MINT_WORDS[mint]} ·{_tail(mint, cycle_id)[:6]}"
 
 
-def _short_label(subject: Subject) -> str:
-    """A campaign or course's served short label: a campaign id is `{dataset}__{rand6}`, a root
-    cycle id `cycle_{origin hash}`, a sibling's the root's plus `_fork_` / `_diag_` and its tail."""
-    if not subject.cycle_id:
-        return subject.campaign_id.rpartition("__")[2]
-    kind = sibling_kind(subject.cycle_id)
-    if kind == "root":
-        return subject.cycle_id.removeprefix("cycle_")[:8]
-    return f"{kind[0]}·{subject.cycle_id.rpartition(f'_{kind}_')[2]}"
+def course_short_label(mint: CourseKind, cycle_id: str) -> str:
+    """A course's served short label: a root's or inner run's origin hash, a sibling's kind and tail."""
+    tail = _tail(mint, cycle_id)
+    return f"{mint[0]}·{tail}" if mint in ("fork", "diag") else tail[:8]
+
+
+def campaign_short_label(campaign_id: str) -> str:
+    """A campaign's served short label, listed or sandboxed: its id's `{dataset}__{rand6}` suffix."""
+    return campaign_id.rpartition("__")[2]
 
 
 def _figure(key: FigureKey, label: str, value: str, sub: str | None = None) -> Figure:
@@ -342,13 +350,12 @@ def course_entry(
         spend=spent,
         bench=bench,
     )
-    subject = Subject(hop.campaign_id, hop.cycle_id, inside=inside)
     return HierarchyCourse(
-        address=subject.address,
+        address=Subject(hop.campaign_id, hop.cycle_id, inside=inside).address,
         parent=Subject(hop.campaign_id, inside=inside).address,
         # An inner course is named for the outer panel cell it measures, by its last segment.
         label=_course_label(mint, hop.cycle_id) if task is None else task.rpartition("/")[2],
-        short_label=_short_label(subject),
+        short_label=course_short_label(mint, hop.cycle_id),
         tags=tags,
         figures=_course_figures(state.status, facts, cap, runs_with, on_line=hop == holder),
         climb=_course_climb(facts),
@@ -473,12 +480,11 @@ def campaign_entry(
         else line.state
     )
     spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
-    subject = Subject(campaign.campaign_id, inside=inside)
     return HierarchyCampaign(
-        address=subject.address,
+        address=Subject(campaign.campaign_id, inside=inside).address,
         parent=Subject.of(inside).address if inside else None,
         label=campaign.label or campaign.dataset_name,
-        short_label=_short_label(subject),
+        short_label=campaign_short_label(campaign.campaign_id),
         tags=_campaign_tags(campaign, runs_with),
         # The campaign's row reads its line course's as its own, its bill the campaign's whole life.
         figures=[_state_row(state.status), _lifetime_row(spend_lifetime)]

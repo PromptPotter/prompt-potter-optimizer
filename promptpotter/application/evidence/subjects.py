@@ -106,6 +106,16 @@ class WinnerChainPoint(StrictModel):
     n_cells: int
 
 
+class SubjectShortLabels(StrictModel):
+    """What a row with no room for an id names the subject's campaign, course and outer campaign by:
+    each the `short_label` its hierarchy entry is served, by the one function serving it."""
+
+    campaign: str
+    course: str
+    # The campaign whose run seeded this sandbox; null outside one.
+    seed_of: str | None
+
+
 class SubjectReading(StrictModel):
     """One subject, read under the selected metric — its identity, its per-cell values and the one
     estimate they merge to. ONE row, because a roster row and a metric reading that live in separate
@@ -125,7 +135,9 @@ class SubjectReading(StrictModel):
     campaign_id: str
     cycle_id: str
     candidate_id: str
+    # What every row names the subject by: a campaign's is its `short_labels.campaign`.
     label: str
+    short_labels: SubjectShortLabels
     dataset_name: str
     created_at: str
     # `None` is UNKNOWN (an unstamped ruler): never render it as `True`.

@@ -2,14 +2,7 @@ import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction"
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import {
-  campaignOf,
-  COPY_WITHOUT_CELLS,
-  courseAt,
-  searchpointCopyChoices,
-  selectedNodeOf,
-} from "@/lib/derivations";
-import { readingPath } from "@/lib/api/reads";
+import { COPY_WITHOUT_CELLS, searchpointCopyChoices, selectedNodeOf } from "@/lib/derivations";
 import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { failureOf, shownData } from "@/lib/hooks/useRead";
 import { CopyButton, FailureLine, Said, SegmentedControl, Term } from "@/components/ui";
@@ -43,12 +36,8 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
   const level = channelLevel(reading, withdrawn, spec);
   const map = <ChannelMap item={item} run={run} points={points} />;
   if (reading === null) return map;
-  // The reading's course, its campaign and an L4 seed's outer campaign, as the channel's tree serves them.
-  const path = readingPath(reading);
-  const course = courseAt(index, path);
-  const campaign = campaignOf(index, course);
-  const host = campaignOf(index, courseAt(index, path.slice(0, -1)));
   if (!level) return null;
+  const names = reading.short_labels;
   return (
     <>
       {head.options.length > 1 && (
@@ -94,19 +83,17 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
         </div>
         <div>
           <dt>campaign</dt>
-          <dd title={reading.campaign_id}>{campaign?.short_label ?? PLACEHOLDER}</dd>
+          <dd title={reading.campaign_id}>{names.campaign}</dd>
         </div>
-        {reading.inside.length > 0 && (
+        {names.seed_of !== null && (
           <div>
             <dt>seed of</dt>
-            <dd title={reading.inside.map((h) => h.campaign_id).join(" → ")}>
-              {host?.short_label ?? PLACEHOLDER}
-            </dd>
+            <dd title={reading.inside.map((h) => h.campaign_id).join(" → ")}>{names.seed_of}</dd>
           </div>
         )}
         <div>
           <dt>branch</dt>
-          <dd title={reading.cycle_id}>{course?.short_label ?? PLACEHOLDER}</dd>
+          <dd title={reading.cycle_id}>{names.course}</dd>
         </div>
         <div>
           <dt>reads at</dt>

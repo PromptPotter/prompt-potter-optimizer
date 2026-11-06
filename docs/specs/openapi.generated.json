@@ -16296,6 +16296,9 @@
               }
             ]
           },
+          "short_labels": {
+            "$ref": "#/components/schemas/SubjectShortLabels"
+          },
           "spend_to_round": {
             "additionalProperties": {
               "type": "number"
@@ -16362,6 +16365,7 @@
           "cycle_id",
           "candidate_id",
           "label",
+          "short_labels",
           "dataset_name",
           "created_at",
           "comparable",
@@ -16391,6 +16395,38 @@
           "unscorable_cells"
         ],
         "title": "SubjectReading",
+        "type": "object"
+      },
+      "SubjectShortLabels": {
+        "additionalProperties": false,
+        "description": "What a row with no room for an id names the subject's campaign, course and outer campaign by:\neach the `short_label` its hierarchy entry is served, by the one function serving it.",
+        "properties": {
+          "campaign": {
+            "title": "Campaign",
+            "type": "string"
+          },
+          "course": {
+            "title": "Course",
+            "type": "string"
+          },
+          "seed_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed Of"
+          }
+        },
+        "required": [
+          "campaign",
+          "course",
+          "seed_of"
+        ],
+        "title": "SubjectShortLabels",
         "type": "object"
       },
       "SubmitArmsPayload": {

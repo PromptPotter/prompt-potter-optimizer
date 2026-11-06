@@ -1,10 +1,8 @@
 import { useMemo } from "react";
-import type { Evidence, HierarchyEntry, SubjectReading } from "@/lib/api/types";
+import type { Evidence, SubjectReading } from "@/lib/api/types";
 import { CardFrame, DataTable, Empty, ReadState, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { campaignAt, spinesOf, subjectName } from "@/lib/derivations";
-import { PLACEHOLDER } from "@/lib/format";
-import { useRegistry } from "@/lib/hooks/useRegistry";
+import { spinesOf } from "@/lib/derivations";
 import { shownData } from "@/lib/hooks/useRead";
 import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
@@ -15,7 +13,6 @@ function configured(evidence: Evidence): SubjectReading[] {
 }
 
 function ConfigPanels({ evidence }: { evidence: Evidence }) {
-  const { byAddress } = useRegistry();
   const rows = configured(evidence);
 
   const differs = evidence.config_keys?.differs ?? [];
@@ -57,7 +54,7 @@ function ConfigPanels({ evidence }: { evidence: Evidence }) {
       <DataTable
         ariaLabel="Configuration by searchpoint"
         className="cmp-cfg"
-        columns={configColumns(rows, evidence.subjects, byAddress)}
+        columns={configColumns(rows, evidence.subjects)}
         groups={[
           {
             key: "differs",
@@ -91,7 +88,6 @@ interface ConfigKey {
 function configColumns(
   rows: readonly SubjectReading[],
   subjects: readonly SubjectReading[],
-  byAddress: ReadonlyMap<string, HierarchyEntry>,
 ): Column<ConfigKey>[] {
   return [
     {
@@ -114,7 +110,7 @@ function configColumns(
               style={{ background: seriesVar(subjects.indexOf(r)) }}
               aria-hidden="true"
             />
-            {subjectName(r, byAddress)}
+            {r.label}
             <ChannelRestore subjectKey={pointKeyOf(r)} />
           </span>
         ),
@@ -136,10 +132,13 @@ function configColumns(
 }
 
 function AncestryPanels({ evidence }: { evidence: Evidence }) {
+  // One group per campaign, named by the label its first subject's reading serves for it.
   const byCampaign = useMemo(() => {
-    const out = new Map<string, SubjectReading[]>();
+    const out = new Map<string, { name: string; subjects: SubjectReading[] }>();
     for (const s of evidence.subjects) {
-      out.set(s.campaign_id, [...(out.get(s.campaign_id) ?? []), s]);
+      const group = out.get(s.campaign_id);
+      if (group) group.subjects.push(s);
+      else out.set(s.campaign_id, { name: s.short_labels.campaign, subjects: [s] });
     }
     return [...out.entries()];
   }, [evidence.subjects]);
@@ -147,10 +146,11 @@ function AncestryPanels({ evidence }: { evidence: Evidence }) {
   if (byCampaign.length === 0) return null;
   return (
     <div className="cmp-spines">
-      {byCampaign.map(([campaignId, subjects]) => (
+      {byCampaign.map(([campaignId, { name, subjects }]) => (
         <CampaignSpines
           key={campaignId}
           campaignId={campaignId}
+          name={name}
           subjects={subjects}
           evidence={evidence}
         />
@@ -161,23 +161,25 @@ function AncestryPanels({ evidence }: { evidence: Evidence }) {
 
 function CampaignSpines({
   campaignId,
+  name,
   subjects,
   evidence,
 }: {
   campaignId: string;
+  // Its subjects' served `short_labels.campaign`.
+  name: string;
   subjects: readonly SubjectReading[];
   evidence: Evidence;
 }) {
   const read = useLineageTree(campaignId, true);
   const root = shownData(read);
   const index = lineageIndexOf(root);
-  const listed = campaignAt(useRegistry().byAddress, campaignId);
 
   const spines = useMemo(() => spinesOf(index, subjects), [index, subjects]);
 
   if (root === null) {
     return (
-      <ReadState read={read} subject={`${listed?.short_label ?? campaignId}’s lineage`}>
+      <ReadState read={read} subject={`${name}’s lineage`}>
         {() => null}
       </ReadState>
     );
@@ -185,7 +187,7 @@ function CampaignSpines({
   if (spines.length === 0) {
     return (
       <p className="note-info">
-        {root.short_label}: no ancestry to draw — its channels read at points the tree does not
+        {name}: no ancestry to draw — its channels read at points the tree does not
         place, which is the case for an L4 inner run in its own sandbox.
       </p>
     );
@@ -194,9 +196,9 @@ function CampaignSpines({
   return (
     <>
       {spines.map((spine) => (
-        <div className="cmp-spine" key={`${spine.campaignId}|${spine.cycleId}`}>
-          <span className="cmp-spine-name" title={`${spine.campaignId} / ${spine.cycleId}`}>
-            {spine.campaign?.short_label ?? PLACEHOLDER} · {spine.course?.short_label ?? PLACEHOLDER}
+        <div className="cmp-spine" key={spine.course.address}>
+          <span className="cmp-spine-name" title={spine.course.address}>
+            {spine.campaign.short_label} · {spine.course.short_label}
           </span>
           <ol className="cmp-spine-chain">
             {spine.chain.map((node) => {

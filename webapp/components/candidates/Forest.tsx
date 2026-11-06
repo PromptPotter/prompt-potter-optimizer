@@ -4,11 +4,10 @@ import { useWidth } from "@/lib/hooks/useWidth";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress } from "@/lib/ids";
-import { figureOf, tagLabel, tagValue } from "@/lib/derivations";
+import { courseName, figureOf, tagLabel } from "@/lib/derivations";
 import {
   type CourseKind,
   type CourseSpawn,
-  type HierarchyCourse,
   type SubtreeCampaign,
   DISPLAY_METRIC_INFO,
   type DisplayMetric,
@@ -44,12 +43,6 @@ export interface CladogramCtx {
   channels: readonly CladogramChannel[];
   clip: CladogramAnchor | null;
   invalidated?: ReadonlySet<string>;
-}
-
-function courseName(course: HierarchyCourse): string {
-  return course.facts.mint === "root"
-    ? (tagValue(course, "dataset") ?? pathLeaf(pathOfAddress(course.address)).cycleId)
-    : course.short_label;
 }
 
 function SpawnGlyph({ kind, spawn }: { kind: CourseKind; spawn: CourseSpawn | null }) {

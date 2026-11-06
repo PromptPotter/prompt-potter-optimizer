@@ -2,7 +2,6 @@ import type {
   GeneSource,
   HierarchyCandidate,
   HierarchyCourse,
-  HierarchyEntry,
   LineageNode,
   SubjectReading,
   SubtreeCampaign,
@@ -11,8 +10,8 @@ import type {
   DisplayMetric,
 } from "@/lib/api/types";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
-import { campaignAt, tagValue } from "./hierarchy";
-import { courseAddressOf, encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
+import { tagValue, type RootGroup } from "./hierarchy";
+import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel } from "./headline-stats";
 
 export interface RetiredGroup {
@@ -101,15 +100,32 @@ export function spawnParentAt(index: LineageIndex, path: CyclePath | null): Subt
   return entry?.level === "course" ? entry : null;
 }
 
-// What a compare surface names a subject: a listed campaign by its entry's short label, every
-// other subject (and a sandbox's campaign, which no listing holds) by the label its reading serves.
-export function subjectName(
-  s: SubjectReading,
-  byAddress: ReadonlyMap<string, HierarchyEntry>,
-): string {
-  const listed =
-    s.kind === "campaign" && s.inside.length === 0 ? campaignAt(byAddress, s.campaign_id) : null;
-  return listed === null ? s.label : listed.short_label;
+// The short label a ranked edit's campaign is served under: every edit ranks inside a campaign
+// one of the read's subjects reads, so a miss is a reading this read did not serve.
+export function editCampaignName(
+  subjects: readonly SubjectReading[],
+  edit: { campaign_id: string },
+): string | null {
+  return subjects.find((s) => s.campaign_id === edit.campaign_id)?.short_labels.campaign ?? null;
+}
+
+// What a forest card names a course: a root by the dataset it measures, a sibling by its short label.
+export function courseName(course: HierarchyCourse): string {
+  return course.facts.mint === "root"
+    ? (tagValue(course, "dataset") ?? course.short_label)
+    : course.short_label;
+}
+
+// The origin course a group of campaigns shares: the first's served root. The listing is read at
+// depth 1, so every started campaign holds its root course; a group of two holds no unstarted one.
+export function groupOrigin(group: RootGroup): HierarchyCourse {
+  const [first] = group.campaigns;
+  const origin =
+    first?.level === "campaign"
+      ? first.children.find((course) => course.address === first.facts.root)
+      : undefined;
+  if (origin === undefined) throw new Error(`unlisted origin ${group.rootCycleId}`);
+  return origin;
 }
 
 function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
@@ -160,11 +176,9 @@ export function mainLineOf(index: LineageIndex, head: HierarchyCandidate): LineS
 }
 
 export interface Spine {
-  campaignId: string;
-  cycleId: string;
   // The course of the spine's head and its campaign, as the tree serves them.
-  course: SubtreeCourse | null;
-  campaign: SubtreeCampaign | null;
+  course: SubtreeCourse;
+  campaign: SubtreeCampaign;
   // The served main line to the head, origin first; a held round adds no point.
   chain: HierarchyCandidate[];
   // The subject labels marked on each individual of the chain.
@@ -190,18 +204,12 @@ export function spinesOf(index: LineageIndex, subjects: readonly SubjectReading[
     marked.set(s.candidate_id, [...(marked.get(s.candidate_id) ?? []), s.label]);
     chains.set(rootId, { chain: merged, marked });
   }
-  return [...chains.values()].map(({ chain, marked }) => {
+  // A head the tree holds sits in a course of a campaign it holds: a miss draws no spine.
+  return [...chains.values()].flatMap(({ chain, marked }) => {
     const head = chain.at(-1);
-    const leaf = head ? pathOfAddress(head.address).at(-1) : undefined;
     const course = head ? courseOf(index, head) : null;
-    return {
-      campaignId: leaf?.campaignId ?? "",
-      cycleId: leaf?.cycleId ?? "",
-      course,
-      campaign: campaignOf(index, course),
-      chain,
-      marked,
-    };
+    const campaign = campaignOf(index, course);
+    return course && campaign ? [{ course, campaign, chain, marked }] : [];
   });
 }
 

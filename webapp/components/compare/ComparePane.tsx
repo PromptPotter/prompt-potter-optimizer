@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Evidence, HierarchyCourse, HierarchyEntry, SubjectReading, MeasuredLift } from "@/lib/api/types";
+import type { Evidence, HierarchyCourse, SubjectReading, MeasuredLift } from "@/lib/api/types";
 import {
   CardFrame,
   DataTable,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import { campaignAt, readPaired, subjectName } from "@/lib/derivations";
+import { campaignAt, editCampaignName, readPaired } from "@/lib/derivations";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import { shownData } from "@/lib/hooks/useRead";
@@ -101,8 +101,8 @@ export function ComparePane() {
   const comparability = evidence?.comparability ?? null;
   const readable = !!evidence && evidence.subjects_read > 0;
   const names = useMemo(
-    () => new Map((evidence?.subjects ?? []).map((s) => [s.key, subjectName(s, byAddress)])),
-    [evidence?.subjects, byAddress],
+    () => new Map((evidence?.subjects ?? []).map((s) => [s.key, s.label])),
+    [evidence?.subjects],
   );
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;
@@ -493,7 +493,6 @@ function Readings({ evidence }: { evidence: Evidence }) {
 }
 
 function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: number }) {
-  const { byAddress } = useRegistry();
   const m = evidence.metric;
   if (!evidence.ranking_computed) {
     return (
@@ -525,7 +524,7 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
     <>
       <DataTable
         ariaLabel="Edits ranked over their origin"
-        columns={rankColumns(m.spec.label, byAddress)}
+        columns={rankColumns(m.spec.label, evidence.subjects)}
         rows={rows}
         getRowId={({ row }) => `${row.campaign_id}/${row.sp_hash}`}
       />
@@ -548,7 +547,7 @@ interface RankedEdit {
 
 function rankColumns(
   label: string,
-  byAddress: ReadonlyMap<string, HierarchyEntry>,
+  subjects: readonly SubjectReading[],
 ): Column<RankedEdit>[] {
   return [
     {
@@ -565,10 +564,7 @@ function rankColumns(
       cell: ({ row }) => (
         <span className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
           <code>{row.sp_hash}</code> {row.label}
-          <span className="l4-dim">
-            {" "}
-            {campaignAt(byAddress, row.campaign_id)?.short_label ?? row.campaign_id}
-          </span>
+          <span className="l4-dim"> {editCampaignName(subjects, row)}</span>
         </span>
       ),
     },

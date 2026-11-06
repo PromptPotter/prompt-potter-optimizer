@@ -5,6 +5,7 @@ import {
   candidatesOf,
   figureOf,
   groupByRoot,
+  groupOrigin,
   hasTag,
   type RetiredGroup,
   type RootGroup,
@@ -88,12 +89,6 @@ function GroupRow({
 function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
   const { rootCycleId, campaigns } = group;
   if (campaigns.length === 1) return <ListedRow campaign={campaigns[0]!} ctx={ctx} />;
-  // A group's campaigns root on one origin cycle id, so the first's root course names it.
-  const [first] = campaigns;
-  const origin =
-    first?.level === "campaign"
-      ? first.children.find((course) => course.address === first.facts.root)
-      : undefined;
   return (
     <GroupRow
       addr={rootCycleId}
@@ -103,7 +98,7 @@ function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
       title={`${campaigns.length} campaigns start from this same specification (${rootCycleId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
       name={
         <>
-          spec {origin?.short_label ?? PLACEHOLDER}
+          spec {groupOrigin(group).short_label}
           <span className="unit-library-kind">{campaigns.length} runs</span>
         </>
       }

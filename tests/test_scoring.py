@@ -82,6 +82,8 @@ from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
+from promptpotter.application.hierarchy import list_hierarchy
+from promptpotter.application.hierarchy_subtree import hierarchy_subtree
 from promptpotter.application.host_surface import (
     IDEMPOTENCY_KEY,
     CallTool,
@@ -242,6 +244,7 @@ from promptpotter.domain.command_kinds import (
     VerifyCandidatePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
+from promptpotter.domain.hierarchy import HierarchyCampaign, SubtreeCampaign, entries_under
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
@@ -4603,4 +4606,61 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
         cell({"harness": candidate}, book_usd=0.5)
     assert len(offline.harness.asked) == asked, (
         "a cell no rate prices was sent under a dollar ceiling it cannot be held to"
+    )
+
+
+# 9. One short label per subject — the listing's, the subtree's and the reading's
+
+
+def test_a_campaign_and_its_courses_are_named_by_one_served_short_label(tmp_path: Path) -> None:
+    stores = workspace(tmp_path / "named")
+    owner = _evidence_campaign(stores, "potter__owner1", 1, selected=0.5, rebased=True)
+    root = CycleHop(campaign_id=owner.campaign_id, cycle_id=f"cycle_{owner.campaign_id}")
+    fork = root.model_copy(update={"cycle_id": f"{root.cycle_id}_fork_r1"})
+    stores.campaigns.mint_fork_cycle(
+        root.model_copy(update={"cycle_id": f"{root.cycle_id}_diag_001"}),
+        stores.campaigns.cycle_dir(fork),
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_DIAG,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=1, arm=ArmKey(f"{owner.campaign_id}:selected")),
+        ),
+        cut=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(fork))).next_offset,
+        cut_round=1,
+    )
+    [listed] = list_hierarchy(
+        stores,
+        inside=(),
+        dataset=None,
+        lifecycle="all",
+        campaign_id=owner.campaign_id,
+        attached_only=False,
+        depth=1,
+    ).entries
+    assert isinstance(listed, HierarchyCampaign), "guard"
+    courses = [c.short_label for c in listed.children]
+    assert len(courses) == 3 and all(courses) and len(set(courses)) == 3, (
+        "a root, a fork or a diag course is served without a short label its siblings do not share"
+    )
+    # A sandboxed campaign is read by the same function its subtree entry is served from.
+    sandbox = inner_sandbox(stores, root.campaign_id, root.cycle_id)
+    (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+    seated = _evidence_campaign(descend_store(stores, (root,)), "capo__inner1", 2, selected=0.6)
+    inner = Subject(seated.campaign_id, inside=(root,))
+    tree = hierarchy_subtree(stores, owner.address, None, None, moment=None)
+    entry = {e.address: e for e in entries_under(tree)}.get(inner.address)
+    assert isinstance(entry, SubtreeCampaign), "guard"
+    readings = subject_evidence(stores, [owner, inner]).subjects
+    assert [r.label for r in readings] == [listed.short_label, entry.short_label], (
+        "a compared campaign is named by another label than the entry the tree serves for it"
+    )
+    assert len({r.label for r in readings}) == 2 and all(r.label for r in readings), "guard"
+    seeded = readings[1].short_labels
+    assert (seeded.campaign, seeded.seed_of) == (entry.short_label, listed.short_label), (
+        "a seeded run's campaign or the campaign it seeds is named unlike the entries the tree serves"
+    )
+    origin = next(c for c in listed.children if c.address == listed.facts.root)
+    assert readings[0].short_labels.course == origin.short_label, (
+        "a campaign reads its origin's course under another label than the listing names it by"
     )

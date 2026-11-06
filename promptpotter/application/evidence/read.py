@@ -55,10 +55,12 @@ from promptpotter.application.evidence.metric_catalogue import (
 from promptpotter.application.evidence.subjects import (
     SubjectMask,
     SubjectReading,
+    SubjectShortLabels,
     WinnerChainPoint,
     authorship_of,
     scenario_said,
 )
+from promptpotter.application.hierarchy import campaign_short_label, course_short_label
 from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.pipeline_resolve import cycle_config
@@ -104,6 +106,7 @@ from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
     campaign_cycles_dir,
+    sibling_kind,
 )
 from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import descend_store
@@ -625,7 +628,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
         c0_index = read_cycle_index(cycle_dir, moment=None)
         return _Head(
             cycle_dir=cycle_dir,
-            label=spec.campaign_id,
+            label=campaign_short_label(spec.campaign_id),
             dataset_name=dataset_name,
             created_at=str(manifest.get("created_at", "")),
             point=c0,
@@ -865,14 +868,20 @@ def _reading_row(
     assert state is not None, "a point is an arm its records named"
     report = head.point.concluded
     value, ci_lo, ci_hi, n_cells = merge_cells(values)
+    cycle_id = spec.cycle_id or head.cycle_dir.name
     return SubjectReading(
         key=spec.key,
         kind=spec.kind,
         inside=list(spec.inside),
         campaign_id=spec.campaign_id,
-        cycle_id=spec.cycle_id or head.cycle_dir.name,
+        cycle_id=cycle_id,
         candidate_id=head.point.candidate_id,
         label=head.label,
+        short_labels=SubjectShortLabels(
+            campaign=campaign_short_label(spec.campaign_id),
+            course=course_short_label(sibling_kind(cycle_id), cycle_id),
+            seed_of=campaign_short_label(spec.inside[-1].campaign_id) if spec.inside else None,
+        ),
         dataset_name=head.dataset_name,
         created_at=head.created_at,
         comparable=None,
