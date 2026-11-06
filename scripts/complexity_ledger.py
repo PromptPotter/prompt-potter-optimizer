@@ -3,8 +3,9 @@
     python scripts/complexity_ledger.py            # print the ledger
     python scripts/complexity_ledger.py --check    # the gate's `surface-ledger` check
 
-Each ``BASELINE`` row is a CEILING: a row above it fails, and a raise owes a written reason in the
-COMMIT BODY (root ``CLAUDE.md`` § Working). A fall needs no edit.
+Each ``BASELINE`` row is the count itself: a row above it fails, and a raise owes a written reason in
+the COMMIT BODY (root ``CLAUDE.md`` § Working). A row below it fails too, until the commit lowers it,
+so slack a cut left can't be refilled by a later change that writes no reason.
 
 A script and not a module of the package: it counts every layer, the suite and the generated
 contract beside them, none of which an installed wheel carries.
@@ -27,7 +28,7 @@ from processes import REPO
 
 BASELINE = {
     # The `__init__.py` files that re-export names instead of staying empty.
-    "reexport_shims": 2,
+    "reexport_shims": 1,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 94,
     # `Settings` fields — what the environment can set.
@@ -51,7 +52,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 13,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 184,
+    "p_served": 178,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 12,
     # The rows each file naming most of them leaves out.
@@ -519,17 +520,21 @@ def _format(ledger: dict[str, int]) -> str:
 
 
 def check(ledger: dict[str, int]) -> list[str]:
-    """What stands above ``BASELINE`` — empty where every row is at or under its ceiling."""
+    """Each row that moved off ``BASELINE`` — empty where every row equals its count."""
     if set(ledger) != set(BASELINE):
         moved = sorted(set(ledger) ^ set(BASELINE))
         return [f"complexity-ledger dimensions changed ({moved}); update BASELINE in this commit"]
     risen = {k: (v, BASELINE[k]) for k, v in ledger.items() if v > BASELINE[k]}
-    if not risen:
-        return []
-    return [
-        "the cost of the next change grew (dimension: actual vs ceiling): "
-        f"{risen}. Subtract instead, or raise the ceiling with a reason in the commit body."
-    ]
+    fallen = {k: (v, BASELINE[k]) for k, v in ledger.items() if v < BASELINE[k]}
+    moved = []
+    if risen:
+        moved.append(
+            "the cost of the next change grew (dimension: actual vs ceiling): "
+            f"{risen}. Subtract instead, or raise the ceiling with a reason in the commit body."
+        )
+    if fallen:
+        moved.append(f"a row fell (dimension: actual vs ceiling): {fallen}. Lower BASELINE to it.")
+    return moved
 
 
 if __name__ == "__main__":

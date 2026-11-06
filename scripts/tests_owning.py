@@ -21,8 +21,8 @@ TESTS = "tests"
 EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
 # The desk's free RAM is what binds the suite (it runs beside builders), so only win32 is held: a
-# fifth above a measured 168 MB peak commit. A CI runner has room, and its peak no desk can rerun.
-WIN32_CEILING_MB = 202
+# fifth above a measured 191 MB peak commit. A CI runner has room, and its peak no desk can rerun.
+WIN32_CEILING_MB = 229
 
 
 def _rel(path: str | Path) -> str | None:

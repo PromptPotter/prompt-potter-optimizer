@@ -255,10 +255,10 @@ def _authored_contract(
     authored = [f for f in edit.answer_fields or () if f in fields]
     kept = [f for f in running.get(ANSWER_FIELDS_KEY) or () if f in fields]
     # The LAST field: fields generate in order, reasoning first.
-    fallback = ["answer"] if "answer" in fields else fields[-1:]
+    inferred = ["answer"] if "answer" in fields else fields[-1:]
     node[OUTPUT_SCHEMA_KEY] = edit.output_schema
     node.pop(ANSWER_FIELDS_KEY, None)
-    if answers := authored or kept or fallback:
+    if answers := authored or kept or inferred:
         node[ANSWER_FIELDS_KEY] = answers
     out = {**config, "pipeline_overlay": {**overlay, edit.node: node}}
     if not first:

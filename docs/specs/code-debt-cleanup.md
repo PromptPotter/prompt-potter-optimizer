@@ -381,7 +381,14 @@ facts: a lint over EW's one type door, not a mechanism.
    `loop_start.py`, `run_prep.py`, `run_observers.py`, `cycle_close.py`, `views/ingress.py`),
    `_DETERMINISM` and `_OPTIMIZER_PROMPT_OVERRIDES`, read by `bench/llm_call.py::_merged_config`,
    `potter/dispatch/layout.py` and `l1_wire_schema.py`; `_single_model` depends on node order. Action:
-   selection rides `RunScope` (4), keyed by node. **Re-test:** `git grep -n "_BOUND.get()" -- promptpotter`.
+   selection rides `RunScope` (4), keyed by node. An L4 cell's overrides are a second optimizer
+   overlay beside `optimizer_manifest.py::SelectedOptimizer`'s own: spawn lays them into the inner
+   run's `OptimizerChoice.nodes` instead, and `optimizer_manifest.py::binding_prompt_overrides`,
+   `optimizer_manifest.py::declared_node_override`, `optimizer_manifest.py::resolve_node_override` and
+   `optimizer_manifest.py::_single_model` go. Fork first: an unusable mutation is dropped
+   (`optimizer_manifest.py::_resolved_prompt_parts`) where an unknown overlay is refused
+   (`optimizer_manifest.py::_select`); one rule. One L4 re-key.
+   **Re-test:** `git grep -n "_BOUND.get()\|_OPTIMIZER_PROMPT_OVERRIDES" -- promptpotter`.
 8. **A root's typed refusal is served as one generic caveat** — `pipeline_resolve.py::campaign_runs_with`
    and `line_config` answer `None` for any `_ROOT_UNRESOLVED`, and `application/hierarchy.py::_UNRESOLVED`
    serves the same sentence whichever refusal it was. Action: the refusal rides the row, its message
@@ -438,8 +445,10 @@ next run-data reshape.
   and `.get("p_better", 0.0)` to print. Action: a typed per-prior model. **Re-test:** `git grep -n '"p_better"' -- promptpotter`.
 - **`evidence/read.py` reads `campaign.json` as a tolerant dict** (`_dataset_of`, `_at`,
   `_resolve_head`), and `_dataset_name` accepts a `campaign_config.dataset_name` shape `Campaign` has no
-  field for, while `subject_evidence` beside them loads `Campaign`. Action: `CampaignStore.load_campaign`.
-  **Re-test:** `git grep -n "read_json_tolerant(CampaignLayout" -- promptpotter`.
+  field for, while `subject_evidence` beside them loads `Campaign`. `evidence/read.py::campaigns_on_dataset`
+  matches the name label, so two banks under one name (a re-upload, a name two tiers hold) pool into
+  one read. Action: `CampaignStore.load_campaign`, and the name resolved once and matched on
+  `Campaign.declaration.dataset_hash`. **Re-test:** `git grep -n "read_json_tolerant(CampaignLayout" -- promptpotter`.
 - **The stale-data ladder's outcome has two owners**: `sample_measurement.py::execute_stale_data_protocol`
   returns a step string its one caller drops (`query_loop.py`, `recovered, _step =`), and stamps one of
   several exclusive bools on `MeasuredCell` that `render/sample.py` re-reads as an `elif` chain; the
@@ -453,6 +462,14 @@ next run-data reshape.
   when absent (a failed write served as "no scale") and with no `at` (a replay page orders by today's
   file); the dataset scope derives its view instead (`_dataset_view`). Action: the cycle view derives
   from the fold. **Re-test:** `git grep -n "read_hard_samples(" -- promptpotter`.
+- **`runner/output.py`'s artifact writers run imperatively, outside the projection roster**:
+  `runner/output.py::write_log_md`, `runner/output.py::write_review_md`, `runner/output.py::publish_export`
+  and `runner/output.py::write_hard_samples_artifacts` are called only from `runner/round.py`,
+  `runner/cycle_close.py` and `runner/grade_bench.py`. So `log.md`, `review.md` and the export lag
+  any other act that moves the ledger, and nothing says so (architecture §0 Display: a ledger
+  subscriber writes only the artifact it declares). Action: each a writing projection on the
+  ledger, or the file goes where `readout.log` and `index.json` already carry it.
+  **Re-test:** `git grep -n "write_log_md(\|write_review_md(\|publish_export(" -- promptpotter/application/runner`.
 - **A running verification is orphaned at two seams** (`live_dashboard/projection.py::_handle_run_wiring`,
   `served_dashboard.py::_serve`) and `orphaned=` computed a third way in `_serve`; `_round_axis` and
   `_walk` each re-decide whether `current_round` closed, by different predicates. Action: derive it

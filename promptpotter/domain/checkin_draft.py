@@ -106,7 +106,7 @@ class DraftFile(FrozenModel):
         return self.column_label_sets.get(self.column_ground_truth)
 
     def authored_prompts(self) -> bool:
-        # Wiped strings count as blank, so the fallback is not keyed on the map being empty.
+        # Wiped strings count as blank: emptied fields read unauthored, as an empty map does.
         return any(
             text.strip() for fields in self.origin_prompts.values() for text in fields.values()
         )

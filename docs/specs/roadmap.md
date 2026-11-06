@@ -27,8 +27,11 @@ schedule. Sections named in a row are
   A PR is ready once an independent review's findings are fixed on its own branch and CI is green on
   its tip, rebased on main. It merges on the operator's word: he reviews every merge. Main is
   landable after every merge, so a checkpoint means: stop dispatching, land what is ready, deploy.
-- **The box holds what it runs through the operator's showing on 11-06**; the next deploy, and the
-  run-data wipe batch E owes, wait for his word. Main keeps landing.
+- **How an arc is sized, briefed, reviewed and stopped** is
+  [`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)'s (operator, 2026-11-06): medium
+  arcs, scope settled before the first build, behaviour equal to main except what the brief names.
+- **The box runs the build it ran before batch E**; deploying main, and the run-data wipe batch E
+  owes, wait for the operator's word. Main keeps landing.
 - **The end:** the code debt is rewritten, then the operator is asked about a release.
 - **An item ships when its code-debt entry is deleted.** A shape noticed in passing is fixed at its root
   in the same arc, unless it is a fork.
@@ -86,9 +89,13 @@ batch-E edges it names close in batch E at "no regression against main".
 | **Q3** | one fault channel, a fault is a value: inside a run a typed record through `scope.ledger.append`, inside a read a field of the row it failed; `logging` leaves `application/` and `domain/` | § Config resolution item 10 (engine decisions narrated into `logger.warning`); the origin gate's logged re-score; the skipped origin of `origin_listing.py::list_origins`; the swallowed export of `campaign_store/store.py::CampaignStore.bank_final`; `shared/errors.py::graceful` in `application/` | `application/` and `domain/` import no `logging`; the gate lists no `except` there that neither raises nor hands its fault on; every fault kind has a projection reader | the fault record kinds in `domain/run_records.py`, the catch sites in `application/`, one gate check | U3; beside U4 and U5 |
 | **RS** | one running set: a which-nodes question reads the nodes a run calls (chain, phases, declared off-chain nodes, less the excluded); an order question reads the chain | batch E's cut EN rule; run init's and the Start gate's model and prompt checks; `prompt_nodes`' readers; potter's view and wounds; `carried_writes`; the price, fence and scoring role readers; "phase" spelled twice; the default-every-node and one-node rules spelled twice | every which-nodes reader reads the one `running` set; a test per door fails when its fix is reverted | `domain/pipeline_schema.py`, `pipeline_resolve.py`'s run-init readers, `optimizer_manifest.py` phases, the which-nodes readers the entry names | Q1 (operator, 2026-11-05); U1a and U1b own its resolver and potter files |
 
-**Beside the unifications**, in the batches their dependencies allow: batch 2 is U1a with P, W2 and
-A3; batch 3 is U1b with EP, U2 with Q1, and G; batch 4 is U3 with ET, S, B and A4; batch 5 is U4, U5,
-Q2, Q3 and A5; then D.
+**Landed so far.** Batch 2 landed P, W2, A3, and U1a's selection door and typed `NodeConfig`. U1a's
+`RunScope` and typed pipeline carrier did not land (`git grep -c "RunScope" -- promptpotter`), so
+every "waits on U1a" below is still open. Batch E (PR #70) landed EA (reads mount from their rows,
+one `Subject`), ED (the research tier, connector cell terms, cards), EW (reads off the cache) and EN
+(the draft as one partial `CampaignConfig`); EM landed as no code. Its cut parts went to Q1 (EA's
+command status), Q2 (EW's resting reads) and RS (EN's which-nodes rule). From here the order is
+§ The medium arcs below.
 The paid run beside batch 2: the host-pin twins (§ Open — multi-arc, "the default host pin"), also
 read for the L2/L3 repair rate and the errored-cell INVESTIGATE; then L4 validation.
 
@@ -135,6 +142,74 @@ The paid run comes after D, H and the re-key batch: the M13 CAPO head-to-head on
 - an archived answer's per-node outputs;
 - the crowning bar (paper stage 3);
 - everything under § Blocked.
+
+### The medium arcs (plan audit, 2026-11-06)
+
+An independent audit checked every open debt row against main after batch E and regrouped the rest
+into medium arcs ([`../developer/refactor-arcs.md`](../developer/refactor-arcs.md)). The operator
+confirms this order before the first of them is briefed. Each arc's named decision is settled
+before its build; the recommendation is in brackets.
+
+**First, apply the audit's verdicts to [`code-debt-cleanup.md`](code-debt-cleanup.md)** (one docs
+commit).
+
+Delete as shipped:
+- the bank mint keeping repeated rows;
+- the unparseable job file logged and skipped;
+- census A's raw reads of the blocklist, grants and job registry (keep its six private `_read`
+  copies);
+- the server half of "One subject";
+- the phone shot of `/candidates` (keep the Lighthouse score).
+
+Fix as stale:
+- § One record shape's "one verb or two" (decided: one verb, U4);
+- the TermNorm parse refusal (only `direct_prompt`'s missing prompt metadata is left);
+- every "Rides with" naming K3a, W1, E+, "the run-card session" or `arc/records`;
+- the allowance refusal said to name no provider (`provider=None` is deliberate);
+- "writers with no reader" for `dashboard.json` and `index.json`, against §0.
+
+Delete from the plan:
+- the declined `phases.py` split;
+- the empty § Phone pass checklist;
+- minimatch #171;
+- the box's unexplained R1 scores (the wipe removes them);
+- "two seams owed a re-read";
+- the unpicked rename candidates;
+- the admitted `OBSERVE_LABELS`;
+- the "never observed" checks for `_rebank_on_branch` and `cycle_seed` (checks to run, not debt).
+
+**Next: M2.**
+
+| Arc | Was | Closes | Decision first | Size | Waits on |
+|---|---|---|---|---|---|
+| **M1** gate cost | T rest | the four regenerators made `light`, the `last_green` lock, the walk tier, the worktree `compileall`, the controlled leg's count, the Vite leftovers | walk tier in the full gate or `--release` only (full gate) | ~10 files | — |
+| **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address; EA's cut state table is its acceptance test (`origin/arc/ea-8`) | amend architecture §0 Control-remote and decision 0001 so commands leave the cycle ledger (yes) | ~22 files, wipes run data | — |
+| **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now (yes); an unusable L4 mutation refused or dropped | ~25 files, one L4 re-key | — |
+| **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer, the overlay delete, a changed knob's source, the free-tier model axis | `steps` leaves the params bag (yes) | ~45 files | — |
+| **M5** running set | RS | RS, census F's `exclude_nodes`, the one-node rule | accept the L4 cache miss, riding M8's re-key (yes) | ~20 files | M2, M4 |
+| **M6** one start | U2 | the five doors, the one launch answer, config item 6, the double selection, `draft_declared`, `close_for_landing`, the shutdown notice, the job logs | plan and price before admission for every start (yes) | ~35 files | M2, M3 |
+| **M7** run init and round 0 | U2 | batch 3's init and round-0 rows, config item 5, `--diag` as a mode, the test builders, the origin-gate rows, `_peer_cycle` | halt a degraded origin (yes) | ~30 files, offline proof | M6 |
+| **M8** potter call door, served roster | U1b, EP | `InjectionBundle`, the template's carrier, the seed rule, `ConfigKnob.source`, `PROMPT_FIELD`, swept F, the digest reach | a failed critique is a typed fault, the round continues or fails (typed fault) | ~50 files, one re-key; split it | M3, M4 |
+| **M9** ledger read stack | U3 | the read stack, `_unlanded`, the cold-fold snapshot, the `dashboard.json` checkout, the artifact writers outside the roster | keep `dashboard.json` / `index.json` as projections (yes, §0) | ~30 files | M3, M6 |
+| **M10** narration and tracing | U3, ET | one narration table, the typed phase act, ET, `FileSink`, `ActivityItem` as `Said` | delete `FileSink` (yes) | ~30 files | M9 |
+| **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend | one wipe shared with M10 (yes) | ~30 files | M9 |
+| **M12** spend | S | S, the payer-rule and host-coupon rows, the lost mirror, the reserved hold, stale `run_limits` | a re-grant counts from `granted_at` (yes) | ~30 files, migrates `charges.jsonl` | M3, M9 |
+| **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells | the verb is "held-out" (yes) | ~30 files | M2, M9 |
+| **M14** faults | Q3 | a: census B, one refusal type; b: `logging` leaves `application/` and `domain/` | — | a small; b ~65 files, mechanical | b: M9 |
+| **M15** change feed | Q2 | Q2, census E | a subject is the `Subject` path (yes) | ~30 files | M2, M9 |
+| **M16** webapp | swept C, U5 | a: lineage reads the served tree; b: one arm row, the selection in the hash | b: a swiped-in column stays blank until its reads land (yes) | a ~12, b ~40 files | b: M15 |
+| **M17** store hygiene | K3a rest | census A's `_read` copies, `banks_sharing`, the file mode, the landing proving a manifest, the `Fate.RUN` dict rows, `MAX_PATH` | read through `io.py`'s readers (yes) | ~20 files | — |
+| **M18** an upload without a backend | G | the in-process `llm_only` connector, the wire-skew probe, TermNorm's wording, § Bypasses | the operator's go to edit TermNorm | — | M4 |
+| **M19** the election | D | the election root, PoBB's lock-in, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
+
+Waves:
+1. M1, M2, M3, M4, M17, M16a, M14a: no dependencies, disjoint files.
+2. M5, M6, M8.
+3. M7, M9.
+4. M10 with M11 (one wipe), M12, M13, M14b.
+5. M15, M16b, M19, and M18 once TermNorm is cleared.
+
+LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride M12.
 
 ### After the crunch
 
