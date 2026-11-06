@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 
-from processes import REPO, clone_cache, git
+from processes import REPO, clone_cache, exclusive, git, replace_changed
 
 # No prose is among them, so a docs edit reruns nothing that only RUNS the engine.
 ENGINE_RUNTIME = ("promptpotter/", "examples/", "pyproject.toml", "uv.lock")
@@ -118,19 +118,13 @@ class LastGreen:
 
     def record(self, verdicts: Mapping[str, str | None]) -> None:
         """A key files a green beside the others; ``None`` drops every green the check holds."""
-        # Loaded here, beside the write: a sibling gate's greens recorded meanwhile are kept.
-        green = self._load()
-        for name, key in verdicts.items():
-            if key is None:
-                green.pop(name, None)
-            else:
-                kept = [k for k in green.get(name, ()) if k != key]
-                green[name] = [*kept, key][-self._KEPT :]
-        staged = self._store.with_name(f"{self._store.name}.{os.getpid()}.tmp")
-        try:
-            staged.write_text(
-                json.dumps({"green": green}, indent=1, sort_keys=True), encoding="utf-8"
-            )
-            os.replace(staged, self._store)
-        finally:
-            staged.unlink(missing_ok=True)
+        # Load, merge and replace under one lock: a sibling gate finishing alongside keeps its greens.
+        with exclusive(self._store.with_name(f"{self._store.name}.lock")):
+            green = self._load()
+            for name, key in verdicts.items():
+                if key is None:
+                    green.pop(name, None)
+                else:
+                    kept = [k for k in green.get(name, ()) if k != key]
+                    green[name] = [*kept, key][-self._KEPT :]
+            replace_changed(self._store, json.dumps({"green": green}, indent=1, sort_keys=True))

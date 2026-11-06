@@ -58,6 +58,11 @@ export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
       const seen4xx = new Map<string, number>();
 
       page.on("console", (m) => {
+        // At any level and past `BENIGN`: a refused style or script is a page the policy broke.
+        if (/Content[- ]Security[- ]Policy/i.test(m.text())) {
+          problems.push({ kind: "csp", text: m.text() });
+          return;
+        }
         if (m.type() !== "error") return;
         // Chrome's failed-subresource error carries no status; it is read off the response channel below.
         const url = m.location().url;

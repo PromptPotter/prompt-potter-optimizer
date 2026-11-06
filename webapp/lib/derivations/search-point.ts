@@ -1,4 +1,4 @@
-import { liveCandidate, roundOf } from "@/lib/poll";
+import { liveCandidate, roundOf } from "./round-candidates";
 import type {
   ServedDashboard,
   ArmName,

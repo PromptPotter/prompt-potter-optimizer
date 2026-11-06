@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { liveCandidates, useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/poll";
 import type { ServedRound } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
 import {
@@ -7,6 +7,7 @@ import {
   candidateBars,
   candidatesAtPath,
   courseAt,
+  liveCandidates,
   measuredUniverse,
   type LineageIndex,
 } from "@/lib/derivations";

@@ -50,7 +50,7 @@ test.describe("account", () => {
     await open(page, "#/account=about");
     // The PILL is the claim (`AccountAboutTab::ProvenancePill`); the tab's prose says "verified" too.
     await expect(account(page).getByText("Self-declared").first()).toBeVisible();
-    await expect(account(page).getByText("✓ Verified")).toHaveCount(0);
+    await expect(account(page).getByText(/^\W*Verified$/)).toHaveCount(0);
 
     const health = await (await request.get("/api/v1/health")).json();
     await expect(account(page).getByText(health.version, { exact: false }).first()).toBeVisible();

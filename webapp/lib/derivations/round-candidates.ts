@@ -1,6 +1,24 @@
-import { liveCandidates, roundOf } from "@/lib/poll";
-import type { ServedDashboard, ArmReading, RoundView } from "@/lib/api/types";
+import type { ServedDashboard, ArmReading, LiveCandidate, RoundView } from "@/lib/api/types";
 import type { ArmRow, RoundCandidates } from "@/lib/types";
+
+// Stable reference: a fresh `[]` per poll drives the candidates card into a setState loop.
+const NO_ROWS: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
+
+export function liveCandidates(dash: ServedDashboard | null): LiveCandidate[] {
+  return dash?.current_round.candidates ?? NO_ROWS;
+}
+
+export function liveCandidate(
+  dash: ServedDashboard | null,
+  key: string | null,
+): LiveCandidate | null {
+  if (!key) return null;
+  return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
+}
+
+export function roundOf(dash: ServedDashboard | null): number | null {
+  return dash?.current_round.round ?? null;
+}
 
 export function scoreboardReading(doc: RoundView | null, key: string): ArmReading | null {
   return doc?.scoreboard.find((r) => r.reading.arm.key === key)?.reading ?? null;

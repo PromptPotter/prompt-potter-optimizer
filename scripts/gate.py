@@ -843,10 +843,15 @@ def _eslint(sel: Selection) -> Outcome:
     return run(_node("npm", "run", "lint", "--", *sel.web_files, *(sel.narrowed or ())), _WEBAPP)
 
 
+# Potter's straight leg of the offline run: the campaigns `walk` serves a copy of (`e2e/walk_world.py`).
+_WALK_WORLD = clone_cache() / OFFLINE_RUN / "potter"
+
+
 def _playwright(_sel: Selection) -> Outcome:
-    # Only `cold`: `walk` needs an offline-run world (`PP_E2E_WALK_WORLD`) and `spend` costs real
-    # money.
-    return run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
+    # `spend` costs real money; an empty `PP_E2E_BASE_URL` keeps a desk's server out of the walk.
+    projects = ("--project=cold", "--project=walk")
+    world = {"PP_E2E_WALK_WORLD": str(_WALK_WORLD), "PP_E2E_BASE_URL": ""}
+    return run(_node("npx", "playwright", "test", *projects), _WEBAPP, **world)
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
@@ -988,8 +993,9 @@ class Check:
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak is more than any lane beside it leaves free.
     alone: bool = False
-    # The check that builds what it reads: earlier in its lane, and brought along by `--only`.
-    after: str = ""
+    # The checks that build what it reads: earlier in its lane, or in a lane before an `alone`
+    # check; brought along by a selection that leaves them out (`--only`, `--web`).
+    after: tuple[str, ...] = ()
     # Empty is its kind's prefixes; `!prefix` is everything outside one. A callable is derived at
     # first use, so importing the gate parses nothing.
     reads: tuple[str, ...] | Callable[[], tuple[str, ...]] = ()
@@ -1227,6 +1233,7 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _Probe("scripts/build_ts_types.py", ("webapp/lib/api/types.generated.ts",)),
         on_commit=True,
+        light=True,
         reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
@@ -1237,6 +1244,7 @@ CHECKS: tuple[Check, ...] = (
             "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
         ),
         on_commit=True,
+        light=True,
         reads=(
             "scripts/build_vendor_marks.py",
             "webapp/assets/vendor-marks/",
@@ -1256,6 +1264,7 @@ CHECKS: tuple[Check, ...] = (
             ),
         ),
         on_commit=True,
+        light=True,
     ),
     Check(
         "specs",
@@ -1269,6 +1278,7 @@ CHECKS: tuple[Check, ...] = (
             ),
         ),
         on_commit=True,
+        light=True,
     ),
     # Last in the host: it imports every module, which no regenerator before it may see.
     Check(
@@ -1286,7 +1296,14 @@ CHECKS: tuple[Check, ...] = (
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
     # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
-    Check(OFFLINE_RUN, "py", _offline_run, landing=True, reads=(*OFFLINE_RUN_READS, *_GATE)),
+    Check(
+        OFFLINE_RUN,
+        "py",
+        _offline_run,
+        landing=True,
+        reads=(*OFFLINE_RUN_READS, *_GATE),
+        builds=str(_WALK_WORLD),
+    ),
     Check(
         "optimizer-plugin",
         "py",
@@ -1310,17 +1327,20 @@ CHECKS: tuple[Check, ...] = (
         _playwright,
         landing=True,
         alone=True,
-        after="vite-build",
+        after=("vite-build", OFFLINE_RUN),
         product=("webapp/out",),
-        # The cold server's backend is the offline world's (`e2e/serve_app.py`).
-        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME, "scripts/offline_world.py"),
+        # Both servers' backend is the offline world's (`e2e/serve_app.py`); the walk world is
+        # keyed on what made it, the offline run's sources.
+        reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS),
     ),
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
 )
 # A lane runs in this order, so what a check reads is built before it.
-assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)
+assert all(
+    any(b.name == name for b in CHECKS[:i]) for i, c in enumerate(CHECKS) for name in c.after
+)
 
 
 @dataclass(frozen=True)
@@ -1644,12 +1664,15 @@ def main() -> int:
             if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
         ]
     if not args.staged:
-        # `--only playwright` brings `vite-build` along, so it never reads a build older than its sources.
+        # `--only playwright` brings `vite-build` and `offline-run` along, so it never reads a build
+        # or a world older than its sources.
         named = {c.name: c for c in CHECKS}
-        for check in list(checks):
-            while check.after and named[check.after] not in checks:
-                check = named[check.after]
-                checks.append(check)
+        due = list(checks)
+        while due:
+            for builder in (named[name] for name in due.pop().after):
+                if builder not in checks:
+                    checks.append(builder)
+                    due.append(builder)
     checks.sort(key=CHECKS.index)
     if args.push:
         # Before any re-exec: each checkout pins its own, and a path pinned here would name this tree.

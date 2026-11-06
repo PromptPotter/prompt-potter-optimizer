@@ -14,12 +14,13 @@ npx playwright test --project=walk -g "theme"    # one slice
 
 First time on a machine: `npx playwright install chromium`.
 
-**`gate.py` runs `cold` only** — its playwright check does not walk an offline-run world yet
-([`code-debt-cleanup.md`](../../docs/specs/code-debt-cleanup.md) § The webapp's vanilla pass), and `spend` needs money. `walk` reads no operator campaign when
-`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run is what `gate.py --only offline-run` leaves
-at `.gate_cache/offline-run/potter` — and `walk_world.py` serves a throwaway copy of it whose
-account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
-own workspace, a desk tier run by hand.
+**`gate.py` runs `cold` and `walk`**, never `spend`, which needs money. Its `playwright` check
+runs after `offline-run` and `vite-build` (`gate.py::Check.after`) and names potter's straight run,
+`.gate_cache/offline-run/potter`, as the walk world. `walk` reads no operator campaign when
+`PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`)
+names a run, and `walk_world.py` serves a throwaway copy of it whose account agreed to the live
+terms, with the `offline` backend. Unset, `walk` reads the checkout's own workspace, a desk tier
+run by hand.
 
 **The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
 without `spend` serves the throwaway world `offline`: `serve_app.py` answers `TERMNORM_URL` with
@@ -39,8 +40,8 @@ cannot hold both. **Neither binds 8001** — that port is the operator's.
 
 **A run boots only the servers its projects need** (`playwright.config.ts::runs`, read off
 `--project`): `walk` starts the walk server, `cold` and `spend` the throwaway one, and no
-`--project` at all — `npm run e2e` — starts both. So the gate's `--project=cold` never opens the
-operator's workspace.
+`--project` at all — `npm run e2e` — starts both. A `cold`-only run never opens the operator's
+workspace, and neither does the gate's walk: it names its world.
 
 **One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
 needs an identity that is signed in and is not the host, which neither server above can produce
@@ -98,5 +99,7 @@ Each binds one helper in `harness.ts` and is argued where it binds:
   assert the app renders THAT; where a world cannot answer the question, `test.skip` with the
   reason. A spec naming a campaign id asserts the operator's disk rather than the app.
 - **The console guard is the point** (`BENIGN`, `EXPECTED_4XX`) — it is `auto`, so no spec can
-  forget it, and it stays empty of anything the app itself emits.
+  forget it, and it stays empty of anything the app itself emits. A Content-Security-Policy
+  violation fails a spec at any console level, past `BENIGN`: the page CSP
+  (`headers.py::_WEBAPP_CSP`) holds no `'unsafe-inline'`, so a refused style is a broken page.
 - **A hash-only `goto` does not remount** (`open`) — navigate with it, never `page.goto`.

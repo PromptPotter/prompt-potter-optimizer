@@ -778,17 +778,15 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **A view family that is chrome**: `components/shell/families.tsx::FAMILIES` holds a family with a
   null pane (the phone's campaign list is the sidebar), so naming it on a wide screen opens a chip
   that draws nothing. **Re-test:** every family has a pane.
-- **The `walk` tier rots unseen**: the gate runs only `cold`, so a walk assertion outlives the control
-  it names. The world is built: `PP_E2E_WALK_WORLD=<offline-run>/potter` serves a copy through
-  `e2e/walk_world.py`, and the host it walks as is exempt from the read bucket
-  (`quota.py::refuse_request_rate`). Action: the gate's `playwright` check builds that world and adds
-  `--project=walk` on it. **Re-test:** `gate.py` lists a walk check.
-- **The Vite build leaves five things standing**:
-  - The derivations barrel pulls the network layer into every chunk that imports it.
-  - Babel (React Compiler) is 87% of build time.
-  - Chunks exceed 500 kB.
+- **The Vite build leaves four things standing**:
+  - The derivations barrel still reaches `hooks/useRead` at runtime: `connector-state.ts::nodeSchemaReading`
+    reads a `ReadResult`, so it is no reading of served data; it moves to the pipeline read's hook,
+    re-pointing its four importers. No chunk moves with it: `app/mount.tsx`'s auth provider already
+    puts `api/client`, `read-cache` and `api/reads` in the chunk every page loads.
+  - Babel (React Compiler) is about 90% of build time (a build with `@rolldown/plugin-babel` dropped
+    takes a tenth as long).
+  - The main entry chunk exceeds 500 kB.
   - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank`, `@next/next/*`.
-  - `headers.py::_WEBAPP_CSP` `style-src 'self'` may now hold, with no inline style from the framework: check the console first.
 - **minimatch alert #171** (dev-scope, lint-time only): no eslint / `@eslint/eslintrc` / jsx-a11y /
   typescript-estree release takes minimatch >= 11.0.1. **Rides with:** the first eslint / ts-eslint / jsx-a11y
   release on minimatch >= 11.
@@ -1077,18 +1075,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   which a host loaded from outside the gate lock (a builder's bare `pytest` or `vitest`) still trips,
   though the gate runs it `alone` on one unisolated worker per project. **Re-test:** five builders
   plus one full gate with no reap and no gate waiting longer than its own run.
-- **Four `--staged` checks queue only because their regenerators always write**: `ts-types`,
-  `vendor-marks`, `optimizer-schemas` and `specs` rewrite their tracked output on every run, even
-  when it is unchanged, so they cannot be `gate.py::Check.light`. Two more keep a commit queued:
-  eslint's `--cache` write and tsc's typegen. `ts-types`, `optimizer-schemas` and `specs` read
-  `!webapp/`, so nearly every commit selects one. Action: each regenerator writes only when the
-  content differs, via atomic `os.replace`; mark the four light. **Re-test:** a `--staged` gate
-  selecting them starts while a sibling gate runs.
-- **Two gates can still lose each other's greens**: `last_green.py::LastGreen.record` re-loads
-  `greens.json` just before an atomic replace, but nothing locks the load-to-replace span, so of two
-  gates finishing together the later drops the earlier's greens (a rerun, never a false green).
-  Action: hold an exclusive lock across load, merge and replace. **Re-test:** two concurrent
-  `record` calls on distinct checks both persist.
 - **`initialization/session.py::LaunchState.ledger` is `Optional` while a round needs it**:
   `run_observers.py::build_run_observers` sets it after the state is built, so `runner/round.py`
   asserts presence and five other readers branch on `None`. Action: the run's state is built with its
@@ -1408,12 +1394,8 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `round_walks` each decide which walk counts as a round of its own.
 - **The capo offline bench turns on one seed**: lift +0.700 or none after a draw-order change, so the
   fixture cannot tell a mating-law change from a reshuffle.
-- **The controlled offline leg's arm-memory count moves between identical runs** (`arm potter: memory
-  holds 380` then `375` own answers on one tree): a cell coalesced with a twin in flight is answered
-  from memory, not sent. A printed reading, not a decision. Action: count filed answers, not distinct
-  ones — the count is `scripts/offline_run.py::run_controlled`'s (`file_answers` mints a ref per
-  filing, and a coalesced cell files none). Separately, `--controlled` stops at `_variant_edit`
-  ("no framing to cite") on the foreign potter campaign, on main too. **Re-test:** two `--controlled` runs of one tree print one count.
+- **`--controlled` stops at `_variant_edit`** ("no framing to cite") on the foreign potter
+  campaign, on main too.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 

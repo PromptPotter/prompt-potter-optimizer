@@ -12,9 +12,10 @@ _API = "/api/v1/"
 # The build (`webapp/vite.config.ts`) names these files by their content, so one that was served never changes.
 _CONTENT_NAMED = "/assets/"
 _API_CSP = "default-src 'none'; frame-ancestors 'none'"
-# No inline script: the theme stamp is a file. Styles stay 'unsafe-inline' for React's `style=` props.
+# No inline script or style: the theme stamp is a file, and React's `style=` props set the CSSOM,
+# which `style-src` does not govern. The browser walk fails on any violation (`e2e/harness.ts`).
 _WEBAPP_CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
     "img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
     "form-action 'self'"
 )

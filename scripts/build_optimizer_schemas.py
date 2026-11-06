@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from processes import replace_changed
 from pydantic import BaseModel
 
 from promptpotter.application import optimizers
@@ -59,12 +60,9 @@ def main() -> int:
         resolved = {f"{node}/1": _entry(node, model) for node, model in models.items()}
         out_path = directory / "resolved_schemas.json"
         # `ensure_ascii=False`: escaped prose cannot reproduce the committed output byte for byte.
-        out_path.write_text(
-            json.dumps(resolved, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        print(f"wrote {len(resolved)} schemas to {out_path}")
+        content = json.dumps(resolved, indent=2, ensure_ascii=False) + "\n"
+        verb = "wrote" if replace_changed(out_path, content) else "unchanged:"
+        print(f"{verb} {len(resolved)} schemas to {out_path}")
     return 0
 
 

@@ -7,9 +7,9 @@ test.describe("the walk world", () => {
     const all = await campaigns(request);
     expect(
       all.length,
-      "the walk tier reads the operator's own workspace and this one holds no campaign with a " +
-        "cycle — every spec below it would SKIP and the tier would exit 0 having checked " +
-        "nothing. Point PP_E2E_BASE_URL at a populated server, or run --project=cold.",
+      "the walk world holds no campaign with a cycle — every spec below it would SKIP and the " +
+        "tier would exit 0 having checked nothing. Name a run in PP_E2E_WALK_WORLD (the gate " +
+        "names offline-run's potter/), or point PP_E2E_BASE_URL at a populated server.",
     ).toBeGreaterThan(0);
   });
 
