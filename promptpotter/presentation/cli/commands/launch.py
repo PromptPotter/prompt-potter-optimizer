@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
+from promptpotter.application.commands.command_stopping import stop_pass
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.jobs.launcher.admission import PassHold
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep

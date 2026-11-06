@@ -9,17 +9,16 @@ from typing import Literal
 
 from promptpotter.application.jobs.interlock import producer_alive
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, LoopPayload
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
-from promptpotter.domain.run_records import CommandState, LaunchedEffect
+from promptpotter.domain.run_records import CommandState, CommandSubject, LaunchedEffect
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state, run_mark
-from promptpotter.infrastructure.store.command_log import CommandLog
+from promptpotter.infrastructure.store.command_log import LOOP_KINDS
 from promptpotter.infrastructure.store.layout import cycle_dir_for
-from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.infrastructure.store.stores import Stores, descend_store
+from promptpotter.shared.errors import NotFoundError, PotterError
 from promptpotter.shared.identity import acting_principal
 
 type TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
@@ -79,7 +78,7 @@ def _held(job: Job) -> bool:
     return derive_run_state(cycle_dir).gate is not None
 
 
-class CommandStatus(FrozenModel):
+class CommandReading(FrozenModel):
     """One command as every door reads it: where it stands, in the words of its task status,
     read afresh off the account's command log and, for a launch, each job it launched."""
 
@@ -95,7 +94,7 @@ class CommandStatus(FrozenModel):
 
 def owned_command(stores: Stores, command_id: str) -> CommandState:
     """*command_id* as the account's log holds it, filed by this principal; another's is absent."""
-    state = CommandLog(stores.base_dir).state(command_id)
+    state = stores.commands.state(command_id)
     principal = acting_principal(stores.identity).id
     if state is None or state.filed.issued_by.id != principal:
         raise NotFoundError(f"no command {command_id!r}")
@@ -113,22 +112,25 @@ def launched_jobs(jobs: JobRegistry, state: CommandState) -> list[Job] | None:
     return launched
 
 
-_LOOP_KINDS = frozenset(k for k, m in PAYLOAD_MODEL_FOR_KIND.items() if issubclass(m, LoopPayload))
 # What a loop command reads once the run it was accepted for ended without taking it.
 _LOOP_ENDED = "loop ended without taking it"
 
 
 def _loop_left(stores: Stores, state: CommandState) -> bool:
-    """An accepted loop command its cycle's runs have moved past (`run_mark`), or whose cycle is gone."""
-    if state.filed.kind not in _LOOP_KINDS:
+    """An accepted loop command its cycle's runs have moved past (`run_mark`), or whose cycle (or
+    the sandbox holding it) is gone: no boundary voids it on the log yet."""
+    subject = CommandSubject.subject_of(state.filed.subject)
+    if state.filed.kind not in LOOP_KINDS or subject is None:
         return False
-    campaign_id, _, cycle_id = state.filed.subject.partition("/")
-    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-    cycle_dir = cycle_dir_for(WorkspaceDir(stores.base_dir), hop)
+    try:
+        leaf = descend_store(stores, subject.inside)
+    except PotterError:
+        return True
+    cycle_dir = leaf.campaigns.cycle_dir(subject.path[-1])
     return not cycle_dir.is_dir() or run_mark(cycle_dir) != state.run_mark
 
 
-def command_status(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandStatus:
+def command_status(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandReading:
     """*command_id* as this principal filed it: refused as absent for anyone else's."""
     state = owned_command(stores, command_id)
     updated = state.at
@@ -157,7 +159,7 @@ def command_status(stores: Stores, jobs: JobRegistry, command_id: str) -> Comman
                 status, said = "cancelled", state.detail or "cancelled"
             case _:
                 status, said = "failed", state.detail or state.status
-    return CommandStatus(
+    return CommandReading(
         command_id=command_id,
         kind=state.filed.kind,
         subject=state.filed.subject,

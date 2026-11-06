@@ -16,14 +16,14 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
+from promptpotter.domain.phase_views import PhaseView, RunSpendView, VerifyGradedView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
@@ -505,21 +505,6 @@ class PricedKeyRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class BankedSubject(NamedTuple):
-    """What a tombstone banks: a campaign, one of its cycles, or a draft that never minted one."""
-
-    campaign_id: str = ""
-    cycle_id: str = ""
-    draft_id: str = ""
-
-
-def _one_subject(subject: BankedSubject) -> None:
-    if bool(subject.campaign_id) is bool(subject.draft_id):
-        raise ValueError("a tombstone banks a campaign (or its cycle) or a draft, exactly one")
-    if subject.cycle_id and not subject.campaign_id:
-        raise ValueError("a banked cycle names its campaign")
-
-
 class BankedSpend(FrozenModel):
     """One wallet's `UserSpend`, as a tombstone banks it."""
 
@@ -556,39 +541,32 @@ class SpendTombstoneRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def subject(self) -> BankedSubject:
-        return BankedSubject(self.campaign_id, self.cycle_id)
+    def subject(self) -> Subject:
+        return Subject(self.campaign_id, self.cycle_id)
 
 
-class BankedCommand(FrozenModel):
-    """A cycle's trail line — a command, or the run's abnormal stop — banked before the cycle went."""
+class BankedStop(FrozenModel):
+    """A run's abnormal stop, as the trail read it before its cycle went; what was asked of the
+    cycle stays on the account's command log, which no delete reaches."""
 
     at: str
-    kind: str
-    # The campaign and cycle it addressed, as the trail read it before they went.
+    # Where it stopped and why, as the trail spelled it.
     subject: str
-    user_id: str
 
 
 class TrailTombstoneRecord(FrozenModel):
     """On the WORKSPACE ledger, so deleting a run cannot delete that it stopped."""
 
     record_type: Literal["trail_tombstone"] = "trail_tombstone"
-    campaign_id: str = ""
+    campaign_id: str
     # Empty for a whole-campaign bank.
     cycle_id: str = ""
-    draft_id: str = ""
-    commands: tuple[BankedCommand, ...]
+    stops: tuple[BankedStop, ...]
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def subject(self) -> BankedSubject:
-        return BankedSubject(self.campaign_id, self.cycle_id, self.draft_id)
-
-    @model_validator(mode="after")
-    def _one(self) -> TrailTombstoneRecord:
-        _one_subject(self.subject)
-        return self
+    def subject(self) -> Subject:
+        return Subject(self.campaign_id, self.cycle_id)
 
 
 class LLMCallStartRecord(FrozenModel):
@@ -746,8 +724,22 @@ VERIFY_WORDS: Worded[VerifyWord, str] = Worded(
 )
 
 
+class AnsweredEffect(FrozenModel):
+    """An act whose applied answer is a model of its own, kept whole: what a retry under its key
+    answers, read back as that model by the kind's replay."""
+
+    kind: Literal["answered"] = "answered"
+    answer: dict[str, Any]
+
+
 CommandEffect = Annotated[
-    NoEffect | DraftOpenedEffect | LaunchedEffect | VerifySaturated, Field(discriminator="kind")
+    NoEffect
+    | DraftOpenedEffect
+    | LaunchedEffect
+    | VerifySaturated
+    | VerifyGradedView
+    | AnsweredEffect,
+    Field(discriminator="kind"),
 ]
 
 
@@ -761,22 +753,32 @@ COMMAND_ENDED: frozenset[CommandStatus] = frozenset({"applied", "refused", "void
 
 
 class CommandSubject:
-    """The one spelling of a command's resolved address on the log: the workspace (``""``), a
-    campaign, a cycle, or a draft."""
+    """The one spelling of a command's resolved address on the log, served as filed: the workspace
+    (``""``), a campaign or a course in `Subject`'s own encoding (`Subject.key`, its sandbox chain
+    kept), or a draft."""
 
     WORKSPACE = ""
+    _DRAFT = "draft:"
 
     @staticmethod
-    def campaign(campaign_id: str) -> str:
-        return campaign_id
+    def of(subject: Subject) -> str:
+        return subject.key
 
-    @staticmethod
-    def cycle(hop: CycleHop) -> str:
-        return f"{hop.campaign_id}/{hop.cycle_id}"
+    @classmethod
+    def draft(cls, draft_id: str) -> str:
+        return f"{cls._DRAFT}{draft_id}"
 
-    @staticmethod
-    def draft(draft_id: str) -> str:
-        return f"drafts/{draft_id}"
+    @classmethod
+    def draft_of(cls, spelled: str) -> str | None:
+        """The draft *spelled* names, ``None`` for any other address."""
+        return spelled.removeprefix(cls._DRAFT) if spelled.startswith(cls._DRAFT) else None
+
+    @classmethod
+    def subject_of(cls, spelled: str) -> Subject | None:
+        """The campaign or course *spelled* names, ``None`` for the workspace or a draft."""
+        if not spelled or cls.draft_of(spelled) is not None:
+            return None
+        return Subject.parse(spelled)
 
 
 class CommandFiled(FrozenModel):
@@ -790,7 +792,7 @@ class CommandFiled(FrozenModel):
     # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
     act_digest: str
     issued_by: Principal
-    # The address the dispatcher resolved (`CommandSubject`): what the loop and the trail read by.
+    # The address the dispatcher resolved (`CommandSubject`): what every door serves and reads by.
     subject: str
     # The process that files it and runs its act (`interlock.this_producer`): gone while the
     # command is still ``filed``, its act died with it.
@@ -820,10 +822,14 @@ class CommandApplied(FrozenModel):
 
 
 class CommandRefused(FrozenModel):
-    """Its act refused it, or raised: nothing it asked happened."""
+    """Its act refused it, or raised: nothing it asked happened. ``error`` and ``code`` are the
+    error's own class and code, which a door that answers it later re-raises (`shared/errors.py::
+    raised_again`), ``detail`` its words."""
 
     event: Literal["refused"] = "refused"
     command_id: str
+    error: str = ""
+    code: str = ""
     detail: str = ""
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -838,24 +844,38 @@ class CommandVoided(FrozenModel):
 
 
 class CommandCancelled(FrozenModel):
-    """Its act was interrupted (a signal, a task's cancel) or a `cancel-command` reached it."""
+    """Its act was interrupted (a signal, a task's cancel, a pass's stop) or a `cancel-command`
+    reached it; ``code`` as `CommandRefused`'s, empty where no error said it."""
 
     event: Literal["cancelled"] = "cancelled"
     command_id: str
+    error: str = ""
+    code: str = ""
     detail: str = ""
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-CommandEvent = Annotated[
+class SubjectLanded(FrozenModel):
+    """A draft's mint adopted it as a cycle (`jobs/mint.py`): every command filed on ``subject``
+    is read as the minted cycle's, ``onto``. A subject's event, never a command's."""
+
+    event: Literal["landed"] = "landed"
+    subject: str
+    onto: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+CommandEvent = (
     CommandFiled
     | CommandAccepted
     | CommandApplied
     | CommandRefused
     | CommandVoided
-    | CommandCancelled,
-    Field(discriminator="event"),
-]
-COMMAND_EVENT_ADAPTER: TypeAdapter[CommandEvent] = TypeAdapter(CommandEvent)
+    | CommandCancelled
+)
+# One line of the account's command log: a command's event, or a subject's landing.
+CommandLogRow = Annotated[CommandEvent | SubjectLanded, Field(discriminator="event")]
+COMMAND_EVENT_ADAPTER: TypeAdapter[CommandLogRow] = TypeAdapter(CommandLogRow)
 
 
 def _moves(*to: CommandStatus) -> dict[CommandStatus, CommandStatus | None]:
@@ -883,6 +903,9 @@ class CommandState(NamedTuple):
     detail: str = ""
     effect: CommandEffect = NoEffect()
     run_mark: int | None = None
+    # The refusal's or the cancel's own error (`CommandRefused.error`, `.code`).
+    error: str = ""
+    code: str = ""
 
     @staticmethod
     def moved(status: CommandStatus | None, event: CommandStatus) -> CommandStatus:
@@ -900,9 +923,14 @@ class CommandState(NamedTuple):
                 )
             case CommandApplied(effect=effect):
                 return self._replace(status=status, at=event.timestamp, effect=effect)
-            case CommandRefused(detail=detail) | CommandVoided(detail=detail):
-                return self._replace(status=status, at=event.timestamp, detail=detail)
-            case CommandCancelled(detail=detail):
+            case (
+                CommandRefused(error=error, code=code, detail=detail)
+                | CommandCancelled(error=error, code=code, detail=detail)
+            ):
+                return self._replace(
+                    status=status, at=event.timestamp, error=error, code=code, detail=detail
+                )
+            case CommandVoided(detail=detail):
                 return self._replace(status=status, at=event.timestamp, detail=detail)
             case _:
                 raise ValueError(f"command {self.filed.command_id} is filed once")

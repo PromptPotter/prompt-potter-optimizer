@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.commands import measuring
+from promptpotter.application.commands import command_stopping, measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import active_pointer
 from promptpotter.application.views.render.primitives import bench_readout
@@ -27,7 +27,7 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
         raise NotFoundError("No active campaign to bench — name one with --campaign.")
     payload = GradeBenchPayload(campaign_id=campaign_id)
     # The pass scores the cycle holding the line, so that is the cycle a Ctrl+C pauses.
-    with ctrl_c_stops_pass(store, measuring.pass_pause(store, payload, reason="Ctrl+C")):
+    with ctrl_c_stops_pass(store, command_stopping.pass_pause(store, payload, reason="Ctrl+C")):
         sent = await CommandDispatcher(store).answer(measuring.grade_bench, CommandCall(payload))
     score, graded = sent.result, sent.payload.campaign_id
     logger.info("bench: %s -> graded", graded)

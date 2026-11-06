@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 
+from promptpotter.application.acting_command import PassStoppedError
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
-from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import PauseCyclePayload
 from promptpotter.domain.phases import StopOutcome

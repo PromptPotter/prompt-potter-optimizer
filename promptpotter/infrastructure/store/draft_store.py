@@ -4,8 +4,6 @@ from pathlib import Path
 
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.run_records import BankedSubject
-from promptpotter.infrastructure.store.account_trail import bank_trail
 from promptpotter.infrastructure.store.io import HeldLock, rmtree_robust, take_lock, write_bytes
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -104,12 +102,7 @@ class DraftStore:
         rmtree_robust(self.draft_dir(draft_id))
 
     def discard(self, claim: DraftClaim) -> None:
-        """A destroyer, under the claim it releases: what was commanded on it outlives it, under its id."""
+        """A destroyer, under the claim it releases: what was commanded on it outlives it on the
+        account's command log, under its id."""
         with claim:
-            draft_dir = self.draft_dir(claim.draft_id)
-            bank_trail(
-                workspace=self._base_dir,
-                cycle_dirs=[draft_dir],
-                subject=BankedSubject(draft_id=claim.draft_id),
-            )
-            rmtree_robust(draft_dir)
+            rmtree_robust(self.draft_dir(claim.draft_id))

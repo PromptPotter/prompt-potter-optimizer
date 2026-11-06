@@ -30,7 +30,7 @@ from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands.command_reading import (
     TERMINAL,
-    CommandStatus,
+    CommandReading,
     TaskStatus,
     command_status,
     owned_command,
@@ -40,9 +40,10 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
     CommandOutcome,
+    answer_kept,
     command_answer,
 )
-from promptpotter.application.jobs.launcher.admission import PassHold
+from promptpotter.application.commands.launching import StartRecorded
 from promptpotter.application.jobs.launcher.head_to_head import (
     AdmittedHeadToHead,
 )
@@ -64,11 +65,11 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.shared.errors import (
     ConflictError,
     NotFoundError,
     PayloadInvalidError,
+    raised_again,
 )
 from promptpotter.shared.named_rows import returned
 
@@ -225,7 +226,7 @@ class HostTask(FrozenModel):
     last_updated_at: str
 
     @classmethod
-    def of(cls, read: CommandStatus) -> HostTask:
+    def of(cls, read: CommandReading) -> HostTask:
         return cls(
             task_id=read.command_id,
             status=read.status,
@@ -237,7 +238,7 @@ class HostTask(FrozenModel):
 
 async def _launched(result: object) -> object:
     """An admission's launch, awaited, so the jobs its command names are launched."""
-    if isinstance(result, Admitted | AdmittedHeadToHead):
+    if isinstance(result, Admitted | AdmittedHeadToHead | StartRecorded):
         return await result.launched()
     return result
 
@@ -380,20 +381,18 @@ class HostSession:
         return HostAnswer(_jsonable(outcome.accepted if tool.answers() is None else outcome.result))
 
     async def _open(self, sent: CommandCall[CommandPayload]) -> HostTask:
-        """Its act runs on past the answer, under the hold any stop of its pass takes; the task
-        answered is the command it filed, or the first act's where the call was a retry."""
-        hold = PassHold()
+        """Its act runs on past the answer, stopped by its cancel on the log; the task answered is
+        the command it filed, or the first act's where the call was a retry."""
 
         async def _dispatch() -> CommandOutcome[Any, Any]:
-            with hold.bound(sent.command_id):
-                outcome = await self._dispatcher().dispatch(sent)
+            outcome = await self._dispatcher().dispatch(sent)
             await _launched(outcome.result)
             return outcome
 
         running = asyncio.create_task(_dispatch())
-        _ACTING.add(running)
-        running.add_done_callback(_settled)
-        log = CommandLog(self.caller.stores.base_dir)
+        _ACTING[sent.command_id] = running
+        running.add_done_callback(functools.partial(_settled, sent.command_id))
+        log = self.caller.stores.commands
         while await _off_loop(lambda: log.state(sent.command_id)) is None and not running.done():  # noqa: ASYNC110 — its filing lands off the loop
             await asyncio.sleep(_FILED_POLL_S)
         command_id = sent.command_id
@@ -402,16 +401,26 @@ class HostSession:
             command_id = (await running).accepted.command_id
         return HostTask.of(await self.command_status(command_id))
 
-    async def command_status(self, command_id: str) -> CommandStatus:
+    async def command_status(self, command_id: str) -> CommandReading:
         stores, jobs = self.caller.stores, self.caller.jobs
         return await _off_loop(lambda: command_status(stores, jobs, command_id))
 
     async def _task_result(self, task_id: str) -> tuple[str, HostAnswer]:
-        """Polled to its end: its act runs in whichever process filed it, and its jobs in their own."""
-        while (read := await self.command_status(task_id)).status not in TERMINAL:  # noqa: ASYNC110 — a cross-process wait
-            await asyncio.sleep(_SETTLE_POLL_S if read.status != "working" else _FILED_POLL_S)
+        """Waited to its end: woken by its act's task where this process runs it, else read every
+        `_SETTLE_POLL_S` — its act runs in whichever process filed it, its jobs in their own. Its
+        answer is what its command's end kept, never a second dispatch; its refusal, re-raised as
+        the error it was."""
+        while (read := await self.command_status(task_id)).status not in TERMINAL:
+            if (running := _ACTING.get(task_id)) is not None and not running.done():
+                await asyncio.wait({running})
+            else:
+                await asyncio.sleep(_SETTLE_POLL_S)
         tool = host_tool(read.kind)
         state = await _off_loop(lambda: owned_command(self.caller.stores, task_id))
+        # The command's own refusal first, whatever its kind answers; a launch's jobs ending
+        # answer nothing past its filing.
+        if state.error:
+            raise raised_again(state.error, state.code, state.detail)
         if tool.answers() is None:
             accepted = CommandAcceptedBody(command_id=task_id, subject=read.subject)
             return tool.name, HostAnswer(_jsonable(accepted))
@@ -421,13 +430,10 @@ class HostSession:
                 code=f"command_{read.status}",
                 details={"command_id": task_id},
             )
-        payload = PAYLOAD_MODEL_FOR_KIND[read.kind].model_validate(state.filed.payload)
-        replayed = await self._dispatcher().dispatch(
-            CommandCall(payload, state.filed.idempotency_key)
-        )
-        return tool.name, HostAnswer(_jsonable(replayed.result))
+        assert isinstance(tool.kind, CommandKind), "a task is a command's"
+        return tool.name, HostAnswer(_jsonable(answer_kept(tool.kind, state.effect)))
 
-    async def cancel_command(self, command_id: str) -> CommandStatus:
+    async def cancel_command(self, command_id: str) -> CommandReading:
         """Its one `cancel-command`, keyed by it so a retried cancel acts once."""
         await self.command_status(command_id)
         cancel = CommandCall(CancelCommandPayload(command_id=command_id), f"cancel:{command_id}")
@@ -465,17 +471,19 @@ class HostSession:
         return template.compile_prompt(consultation_instruction=instruction)
 
 
-# How often a task's result re-reads its command while its jobs run, and while its act does.
+# How often a task's result re-reads its command where no act of this process runs it, and how
+# often an opening reads for its filing.
 _SETTLE_POLL_S = 2.0
 _FILED_POLL_S = 0.05
 
-# A task's act in flight in this process, kept from collection until it ends.
-_ACTING: set[asyncio.Task[Any]] = set()
+# A task's act in flight in this process, by its command: kept from collection until it ends, and
+# what its result's wait wakes on.
+_ACTING: dict[str, asyncio.Task[Any]] = {}
 
 
-def _settled(running: asyncio.Task[Any]) -> None:
+def _settled(command_id: str, running: asyncio.Task[Any]) -> None:
     """Its act ended: what it raised is on its command's log, taken here."""
-    _ACTING.discard(running)
+    _ACTING.pop(command_id, None)
     if not running.cancelled():
         running.exception()
 

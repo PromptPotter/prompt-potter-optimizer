@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from promptpotter.domain.activity import ActivityFeed, ActivityRecord
+from promptpotter.domain.activity import ActivityFeed, ActivityRecord, ActivityState
 from promptpotter.domain.projection_envelope import (
     ProjectionEnvelope,
     ProjectionKind,
     bearing_record,
 )
 from promptpotter.domain.run_records import RECORD_ADAPTER
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.infrastructure.store.io import complete_lines
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
@@ -31,6 +32,7 @@ class CycleLedgerTail:
 
     def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
         self._cycle_id = cycle_id
+        self._commands = CommandLog.of_cycle(cycle_dir)
         self._ledger_path = CycleLayout(cycle_dir).ledger
         self._byte_pos = 0
         self._line_index = 0
@@ -49,7 +51,7 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=offset,
             payload=body,
-            activity=self._feed.state(),
+            activity=self._activity(),
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
@@ -66,6 +68,10 @@ class CycleLedgerTail:
             if envelope is not None:
                 out.append(envelope)
         return out
+
+    def _activity(self) -> ActivityState:
+        log, place = self._commands
+        return self._feed.state(state for _, state in log.of_subject(place))
 
     def _park(self, line: int | None) -> int:
         """Walks the bytes, not the number: a rewind or a fork leaves a ledger shorter than ``line``."""
@@ -101,5 +107,5 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=self._line_index,
             payload=rec,
-            activity=self._feed.state(),
+            activity=self._activity(),
         )

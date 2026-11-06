@@ -51,7 +51,7 @@ from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
-from promptpotter.infrastructure.store.command_log import COMMAND_CHECK_LOCK, COMMAND_LOG_FILE
+from promptpotter.infrastructure.store.command_log import COMMAND_LOG_FILE
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -438,17 +438,14 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         TypeAdapter(CycleHop),
     ),
     Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, RECORD_ADAPTER),
-    # What the account asked: no SURVIVOR fact lives only here (consent, grants, keys and charges
-    # each keep their own file).
+    # What the account asked, its sandboxes' commands under their full subject: no SURVIVOR fact
+    # lives only here (consent, grants, keys and charges each keep their own file).
     Kind(
         "command log",
-        _WS,
+        Scope.ACCOUNT,
         f"{WORKSPACE_STATE_DIR}/{COMMAND_LOG_FILE}",
         Fate.RUN,
         COMMAND_EVENT_ADAPTER,
-    ),
-    Kind(
-        "command log check lock", _WS, f"{WORKSPACE_STATE_DIR}/{COMMAND_CHECK_LOCK}", Fate.MACHINE
     ),
     Kind(
         "head-to-head",

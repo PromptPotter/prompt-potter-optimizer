@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
@@ -22,6 +23,7 @@ from promptpotter.domain.round_health import HEALTH_CAUSE_INFO, DegradationHealt
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
+    CommandState,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -259,6 +261,8 @@ class ActivityFeed:
         self._status: ActivityItem | None = None
         self._notices: list[ActivityItem] = []
         self._round: int | None = None
+        # When the round in force was entered: a refused control of an earlier round has lapsed.
+        self._round_since = ""
         self._bench: _BenchPass | None = None
         self._gate: GateKind | None = None
         self._offered: list[Said] = []
@@ -269,13 +273,30 @@ class ActivityFeed:
         self._labels: dict[ArmKey, str] = {}
         self._arms = AnnouncedArms()
 
-    def state(self) -> ActivityState:
+    def state(self, refused: Iterable[CommandState] = ()) -> ActivityState:
+        """*refused* is the cycle's refused commands off the account's command log: each one of
+        the round in force is a notice beside the ledger's."""
         decision: ActivityDecision | None = None
         if self._gate == "origin":
             decision = _origin_gate(self._origin_health)
         elif self._gate == "arms":
             decision = _arms_gate(self._round, self._offered)
-        return ActivityState(status=self._status, notices=list(self._notices), decision=decision)
+        controls = [
+            ActivityItem(
+                id=f"command_refused-{state.filed.command_id}",
+                kind="warning",
+                icon="⚠",
+                label="control rejected",
+                detail=state.detail or None,
+                tone="warn",
+                round=self._round,
+            )
+            for state in sorted(refused, key=lambda state: state.at)
+            if state.status == "refused" and state.at >= self._round_since
+        ]
+        return ActivityState(
+            status=self._status, notices=[*self._notices, *controls], decision=decision
+        )
 
     def feed(self, record: ActivityRecord) -> None:
         self.read(self.at_offset, record)
@@ -323,6 +344,7 @@ class ActivityFeed:
                 self._arms.enter(record)
                 if self._round is not None and record.round != self._round:
                     self._notices = [n for n in self._notices if LIFETIME[n.kind] == "run"]
+                    self._round_since = record.timestamp
                 self._round = record.round
             case PhaseRecord(event="enter", round=int() as opened) if self._round is None:
                 self._round = opened

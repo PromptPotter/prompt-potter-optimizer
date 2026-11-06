@@ -1388,7 +1388,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             ),
         )
     )
-    (inner_sandbox(stores, family.campaign_id, family.cycle_id) / stores.tenant_id).mkdir()
+    inner_sandbox(stores, family.campaign_id, family.cycle_id)
     sandbox = inner_sandbox_store(stores, family.campaign_id, family.cycle_id)
     assert sandbox is not None, "guard"
     asks = {

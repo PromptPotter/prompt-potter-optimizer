@@ -9,10 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.run_records import (
     BankedSpend,
-    BankedSubject,
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
@@ -122,7 +121,7 @@ class _Tombstones:
     def __init__(self) -> None:
         self._by_campaign: dict[str, PaidSpend] = {}
         self._metered: dict[tuple[str, CeilingMeter], Budget] = {}
-        self._subjects: set[BankedSubject] = set()
+        self._subjects: set[Subject] = set()
 
     def feed(self, banked: SpendTombstoneRecord) -> None:
         self._subjects.add(banked.subject)
@@ -142,7 +141,7 @@ class _Tombstones:
 class _Banked(NamedTuple):
     spent: dict[str, PaidSpend]
     metered: dict[tuple[str, CeilingMeter], Budget]
-    subjects: frozenset[BankedSubject]
+    subjects: frozenset[Subject]
 
 
 _SPEND_FOLDS = (_Spend, _Tombstones)
@@ -289,7 +288,7 @@ def bank_spend(
     *,
     workspace: WorkspaceDir,
     cycle_dirs: list[Path],
-    subject: BankedSubject,
+    subject: Subject,
     metered: dict[CeilingMeter, Budget],
 ) -> PaidSpend:
     """Destroyers only (archiving keeps the rows); a tombstone already standing is a crashed delete's, kept for the retry."""

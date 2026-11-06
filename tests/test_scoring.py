@@ -66,19 +66,20 @@ from pydantic import SecretStr, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application import optimizers
+from promptpotter.application.acting_command import PassStoppedError
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_clock, session_ruler_scope
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands import measuring
+from promptpotter.application.commands import command_stopping, measuring
+from promptpotter.application.commands.command_stopping import stop_pass
 from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
     CommandDispatcher,
 )
-from promptpotter.application.commands.measuring import stop_pass
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
@@ -100,7 +101,6 @@ from promptpotter.application.intelligence.rasch import (
 )
 from promptpotter.application.jobs.launcher.admission import (
     PassHold,
-    PassStoppedError,
     paid_pass,
 )
 from promptpotter.application.optimizer_manifest import (
@@ -1949,15 +1949,15 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
             "the pass left its pause unapplied, or kept the cycle after it stopped"
         )
-        # Every other door stops the pass by its own hold, in one step: the host's cancel and the
-        # terminal's Ctrl+C each pause it while it holds its cycle, and once it let go the stop
-        # answers that it ended, leaving no pause for whatever holds the cycle next.
+        # The host's cancel stops the pass by its command's cancel on the log, which the pass reads
+        # (no pause is filed); the terminal's Ctrl+C pauses it under its own hold, and once it let
+        # go the stop answers that it ended, leaving no pause for whatever holds the cycle next.
         host = HostSession(Caller(stores))
 
         def paused_by() -> list[str]:
             return [
                 state.filed.payload["reason"]
-                for state in CommandLog(stores.base_dir).book().commands.values()
+                for state in stores.commands.book().commands.values()
                 if state.filed.kind == CommandKind.PAUSE_CYCLE
             ]
 
@@ -1972,9 +1972,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 raise AssertionError("a stop left the pass running")
 
         async def _host_cancel() -> HostTask:
-            """A verify the host task "held" runs, sent by an id prefix, as a terminal names its
-            stop: its cancel still addresses the pass's cycle, by the task's command id."""
-            hold = PassHold()
+            """A verify the host task "held" runs, sent by an id prefix: its cancel reaches the
+            pass by the task's command id."""
             held = VerifyCandidatePayload(
                 campaign_id=_PEER_HOP.campaign_id[:3],
                 cycle_id=_PEER_HOP.cycle_id,
@@ -1986,11 +1985,11 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     await _held_pass(lambda: host.answer(CancelTask("held")))
                     raise AssertionError("a host cancel left the pass running")
 
-                return Applier(_run, replay=None)
+                return Applier.silent(_run)
 
             with monkeypatch.context() as patched:
                 patched.setattr(measuring, "verify_candidate", _holding)
-                with hold.bound("held"), pytest.raises(PassStoppedError):
+                with pytest.raises(PassStoppedError):
                     await CommandDispatcher(stores).dispatch(CommandCall(held, command_id="held"))
             return await host.answer(TaskStatusOf("held"))
 
@@ -2051,21 +2050,23 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         async def _tracked_by_prefix() -> object:
             opened = await host.answer(CallTool("verify-candidate", sent_by_prefix))
             assert opened.task is not None
-            filed = CommandLog(stores.base_dir).state(opened.task.task_id)
+            filed = stores.commands.state(opened.task.task_id)
             assert filed is not None
             return filed.filed.payload["campaign_id"], filed.filed.subject
 
         with monkeypatch.context() as patched:
             patched.setattr(measuring, "verify_candidate", _verify_refused)
             tracked = asyncio.run(_tracked_by_prefix())
-        assert tracked == (_PEER_HOP.campaign_id, CommandSubject.cycle(_PEER_HOP)), (
+        assert tracked == (_PEER_HOP.campaign_id, CommandSubject.of(Subject.of((_PEER_HOP,)))), (
             "a host task's command was filed at the prefix it was sent by, which a later mint can "
             "make ambiguous"
         )
         by_full_id = GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id)
-        assert measuring.pass_pause(stores, bench_by_prefix, reason="stop") == measuring.pass_pause(
-            stores, by_full_id, reason="stop"
-        ), "a bench's stop by a prefix missed the line holder of the campaign it grades"
+        assert command_stopping.pass_pause(
+            stores, bench_by_prefix, reason="stop"
+        ) == command_stopping.pass_pause(stores, by_full_id, reason="stop"), (
+            "a bench's stop by a prefix missed the line holder of the campaign it grades"
+        )
 
         async def _ctrl_c() -> str:
             stopped = asyncio.Event()
@@ -2088,12 +2089,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             return str(ended.value)
 
         pressed = asyncio.run(_ctrl_c())
-        assert cancelled.status == "cancelled" and "pass stopped" in cancelled.status_message, (
+        assert cancelled.status == "cancelled" and "cancelled by" in cancelled.status_message, (
             "a host cancel left the pass running"
         )
         assert "pass stopped" in pressed, "a Ctrl+C left the pass running"
-        assert len(paused_by()) == before + 2 and paused_by()[-1] == pause.reason, (
-            "a host cancel or a Ctrl+C ended the pass without its pause"
+        assert len(paused_by()) == before + 1 and paused_by()[-1] == pause.reason, (
+            "a host cancel filed a pause, or a Ctrl+C ended the pass without its pause"
         )
         assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
             "a door's stop left its pause standing, or the pass kept its cycle"
@@ -3383,10 +3384,10 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         return outcome.accepted.command_id
 
     def acks(command_id: str) -> list[str]:
-        subject = CommandSubject.cycle(command_hop)
+        log, place = CommandLog.of_cycle(command_dir)
         return [
             state.status
-            for moved, state in CommandLog(commanded.base_dir).of_subject(subject)
+            for moved, state in log.of_subject(place)
             if moved == command_id and state.status != "filed"
         ]
 

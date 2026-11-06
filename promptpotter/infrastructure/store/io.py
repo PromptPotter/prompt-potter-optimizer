@@ -467,8 +467,9 @@ _APPENDED: dict[str, tuple[int, int, int]] = {}
 _APPENDED_HELD = 4096
 
 
-def append_line(path: Path, line: bytes) -> range:
+def append_line(path: Path, line: bytes, *, check: Callable[[], object] | None = None) -> range:
     """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows.
+    *check* runs under the write lock before the line lands, so what it read stands for the write.
 
     Under the lock no append is in flight, so an unterminated last line is a crashed one: it is cut
     back to the last newline before this line lands. No reader counted those bytes (`complete_lines`,
@@ -477,6 +478,8 @@ def append_line(path: Path, line: bytes) -> range:
     data = line + b"\n"
     name = _long_path(path)
     with _write_lock(path):
+        if check is not None:
+            check()
         with open(name, "ab") as f:
             st = os.fstat(f.fileno())
             if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):

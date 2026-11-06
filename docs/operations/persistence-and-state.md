@@ -112,7 +112,7 @@ Each file's contract is its model; this table says only what the type cannot.
 
 **Ledger tail → `cycles` → process table by command line → only then mtimes.**
 
-1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology. What was asked of it is the account's command log (`.workspace/commands.jsonl`): each command `filed`, then `accepted` (armed), `applied` (taken), `refused`, `voided` or `cancelled`, read by id at `GET /commands/{command_id}/status`.
+1. **Ledger tail** (`.runtime/ledger.jsonl`) — the chronology. What was asked of it is the account's one command log (`.workspace/commands.jsonl`), an L4 inner cycle's included under its chain: each command `filed`, then `accepted` (armed), `applied` (taken, its answer kept), `refused` or `cancelled` (the error's class and code kept), or `voided`, read by id alone at `GET /commands/{command_id}/status` — past its owner's delete, which never touches the log.
 2. **`python -m promptpotter cycles`** — derived `run_phase`, the producer reading, the pause cause.
 3. **Process table, by command line** — which process holds the cycle.
 4. **Mtimes** — only to date what the above explained.

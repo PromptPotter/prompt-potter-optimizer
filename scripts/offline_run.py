@@ -91,7 +91,7 @@ from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_r
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import BenchCheckpointKind, CycleSeed
+from promptpotter.domain.run_records import BenchCheckpointKind, CommandSubject, CycleSeed
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
@@ -106,6 +106,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     load_population,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
@@ -955,14 +956,17 @@ def run_terminal(
     campaign_runner.main()
 
 
-def _commands(workspace: Path, subject: str) -> dict[str, list[dict[str, Any]]]:
-    """The applied commands the account's command log filed on *subject*, by kind."""
-    events = _jsonl(workspace / ".workspace" / "commands.jsonl")
-    applied = {e["command_id"] for e in events if e["event"] == "applied"}
+def _commands(cycle: Path, *, on_cycle: bool) -> dict[str, list[dict[str, Any]]]:
+    """The applied commands the account's command log files on *cycle*, or on its workspace, by
+    kind."""
+    log, place = CommandLog.of_cycle(cycle)
+    book = log.book()
+    at = place if on_cycle else log.place(CommandSubject.WORKSPACE)
     out: dict[str, list[dict[str, Any]]] = {}
-    for e in events:
-        if e["event"] == "filed" and e["subject"] == subject and e["command_id"] in applied:
-            out.setdefault(e["kind"], []).append(e["payload"])
+    for command_id in dict.fromkeys(moved for moved, _ in book.by_subject.get(at, ())):
+        state = book.commands[command_id]
+        if state.status == "applied":
+            out.setdefault(state.filed.kind, []).append(state.filed.payload)
     return out
 
 
@@ -979,14 +983,13 @@ def interrupted(
         return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
     if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
         return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
-    (mint,) = _commands(cycle.parents[3], "")["mint-campaign"]
+    (mint,) = _commands(cycle, on_cycle=False)["mint-campaign"]
     if not mint["campaign_config"]:
         return False, f"the mint-campaign record carries no config: {sorted(mint)}"
     if rc := spawn_terminal(workspace, "resume", 0):
         return False, f"`resume` after {interrupts} SIGINT exited {rc}"
     ended = derive_run_state(cycle)
-    hop = f"{cycle.parents[1].name}/{cycle.name}"
-    started = _commands(cycle.parents[3], hop).get("start-run", [])
+    started = _commands(cycle, on_cycle=True).get("start-run", [])
     if ended.run_phase is not RunPhase.TERMINAL or len(started) != 1:
         return False, f"`resume` left the cycle {ended.run_phase} on {len(started)} start-run"
     return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"

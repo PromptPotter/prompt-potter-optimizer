@@ -3868,7 +3868,7 @@ export interface NodeOutputEdit {
 }
 
 /** One command as every door reads it: where it stands, in the words of its task status, */
-export interface CommandStatus {
+export interface CommandReading {
   command_id: string;
   kind: string;
   subject: string;

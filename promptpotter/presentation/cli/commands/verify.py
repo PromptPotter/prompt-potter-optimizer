@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.commands import measuring
+from promptpotter.application.commands import command_stopping, measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
@@ -41,7 +41,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         "seed": args.seed,
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
-    pause = measuring.pass_pause(stores, payload, reason="Ctrl+C")
+    pause = command_stopping.pass_pause(stores, payload, reason="Ctrl+C")
     with ctrl_c_stops_pass(stores, pause):
         dispatched = await CommandDispatcher(stores).answer(
             measuring.verify_candidate, CommandCall(payload)

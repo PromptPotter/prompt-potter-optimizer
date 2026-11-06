@@ -144,7 +144,7 @@ async def set_user_settings(
     async def _apply() -> account.UserSettings:
         return account.set_user_settings(stores, sent)
 
-    return Applier(_apply, replay=None)
+    return Applier.keeping(_apply, dispatched.payload.kind)
 
 
 async def accept_terms(
@@ -155,7 +155,7 @@ async def accept_terms(
     async def _apply() -> account.TermsConsent:
         return account.accept_terms(stores, version)
 
-    return Applier(_apply, replay=None)
+    return Applier.keeping(_apply, dispatched.payload.kind)
 
 
 async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[AccountKey]:
@@ -164,7 +164,7 @@ async def set_api_key(dispatched: Dispatched[SetApiKeyPayload]) -> Applier[Accou
     async def _apply() -> AccountKey:
         return put_account_key(stores, payload.provider, payload.secret)
 
-    return Applier(_apply, replay=None)
+    return Applier.keeping(_apply, dispatched.payload.kind)
 
 
 async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier[object]:

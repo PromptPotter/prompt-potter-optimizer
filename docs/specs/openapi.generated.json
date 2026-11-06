@@ -3780,7 +3780,7 @@
         "title": "CommandAcceptedBody",
         "type": "object"
       },
-      "CommandStatus": {
+      "CommandReading": {
         "additionalProperties": false,
         "description": "One command as every door reads it: where it stands, in the words of its task status,\nread afresh off the account's command log and, for a launch, each job it launched.",
         "properties": {
@@ -3821,7 +3821,7 @@
           "created_at",
           "last_updated_at"
         ],
-        "title": "CommandStatus",
+        "title": "CommandReading",
         "type": "object"
       },
       "CompactArchivePayload": {
@@ -21195,7 +21195,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandStatus"
+                  "$ref": "#/components/schemas/CommandReading"
                 }
               }
             },

@@ -1,17 +1,22 @@
 """The account's command log: what was ASKED, one append-only stream per account
-(`.workspace/commands.jsonl` under the workspace a command addresses). The cycle ledger keeps what
-HAPPENED; no command event rides it, so moving or deleting a ledger moves no command's status.
+(`.workspace/commands.jsonl` under the account's own workspace, beside its grants and charges).
+The cycle ledger keeps what HAPPENED; no command event rides it, so moving or deleting a ledger, a
+campaign or a sandbox moves no command's status.
 
-Every event is written under the log's own check lock, after the fold it lands on accepts it
-(`run_records.py::COMMAND_TRANSITIONS`), so no reader meets a move the table refuses."""
+Every event is checked against the fold it lands on (`run_records.py::COMMAND_TRANSITIONS`) under
+the file's own write lock (`io.py::append_line`), so no reader meets a move the table refuses. Each
+read is a snapshot no later write mutates."""
 
 from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import NamedTuple
 
+from promptpotter.config.paths import PROJECTS_DIR
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     LoopPayload,
@@ -21,34 +26,32 @@ from promptpotter.domain.command_kinds import (
     SkipSearchpointPayload,
     SubmitArmsPayload,
 )
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import (
     COMMAND_EVENT_ADAPTER,
     CommandEvent,
     CommandFiled,
+    CommandLogRow,
     CommandState,
     CommandSubject,
+    SubjectLanded,
 )
-from promptpotter.infrastructure.store.io import ABSENT, FileMark, held_lock
-from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
+from promptpotter.infrastructure.store.io import ABSENT, FileMark
+from promptpotter.infrastructure.store.layout import (
+    INNER_SANDBOXES_DIR,
+    WORKSPACE_STATE_DIR,
+    inner_sandbox_key,
+)
 from promptpotter.infrastructure.store.read_model import append_row, read_rows_past
 from promptpotter.shared.errors import ConflictError, IdempotencyKeyReusedError
 from promptpotter.shared.identity import Principal
 
 COMMAND_LOG_FILE = "commands.jsonl"
-COMMAND_CHECK_LOCK = ".commands.lock"
-# The check lock waits out another writer's check-and-append, never a long act.
-_CHECK_WAIT_S = 30.0
 
 
-def command_log_path(workspace_dir: WorkspaceDir | Path) -> Path:
+def command_log_path(account: WorkspaceDir | Path) -> Path:
     """Never creates it: a read must not mint a `.workspace/` in a tenant that filed nothing."""
-    return Path(workspace_dir) / WORKSPACE_STATE_DIR / COMMAND_LOG_FILE
-
-
-def cycle_workspace(cycle_dir: Path) -> WorkspaceDir:
-    """The workspace a cycle dir sits in: ``<workspace>/campaigns/<campaign>/cycles/<cycle>``."""
-    return WorkspaceDir(cycle_dir.absolute().parents[3])
+    return Path(account) / WORKSPACE_STATE_DIR / COMMAND_LOG_FILE
 
 
 class CommandIdReusedError(ConflictError):
@@ -57,52 +60,104 @@ class CommandIdReusedError(ConflictError):
     code = "command_id_reused"
 
 
+# Where on disk a cycle's commands are read from: its campaign and cycle, in the sandbox that holds
+# it (`layout.py::inner_sandbox_key`), so a cycle read by its directory alone finds its own.
+Place = str
+
+
+def _place(sandbox: str, campaign_id: str, cycle_id: str = "") -> Place:
+    tail = f"{campaign_id}/{cycle_id}" if cycle_id else campaign_id
+    return f"{sandbox}:{tail}" if sandbox else tail
+
+
 class CommandBook(NamedTuple):
-    """The log folded: each command's state, and each subject's events in log order."""
+    """The log folded, as one snapshot: each command's state, each place's events in log order,
+    and each draft subject a mint adopted, by the cycle it landed on."""
 
-    commands: dict[str, CommandState]
+    commands: Mapping[str, CommandState]
     # (command_id, the status that event moved it to), in the order the log holds them.
-    by_subject: dict[str, list[tuple[str, CommandState]]]
+    by_subject: Mapping[Place, tuple[tuple[str, CommandState], ...]]
+    landed: Mapping[str, str]
 
 
-def _row(raw: bytes) -> CommandEvent:
+_EMPTY = CommandBook(MappingProxyType({}), MappingProxyType({}), MappingProxyType({}))
+
+
+def _row(raw: bytes) -> CommandLogRow:
     return COMMAND_EVENT_ADAPTER.validate_json(raw)
 
 
+def _moved(held: CommandState | None, event: CommandEvent) -> CommandState:
+    """What *event* moves its command to; a move the table refuses raises."""
+    if isinstance(event, CommandFiled):
+        if held is not None:
+            raise CommandIdReusedError(
+                f"command id {event.command_id} is already filed",
+                details={"command_id": event.command_id},
+            )
+        CommandState.moved(None, "filed")
+        return CommandState(filed=event, status="filed", at=event.timestamp)
+    if held is None:
+        raise ConflictError(f"no command {event.command_id} is filed", code="command_unfiled")
+    try:
+        return held.after(event)
+    except ValueError as exc:
+        raise ConflictError(
+            f"command {event.command_id} is {held.status}: {exc}",
+            code="command_transition_refused",
+            details={"command_id": event.command_id, "status": held.status},
+        ) from exc
+
+
 class _Fold:
-    def __init__(self) -> None:
+    def __init__(self, tenant: str) -> None:
+        self.tenant = tenant
         self.mark: FileMark = ABSENT
         self.sig: tuple[int, int, int] | None = None
-        self.book = CommandBook({}, {})
+        self.book = _EMPTY
 
-    def feed(self, event: CommandEvent) -> None:
-        commands, by_subject = self.book
-        held = commands.get(event.command_id)
-        if isinstance(event, CommandFiled):
-            if held is not None:
-                raise ValueError(f"command {event.command_id} is filed twice")
-            CommandState.moved(None, "filed")
-            state = CommandState(filed=event, status="filed", at=event.timestamp)
-        elif held is None:
-            raise ValueError(f"an {event.event} event names unfiled command {event.command_id}")
-        else:
-            state = held.after(event)
-        commands[event.command_id] = state
-        by_subject.setdefault(state.filed.subject, []).append((event.command_id, state))
+    def place_of(self, spelled: str) -> Place:
+        """The place a filed subject's commands are read at."""
+        subject = CommandSubject.subject_of(spelled)
+        if subject is None:
+            return spelled
+        sandbox = inner_sandbox_key(self.tenant, subject.inside[-1]) if subject.inside else ""
+        return _place(sandbox, subject.campaign_id, subject.cycle_id)
+
+    def _folded(self, rows: list[CommandLogRow], whole: bool) -> CommandBook:
+        """A fresh book over *rows*: the published one is never written again."""
+        base = _EMPTY if whole else self.book
+        commands = dict(base.commands)
+        by_subject = {place: list(events) for place, events in base.by_subject.items()}
+        landed = dict(base.landed)
+        for row in rows:
+            if isinstance(row, SubjectLanded):
+                # Its events lead the cycle's, as its draft's ledger leads the cycle's ledger.
+                landed[row.subject] = row.onto
+                onto = self.place_of(row.onto)
+                by_subject[onto] = [*by_subject.pop(row.subject, []), *by_subject.get(onto, [])]
+                continue
+            state = _moved(commands.get(row.command_id), row)
+            commands[row.command_id] = state
+            subject = state.filed.subject
+            place = self.place_of(landed.get(subject, subject))
+            by_subject.setdefault(place, []).append((row.command_id, state))
+        return CommandBook(
+            MappingProxyType(commands),
+            MappingProxyType({place: tuple(events) for place, events in by_subject.items()}),
+            MappingProxyType(landed),
+        )
 
     def refresh(self, path: Path) -> CommandBook:
         try:
             st = path.stat()
         except FileNotFoundError:
-            self.mark, self.sig, self.book = ABSENT, None, CommandBook({}, {})
+            self.mark, self.sig, self.book = ABSENT, None, _EMPTY
             return self.book
         sig = (st.st_ino, st.st_size, st.st_mtime_ns)
         if sig != self.sig:
             read = read_rows_past(path, _row, self.mark)
-            if read.whole:
-                self.book = CommandBook({}, {})
-            for event in read.rows:
-                self.feed(event)
+            self.book = self._folded(list(read.rows), read.whole)
             self.mark, self.sig = read.mark, sig
         return self.book
 
@@ -111,77 +166,90 @@ _FOLDS: dict[Path, _Fold] = {}
 _FOLDS_LOCK = threading.Lock()
 
 
-class CommandLog:
-    """One account's log. Reads are incremental folds, cached per file."""
+def _account_of(workspace: Path) -> tuple[Path, str]:
+    """A workspace's account and the sandbox it is (``""`` for the account's own): a sandbox's
+    workspace is ``.inner/<key>/<tenant>`` beside the account's ``projects/<tenant>``."""
+    sandboxes = workspace.parent.parent
+    if sandboxes.name != INNER_SANDBOXES_DIR:
+        return workspace, ""
+    return sandboxes.parent / PROJECTS_DIR / workspace.name, workspace.parent.name
 
-    def __init__(self, workspace_dir: WorkspaceDir | Path) -> None:
-        self.path = command_log_path(workspace_dir)
+
+class CommandLog:
+    """One account's log. Reads are incremental folds, cached per file, each a snapshot."""
+
+    def __init__(self, account: WorkspaceDir | Path) -> None:
+        self.path = command_log_path(account)
+        self._tenant = Path(account).name
 
     @classmethod
-    def of_cycle(cls, cycle_dir: Path) -> CommandLog:
-        return cls(cycle_workspace(cycle_dir))
+    def of_cycle(cls, cycle_dir: Path) -> tuple[CommandLog, Place]:
+        """The account's log a cycle's commands are filed on, and the place they are read at:
+        ``<workspace>/campaigns/<campaign>/cycles/<cycle>``, the workspace an account's or a
+        sandbox's."""
+        cycle_dir = cycle_dir.absolute()
+        account, sandbox = _account_of(cycle_dir.parents[3])
+        return cls(account), _place(sandbox, cycle_dir.parent.parent.name, cycle_dir.name)
+
+    def _fold(self) -> _Fold:
+        return _FOLDS.setdefault(self.path, _Fold(self._tenant))
 
     def book(self) -> CommandBook:
         with _FOLDS_LOCK:
-            fold = _FOLDS.setdefault(self.path, _Fold())
-            return fold.refresh(self.path)
+            return self._fold().refresh(self.path)
 
     def state(self, command_id: str) -> CommandState | None:
         return self.book().commands.get(command_id)
 
-    def of_subject(self, subject: str) -> list[tuple[str, CommandState]]:
-        """*subject*'s events in log order: each the command it moved and where it moved it."""
-        return list(self.book().by_subject.get(subject, ()))
+    def place(self, subject: str) -> Place:
+        """Where *subject*'s commands are read: a draft a mint adopted, at its cycle."""
+        return self._fold().place_of(self.landed_on(subject))
 
-    def keyed(self, kind: str, act_digest: str, idempotency_key: str) -> CommandState | None:
-        """The command a retry under *idempotency_key* names: matched on (kind, act, key), the act
-        its whole validated payload, by its digest; a key the log holds for another act is refused,
-        never replayed. A command that ended without happening satisfies no key."""
+    def of_subject(self, place: Place) -> tuple[tuple[str, CommandState], ...]:
+        """*place*'s events in log order: each the command it moved and where it moved it."""
+        return self.book().by_subject.get(place, ())
+
+    def landed_on(self, subject: str) -> str:
+        """Where *subject*'s commands are read: a draft a mint adopted reads as its cycle."""
+        return self.book().landed.get(subject, subject)
+
+    def keyed(
+        self, kind: str, act_digest: str, idempotency_key: str, subject: str
+    ) -> CommandState | None:
+        """The command a retry under *idempotency_key* names on *subject*: matched on (kind, act,
+        key), the act its whole validated payload, by its digest; a key the subject holds for
+        another act is refused, never replayed. A command that ended without happening satisfies
+        no key."""
         found: CommandState | None = None
-        for state in self.book().commands.values():
+        for _, state in self.of_subject(self.place(subject)):
             filed = state.filed
-            if filed.idempotency_key != idempotency_key:
+            if filed.idempotency_key != idempotency_key or filed.subject != subject:
                 continue
             if filed.kind != kind or filed.act_digest != act_digest:
                 raise IdempotencyKeyReusedError(
                     f"Key {idempotency_key!r} already names a {filed.kind} command with another "
-                    f"payload on this account; send this {kind} under a key of its own.",
+                    f"payload here; send this {kind} under a key of its own.",
                     details={"command_id": filed.command_id},
                 )
-            if state.status in ("filed", "accepted", "applied"):
-                found = state
+            current = self.state(filed.command_id)
+            if current is not None and current.status in ("filed", "accepted", "applied"):
+                found = current
         return found
 
-    def append(self, event: CommandEvent) -> CommandState:
-        """Lands *event* only where the fold takes it, checked and appended under one lock."""
+    def append(self, event: CommandLogRow) -> CommandState | None:
+        """Lands *event* only where the fold takes it, checked under the file's own write lock;
+        the state it moved its command to, ``None`` for a subject's landing."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with held_lock(self.path.parent / COMMAND_CHECK_LOCK, wait_s=_CHECK_WAIT_S):
-            with _FOLDS_LOCK:
-                fold = _FOLDS.setdefault(self.path, _Fold())
-                commands = fold.refresh(self.path).commands
-            held = commands.get(event.command_id)
-            if isinstance(event, CommandFiled):
-                if held is not None:
-                    raise CommandIdReusedError(
-                        f"command id {event.command_id} is already filed",
-                        details={"command_id": event.command_id},
-                    )
-                landed = CommandState(filed=event, status="filed", at=event.timestamp)
-            elif held is None:
-                raise ConflictError(
-                    f"no command {event.command_id} is filed", code="command_unfiled"
-                )
-            else:
-                try:
-                    landed = held.after(event)
-                except ValueError as exc:
-                    raise ConflictError(
-                        f"command {event.command_id} is {held.status}: {exc}",
-                        code="command_transition_refused",
-                        details={"command_id": event.command_id, "status": held.status},
-                    ) from exc
-            append_row(self.path, json.loads(COMMAND_EVENT_ADAPTER.dump_json(event)))
-        return landed
+        landed: list[CommandState] = []
+
+        def _check() -> None:
+            if isinstance(event, SubjectLanded):
+                return
+            held = self.book().commands.get(event.command_id)
+            landed.append(_moved(held, event))
+
+        append_row(self.path, json.loads(COMMAND_EVENT_ADAPTER.dump_json(event)), check=_check)
+        return landed[0] if landed else None
 
 
 class PauseAsk(NamedTuple):
@@ -207,7 +275,7 @@ class Controls(NamedTuple):
     submissions: tuple[tuple[str, SubmitArmsPayload], ...] = ()
 
 
-_LOOP_TAKEN = frozenset(
+LOOP_KINDS = frozenset(
     kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items() if issubclass(model, LoopPayload)
 )
 
@@ -215,7 +283,8 @@ _LOOP_TAKEN = frozenset(
 class _Inbox:
     """The cycle's loop commands in log order. One accepted under an earlier ``run_mark`` than
     the cycle's now was left by a stop or a fresh launch, and stands no more; an ``auto``
-    look-ahead is a mode, and stands across them."""
+    look-ahead is a mode, and stands across them. A superseded look-ahead is voided on the log
+    (`superseded_lookahead`), so it leaves here by its own event."""
 
     def __init__(self, run_mark: int) -> None:
         self._mark = run_mark
@@ -224,7 +293,7 @@ class _Inbox:
         self._lookahead_mark: int | None = None
 
     def feed(self, command_id: str, state: CommandState) -> None:
-        if state.filed.kind not in _LOOP_TAKEN:
+        if state.filed.kind not in LOOP_KINDS:
             return
         match state.status:
             case "accepted":
@@ -244,7 +313,7 @@ class _Inbox:
     def _arm(self, command_id: str, state: CommandState) -> None:
         held, filed = self._held, state.filed
         kind = PAYLOAD_MODEL_FOR_KIND[filed.kind]
-        assert issubclass(kind, LoopPayload), "only a kind in `_LOOP_TAKEN` is asked"
+        assert issubclass(kind, LoopPayload), "only a kind in `LOOP_KINDS` is asked"
         payload = kind.model_validate(filed.payload)
         if not isinstance(payload, SetSampleLookaheadPayload) and state.run_mark != self._mark:
             return
@@ -260,8 +329,6 @@ class _Inbox:
             case SubmitArmsPayload() as submitted:
                 held = held._replace(submissions=(*held.submissions, (command_id, submitted)))
             case SetSampleLookaheadPayload(cells=cells, auto=auto):
-                if held.lookahead is not None:
-                    self._armed.pop(held.lookahead.command_id, None)
                 armed = auto or cells > 1
                 self._lookahead_mark = state.run_mark
                 held = held._replace(
@@ -291,7 +358,9 @@ class _Inbox:
             )
         else:
             ask = held.lookahead
-            if ask is not None and ask.auto and not dropped:
+            if ask is None or ask.command_id != command_id:
+                pass
+            elif ask.auto and not dropped:
                 held = held._replace(lookahead=ask._replace(taken=True))
             else:
                 held = held._replace(lookahead=None)
@@ -304,9 +373,25 @@ class _Inbox:
         return self._held
 
 
-def standing_on(log: CommandLog, hop: CycleHop, run_mark: int) -> Controls:
-    """*hop*'s inbox as of its cycle's *run_mark* (`ledger_scan.py::scan_run_mark`)."""
+def standing_on(log: CommandLog, place: Place, run_mark: int) -> Controls:
+    """*place*'s inbox as of its cycle's *run_mark* (`ledger_scan.py::scan_run_mark`)."""
     inbox = _Inbox(run_mark)
-    for command_id, state in log.of_subject(CommandSubject.cycle(hop)):
+    for command_id, state in log.of_subject(place):
         inbox.feed(command_id, state)
     return inbox.value()
+
+
+def superseded_lookahead(log: CommandLog, place: Place, by: str) -> str | None:
+    """The look-ahead standing on *place* that one accepted as *by* leaves, ``None`` where none
+    stands: its supersede is voided on the log, so its own events say it stands no more."""
+    standing: str | None = None
+    for command_id, state in log.of_subject(place):
+        if command_id == by or state.filed.kind not in LOOP_KINDS:
+            continue
+        payload = PAYLOAD_MODEL_FOR_KIND[state.filed.kind]
+        if payload is not SetSampleLookaheadPayload:
+            continue
+        current = log.state(command_id)
+        if current is not None and current.status == "accepted":
+            standing = command_id
+    return standing

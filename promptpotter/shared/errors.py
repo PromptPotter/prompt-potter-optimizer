@@ -125,6 +125,23 @@ class PotterError(Exception):
         return str(self)
 
 
+def _classes(of: type[PotterError]) -> dict[str, type[PotterError]]:
+    found = {of.__name__: of}
+    for sub in of.__subclasses__():
+        found |= _classes(sub)
+    return found
+
+
+def raised_again(error: str, code: str, detail: str) -> PotterError:
+    """The error an act raised, as its command's end kept it (class name, code, words), raised
+    again by a door that answers it later: the class it was, ``PotterError`` for an error that was
+    none (an internal raise)."""
+    cls = _classes(PotterError).get(error, PotterError)
+    again = cls.__new__(cls)
+    PotterError.__init__(again, detail, code=code or None)
+    return again
+
+
 class BadRequestError(PotterError):
     http_status = 400
     code = "bad_request"

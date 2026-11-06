@@ -1095,36 +1095,6 @@
         "title": "BandedValue",
         "type": "object"
       },
-      "BankedCommand": {
-        "additionalProperties": false,
-        "description": "A cycle's trail line — a command, or the run's abnormal stop — banked before the cycle went.",
-        "properties": {
-          "at": {
-            "title": "At",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "subject": {
-            "title": "Subject",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "at",
-          "kind",
-          "subject",
-          "user_id"
-        ],
-        "title": "BankedCommand",
-        "type": "object"
-      },
       "BankedSpend": {
         "additionalProperties": false,
         "description": "One wallet's `UserSpend`, as a tombstone banks it.",
@@ -1163,6 +1133,26 @@
           "unreported_tokens"
         ],
         "title": "BankedSpend",
+        "type": "object"
+      },
+      "BankedStop": {
+        "additionalProperties": false,
+        "description": "A run's abnormal stop, as the trail read it before its cycle went; what was asked of the\ncycle stays on the account's command log, which no delete reaches.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "subject"
+        ],
+        "title": "BankedStop",
         "type": "object"
       },
       "BenchEnterView": {
@@ -8940,25 +8930,12 @@
         "description": "On the WORKSPACE ledger, so deleting a run cannot delete that it stopped.",
         "properties": {
           "campaign_id": {
-            "default": "",
             "title": "Campaign Id",
             "type": "string"
-          },
-          "commands": {
-            "items": {
-              "$ref": "#/components/schemas/BankedCommand"
-            },
-            "title": "Commands",
-            "type": "array"
           },
           "cycle_id": {
             "default": "",
             "title": "Cycle Id",
-            "type": "string"
-          },
-          "draft_id": {
-            "default": "",
-            "title": "Draft Id",
             "type": "string"
           },
           "record_type": {
@@ -8967,13 +8944,21 @@
             "title": "Record Type",
             "type": "string"
           },
+          "stops": {
+            "items": {
+              "$ref": "#/components/schemas/BankedStop"
+            },
+            "title": "Stops",
+            "type": "array"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
           }
         },
         "required": [
-          "commands"
+          "campaign_id",
+          "stops"
         ],
         "title": "TrailTombstoneRecord",
         "type": "object"

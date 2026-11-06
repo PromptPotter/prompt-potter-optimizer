@@ -11,6 +11,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.command_log import CommandLog
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -64,6 +65,7 @@ class Stores:
     grant: GrantStore
     api_keys: TenantApiKeyStore
     charges: ChargeBook
+    commands: CommandLog
 
     @property
     def tenant_id(self) -> TenantId:
@@ -166,6 +168,8 @@ def build_stores(
         grant=GrantStore(account),
         api_keys=TenantApiKeyStore(account),
         charges=ChargeBook(account),
+        # The account's too: a sandbox's commands are filed under their full subject.
+        commands=CommandLog(account),
     )
 
 

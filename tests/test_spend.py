@@ -162,7 +162,7 @@ from promptpotter.domain.command_kinds import (
     MintHeadToHeadPayload,
     StartCheckinPayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
@@ -193,7 +193,6 @@ from promptpotter.domain.results import CycleResult
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    BankedSubject,
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
@@ -3552,7 +3551,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         bank_spend(
             workspace=stores.campaigns.workspace,
             cycle_dirs=[stores.campaigns.cycle_dir(retried_hop)],
-            subject=BankedSubject(campaign_id="camp-2", cycle_id=retried),
+            subject=Subject("camp-2", retried),
             metered={
                 meter: stores.campaigns.cycle_metered(retried_hop, meter)
                 for meter in get_args(CeilingMeter)
@@ -3578,7 +3577,9 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
 
     # An inner sandbox is a SIBLING of the tenant tree, so no account-wide walk reaches it.
     sandbox = inner_sandbox(stores, SANDBOX_CAMPAIGN, "orphaned-outer-cycle")
-    inner_cycle = sandbox / "tenant" / "campaigns" / "innerds__20260101-000000" / "cycles"
+    inner_cycle = (
+        sandbox / str(stores.tenant_id) / "campaigns" / "innerds__20260101-000000" / "cycles"
+    )
     inner_ledger = CycleEventLog.open(CycleDir(inner_cycle / "inner-cycle-0"))
     # One call carried out, one not: only the second is still this sandbox's to bank.
     for input_tokens, cost_usd, mirrored in ((400, 0.10, True), (600, 0.15, False)):

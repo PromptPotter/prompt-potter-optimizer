@@ -85,7 +85,8 @@ class RunControl:
 
     def _took(self, command_id: str) -> None:
         assert self.cycle_dir is not None, "a command is taken off a cycle's inbox"
-        CommandLog.of_cycle(self.cycle_dir).append(CommandApplied(command_id=command_id))
+        log, _ = CommandLog.of_cycle(self.cycle_dir)
+        log.append(CommandApplied(command_id=command_id))
 
     def pause_requested(self) -> bool:
         """A pause is a CLEAN EXIT: poll it only where work already done is on disk."""

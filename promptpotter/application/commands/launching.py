@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -322,9 +323,23 @@ async def mint_head_to_head(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class StartRecorded:
+    """A Start's retry: the launch its first act recorded, answered as `launched` answers it."""
+
+    request: HeadToHeadRequest | None
+    launches: list[LaunchedJob]
+
+    async def launched(self) -> Launched | HeadToHeadLaunched:
+        if self.request is None:
+            (launch,) = self.launches
+            return Launched(launch, held=None)
+        return head_to_head_answer(self.request, self.launches)
+
+
 async def start_checkin(
     dispatched: DispatchedToDraft[StartCheckinPayload],
-) -> Applier[Admitted | AdmittedHeadToHead]:
+) -> Applier[Admitted | AdmittedHeadToHead | StartRecorded]:
     dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
     stores = dispatcher.stores
 
@@ -351,22 +366,29 @@ async def start_checkin(
             holder=CampaignLaunch(source.opened.draft.dataset_name, draft_id=claim.draft_id),
         )
 
-    def _admitted(admitted: Admitted | AdmittedHeadToHead) -> CommandEffect:
+    def _admitted(admitted: Admitted | AdmittedHeadToHead | StartRecorded) -> CommandEffect:
+        assert not isinstance(admitted, StartRecorded), "a retry records nothing"
         jobs = (
             [admitted.job] if isinstance(admitted, Admitted) else [j for j, _ in admitted.admitted]
         )
         return LaunchedEffect(launches=[LaunchedJob.of(job) for job in jobs])
 
-    def _withdraw(admitted: Admitted | AdmittedHeadToHead, exc: BaseException) -> None:
-        admitted.withdraw(exc)
+    def _withdraw(
+        admitted: Admitted | AdmittedHeadToHead | StartRecorded, exc: BaseException
+    ) -> None:
+        if not isinstance(admitted, StartRecorded):
+            admitted.withdraw(exc)
 
     # The claim and the slot ride the admitted launch to its mint; a second Start refuses while it
-    # holds the claim, and is not found once it minted, so no retry reaches this ledger.
-    async def _run() -> Admitted | AdmittedHeadToHead:
+    # holds the claim, and is not found once it minted, so a retry is answered only between.
+    async def _run() -> Admitted | AdmittedHeadToHead | StartRecorded:
         request = start.head_to_head
         return await _admit() if request is None else await _admit_arms(request)
 
-    return Applier(_run, replay=None, effect_fn=_admitted, ack="accepted", rides=_withdraw)
+    async def _recorded(effect: CommandEffect) -> StartRecorded:
+        return StartRecorded(start.head_to_head, _recorded_launches(effect))
+
+    return Applier(_run, replay=_recorded, effect_fn=_admitted, ack="accepted", rides=_withdraw)
 
 
 async def dispatch_start_checkin(

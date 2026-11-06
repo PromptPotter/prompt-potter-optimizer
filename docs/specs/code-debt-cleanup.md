@@ -262,12 +262,27 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   Pause. `Press` declares terminal and host presence, never the browser's. Action: `Press` names the
   browser door, and a gate check ties each claimed kind to a sender. **Rides with:** a new arc.
   **Re-test:** `git grep -n "submit-arms" -- webapp/components webapp/lib/hooks`.
-- **A retried key on a kind with no replay is refused, never answered** — `start-checkin`,
-  `set-user-settings`, `accept-terms`, `set-api-key` keep no answer, so a retry after a lost answer
-  reads `command_already_applied` (`commands/dispatcher.py::_replayed`). Action: each one's
-  `Applier.replay` answers off the effect the log keeps. **Rides with:** the next change to
-  `commands/workspace_edits.py` or `commands/launching.py`. **Re-test:** retry a `start-checkin` with
-  its key after a lost answer.
+- **The webapp has no stop for a verify or a bench** — `cancel-command` stops either pass from the
+  terminal, the host and REST, and the browser sends neither. Action: the pass's panel sends
+  `cancel-command` by the command id its press answered. **Rides with:** a new arc. **Re-test:**
+  `git grep -n "cancel-command" -- webapp/components webapp/lib/hooks`.
+- **A pass's stop has an address per door** — a Ctrl+C pauses the cycle under its `PassHold`
+  (`commands/command_stopping.py::stop_pass`), every other door cancels the command on the log.
+  Action: the terminal's stop is the pass's `cancel-command` too, and `PassHold` goes. **Rides with:**
+  a new arc. **Re-test:** `git grep -n "class PassHold" -- promptpotter`.
+- **`descend` is walked twice** — the dispatcher resolves a command's chain
+  (`commands/dispatcher.py::addressed`) and `commands/command_reading.py::_loop_left` walks it again
+  off the filed subject. Action: one walk, the filing's resolved chain read back. **Rides with:** a
+  new arc. **Re-test:** `git grep -n "descend_store(" -- promptpotter/application/commands`.
+- **An address re-derived by counting parents** — `store/command_log.py::CommandLog.of_cycle` reads
+  the account and sandbox off a cycle directory's fourth parent, and `layout.py` spells the same tree
+  by hand. Action: a cycle directory is a typed address (`CycleDir` carries its workspace), read, never
+  counted. **Rides with:** a new arc. **Re-test:** `git grep -n "parents\[3\]" -- promptpotter`.
+- **A run's boundary voids nothing on the log** — a loop command accepted before a run ended reads
+  `cancelled` only through `commands/command_reading.py::_loop_left`'s derivation, never an event.
+  Action: the run boundary's ingress (`application/run_observers.py`) appends `voided` for each
+  untaken loop command, and `_loop_left` goes. **Rides with:** M3. **Re-test:**
+  `git grep -n "def _loop_left" -- promptpotter`.
 
 ### The excision pass (six layer audits and a plan review, 2026-11-05)
 
@@ -1126,7 +1141,7 @@ What batch E's reviews found outside the arc under review, grouped by shape.
 
 **C. One address resolved twice.** **Rides with:** M14a (`cli/commands/ab.py`).
 - The CLI's `ab` verb resolves CLI-side (`cycle_addressing.py::cycle_target`, off the dispatcher),
-  and the dispatcher walks `descend` twice. `run_records.py::BankedSubject` is a second address. Action: one resolution, at the
+  and the dispatcher walks `descend` twice. Action: one resolution, at the
   dispatcher, by exact id or prefix. **Re-test:** `git grep -n "cycle_target(" -- promptpotter`.
 
 **D. Spelled by hand beside the rows.** **Rides with:** the next read added.

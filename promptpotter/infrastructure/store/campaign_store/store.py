@@ -20,13 +20,12 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.run_records import (
-    BankedSubject,
     CampaignCeilingRecord,
     ComparisonExit,
     CycleFinal,
@@ -420,7 +419,7 @@ class CampaignStore:
         bank_before_removal(
             workspace=self._base_dir,
             cycle_dirs=cycle_dirs,
-            subject=BankedSubject(campaign_id=campaign_id, cycle_id=cycle_id),
+            subject=Subject(campaign_id, cycle_id),
             metered=metered,
         )
 

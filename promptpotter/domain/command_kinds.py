@@ -248,10 +248,11 @@ class CommandKind(StrEnum):
         anyone("cancel-queued"),
         True,
     )
-    # A host presses it through MCP `tasks/cancel`, its task being the command it cancels.
+    # Every door's stop of a command by its id, a host's MCP `tasks/cancel` among them: a pass
+    # reads its cancel off the account's command log, whichever process runs it.
     CANCEL_COMMAND = (
         "cancel-command",
-        "measuring:cancel_command",
+        "command_stopping:cancel_command",
         None,
         person("cancel"),
         True,
@@ -409,8 +410,8 @@ class CommandPayload(RequestBody):
     def recorded(self) -> tuple[dict[str, JsonValue], str]:
         """The act as its `CommandFiled` keeps it, and what an idempotency key names, so one key
         never answers two acts: that one dump and the raw value of each excluded field, each hashed
-        as its bytes. A secret's text enters no stored digest: the kind carrying one replays
-        nothing (`set-api-key`), so no retry is matched on it."""
+        as its bytes. A secret's text enters no stored digest, so no retry is matched on it: a
+        retry of a kind carrying one (`set-api-key`) acts again (`dispatcher.py::_replayed`)."""
         dump = self.model_dump(mode="json")
         digest = hashlib.sha256(f"{self.kind}\0".encode())
         digest.update(json.dumps(dump, ensure_ascii=False, separators=(",", ":")).encode())
@@ -457,11 +458,12 @@ class CyclePayload(CampaignPayload):
 
 
 class LoopPayload(CyclePayload):
-    """Only a RUNNING loop takes it, off its own ledger (`ledger_scan.py::Controls`) — which is why these sit below `application/`."""
+    """Only a RUNNING loop takes it, off the account's command log (`command_log.py::standing_on`)
+    — which is why these sit below `application/`."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # `ledger_scan.py::_LOOP_TAKEN` reads the kind table having imported this module alone.
+        # `command_log.py::LOOP_KINDS` reads the kind table having imported this module alone.
         if cls.__module__ != __name__:
             raise TypeError(f"{cls.__name__} is a loop payload declared outside {__name__}")
 

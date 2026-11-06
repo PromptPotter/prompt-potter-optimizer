@@ -25,7 +25,7 @@ from promptpotter.application.backend_listing import (
     list_backends,
 )
 from promptpotter.application.caller import Caller
-from promptpotter.application.commands.command_reading import CommandStatus, command_status
+from promptpotter.application.commands.command_reading import CommandReading, command_status
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.cycle_addressing import (
     ActiveSessionResponse,
@@ -649,7 +649,7 @@ class HeadToHeadPriceParams(
         return await price_head_to_head(caller.stores, self.plan)
 
 
-class CommandStatusParams(
+class CommandReadingParams(
     ReadParams, read=ReadKind.COMMAND_STATUS, route="/commands/{command_id}/status"
 ):
     """Where a command the caller filed stands, by the id its filing answered: working, completed,
@@ -658,7 +658,7 @@ class CommandStatusParams(
 
     command_id: str = Field(min_length=1, max_length=128)
 
-    def answer(self, caller: Caller) -> CommandStatus:
+    def answer(self, caller: Caller) -> CommandReading:
         return command_status(caller.stores, caller.jobs, self.command_id)
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -11,6 +12,13 @@ from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
+from promptpotter.application.acting_command import (
+    ActingCommand,
+    PassStoppedError,
+    acting_command,
+    filed,
+    filing,
+)
 from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.jobs.coupon import Send, bind_account
 from promptpotter.application.jobs.quota import (
@@ -49,7 +57,7 @@ from promptpotter.domain.phases import (
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import RunPhaseRecord
+from promptpotter.domain.run_records import CommandApplied, CommandSubject, RunPhaseRecord
 from promptpotter.domain.spend import (
     MONEY_AXES,
     NOTHING_METERED,
@@ -70,7 +78,6 @@ from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import (
-    ConflictError,
     CycleBusyError,
     MachineBusyError,
     NotFoundError,
@@ -538,12 +545,6 @@ async def inner_share[S](
     return ran
 
 
-class PassStoppedError(ConflictError):
-    """A pause reached the pass: what it measured is banked, and a rerun replays it."""
-
-    code = "pass_stopped"
-
-
 class PassHold:
     """A paid pass's hold of the cycle it scores, the one truth its stop reads: unheld until the
     pass holds the cycle, held to its let-go, then ended. The hold, its let-go and a stop each act
@@ -588,31 +589,33 @@ class PassHold:
             yield
 
     @contextmanager
-    def bound(self, command_id: str | None = None) -> Iterator[None]:
+    def bound(self) -> Iterator[None]:
         """A paid pass run inside this context holds its cycle through this hold, which the caller
-        that may stop it keeps; under *command_id*, the command that runs it, any door of this
-        process reaches it by that id (`PassHold.of`) while it is bound."""
+        that may stop it (a Ctrl+C) keeps."""
         token = _BOUND_HOLD.set(self)
-        if command_id is not None:
-            _HOLDS[command_id] = self
         try:
             yield
         finally:
             _BOUND_HOLD.reset(token)
-            if command_id is not None:
-                _HOLDS.pop(command_id, None)
-
-    @staticmethod
-    def of(command_id: str) -> PassHold | None:
-        """The hold of the pass *command_id* runs in this process, ``None`` where none is bound:
-        an act in flight is held by the process running it, and no other."""
-        return _HOLDS.get(command_id)
 
 
 # The hold of the paid pass a caller's task runs, bound by the caller that may stop it.
 _BOUND_HOLD: ContextVar[PassHold | None] = ContextVar("pass_hold", default=None)
-# Each bound hold by the command that runs it: an asyncio lock lives in one process alone.
-_HOLDS: dict[str, PassHold] = {}
+# How often a pass reads its command's cancel off the log: a stop sent from any process.
+STOP_POLL_S = 2.0
+
+
+async def _cut_on_cancel(
+    acting: ActingCommand, task: asyncio.Task[object], cut: list[bool]
+) -> None:
+    """Cancels the pass's *task* once its command's cancel is on the log, read every
+    `STOP_POLL_S`: the cancel may be sent from another process, which no event here hears."""
+    while True:
+        if await asyncio.to_thread(acting.cancel) is not None:
+            cut.append(True)
+            task.cancel()
+            return
+        await asyncio.sleep(STOP_POLL_S)
 
 
 @asynccontextmanager
@@ -624,7 +627,42 @@ async def paid_pass(
     declared: Budget,
     sends: tuple[Send, ...],
 ) -> AsyncIterator[SpendBook]:
-    """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
+    """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops
+    it; the command it runs is stopped by its cancel on the log (`cancel-command`). A pass no
+    command runs and no cycle addresses files its own, so its command id is its address."""
+    acting = acting_command()
+    if acting is not None or hop is not None:
+        async with _paid_pass(stores, verb, hop, declared, sends, acting) as book:
+            yield book
+        return
+    command_id = str(uuid.uuid4())
+    own = filing(
+        stores,
+        command_id=command_id,
+        kind=verb,
+        payload={},
+        idempotency_key=command_id,
+        act_digest=command_id,
+        subject=CommandSubject.WORKSPACE,
+    )
+    async with filed(stores.commands, own) as acting:
+        logger.info(
+            "%s pass filed as %s: `cancel-command %s` stops it", verb, command_id, command_id
+        )
+        async with _paid_pass(stores, verb, hop, declared, sends, acting) as book:
+            yield book
+        acting.end(CommandApplied(command_id=command_id))
+
+
+@asynccontextmanager
+async def _paid_pass(
+    stores: Stores,
+    verb: ScoringVerb,
+    hop: CycleHop | None,
+    declared: Budget,
+    sends: tuple[Send, ...],
+    acting: ActingCommand | None,
+) -> AsyncIterator[SpendBook]:
     job_registry = JobRegistry.attach(stores.jobs_dir)
     (job,) = await asyncio.to_thread(
         request_jobs,
@@ -637,6 +675,15 @@ async def paid_pass(
         refuse_as_busy(stores, job_registry, job)
     holding: CycleHop | None = None
     pass_hold = _BOUND_HOLD.get() or PassHold()
+    task = asyncio.current_task()
+    assert task is not None, "a pass runs in a task"
+    cut: list[bool] = []
+    watch: asyncio.Task[None] | None = None
+
+    def cancelled() -> bool:
+        return acting is not None and acting.cancel() is not None
+
+    set_abort_check(cancelled)
     try:
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
@@ -650,7 +697,8 @@ async def paid_pass(
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             RunCallbacks(CycleEventLog.open(CycleDir(cycle_dir))).close_dead_bench()
             # The rate-limit and slot waits poll it too, as a loop's do.
-            set_abort_check(RunControl(cycle_dir=cycle_dir).pause_requested)
+            control = RunControl(cycle_dir=cycle_dir)
+            set_abort_check(lambda: control.pause_requested() or cancelled())
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
             declared = ceiling.over(declared)
         held = await asyncio.to_thread(
@@ -674,16 +722,27 @@ async def paid_pass(
             live=False,
         )
         job_registry.mark_started(job.job_id)
+        if acting is not None:
+            watch = asyncio.create_task(_cut_on_cancel(acting, task, cut))
         unbind = bind_account(stores)
         try:
             with spending_under(book):
                 yield book
         finally:
             unbind()
+            if watch is not None:
+                watch.cancel()
     except BaseException as exc:
         job_registry.release(job.job_id, exc)
         stopped_by = await pass_hold.let_go(stores, holding)
-        if stopped_by is not None and launch_interrupted(exc):
+        cancel = None if acting is None else acting.cancel()
+        if cancel is not None and stopped_by is None:
+            stopped_by = cancel.detail
+        # A cycle-less pass banks nothing: its cancel ends it as the cancel it is, however it
+        # reached the pass (the watch's cut, or a wait's abort check).
+        if stopped_by is not None and launch_interrupted(exc) and hop is not None:
+            if cut:
+                task.uncancel()
             raise PassStoppedError(
                 f"The {verb} pass stopped: {stopped_by}. Every cell it measured is banked, and a "
                 "rerun replays them."

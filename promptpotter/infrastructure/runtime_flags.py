@@ -4,7 +4,7 @@ import sys
 import time
 from pathlib import Path
 
-from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.phases import (
     GateKind,
     LaunchStage,
@@ -34,6 +34,7 @@ from promptpotter.infrastructure.store.layout import (
     in_inner_sandbox,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.shared.clock import epoch_seconds
 
 
 def run_mark(cycle_dir: Path) -> int:
@@ -43,8 +44,8 @@ def run_mark(cycle_dir: Path) -> int:
 def standing_controls(cycle_dir: Path) -> Controls:
     """The loop's inbox: its cycle's loop commands off the account's command log, as of the
     cycle's run mark."""
-    hop = CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
-    return standing_on(CommandLog.of_cycle(cycle_dir), hop, run_mark(cycle_dir))
+    log, place = CommandLog.of_cycle(cycle_dir)
+    return standing_on(log, place, run_mark(cycle_dir))
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:
@@ -127,8 +128,7 @@ def read_run_state(
         producer = ProducerReading.of(state, silent_for_s=silent_for_s, open_for_s=open_for_s)
     # Before the lifecycle: a pass scores ended cycles too, and a pause asked of it is standing.
     if scoring:
-        phase = RunPhase.PAUSED if pause_requested else RunPhase.SCORING
-        return RunState(phase, producer, scoring=True)
+        return RunState(RunPhase.PAUSED if pause_requested else RunPhase.SCORING, producer)
     if terminal:
         return RunState(RunPhase.TERMINAL, producer)
     if pause_requested or declared == RunPhase.PAUSED:
@@ -198,6 +198,13 @@ def _mtime_ns(path: Path) -> int | None:
         return None
 
 
+def _last_command_ns(cycle_dir: Path) -> int | None:
+    log, place = CommandLog.of_cycle(cycle_dir)
+    events = log.of_subject(place)
+    at = epoch_seconds(events[-1][1].at) if events else None
+    return None if at is None else int(at * 1e9)
+
+
 def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
     """What moves `derive_run_state`, in ns: the files it reads and two edges no write marks."""
     layout = CycleLayout(cycle_dir)
@@ -208,8 +215,9 @@ def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
         # The producer lock: a directory's mtime sees a child's create AND unlink.
         _mtime_ns(layout.runtime),
         _mtime_ns(layout.ledger),
-        # A pause asked of it is on the account's command log, never its ledger.
-        _mtime_ns(CommandLog.of_cycle(cycle_dir).path),
+        # A pause asked of it is on the account's command log, never its ledger: its own
+        # subject's last event, so another subject's command moves no cycle's stamp.
+        _last_command_ns(cycle_dir),
         # A pass that dies writes nothing: past this edge its served mark reads its process gone.
         None if edge is None or time.time() < edge else int(edge * 1e9),
         # A live claim ends with its process, which no write marks: it never 304s.

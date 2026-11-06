@@ -6,7 +6,6 @@ from collections import Counter
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.task_context import (
@@ -68,15 +67,17 @@ from promptpotter.domain.campaign_config import (
     declare_run,
     effective_config,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     BackendRevision,
+    CommandSubject,
     CycleSeed,
     DefaultsDrift,
     OriginSource,
+    SubjectLanded,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
@@ -549,8 +550,10 @@ def _write_plan(
         stores.campaigns.write_cycle_seed(hop, seed)
 
 
-def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Session:
-    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran."""
+def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: str | None) -> Session:
+    """``hop.campaign_id`` is the CALLER's, so an L4 inner spawn lands back on a campaign it ran.
+    *billed* is the draft whose ledger paid toward this cycle before it existed: its ledger moves
+    in as the cycle's first lines, and what was commanded of it lands on the cycle."""
     validate_path_component(hop.cycle_id)
     validate_path_component(hop.campaign_id)
     declaration = plan.declaration
@@ -558,7 +561,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     session = plan.session
     campaigns = session.store.campaigns
     if billed is not None:
-        campaigns.adopt_ledger(hop, billed)
+        _adopt_draft(session.store, hop, billed)
     _write_plan(session.store, hop, plan.drawn, plan.cycle.own_seed)
     session = session.bound(hop, purpose=declaration.purpose)
     # What the origin hash was taken under, appended before the campaign is visible, so every
@@ -590,8 +593,24 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
     return session
 
 
-def mint(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCycle:
-    """``billed`` is a ledger that paid toward this cycle before it existed, moved in as its first lines."""
+def _adopt_draft(stores: Stores, hop: CycleHop, draft_id: str) -> None:
+    """The draft's ledger moved into the cycle, and its commands landed on it: every one filed on
+    the draft reads as the cycle's (`SubjectLanded`). An L4 inner mint's draft is its framing's
+    own, which no command addresses."""
+    ledger = stores.drafts.ledger(draft_id)
+    if ledger.is_file():
+        stores.campaigns.adopt_ledger(hop, ledger)
+    if not stores.inner:
+        stores.commands.append(
+            SubjectLanded(
+                subject=CommandSubject.draft(draft_id),
+                onto=CommandSubject.of(Subject(hop.campaign_id, hop.cycle_id)),
+            )
+        )
+
+
+def mint(plan: CyclePlan, *, campaign_id: str, billed: str | None) -> MintedCycle:
+    """``billed`` is the draft that paid toward this cycle before it existed (`_adopt_draft`)."""
     # Never sweep the inner sandbox here: its key carries the campaign id, so only ANOTHER's dies.
     hop = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
     return MintedCycle(
@@ -620,7 +639,7 @@ def _mint_all(
     plans: Sequence[CyclePlan],
     campaign_ids: Sequence[str],
     *,
-    billed: Path | None,
+    billed: str | None,
     stored: HeadToHeadRecord | None,
 ) -> list[MintedCycle]:
     """Inside `_record_held`, whose *stored* record it is; *billed* moves into the first cycle
@@ -641,7 +660,7 @@ def _mint_all(
     ]
 
 
-def mint_arms(plans: Sequence[CyclePlan], *, billed: Path | None) -> list[MintedCycle]:
+def mint_arms(plans: Sequence[CyclePlan], *, billed: str | None) -> list[MintedCycle]:
     """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing."""
     with _record_held(plans) as stored:
         minted = _mint_all(
@@ -740,7 +759,7 @@ async def _mint_after_framing(
             )
             for plan in plans
         ]
-        minted = _mint_all(framed, campaign_ids, billed=checkin_ledger.path, stored=stored)
+        minted = _mint_all(framed, campaign_ids, billed=draft_id, stored=stored)
     except BaseException:
         drafts.discard(drafts.hold(draft_id))
         raise
