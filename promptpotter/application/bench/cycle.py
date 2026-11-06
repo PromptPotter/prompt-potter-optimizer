@@ -143,7 +143,7 @@ def _assert_overlay_preserved(
 class Cycle:
     session: Session
     config: CampaignConfig
-    # The launch's one selection (`binding_optimizer`): a manifest edit lands at the next launch.
+    # The launch's one selection (`runner/entry.py` scopes it): a manifest edit lands at the next launch.
     optimizer: SelectedOptimizer
     slices: SliceMap
     difficulty: DifficultyView

@@ -308,14 +308,13 @@ from promptpotter.shared.measurement_context import (
     MeasurementRole,
     measured_pass,
 )
+from promptpotter.shared.run_scope import scoped
 
 
 @pytest.fixture
 def run_bound(tmp_path: Path) -> Iterator[None]:
-    ledger = telemetry.set_cycle_ledger(CycleEventLog(tmp_path / "bound.jsonl"))
-    with telemetry.at_round(1):
+    with scoped(ledger=CycleEventLog(tmp_path / "bound.jsonl")), telemetry.at_round(1):
         yield
-    telemetry.reset_cycle_ledger(ledger)
 
 
 def _held(
@@ -402,11 +401,9 @@ async def _grade_twice(
     offline.llm.sent.clear()
     cache = LLMReuseCache(tmp_path, "judge_reuse")
     judge = JudgeStage(model="grader-1", provider="openai")
-    (ev,) = build_evaluators(
-        {"answer": JudgeSpec(name="sealqa", stages=[judge])}, beside=(), cache=cache
-    )
+    (ev,) = build_evaluators({"answer": JudgeSpec(name="sealqa", stages=[judge])}, beside=())
     graded = CycleEventLog(tmp_path / "graded.jsonl")
-    with _billing_on(graded, unbounded_spend_book()):
+    with _billing_on(graded, unbounded_spend_book()), scoped(judge_cache=cache):
         for _ in range(2):
             row = MeasuredCell(sample_key="k0", query="who?", predicted="Ada", ground_truth="Ada")
             computed = ev.compute(result=row, schema=None)
@@ -595,14 +592,11 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         ),
         scorer=scorer_of("max(0.0, min(1.0, env_reward))", verifier_graded=True),
     )
-    token = telemetry.set_cycle_ledger(cells)
-    try:
+    with scoped(ledger=cells):
         with spending_under(unbounded):
             row_ = await measure_sample(Sample(id=0, query="10452", ground_truth=None), session)
         banked = {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}
         emit_replayed_step_tokens(banked, {})
-    finally:
-        telemetry.reset_cycle_ledger(token)
     *ran, replayed = [r for _, r in cells.iter() if isinstance(r, TokenUsageRecord)]
     assert row_.error_category == ErrorCategory.UNSCOREABLE, "an ungraded cell read as graded"
     assert [(r.cost_usd, r.input_tokens, r.cached) for r in ran] == [(0.0076, 1200, False)], (
@@ -792,41 +786,41 @@ async def _walk(
 
     # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
     started = CycleEventLog.open(CycleDir(stores.projects_root / "walks" / uuid.uuid4().hex))
-    bound = telemetry.set_cycle_ledger(started)
-    try:
-        with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
-            session = loop_session(
-                stores,
-                # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
-                _searching(1.0),
-                dataset,
-                backend_id="walks",
-                scorer=_HIT,
-                control=_control_pausing(
-                    lambda: pause_after_call is not None and len(returned) >= pause_after_call,
-                    held_lookahead=armed,
-                ),
-                client=backend_client(stores.jobs_dir, max_cells_in_flight=max_cells),
-            )
-            walk = open_walk(
-                sp,
-                dataset,
+    with (
+        scoped(ledger=started),
+        mock.patch.object(query_loop, "measure_sample", _measure),
+        spending_under(book),
+    ):
+        session = loop_session(
+            stores,
+            # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
+            _searching(1.0),
+            dataset,
+            backend_id="walks",
+            scorer=_HIT,
+            control=_control_pausing(
+                lambda: pause_after_call is not None and len(returned) >= pause_after_call,
+                held_lookahead=armed,
+            ),
+            client=backend_client(stores.jobs_dir, max_cells_in_flight=max_cells),
+        )
+        walk = open_walk(
+            sp,
+            dataset,
+            session,
+            label=MeasurementRole.PANEL,
+            checks=[_CutAfter(cut_at)] if cut_at else [],
+            measured=MeasuredPass(individual_id="arm"),
+            skip_at=skip_at,
+        )
+        stopped = await _stopped_by_operator(
+            query_loop.run_walks(
+                {"arm": walk},
                 session,
-                label=MeasurementRole.PANEL,
-                checks=[_CutAfter(cut_at)] if cut_at else [],
-                measured=MeasuredPass(individual_id="arm"),
-                skip_at=skip_at,
+                keep_cut=False,
+                backfills=priors if parent_lacks_cells else None,
             )
-            stopped = await _stopped_by_operator(
-                query_loop.run_walks(
-                    {"arm": walk},
-                    session,
-                    keep_cut=False,
-                    backfills=priors if parent_lacks_cells else None,
-                )
-            )
-    finally:
-        telemetry.reset_cycle_ledger(bound)
+        )
     depths = [r.sample_lookahead for _, r in started.iter() if isinstance(r, SampleStartedRecord)]
     feed = _filed(stores, sp, session)
     taken = {cell.key for cell in walk.results}
@@ -900,14 +894,10 @@ async def _round(
         )
         for w, cut in enumerate(cuts)
     ]
-    bound = telemetry.set_cycle_ledger(ledger)
-    try:
-        with mock.patch.object(query_loop, "measure_sample", _measure):
-            stopped = await _stopped_by_operator(
-                query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False)
-            )
-    finally:
-        telemetry.reset_cycle_ledger(bound)
+    with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
+        stopped = await _stopped_by_operator(
+            query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False)
+        )
     return {
         "rows": [list(walk.results) for walk in walks],
         "stops": [stopped or _ended_on(walk) for walk in walks],
@@ -1168,35 +1158,29 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
     seats = inner_cells("potter")
     owner = CycleHop(campaign_id="ppself__aaaaaa", cycle_id="cycle_deadbeef0000")
-    spawning = spawn_context._INNER_SPAWN.set(
-        spawn_context.InnerSpawnContext(
-            inner_sandbox_root=inner_sandbox(built_stores, owner.campaign_id, owner.cycle_id),
-            identity=built_stores.identity,
-            shared_root=built_stores.shared_root,
-            install_datasets_root=built_stores.install_datasets_root,
-            research_datasets_root=None,
-            spawn_campaign_id=owner.campaign_id,
-            spawn_cycle_id=owner.cycle_id,
-            enclosing=(),
-            cells=seats,
-            purpose=Optimize(),
-            ruler=RulerReach(version=0, own=None),
-        )
+    spawning = spawn_context.InnerSpawnContext(
+        inner_sandbox_root=inner_sandbox(built_stores, owner.campaign_id, owner.cycle_id),
+        identity=built_stores.identity,
+        shared_root=built_stores.shared_root,
+        install_datasets_root=built_stores.install_datasets_root,
+        research_datasets_root=None,
+        spawn_campaign_id=owner.campaign_id,
+        spawn_cycle_id=owner.cycle_id,
+        enclosing=(),
+        cells=seats,
+        purpose=Optimize(),
+        ruler=RulerReach(version=0, own=None),
     )
-    token = telemetry.set_cycle_ledger(CycleEventLog(tmp_path / "outer.jsonl"))
     (seat,) = seats.cells
     query = seat.id
     pin = PinnedCell(cell=seat, instrument="i").pin()
     cell = Sample(id=0, query=query, ground_truth=None, source_pin=pin)
-    # The connector DECLARES the seconds, the scoring seam enforces them, as in `measure_sample`.
-    envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=query)
-    try:
+    with scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning):
+        # The connector DECLARES the seconds, the scoring seam enforces them, as in `measure_sample`.
+        envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=query)
         with pytest.raises(CellUnscoreableError):
             async with envelope:
                 await spawn.run_inner_cycle(cell, {})
-    finally:
-        telemetry.reset_cycle_ledger(token)
-        spawn_context._INNER_SPAWN.reset(spawning)
     assert started.is_set(), "the inner campaign never started — the envelope proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
 
@@ -1218,7 +1202,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
                 cache=loop_reuse,
             ),
         )
-        with judge_call.bind_cache(judge_reuse):
+        with scoped(judge_cache=judge_reuse):
             await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")
 
     # Another campaign's run banks both replies; this arm only ever replays them.
@@ -1263,8 +1247,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             created_at="2026-01-01T00:00:00Z",
         )
     feed = _filed(built_stores, picked, session)
-    token = telemetry.set_cycle_ledger(ledger)
-    try:
+    with scoped(ledger=ledger):
         # The stopped launch priced the cells it took.
         telemetry.bind_priced({feed.cell_key(s.key) for s in reread[:3]})
         with spending_under(arm):
@@ -1280,8 +1263,6 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             await round_calls()
             telemetry.bind_priced(scan_ledger_priced_keys([ledger.path]))
             await round_calls()
-    finally:
-        telemetry.reset_cycle_ledger(token)
     assert [c.key for c in walk.results] == [s.key for s in reread[:3]], (
         "the ceiling held back a re-read"
     )
@@ -1481,12 +1462,8 @@ async def _owned_chat(node: str, content: str = "x", *, max_tokens: int = 10) ->
 
 @contextlib.contextmanager
 def _billing_on(ledger: CycleEventLog, book: Any) -> Iterator[None]:
-    token = telemetry.set_cycle_ledger(ledger)
-    try:
-        with spending_under(book):
-            yield
-    finally:
-        telemetry.reset_cycle_ledger(token)
+    with scoped(ledger=ledger), spending_under(book):
+        yield
 
 
 def _token_bills(ledger: CycleEventLog) -> list[TokenUsageRecord]:
@@ -3438,22 +3415,19 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
 
 def _pay(ledger: CycleEventLog, cost_usd: float, *, input_tokens: int, output_tokens: int) -> None:
     """One send through the one admission every paid call takes, on *ledger*."""
-    bound = telemetry.set_cycle_ledger(ledger)
     bound_send = SendBound(input_tokens=input_tokens, output_tokens=output_tokens, usd=cost_usd)
-    try:
-        with (
-            spending_under(spend_book()),
-            admitted(
-                CallLabel("backend", "backend"),
-                bound_send,
-                model="openai/gpt-4o",
-                provider="openrouter",
-                paid_by="host",
-            ) as send,
-        ):
-            send.settle(Billed(TokenAccount(input=input_tokens, output=output_tokens), cost_usd))
-    finally:
-        telemetry.reset_cycle_ledger(bound)
+    with (
+        scoped(ledger=ledger),
+        spending_under(spend_book()),
+        admitted(
+            CallLabel("backend", "backend"),
+            bound_send,
+            model="openai/gpt-4o",
+            provider="openrouter",
+            paid_by="host",
+        ) as send,
+    ):
+        send.settle(Billed(TokenAccount(input=input_tokens, output=output_tokens), cost_usd))
 
 
 @pytest.fixture
@@ -3507,26 +3481,23 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         raise OSError("the ledger's disk is full")
 
     root_hop = CycleHop(campaign_id="camp-2", cycle_id=root)
-    ledger = telemetry.set_cycle_ledger(
-        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(root_hop)))
-    )
     bill, book = account_bill(stores.charges), spend_book(1.0)
     room = book.money_left()
-    try:
-        with monkeypatch.context() as patched, spending_under(book), pytest.raises(OSError):
-            patched.setattr(
-                "promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable
-            )
-            with admitted(
-                CallLabel("backend", "backend"),
-                SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
-                model="openai/gpt-4o",
-                provider="openrouter",
-                paid_by="host",
-            ):
-                pass
-    finally:
-        telemetry.reset_cycle_ledger(ledger)
+    with (
+        scoped(ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(root_hop)))),
+        monkeypatch.context() as patched,
+        spending_under(book),
+        pytest.raises(OSError),
+    ):
+        patched.setattr("promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable)
+        with admitted(
+            CallLabel("backend", "backend"),
+            SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
+            model="openai/gpt-4o",
+            provider="openrouter",
+            paid_by="host",
+        ):
+            pass
     assert account_bill(stores.charges) == bill, "a send never made left its hold on the bill"
     assert book.money_left() == room, "a send never made kept its room held"
     assert not cleanup(root) and account_usd() == pytest.approx(before), (
@@ -3724,32 +3695,25 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     after_reset = CycleHop(campaign_id="camp-4", cycle_id=root)
     stores.campaigns.create_campaign(minted_campaign(after_reset))
     stores.campaigns.mint_cycle(after_reset)
-    ledger = telemetry.set_cycle_ledger(
-        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(after_reset)))
-    )
     book = spend_book(1.0)
-    try:
-        with (
-            monkeypatch.context() as patched,
-            spending_under(book),
-            pytest.raises(OSError),
-            admitted(
-                CallLabel("backend", "backend"),
-                SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
-                model="openai/gpt-4o",
-                provider="openrouter",
-                paid_by="host",
-            ) as send,
-        ):
-            patched.setattr(
-                "promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable
-            )
-            send.settle(
-                Billed(TokenAccount(input=2_000, output=400), 0.2),
-                unknown=SendBound(input_tokens=0, output_tokens=400, usd=0.1),
-            )
-    finally:
-        telemetry.reset_cycle_ledger(ledger)
+    with (
+        scoped(ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(after_reset)))),
+        monkeypatch.context() as patched,
+        spending_under(book),
+        pytest.raises(OSError),
+        admitted(
+            CallLabel("backend", "backend"),
+            SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
+            model="openai/gpt-4o",
+            provider="openrouter",
+            paid_by="host",
+        ) as send,
+    ):
+        patched.setattr("promptpotter.infrastructure.llm.spend_book.emit_spend_hold", unwritable)
+        send.settle(
+            Billed(TokenAccount(input=2_000, output=400), 0.2),
+            unknown=SendBound(input_tokens=0, output_tokens=400, usd=0.1),
+        )
     assert book.money_left().usd == pytest.approx(1.0 - 0.2 - 0.1), (
         "a settle that raised left its book holding another sum than it billed and kept held"
     )

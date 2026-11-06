@@ -36,7 +36,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
     reset_spend_book,
 )
-from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 from promptpotter.infrastructure.projections.base import Projection
@@ -194,7 +193,6 @@ class RunObservers:
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     tracing: TracingProjection
-    _ledger_token: Token[CycleEventLog | None] | None = None
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
 
     def arm_spend_book(self, book: SpendBook) -> None:
@@ -229,8 +227,6 @@ class RunObservers:
         self.dashboard.drain()
         self.tracing.drain()
         # The SSE stream is no subscriber — it tails the on-disk ledger — so nothing drains here.
-        if self._ledger_token is not None:
-            reset_cycle_ledger(self._ledger_token)
         if self._book_tokens:
             reset_spend_book(self._book_tokens.pop())
 
@@ -316,7 +312,6 @@ def _bind_observers(
         if forked_from is None
         else RunCallbacks(ledger=ledger, view_context=forked_from.callbacks.view_context)
     )
-    ledger_token = set_cycle_ledger(ledger)
     bind_account(session.store)
 
     return RunObservers(
@@ -326,5 +321,4 @@ def _bind_observers(
         dashboard=dashboard,
         readout=readout,
         tracing=tracing,
-        _ledger_token=ledger_token,
     )

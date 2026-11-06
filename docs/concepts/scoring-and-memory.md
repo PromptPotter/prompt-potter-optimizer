@@ -39,8 +39,8 @@ replays free. `node_configs` is canonical identity and stays deterministic from 
 
 **Write path:** `application/datasets/loaders.py::archive_entry` names the configuration →
 `MeasurementArchive.file_answers` appends one line per answer the cell did not hold; a replay files nothing.
-**Read paths:** `archive_queries.py`'s `load_population` / `list_populations` (inside the scope
-`bind_memory_scope` gives the task) and `walked_answers`; `MeasurementArchive.measurements_for_config`.
+**Read paths:** `archive_queries.py`'s `load_population` / `list_populations` (inside the memory scope
+`shared/run_scope.py::RunScope` carries for the task) and `walked_answers`; `MeasurementArchive.measurements_for_config`.
 
 **The content hashes are not interchangeable:**
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from promptpotter.application.optimizer_manifest import declared_node_override
+from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
@@ -361,13 +361,9 @@ def resolve_layout_override(
 
 
 def resolve_node_layout(node: str) -> L1Layout:
-    """Raises rather than render the floor: that attributes the measurement to a layout nobody ran."""
-    layout, breaches = resolve_layout_override(node, declared_node_override(node).get("layout"))
-    if breaches:
-        raise ValueError(
-            f"resolve_node_layout({node!r}): the declared layout edit breaks "
-            f"{sorted(o.validator_id for o in breaches)} and cannot be applied"
-        )
+    """The layout the scoped selection laid on *node* (an L4 cell's), else its floor; a breaching
+    one never reaches here, refused at selection (`LayoutNode.lever_refusals`)."""
+    layout, _ = resolve_layout_override(node, bound_optimizer().levers(node).get("layout"))
     return layout
 
 
@@ -377,6 +373,14 @@ class LayoutNode(LlmNode):
 
     def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
         return layout_levers(self.name, declared)
+
+    def lever_refusals(self, declared: Mapping[str, Any]) -> list[str]:
+        _, breaches = resolve_layout_override(self.name, declared.get("layout"))
+        return (
+            [f"its layout edit breaks {sorted(o.validator_id for o in breaches)}"]
+            if breaches
+            else []
+        )
 
 
 def layout_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:

@@ -25,13 +25,13 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import FileKind, FileUnreadableError
+from promptpotter.shared.run_scope import scoped
 
 ORIGIN_FIELD_MAX = 600
 
@@ -274,8 +274,7 @@ async def commit_task_framing(
 ) -> None:
     """*prompt_fields*: each the chain's prompt nodes declare, once per node declaring it."""
     context = checkin_call_context(stores, ledger)
-    token = set_cycle_ledger(ledger)
-    try:
+    with scoped(ledger=ledger):
         result, _ = await run_checkin(
             response_model=checkin_output(prompt_fields),
             consultation_instruction=(
@@ -288,8 +287,6 @@ async def commit_task_framing(
             ),
             context=context,
         )
-    finally:
-        reset_cycle_ledger(token)
     stores.tenant_datasets.save_task_context(
         dataset_name,
         TaskDecomposition.from_dict(

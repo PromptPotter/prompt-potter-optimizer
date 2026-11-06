@@ -12,10 +12,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict
 
 from promptpotter.application.jobs.coupon import keyed_client
-from promptpotter.application.optimizer_manifest import (
-    bound_determinism,
-    resolve_node_override,
-)
+from promptpotter.application.optimizer_manifest import bound_determinism
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import pinned_route
 from promptpotter.domain.run_records import (
@@ -145,9 +142,8 @@ class _Call:
 
 
 def _merged_config(
-    node: str, config: NodeConfig, *, temperature: float | None, seed: int | None
+    config: NodeConfig, *, temperature: float | None, seed: int | None
 ) -> NodeConfig:
-    config = resolve_node_override(node).laid_on(config)
     laid: dict[str, object] = {}
     if temperature is not None:
         laid["temperature"] = temperature
@@ -333,7 +329,8 @@ async def llm_call(
     seed: int | None = None,
 ) -> LLMResponse:
     node = context.node
-    merged = _merged_config(node, context.config, temperature=temperature, seed=seed)
+    merged = _merged_config(context.config, temperature=temperature, seed=seed)
+
     call = _Call(
         label=node,
         merged=merged,

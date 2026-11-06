@@ -17,11 +17,7 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
-from promptpotter.application.optimizer_manifest import (
-    SelectedOptimizer,
-    binding_prompt_overrides,
-    resolved_overrides,
-)
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolved_overrides
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
@@ -54,6 +50,7 @@ from promptpotter.domain.l4.proxies import (
     unread_rounds,
 )
 from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
@@ -71,6 +68,7 @@ from promptpotter.shared.errors import (
     CellSendRefusedError,
     CellUnscoreableError,
     ErrorCategory,
+    PayloadInvalidError,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.measurement_context import (
@@ -80,6 +78,7 @@ from promptpotter.shared.measurement_context import (
     measured_pass,
     measured_pass_context,
 )
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -314,7 +313,7 @@ def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
 
 
 def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
-    """Inside a cell, never at `publish_inner_spawn_context`, which fires for EVERY cycle."""
+    """Inside a cell, never at `spawn_context.py::inner_spawn_of`, which fires for EVERY cycle."""
     owner = SandboxOwner(
         tenant_id=str(ctx.identity.tenant_id),
         campaign_id=ctx.spawn_campaign_id,
@@ -397,9 +396,21 @@ class _Opened(NamedTuple):
     optimizer: SelectedOptimizer
 
 
+def _laid_arm(config: CampaignConfig, overrides: Overrides) -> CampaignConfig:
+    """The arm's edit laid into the cell's own overlay, last: the selection refuses what no
+    render can apply (`optimizer_manifest.py::_select`), and its treatment hashes the rest."""
+    if not overrides:
+        return config
+    nodes = dict(config.optimization.nodes)
+    for node, edit in overrides.items():
+        held = nodes[node].config if node in nodes else {}
+        nodes[node] = ManifestNodeOverlay(config={**held, **edit})
+    optimization = config.optimization.model_copy(update={"nodes": nodes})
+    return config.model_copy(update={"optimization": optimization})
+
+
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     ctx, spec = cell.ctx, cell.spec
-    enter_inner_cell(ctx, store.campaigns, cell.campaign_id)
     # enable_tracing=False: cloud traces of an ephemeral measurement pile spans in process memory.
     session = await init_services(
         dataset_name=spec.inner_dataset,
@@ -424,27 +435,36 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
             spent={},
         )
     train_data = [*search, *bench]
-    config = inner_instrument_config(
-        spec,
-        CampaignConfig.model_validate(
-            dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
+    config = _laid_arm(
+        inner_instrument_config(
+            spec,
+            CampaignConfig.model_validate(
+                dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
+            ),
+            solver=session.pipeline_schema.prompt_nodes(),
+            n_search=len(search),
         ),
-        solver=session.pipeline_schema.prompt_nodes(),
-        n_search=len(search),
+        cell.overrides,
     )
-    declaration = declare(session, config, purpose=ctx.purpose)
-    # The campaign that exists decides, never an id its origin content derives: a drifted origin
-    # reaches the drift refusal rather than a fresh root.
-    campaign = session.store.campaigns.load_campaign(cell.campaign_id)
-    if campaign is None:
-        minted = mint(
-            resolve_cycle_plan(session, declaration, train_data),
-            campaign_id=cell.campaign_id,
-            billed=None,
-        )
-        session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
-    else:
-        session, cycle, optimizer = _continue_inner_campaign(session, campaign, train_data)
+    try:
+        declaration = declare(session, config, purpose=ctx.purpose)
+        # The campaign that exists decides, never an id its origin content derives: a drifted
+        # origin reaches the drift refusal rather than a fresh root.
+        campaign = session.store.campaigns.load_campaign(cell.campaign_id)
+        if campaign is None:
+            minted = mint(
+                resolve_cycle_plan(session, declaration, train_data),
+                campaign_id=cell.campaign_id,
+                billed=None,
+            )
+            session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
+        else:
+            session, cycle, optimizer = _continue_inner_campaign(session, campaign, train_data)
+    except PayloadInvalidError as refused:
+        if refused.code != "optimizer_overlay":
+            raise
+        # The arm's fault, banked on its cell in the selection's own words, before anything is sent.
+        raise CellUnscoreableError(str(refused), spent={}) from refused
     return _Opened(session, cycle, train_data, class_floor(search), optimizer)
 
 
@@ -455,8 +475,8 @@ async def _run_inner_campaign(
 ) -> CycleResult:
     """Runs in a FRESH task, so every ContextVar bound below is this cell's alone."""
     store = claim_sandbox(cell.ctx)
-    # Over the mint too: the treatment it declares hashes the overridden prompts.
-    with binding_prompt_overrides(cell.overrides):
+    # Over the seat too: its init reads what this cell remembers.
+    with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
         opened = await _open_seat(cell, store)
         session, config = opened.session, opened.cycle.config
         session.store.campaigns.record_spawned(session.hop, SpawnedBy.model_validate(spawned_by))

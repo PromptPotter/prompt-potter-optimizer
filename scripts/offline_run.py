@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 import asyncio
-import contextvars
+import contextlib
 import inspect
 import json
 import os
@@ -27,6 +27,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
+from unittest import mock
 
 import tests_owning
 import yaml
@@ -46,7 +47,8 @@ from offline_world import (
 from processes import REPO, RamBudget, end_children_with_this_process, queue_behind_siblings
 
 import promptpotter
-from promptpotter.application import optimizers
+from promptpotter.application import optimizer_manifest, optimizers
+from promptpotter.application.bench import node_context
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import dataset_campaign_block
@@ -63,7 +65,6 @@ from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.maintenance.landing import plan_landing
 from promptpotter.application.optimizer_manifest import (
-    binding_prompt_overrides,
     manifest_directories,
     running_prompt,
     select_optimizer,
@@ -101,7 +102,6 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
-    bind_memory_scope,
     list_populations,
     load_population,
 )
@@ -113,9 +113,10 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
@@ -557,12 +558,25 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
     }
 
 
-def edited_proposer(config: CampaignConfig) -> dict[str, dict[str, Any]]:
-    """Appended, so the fake still knows the node by its template's opening."""
-    selected = select_optimizer(config.optimization)
-    node = selected.proposer
-    held = running_prompt(node, selected.node_config(node), selected.manifest)
-    return {node: {"problem_description": f"{held.problem_description}\n\nEdited on resume."}}
+@contextlib.contextmanager
+def edited_proposer(config: CampaignConfig) -> Iterator[None]:
+    """An edit of the proposer's template on resume, as an operator's lands; appended, so the
+    fake still knows the node by its template's opening."""
+    proposer = select_optimizer(config.optimization).proposer
+
+    def edited(node: str, *args: Any) -> Any:
+        held = running_prompt(node, *args)
+        if node != proposer:
+            return held
+        return held.model_copy(
+            update={"problem_description": f"{held.problem_description}\n\nEdited on resume."}
+        )
+
+    with (
+        mock.patch.object(optimizer_manifest, "running_prompt", edited),
+        mock.patch.object(node_context, "running_prompt", edited),
+    ):
+        yield
 
 
 def closed_a_round(stores: Stores, hop: CycleHop) -> bool:
@@ -701,7 +715,7 @@ async def run_one(
         shutil.rmtree(stores.campaigns.layout(session.hop).rounds)
         paused = session.hop
         session = await rebound_session(stores, paused)
-        with binding_prompt_overrides(edited_proposer(config) if diverge else None):
+        with edited_proposer(config) if diverge else contextlib.nullcontext():
             session, result = await run_campaign(
                 session,
                 readout_sink=print,
@@ -1066,18 +1080,18 @@ async def run_controlled(
     assert bank is not None, "every arm ran on the labelled bank"
 
     def memory(campaign_id: str) -> set[str]:
-        bind_memory_scope(ArmOf(walks(campaign_id), ruler_version=0))
-        return {
-            answer.answer
-            for entry in list_populations(stores, bank)
-            for answer in load_population(stores, entry, bank)
-        }
+        with scoped(memory=ArmOf(walks(campaign_id), ruler_version=0)):
+            return {
+                answer.answer
+                for entry in list_populations(stores, bank)
+                for answer in load_population(stores, entry, bank)
+            }
 
     foreign_only = set().union(*(filed(c) for c in subjects)) - set().union(
         *(filed(c) for _, c in arms.values())
     )
     for name, (_, cid) in arms.items():
-        seen = contextvars.copy_context().run(memory, cid)
+        seen = memory(cid)
         if seen & foreign_only or not seen <= filed(cid):
             raise SystemExit(f"offline run: arm {name}'s memory reads an answer it did not walk")
         print(

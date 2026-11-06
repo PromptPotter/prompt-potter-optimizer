@@ -19,13 +19,15 @@ from pydantic import SecretStr
 
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.coupon import bind_account
-from promptpotter.application.optimizer_manifest import binding_optimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.base import wire_client
 from promptpotter.infrastructure.llm.registry import send_pacing
+from promptpotter.infrastructure.store.archive_queries import OpenAt
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.run_scope import scoped
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -35,8 +37,9 @@ def completed_registries() -> None:
 
 @pytest.fixture(autouse=True)
 def bound_potter() -> Iterator[None]:
-    """What every run seam binds (`runner/entry.py`), for a test driving a node without one."""
-    with binding_optimizer(select_optimizer(OptimizerChoice()), determinism=None):
+    """The selection and memory an optimizing run scopes (`runner/entry.py`), for a test driving a
+    node without one."""
+    with scoped(optimizer=select_optimizer(OptimizerChoice()), memory=OpenAt()):
         yield
 
 

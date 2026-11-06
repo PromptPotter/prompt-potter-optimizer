@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Awaitable, Iterator, Sequence
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
@@ -20,7 +20,7 @@ from promptpotter.application.pipeline_resolve import configure_and_apply_pipeli
 from promptpotter.application.preflight import refuse_below_reasoning_floor, run_preflight_checks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.spawn_context import (
-    publish_inner_spawn_context,
+    inner_spawn_of,
     retarget_inner_spawn,
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
@@ -43,21 +43,16 @@ from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import bound_spend_book
-from promptpotter.infrastructure.llm.telemetry import (
-    active_cycle_ledger,
-    filed_as,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, filed_as
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
     CellOf,
+    MemoryScope,
     OpenAt,
-    bind_memory_scope,
-    memory_scope,
 )
 from promptpotter.shared.errors import DiagnosticError
+from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
     from promptpotter.application.origin import CampaignOrigin
@@ -125,42 +120,45 @@ def populate_session_scoring(
                 connector_report_owner(connector.name, connector.cell_report_keys),
                 observation_owner(session.pipeline_schema.observation_keys),
             ),
-            cache=session.store.judge_reuse,
         ),
     )
 
 
-def scope_memory(session: Session) -> None:
-    """An L4 cell keeps the scope its spawner bound (`runner/inner/spawn_context.py::enter_inner_cell`)."""
-    if isinstance(memory_scope(), CellOf):
-        return
+def run_memory(session: Session) -> MemoryScope:
+    """What a run on *session* remembers, by its purpose; an L4 cell keeps the scope its spawner
+    opened (`runner/inner/spawn.py::_run_inner_campaign`)."""
+    if isinstance(cell := run_scope().memory, CellOf):
+        return cell
     match purpose := session.purpose:
         case Optimize():
-            bind_memory_scope(OpenAt())
+            return OpenAt()
         case Compare(arm=arm):
             record = session.store.campaigns.load_head_to_head(arm.head_to_head_id)
             assert record is not None, "an arm's mint declares its head-to-head"
             walks = CampaignWalks(session.store.campaigns, session.campaign_id)
-            bind_memory_scope(ArmOf(walks, record.ruler_version))
+            return ArmOf(walks, record.ruler_version)
         case _:
             assert_never(purpose)
 
 
+@contextmanager
 def arm_diagnostic_scoring(
     session: Session,
     campaign_config: CampaignConfig,
     *,
     source: RunSource,
-) -> None:
+) -> Iterator[None]:
+    """The pass's scoring, under the memory and grader cache a run on *session* would take, for the block."""
     # A run is refused at its mint (`jobs/mint.py::refuse_unrunnable`); a pass outside one, here.
     refuse_below_reasoning_floor(node_config_items(dict(session.pipeline_params)))
-    scope_memory(session)
-    populate_session_scoring(
-        session,
-        campaign_config,
-        source=source,
-        partition=cycle_partition(session, session.bank.samples, campaign_config),
-    )
+    with scoped(memory=run_memory(session), judge_cache=session.store.judge_reuse):
+        populate_session_scoring(
+            session,
+            campaign_config,
+            source=source,
+            partition=cycle_partition(session, session.bank.samples, campaign_config),
+        )
+        yield
 
 
 @dataclass(frozen=True)
@@ -175,8 +173,12 @@ class OpenedDiagnostic:
         return self.session.points(self.framing)
 
 
-async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -> OpenedDiagnostic:
-    """The one opener of every verb that scores a cycle's points outside its loop."""
+@asynccontextmanager
+async def open_diagnostic(
+    stores: Stores, hop: CycleHop, *, source: RunSource
+) -> AsyncIterator[OpenedDiagnostic]:
+    """The one opener of every verb that scores a cycle's points outside its loop: its scope is
+    the block's, so a pass the loop runs leaves the loop's own standing."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
@@ -185,12 +187,14 @@ async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -
     config = cycle.config
     # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
     session.state.control = RunControl(enclosing=(stores.campaigns.cycle_dir(hop),))
-    # As `run_optimization` does: a pp-self point's connector dispatches no inner run without it.
-    publish_inner_spawn_context(session)
-    arm_diagnostic_scoring(session, config, source=source)
-    return OpenedDiagnostic(
-        campaign, session, config, campaign_framing(stores, config, session.dataset)
-    )
+    # The spawn as `run_optimization` scopes it: a pp-self point's connector dispatches no inner run without it.
+    with (
+        arm_diagnostic_scoring(session, config, source=source),
+        scoped(spawn=inner_spawn_of(session)),
+    ):
+        yield OpenedDiagnostic(
+            campaign, session, config, campaign_framing(stores, config, session.dataset)
+        )
 
 
 def cycle_partition(
@@ -232,11 +236,8 @@ def verb_ledger(stores: Stores, hop: CycleHop | None) -> Iterator[CycleEventLog]
     # So what an L4 cell spends beneath the verb lands here, not only on the sandbox's ledger.
     if (book := bound_spend_book()) is not None and book.ledger is None:
         book.ledger = ledger
-    token = set_cycle_ledger(ledger)
-    try:
+    with scoped(ledger=ledger):
         yield ledger
-    finally:
-        reset_cycle_ledger(token)
 
 
 @contextmanager

@@ -316,6 +316,10 @@ class LlmNode(NodeMember):
         """The L4 override levers its optimizer resolves itself, as they RESOLVE: the inner cell's identity reads them."""
         return {}
 
+    def lever_refusals(self, _declared: Mapping[str, Any]) -> list[str]:
+        """Why its laid levers cannot render, which selection refuses (`optimizer_manifest.py::_select`)."""
+        return []
+
 
 @dataclass(frozen=True)
 class RoundOpening:

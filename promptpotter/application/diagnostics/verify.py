@@ -261,134 +261,134 @@ async def verify_candidate(
     arm = arm_name(ArmKey(candidate_id), entry, round_num)
     label = arm.label
 
-    opened = await open_diagnostic(stores, hop, source=RunSource.VERIFY)
-    session, campaign_config, campaign = opened.session, opened.config, opened.campaign
-    schema = session.pipeline_schema
-    # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
-    jsp = opened.points.measured(entry)
-    sp_hash = jsp.sp_hash(schema)
-    # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
-    predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
+    async with open_diagnostic(stores, hop, source=RunSource.VERIFY) as opened:
+        session, campaign_config, campaign = opened.session, opened.config, opened.campaign
+        schema = session.pipeline_schema
+        # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
+        jsp = opened.points.measured(entry)
+        sp_hash = jsp.sp_hash(schema)
+        # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
+        predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
 
-    # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.
-    prior = stores.archive.measurements_for_config(predicate)
-    measured_keys = {m.cell.sample_key for m in prior} & session.bank.slot_of.keys()
-    # Search split only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
-    search = session.state.scoring.require_partition().search
-    unmeasured = [s for s in search if s.key not in measured_keys]
-    round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
-    if not unmeasured:
-        return VerifyOutcome(
-            dataset_name=campaign.dataset_name, already_measured=len(measured_keys)
-        )
-
-    ledger_path = stores.campaigns.ledger(hop)
-    budget = derive_verify_samples(
-        round_cell_budget=round_cells,
-        rounds_unverified=rounds_since_verified(
-            (banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()),
-            round_num=round_num,
-        ),
-        unmeasured=len(unmeasured),
-    )
-    if samples is not None and samples > budget:
-        raise DiagnosticError(
-            f"--samples {samples} is above this candidate's verify budget of {budget} "
-            f"({round_cells} cells per candidate per round, lifted by the "
-            f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured "
-            f"and at {MAX_PASS_ROWS} per pass). "
-            f"Pass {budget} or fewer, or verify again after more rounds."
-        )
-    # The ruler the campaign's elections read now, less the candidate under verification.
-    ruler = judging_ruler(
-        stores.ruler,
-        session_ruler_scope(session),
-        ruler_clock(session),
-        {sp_hash},
-        objective_id=session.state.scoring.require_scorer().id,
-        n_min=campaign_config.optimization.elimination_n_min,
-        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
-    ).ruler
-    picked = pick_fresh(
-        unmeasured,
-        budget if samples is None else samples,
-        strategy=strategy,
-        rng=random.Random(seed),
-        delta={} if ruler is None else ruler.delta,
-    )
-
-    logger.info(
-        "verify %s (%s/%s): scoring %d new sample(s); %d already in archive for this config",
-        label,
-        hop.campaign_id,
-        hop.cycle_id,
-        len(picked),
-        len(measured_keys),
-    )
-    # Bound at the candidate's round: each cell's record names one, and the pass bills there.
-    with diagnostic_trace(stores, hop), at_round(round_num):
-        ledger = active_cycle_ledger()
-        assert ledger is not None
-        on_phase = RunCallbacks(ledger).on_phase
-        on_phase(
-            CampaignPhase.VERIFY,
-            "enter",
-            view=VerifyEnterView(arm=arm, rows=len(picked), strategy=strategy),
-        )
-        try:
-            try:
-                cells = (
-                    await diagnostic_pass(
-                        score_search_point(
-                            jsp,
-                            picked,
-                            session,
-                            label=MeasurementRole.VERIFY,
-                            measured=MeasuredPass(candidate_id, MeasurementRole.VERIFY),
-                        ),
-                    )
-                ).cells
-            except (KeyboardInterrupt, asyncio.CancelledError) as stop:
-                if not session.state.control.paused(stop):
-                    raise
-                # A pause stops on no outcome, so the rows walked are a fresh pick of their own;
-                # each was unmeasured, so a row the archive holds now is one this pass bought.
-                walked = reread_cells(jsp, picked, session, label=MeasurementRole.VERIFY)
-                cells = [(key, answer, False) for key, answer, _ in walked.addresses()]
-                picked = [s for s in picked if s.key in {key for key, _, _ in cells}]
-                if not picked:
-                    raise DiagnosticError(
-                        f"the verify pass of {label!r} was paused before it measured a cell."
-                    ) from None
-            banked = VerifyPass(
-                arm=arm,
-                sp_hash=sp_hash,
-                cells=cells,
-                positions=[s.id for s in picked],
-                strategy=strategy,
-                seed=seed,
-                scorer_id=session.state.scoring.require_scorer().id,
+        # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.
+        prior = stores.archive.measurements_for_config(predicate)
+        measured_keys = {m.cell.sample_key for m in prior} & session.bank.slot_of.keys()
+        # Search split only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
+        search = session.state.scoring.require_partition().search
+        unmeasured = [s for s in search if s.key not in measured_keys]
+        round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
+        if not unmeasured:
+            return VerifyOutcome(
+                dataset_name=campaign.dataset_name, already_measured=len(measured_keys)
             )
-            reading = read_verify(stores, hop, banked, session.state.scoring.require_scorer())
-            if reading.fresh.accuracy is None:
-                raise DiagnosticError(
-                    f"the fresh cells of {label!r} produced no scoreable sample — there is "
-                    "nothing to read beside the recorded measurement."
-                )
+
+        ledger_path = stores.campaigns.ledger(hop)
+        budget = derive_verify_samples(
+            round_cell_budget=round_cells,
+            rounds_unverified=rounds_since_verified(
+                (banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()),
+                round_num=round_num,
+            ),
+            unmeasured=len(unmeasured),
+        )
+        if samples is not None and samples > budget:
+            raise DiagnosticError(
+                f"--samples {samples} is above this candidate's verify budget of {budget} "
+                f"({round_cells} cells per candidate per round, lifted by the "
+                f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured "
+                f"and at {MAX_PASS_ROWS} per pass). "
+                f"Pass {budget} or fewer, or verify again after more rounds."
+            )
+        # The ruler the campaign's elections read now, less the candidate under verification.
+        ruler = judging_ruler(
+            stores.ruler,
+            session_ruler_scope(session),
+            ruler_clock(session),
+            {sp_hash},
+            objective_id=session.state.scoring.require_scorer().id,
+            n_min=campaign_config.optimization.elimination_n_min,
+            enable_2pl=campaign_config.optimization.enable_2pl_graduation,
+        ).ruler
+        picked = pick_fresh(
+            unmeasured,
+            budget if samples is None else samples,
+            strategy=strategy,
+            rng=random.Random(seed),
+            delta={} if ruler is None else ruler.delta,
+        )
+
+        logger.info(
+            "verify %s (%s/%s): scoring %d new sample(s); %d already in archive for this config",
+            label,
+            hop.campaign_id,
+            hop.cycle_id,
+            len(picked),
+            len(measured_keys),
+        )
+        # Bound at the candidate's round: each cell's record names one, and the pass bills there.
+        with diagnostic_trace(stores, hop), at_round(round_num):
+            ledger = active_cycle_ledger()
+            assert ledger is not None
+            on_phase = RunCallbacks(ledger).on_phase
             on_phase(
                 CampaignPhase.VERIFY,
-                "graded",
-                view=VerifyGradedView(verify_pass=banked, reading=reading),
+                "enter",
+                view=VerifyEnterView(arm=arm, rows=len(picked), strategy=strategy),
             )
-        finally:
-            on_phase(CampaignPhase.VERIFY, "exit")
+            try:
+                try:
+                    cells = (
+                        await diagnostic_pass(
+                            score_search_point(
+                                jsp,
+                                picked,
+                                session,
+                                label=MeasurementRole.VERIFY,
+                                measured=MeasuredPass(candidate_id, MeasurementRole.VERIFY),
+                            ),
+                        )
+                    ).cells
+                except (KeyboardInterrupt, asyncio.CancelledError) as stop:
+                    if not session.state.control.paused(stop):
+                        raise
+                    # A pause stops on no outcome, so the rows walked are a fresh pick of their own;
+                    # each was unmeasured, so a row the archive holds now is one this pass bought.
+                    walked = reread_cells(jsp, picked, session, label=MeasurementRole.VERIFY)
+                    cells = [(key, answer, False) for key, answer, _ in walked.addresses()]
+                    picked = [s for s in picked if s.key in {key for key, _, _ in cells}]
+                    if not picked:
+                        raise DiagnosticError(
+                            f"the verify pass of {label!r} was paused before it measured a cell."
+                        ) from None
+                banked = VerifyPass(
+                    arm=arm,
+                    sp_hash=sp_hash,
+                    cells=cells,
+                    positions=[s.id for s in picked],
+                    strategy=strategy,
+                    seed=seed,
+                    scorer_id=session.state.scoring.require_scorer().id,
+                )
+                reading = read_verify(stores, hop, banked, session.state.scoring.require_scorer())
+                if reading.fresh.accuracy is None:
+                    raise DiagnosticError(
+                        f"the fresh cells of {label!r} produced no scoreable sample — there is "
+                        "nothing to read beside the recorded measurement."
+                    )
+                on_phase(
+                    CampaignPhase.VERIFY,
+                    "graded",
+                    view=VerifyGradedView(verify_pass=banked, reading=reading),
+                )
+            finally:
+                on_phase(CampaignPhase.VERIFY, "exit")
 
-    return VerifyOutcome(
-        dataset_name=campaign.dataset_name,
-        already_measured=len(measured_keys),
-        verify_pass=banked,
-        reading=reading,
-    )
+        return VerifyOutcome(
+            dataset_name=campaign.dataset_name,
+            already_measured=len(measured_keys),
+            verify_pass=banked,
+            reading=reading,
+        )
 
 
 async def verify_on_saturation(

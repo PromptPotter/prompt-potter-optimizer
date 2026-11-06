@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import functools
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
@@ -46,6 +44,7 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     MEMBER_KINDS,
+    SCHEMA_RENAME_PARAM,
     NodeKind,
     PipelineNode,
     PipelineSchema,
@@ -57,6 +56,7 @@ from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -282,6 +282,8 @@ class SelectedOptimizer:
     # Validated once, at selection: each llm node's config, and each member's knobs.
     node_configs: Mapping[str, NodeConfig]
     node_knobs: Mapping[str, StrictModel]
+    # Each llm node's outer levers as laid (an L4 cell's, `spawn.py::_open_seat`), refused at selection where unusable.
+    node_levers: Mapping[str, Mapping[str, Any]]
 
     @property
     def version(self) -> str:
@@ -374,6 +376,13 @@ class SelectedOptimizer:
     def file_config(self, name: str) -> dict[str, Any]:
         self.node(name)
         return dict(self.manifest.nodes[name].config)
+
+    def levers(self, node: str) -> Mapping[str, Any]:
+        return self.node_levers.get(node, {})
+
+    def schema_field_names(self, node: str) -> dict[str, str]:
+        """The wire rename an L4 cell laid on *node*'s output schema; empty where none is."""
+        return dict(self.levers(node).get(SCHEMA_RENAME_PARAM) or {})
 
     def knobs(self, name: str) -> StrictModel:
         if (knobs := self.node_knobs.get(name)) is None:
@@ -556,17 +565,16 @@ class SelectedOptimizer:
 
     def _node_digest(self, node: str) -> str:
         config = self.node_config(node)
-        override = resolve_node_override(node)
         prompt = None if prompt_key(config) is None else running_prompt(node, config, self.manifest)
         schema_key = resolved_key(config.schema_family, config.schema_version)
         return stable_hash(
             [
                 None if prompt is None else prompt.model_dump(exclude_unset=True),
-                override.schema_field_names,
-                _resolved_levers(node, declared_node_override(node)),
+                self.schema_field_names(node),
+                _resolved_levers(node, self.levers(node)),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
                 # Laid as `bench/llm_call.py::_merged_config` sends it.
-                override.laid_on(config).call_settings(),
+                config.call_settings(),
             ]
         )
 
@@ -610,11 +618,29 @@ def _resolved_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
     return {} if member is None else member.resolved_levers(declared)
 
 
+def _lever_refusals(node: str, levers: Mapping[str, Any]) -> list[str]:
+    """Why *node*'s laid levers cannot run: the rename the bench applies, any other its member's."""
+    member = optimizers.llm_nodes().get(node)
+    refused = [] if member is None else member.lever_refusals(levers)
+    if (rename := levers.get(SCHEMA_RENAME_PARAM)) is None:
+        return refused
+    if not isinstance(rename, Mapping):
+        return [*refused, f"{SCHEMA_RENAME_PARAM} is no field-to-name map"]
+    wires = list(rename.values())
+    for name, wire in rename.items():
+        if not isinstance(wire, str) or not wire.isidentifier() or wire == name:
+            refused.append(f"{SCHEMA_RENAME_PARAM} renames {name!r} to {wire!r}, no new identifier")
+        elif wires.count(wire) > 1:
+            refused.append(f"{SCHEMA_RENAME_PARAM} names {wire!r} for two fields")
+    return refused
+
+
 @shapes_optimizer_prompt
-def node_prompt(
+def running_prompt(
     node: str, config: NodeConfig, manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    """The template under the config's field edits, before any L4 override; fields set only where authored or edited."""
+    """The one text *node* runs, which its prompt hash reads: the template under the config's
+    field edits (an L4 cell's laid last), set only where authored or edited."""
     key = prompt_key(config)
     if key is None or key not in manifest.resolved_prompts:
         raise KeyError(
@@ -622,17 +648,6 @@ def node_prompt(
             f"(check nodes.{node}.config.prompt_family/version)."
         )
     return manifest.resolved_prompts[key].model_copy(update=config.prompt_edits)
-
-
-@shapes_optimizer_prompt
-def running_prompt(
-    node: str, config: NodeConfig, manifest: PipelineManifest
-) -> OptimizerPromptTemplate:
-    """The one text *node* runs, which its prompt hash reads: template, then config edits, then L4's bound override, which wins over both."""
-    template = node_prompt(node, config, manifest)
-    if fields := resolve_node_override(node).prompt_fields:
-        template = template.model_copy(update=fields)
-    return template
 
 
 def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
@@ -797,16 +812,32 @@ def _select(
     schema = _carrying_knobs(_parse(manifest.laid_over(overlay), schemas), manifest)
     table = optimizers.NODE_MEMBERS.table
     # NOW, never mid-round: a bad overlay or an llm node naming no model stops the run before it spends.
+    llm = [n for n in schema.declared_nodes if n.kind is NodeKind.LLM]
+    current = {n.name: n.current_config for n in llm}
+    stated = optimizers.llm_nodes()
+    levers = {n.name: stated[n.name].outer_levers for n in llm if n.name in stated}
     node_configs = {
         n.name: laid_config(
             f"optimizer {name!r}",
             n.name,
             n.current_config,
-            knobs=table[n.name].knobs.model_fields if n.name in table else (),
+            knobs=[
+                *(table[n.name].knobs.model_fields if n.name in table else ()),
+                *levers.get(n.name, ()),
+            ],
         )
-        for n in schema.declared_nodes
-        if n.kind is NodeKind.LLM
+        for n in llm
     }
+    node_levers = {
+        node: laid
+        for node, keys in levers.items()
+        if (laid := {k: v for k, v in current[node].items() if k in keys})
+    }
+    # One rule with an unknown key's: a lever no render can apply is refused, never dropped.
+    if refused := [
+        f"{n}: {why}" for n, laid in node_levers.items() for why in _lever_refusals(n, laid)
+    ]:
+        raise ValueError("; ".join(refused))
     node_knobs = {
         n.name: _knobs(n.name, n.kind, n.current_config)
         for n in schema.declared_nodes
@@ -822,6 +853,7 @@ def _select(
         member_nodes=_roster(schema),
         node_configs=node_configs,
         node_knobs=node_knobs,
+        node_levers=node_levers,
     )
     # At load, never mid-round: an edge no roster member closes would raise inside round 1.
     if open_ := _open_edges(selected):
@@ -958,127 +990,31 @@ def checkin_manifest() -> CheckinManifest:
     return _checkin_at(path, _stamp(path))
 
 
-_BOUND: Annotated[contextvars.ContextVar[SelectedOptimizer | None], shapes_optimizer_prompt] = (
-    contextvars.ContextVar("selected_optimizer", default=None)
-)
-_DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
-    "determinism_clamp", default=None
-)
-
-
-@contextlib.contextmanager
-def binding_optimizer(
-    selected: SelectedOptimizer, *, determinism: DeterminismClamp | None
-) -> Iterator[None]:
-    token = _BOUND.set(selected)
-    clamp = _DETERMINISM.set(determinism)
-    try:
-        yield
-    finally:
-        _DETERMINISM.reset(clamp)
-        _BOUND.reset(token)
-
-
 @shapes_optimizer_prompt
 def bound_optimizer() -> SelectedOptimizer:
-    selected = _BOUND.get()
+    selected = run_scope().optimizer
     if selected is None:
         raise RuntimeError(
-            "no optimizer is bound to this task — the run seam binds the launch's "
+            "no optimizer is scoped to this task — the run seam scopes the launch's "
             "selection before anything reads a node"
         )
     return selected
 
 
-# The OUTER's per-node mutations, bound inside the inner task so each recursion level carries its own.
-_OPTIMIZER_PROMPT_OVERRIDES: Annotated[
-    contextvars.ContextVar[dict[str, dict[str, Any]] | None], shapes_optimizer_prompt
-] = contextvars.ContextVar("optimizer_prompt_overrides", default=None)
-
-
-@contextlib.contextmanager
-def binding_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> Iterator[None]:
-    token = _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
-    try:
-        yield
-    finally:
-        _OPTIMIZER_PROMPT_OVERRIDES.reset(token)
-
-
 def bound_determinism() -> DeterminismClamp | None:
-    return _DETERMINISM.get()
+    return run_scope().determinism
 
 
-@dataclass(frozen=True)
-class ResolvedNodeOverride:
-    """``model`` / ``provider`` are the ONE choice the outer's carrier node set, returned for every node."""
-
-    prompt_fields: dict[str, Any]
-    schema_field_names: dict[str, str]
-    model: str | None
-    provider: str | None
-
-    def laid_on(self, config: NodeConfig) -> NodeConfig:
-        """*config* answered by the specimen's model, on its provider where it names one."""
-        if not self.model:
-            return config
-        laid = {"model": self.model} | ({"provider": self.provider} if self.provider else {})
-        return config.laid(laid)
-
-
-@shapes_optimizer_prompt
-def declared_node_override(node: str) -> dict[str, Any]:
-    raw = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
-    return raw if isinstance(raw, dict) else {}
-
-
-@shapes_optimizer_prompt
-def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
-    for nd in overrides.values():
-        if isinstance(nd, dict) and isinstance(nd.get("model"), str) and nd["model"]:
-            prov = nd.get("provider")
-            return nd["model"], prov if isinstance(prov, str) and prov else None
-    return None, None
-
-
-@shapes_optimizer_prompt
-def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    """An unusable rename is DROPPED, never raised: a bad L4 mutation must score poorly, not break the run."""
-    prompt_fields = {k: v for k, v in raw.items() if k in OptimizerPromptTemplate.model_fields}
-    names: dict[str, str] = {}
-    rename_raw = raw.get("output_schema_field_names")
-    if isinstance(rename_raw, dict):
-        for field, wire in rename_raw.items():
-            if not isinstance(field, str) or not isinstance(wire, str):
-                continue
-            wire = wire.strip()
-            if not wire.isidentifier() or wire == field:
-                continue
-            names[field] = wire
-        targets = list(names.values())
-        names = {f: w for f, w in names.items() if targets.count(w) == 1}
-    return prompt_fields, names
-
-
-@shapes_optimizer_prompt
-def resolve_node_override(node: str) -> ResolvedNodeOverride:
-    prompt_fields, names = _resolved_prompt_parts(declared_node_override(node))
-    model, provider = _single_model(_OPTIMIZER_PROMPT_OVERRIDES.get() or {})
-    return ResolvedNodeOverride(
-        prompt_fields=prompt_fields, schema_field_names=names, model=model, provider=provider
-    )
-
-
-def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """The identity `inner_campaign_id` hashes: what the resolvers drop is dropped here, so declarations rendering ONE prompt hash alike."""
+def resolved_overrides(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """The identity `inner_campaign_id` hashes, each node's edit as it resolves: a lever its
+    member resolves to its floor is dropped, so declarations rendering ONE prompt hash alike."""
+    stated = optimizers.llm_nodes()
     nodes: dict[str, dict[str, Any]] = {}
     for node, raw in overrides.items():
-        prompt_fields, names = _resolved_prompt_parts(raw)
-        resolved: dict[str, Any] = dict(prompt_fields)
-        if names:
-            resolved["output_schema_field_names"] = names
-        resolved.update(_resolved_levers(node, raw))
+        resolves = (
+            set(stated[node].outer_levers) - {SCHEMA_RENAME_PARAM} if node in stated else set()
+        )
+        resolved = {k: v for k, v in raw.items() if k not in resolves} | _resolved_levers(node, raw)
         if resolved:
             nodes[node] = resolved
-    model, provider = _single_model(overrides)
-    return {"nodes": nodes, "model": model, "provider": provider}
+    return nodes

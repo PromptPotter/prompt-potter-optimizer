@@ -8,7 +8,7 @@ from pydantic import Field
 from promptpotter.application import optimizers
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
-    node_prompt,
+    running_prompt,
     select_optimizer,
 )
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
@@ -388,7 +388,7 @@ def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]
             continue
         family = config.prompt_family
         out[node] = OptimizerNodePrompt(
-            fields=node_prompt(node, config, selected.manifest).model_dump(),
+            fields=running_prompt(node, config, selected.manifest).model_dump(),
             edited=list(config.prompt_edits),
             version=str(config.prompt_version or ""),
             versions_declared=sum(k.partition("/")[0] == family for k in declared),

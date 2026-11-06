@@ -12,6 +12,7 @@
 - Optimizer LLM calls go through `bench/llm_call.py::llm_call`, never `chat()`. <!-- probe: git grep -cE "\.chat\(" -- promptpotter/application/optimizers/*.py == 0 -->
 - A stop rule's verdict flows by return value (`QueryLoopResult.stop_signal`), never an exception.
 - **An await that can outlast `RUN_FRESH_S` and writes nothing heartbeats** (`infrastructure/llm/heartbeat.py`), or it is served `wedged`; create the task unconditionally, it also carries `on_suspend`.
+- **A run's ambient state is ONE frozen `shared/run_scope.py::RunScope`**: the ledger, the selected optimizer and its clamp, the judge cache, the memory scope and the inner spawn. It is bound once at `runner/entry.py::run_optimization`, and a diagnostic binds it through `open_diagnostic`. A move inside a run goes through `rescope`, never a second ContextVar.
 - Per-call telemetry from deep async chains uses `emit_*`, not `RunCallbacks` — [`adding-a-surface.md`](../../docs/developer/adding-a-surface.md) §1.
 - **`commands/dispatcher.py` is the sole writer of `CommandRecord`** <!-- probe: git grep -cE "emit_command\(" -- promptpotter/application/*.py <= 2 --> **and imports no handler** <!-- probe: git grep -cE "^from promptpotter\.application\.commands\." -- promptpotter/application/commands/dispatcher.py == 0 -->: a `CommandKind` row names its `module:handler`, imported at dispatch.
 

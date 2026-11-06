@@ -51,7 +51,11 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
 )
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.store.archive_queries import list_populations, load_population
+from promptpotter.infrastructure.store.archive_queries import (
+    OpenAt,
+    list_populations,
+    load_population,
+)
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
@@ -62,6 +66,7 @@ from promptpotter.infrastructure.store.read_model import Moment, derived, file_s
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.measurement_context import RoleScope, individual_cells
+from promptpotter.shared.run_scope import scoped
 
 if TYPE_CHECKING:
     from promptpotter.domain.bench import PartitionRecord
@@ -500,35 +505,39 @@ def _cycle_cells(
 
 
 def _dataset_cells(stores: Stores, name: str, bank: Bank, wanted: Mapping[str, int]) -> ScopeCells:
-    """A column is a CONFIGURATION's population: the archive names no individual or walk, so no ``RoleScope``."""
+    """A column is a CONFIGURATION's population: the archive names no individual or walk, so no
+    ``RoleScope``; a served read, it remembers every campaign's answers as filed."""
     scorer = dataset_scorer(resolve_dataset(stores, name))
     archive = stores.archive
     sigs = archive.cell_signatures()
     candidates: list[CellCandidate] = []
     cells: list[CellRow] = []
-    for entry in list_populations(stores, bank):
-        key = entry.config_key
+    with scoped(memory=OpenAt()):
+        for entry in list_populations(stores, bank):
+            key = entry.config_key
 
-        def grade(entry: ArchiveEntry = entry) -> CellSheet:
-            return scorer.sheet(answer.cell for answer in load_population(stores, entry, bank))
+            def grade(entry: ArchiveEntry = entry) -> CellSheet:
+                return scorer.sheet(answer.cell for answer in load_population(stores, entry, bank))
 
-        sheet = derived(
-            ("graded_population", archive.base_dir, key, bank.dataset_hash, scorer.id),
-            sig=archive.signature(entry, sigs),
-            compute=grade,
-        )
-        if not sheet:
-            continue
-        candidates.append(
-            CellCandidate(
-                key=key,
-                label=f"{entry.name} {key[:8]}",
-                created_at=entry.created_at,
+            sheet = derived(
+                ("graded_population", archive.base_dir, key, bank.dataset_hash, scorer.id),
+                sig=archive.signature(entry, sigs),
+                compute=grade,
             )
-        )
-        cells.extend(
-            _row_cell(cell, key=key, slot=wanted[cell.key]) for cell in sheet if cell.key in wanted
-        )
+            if not sheet:
+                continue
+            candidates.append(
+                CellCandidate(
+                    key=key,
+                    label=f"{entry.name} {key[:8]}",
+                    created_at=entry.created_at,
+                )
+            )
+            cells.extend(
+                _row_cell(cell, key=key, slot=wanted[cell.key])
+                for cell in sheet
+                if cell.key in wanted
+            )
     return candidates, cells
 
 

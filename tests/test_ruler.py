@@ -7,7 +7,6 @@ arithmetic: each journey recovers a known answer from data built to have one.
 
 from __future__ import annotations
 
-from contextvars import copy_context
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -84,11 +83,11 @@ from promptpotter.infrastructure.store.archive_queries import (
     CampaignWalks,
     CellOf,
     OpenAt,
-    bind_memory_scope,
 )
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError
+from promptpotter.shared.run_scope import scoped
 
 # 1. The estimator
 
@@ -475,11 +474,8 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
         )
         view = DifficultyView(session, 4, False, frozenset(), opened)
 
-        def read() -> list[Any]:
-            bind_memory_scope(memory)
+        with scoped(memory=memory):
             return view.level_series(lines)
-
-        return copy_context().run(read)
 
     def graded(hits: list[float]) -> Any:
         return sheet(

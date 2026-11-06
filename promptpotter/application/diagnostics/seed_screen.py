@@ -268,117 +268,117 @@ async def _screen(
             }
         campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
     session = configure_and_apply_pipeline(session, CycleConfig.laid(campaign_config, []))
-    arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN)
-    pipeline_params = session.pipeline_params
-    # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
-    session.state.control = replace(session.state.control, held_lookahead=parallel)
-    ceiling = session.backend_client.max_cells_in_flight
-    if parallel > ceiling:
-        # A warning: a terminal shows this layer's info only under `--verbose`.
-        logger.warning(
-            "seed-screen: --parallel %d exceeds this backend's declared ceiling of %d "
-            "(Connector.max_cells_in_flight); running at %d.",
-            parallel,
-            ceiling,
-            ceiling,
+    with arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN):
+        pipeline_params = session.pipeline_params
+        # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
+        session.state.control = replace(session.state.control, held_lookahead=parallel)
+        ceiling = session.backend_client.max_cells_in_flight
+        if parallel > ceiling:
+            # A warning: a terminal shows this layer's info only under `--verbose`.
+            logger.warning(
+                "seed-screen: --parallel %d exceeds this backend's declared ceiling of %d "
+                "(Connector.max_cells_in_flight); running at %d.",
+                parallel,
+                ceiling,
+                ceiling,
+            )
+        # The run's C0 framing: the origin must be the prompt the campaign will actually score.
+        origin = resolve_origin_opt_search_point(
+            session.dataset,
+            pipeline_params=pipeline_params,
+            schema=session.pipeline_schema,
         )
-    # The run's C0 framing: the origin must be the prompt the campaign will actually score.
-    origin = resolve_origin_opt_search_point(
-        session.dataset,
-        pipeline_params=pipeline_params,
-        schema=session.pipeline_schema,
-    )
-    if unprompted := [node.name for node in solver if not origin.prompt(node.name).fields]:
-        # A campaign's check-in writes the missing prompt; a screen has none, so a bare question
-        # would be graded under no answer grammar and the matcher's misses read as the model's.
-        raise DiagnosticError(
-            f"dataset {dataset_name!r} authors no starting prompt for {unprompted} in its "
-            "origin.yaml, so its origin is the bare question. Write one before screening."
-        )
-    origin_sp = session.points(campaign_framing(stores, campaign_config, session.dataset)).job(
-        origin
-    )
-
-    readings: list[SeedReading] = []
-    for seed in seeds:
-        bank = draw_bank(all_samples, n_samples, seed)
-        # Refuses a mixed bank BEFORE the loop buys `repeat` passes over it.
-        bank_floor = class_floor(bank)
-        reads: list[float] = []
-        latencies: list[float] = []
-        all_rows: list[GradedCell] = []
-        cost_usd: float | None = None
-        n_scored = 0
-        for i in range(max(1, repeat)):
-            # A screen answers for no campaign, so its bills land on the workspace's ledger.
-            with diagnostic_trace(stores, None):
-                passed = await diagnostic_pass(
-                    score_search_point(
-                        origin_sp,
-                        bank,
-                        session,
-                        # Distinct per pass: `force_fresh` truncates its run's detail log first.
-                        label=f"seed{seed}_origin_{i}",
-                        measured=None,
-                        # A replay off the content-addressed archive would fabricate a zero spread.
-                        force_fresh=repeat > 1,
-                    ),
-                )
-            rows = passed.sheet.cells
-            scored = [cell.hit for cell in rows]
-            if not scored:
-                raise DiagnosticError(
-                    f"seed {seed} pass {i}: the origin pass returned no scoreable row — the "
-                    "screen measured nothing and must not report a bank on that basis."
-                )
-            reads.append(sum(scored) / len(scored))
-            n_scored = len(scored)
-            pass_latencies, pass_cost = _call_cost_and_latency(rows)
-            latencies += pass_latencies
-            if pass_cost is not None:
-                cost_usd = (cost_usd or 0.0) + pass_cost
-            all_rows += rows
-        reading = SeedReading(
-            seed=seed,
-            n=n_scored,
-            class_floor=bank_floor,
-            origin_reads=tuple(reads),
-            latencies=tuple(latencies),
-            cost_usd=cost_usd,
-            answer_modal_share=modal_answer_share(all_rows),
-        )
-        readings.append(reading)
-        margin = reading.reasoning_margin
-        logger.info(
-            f"seed {seed}: floor "
-            f"{'--' if reading.class_floor is None else f'{reading.class_floor:.3f}'} "
-            f"origin {reading.origin_accuracy:.3f} "
-            f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
-            f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
-            f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
-            f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
-            f"{'--' if reading.cost_per_pass is None else usd_text(reading.cost_per_pass)}/pass"
-            + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
+        if unprompted := [node.name for node in solver if not origin.prompt(node.name).fields]:
+            # A campaign's check-in writes the missing prompt; a screen has none, so a bare question
+            # would be graded under no answer grammar and the matcher's misses read as the model's.
+            raise DiagnosticError(
+                f"dataset {dataset_name!r} authors no starting prompt for {unprompted} in its "
+                "origin.yaml, so its origin is the bare question. Write one before screening."
+            )
+        origin_sp = session.points(campaign_framing(stores, campaign_config, session.dataset)).job(
+            origin
         )
 
-    # No ledger event: a screen is not a run, nor a `DiagnosticRunRecord` (a re-scored origin).
-    readings.sort(key=lambda r: r.rank_key)
-    solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
-    path = stores.diagnostic_runs.sidecar_path(
-        f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
-    )
-    write_json(
-        path,
-        {
-            "ts": utcnow_iso(),
-            "dataset": dataset_name,
-            "solver": model,
-            "provider": provider,
-            "n_samples": n_samples,
-            "readings": [r.as_dict() for r in readings],
-        },
-    )
-    logger.info("seed-screen: wrote %d reading(s) -> %s", len(readings), path)
-    return SeedScreenOutcome(
-        dataset_name=dataset_name, solver=model, readings=readings, artifact_path=str(path)
-    )
+        readings: list[SeedReading] = []
+        for seed in seeds:
+            bank = draw_bank(all_samples, n_samples, seed)
+            # Refuses a mixed bank BEFORE the loop buys `repeat` passes over it.
+            bank_floor = class_floor(bank)
+            reads: list[float] = []
+            latencies: list[float] = []
+            all_rows: list[GradedCell] = []
+            cost_usd: float | None = None
+            n_scored = 0
+            for i in range(max(1, repeat)):
+                # A screen answers for no campaign, so its bills land on the workspace's ledger.
+                with diagnostic_trace(stores, None):
+                    passed = await diagnostic_pass(
+                        score_search_point(
+                            origin_sp,
+                            bank,
+                            session,
+                            # Distinct per pass: `force_fresh` truncates its run's detail log first.
+                            label=f"seed{seed}_origin_{i}",
+                            measured=None,
+                            # A replay off the content-addressed archive would fabricate a zero spread.
+                            force_fresh=repeat > 1,
+                        ),
+                    )
+                rows = passed.sheet.cells
+                scored = [cell.hit for cell in rows]
+                if not scored:
+                    raise DiagnosticError(
+                        f"seed {seed} pass {i}: the origin pass returned no scoreable row — the "
+                        "screen measured nothing and must not report a bank on that basis."
+                    )
+                reads.append(sum(scored) / len(scored))
+                n_scored = len(scored)
+                pass_latencies, pass_cost = _call_cost_and_latency(rows)
+                latencies += pass_latencies
+                if pass_cost is not None:
+                    cost_usd = (cost_usd or 0.0) + pass_cost
+                all_rows += rows
+            reading = SeedReading(
+                seed=seed,
+                n=n_scored,
+                class_floor=bank_floor,
+                origin_reads=tuple(reads),
+                latencies=tuple(latencies),
+                cost_usd=cost_usd,
+                answer_modal_share=modal_answer_share(all_rows),
+            )
+            readings.append(reading)
+            margin = reading.reasoning_margin
+            logger.info(
+                f"seed {seed}: floor "
+                f"{'--' if reading.class_floor is None else f'{reading.class_floor:.3f}'} "
+                f"origin {reading.origin_accuracy:.3f} "
+                f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
+                f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
+                f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
+                f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
+                f"{'--' if reading.cost_per_pass is None else usd_text(reading.cost_per_pass)}/pass"
+                + (" REWARDS COLLAPSE" if reading.rewards_collapse else "")
+            )
+
+        # No ledger event: a screen is not a run, nor a `DiagnosticRunRecord` (a re-scored origin).
+        readings.sort(key=lambda r: r.rank_key)
+        solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
+        path = stores.diagnostic_runs.sidecar_path(
+            f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
+        )
+        write_json(
+            path,
+            {
+                "ts": utcnow_iso(),
+                "dataset": dataset_name,
+                "solver": model,
+                "provider": provider,
+                "n_samples": n_samples,
+                "readings": [r.as_dict() for r in readings],
+            },
+        )
+        logger.info("seed-screen: wrote %d reading(s) -> %s", len(readings), path)
+        return SeedScreenOutcome(
+            dataset_name=dataset_name, solver=model, readings=readings, artifact_path=str(path)
+        )
