@@ -1117,9 +1117,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         wheel.setattr(paths, "research_datasets_root", lambda: None)
         wheel.setenv("OPENROUTER_API_KEY", "not-a-key")
         wheel.setattr(sys, "argv", ["promptpotter", "new", "promptpotter-self/panel"])
-        with pytest.raises(SystemExit) as refused_new:
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
             campaign_runner.main()
-    assert "no research tier" in str(refused_new.value.code), (
+    assert "no research tier" in capsys.readouterr().err, (
         "`new` on a wheel dropped why the L4 panel is not found"
     )
     # So does an upload `new` refuses: the slug's own reason, never a parse failure in its place.
@@ -1143,11 +1144,12 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         cli.setattr(
             sys, "argv", ["promptpotter", "new", str(upload), "--set", "slug=email-tagging"]
         )
-        with pytest.raises(SystemExit) as renamed:
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
             campaign_runner.main()
-    said = str(renamed.value.code)
+    said = capsys.readouterr().err
     assert said.startswith(
-        "ERROR: A dataset named 'email-tagging' already exists. Suggested slug: email-tagging-2."
+        "Error: A dataset named 'email-tagging' already exists. Suggested slug: email-tagging-2."
     ), f"a check-in took an install name, or `new` reworded the claim: {said!r}"
     assert "discard-draft" in said, "`new` dropped that the refused check-in is kept"
 

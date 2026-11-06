@@ -49,10 +49,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LaunchError(PayloadInvalidError):
-    """A mint-time failure: missing dataset, malformed config."""
-
-
 class OriginIncompleteError(PayloadInvalidError):
     code = "origin_incomplete"
 

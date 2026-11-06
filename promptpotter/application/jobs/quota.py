@@ -89,8 +89,8 @@ logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(PotterError):
-    """A user-scoped abuse limit refused a request — 429, as against ``LaunchError``'s 422 for a malformed
-    or unowned one. Both map to one HTTP response through the ``PotterError`` seam."""
+    """A user-scoped abuse limit refused a request — 429, as against ``PayloadInvalidError``'s 422
+    for a malformed one. Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 429
 

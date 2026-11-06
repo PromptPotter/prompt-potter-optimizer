@@ -29,6 +29,7 @@ from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.quota import RateLimitedError
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.refusal import Refusal
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.paths import (
     default_projects_root,
@@ -37,7 +38,6 @@ from promptpotter.config.paths import (
     webapp_static_root,
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
-from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
     MAX_UPLOAD_BYTES,
     CommandAcceptedBody,
@@ -128,7 +128,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 class ErrorEnvelope(StrictModel):
-    """What every refusal and failure answers, whatever raised it."""
+    """What every refusal and failure answers, whatever raised it: a refusal's
+    `application/refusal.py::Refusal`, its `code` served as `error`."""
 
     error: str = Field(description="The code a client branches on.")
     message: str = Field(description="The sentence an operator reads, naming its remedy.")
@@ -219,12 +220,13 @@ def _error_response(
 
 @app.exception_handler(PotterError)
 async def potter_error_handler(request: Request, exc: PotterError) -> JSONResponse:
+    refused = Refusal.of(exc)
     return _error_response(
         request,
         status=exc.http_status,
-        code=exc.code,
-        message=refusal_words(exc),
-        details=exc.details,
+        code=refused.code,
+        message=refused.message,
+        details=refused.details,
         banked=not isinstance(exc, RateLimitedError),
     )
 

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
@@ -35,8 +36,7 @@ class SessionCtx:
 def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
     campaign = store.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
-        raise SystemExit(
-            f"ERROR: campaign manifest not found for '{hop.campaign_id}'.\n"
-            "Run `python -m promptpotter new <dataset>` to mint a fresh campaign."
-        )
+        refused = NotFoundError(f"campaign manifest not found for '{hop.campaign_id}'.")
+        refused.add_note("Run `python -m promptpotter new <dataset>` to mint a fresh campaign.")
+        raise refused
     return SessionCtx(store, campaign, hop.cycle_id)

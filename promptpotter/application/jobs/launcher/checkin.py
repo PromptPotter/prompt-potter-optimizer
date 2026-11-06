@@ -20,7 +20,6 @@ from promptpotter.application.jobs.launcher.admission import (
     release_slot,
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
-    LaunchError,
     assert_origin_ready,
     commit_upload_definition,
     persist_origin_candidate_library,
@@ -136,9 +135,8 @@ def _land_draft(
     if datasets.slug_exists(draft.slug) and definition_source(
         tenant_dataset(draft.slug, datasets.dataset_dir(draft.slug))
     ) != Source.of(source):
-        raise LaunchError(
-            f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
-        )
+        # Another upload's definition holds the name: refused as a new name a tier holds is.
+        claim_own_definition(stores, draft.slug, new=True)
     rows = cut_bank(stores, source)
     for overlay in overlays:
         config = with_optimization(pipeline.config, overlay)

@@ -29,6 +29,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, cast, override
 
+import mcp.types as mcp_types
 import pytest
 from factories import (
     SANDBOX_CAMPAIGN,
@@ -88,15 +89,20 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
+from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
+    validate_template,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.refusal import Refusal
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
+from promptpotter.config.prompt_blocks import PACK_FILE, PackShelf
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign_config import OptimizerChoice
@@ -112,7 +118,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
     PRODUCER_STATE_INFO,
@@ -153,7 +159,6 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.jwks import JWKSCache
 from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
 from promptpotter.infrastructure.identity.provider_config import (
-    OIDCConfigError,
     OIDCProviderConfig,
     ProviderConfigBundle,
     ProviderIdentity,
@@ -188,7 +193,13 @@ from promptpotter.infrastructure.store.user_store import (
     UserStore,
     count_accounts,
 )
-from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
+from promptpotter.main import (
+    API_ROUTERS,
+    MAX_REQUEST_BYTES,
+    _off_catalogue,
+    app,
+    potter_error_handler,
+)
 from promptpotter.presentation.api.deps import (
     build_stores_from_identity,
     require_site_records_token,
@@ -201,18 +212,27 @@ from promptpotter.presentation.api.middleware.oidc import (
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
 from promptpotter.presentation.api.routers.reads import reads_router
+from promptpotter.presentation.cli import campaign_runner
 from promptpotter.presentation.cli.commands.bench import cmd_bench
 from promptpotter.presentation.cli.commands.command import cmd_command
 from promptpotter.presentation.cli.commands.read import cmd_read
 from promptpotter.presentation.cli.commands.result import said_text
+from promptpotter.presentation.mcp.server import _refused, refusal_result
 from promptpotter.shared.errors import (
     ConflictError,
+    ContextOverflowError,
     CycleBusyError,
+    ErrorCategory,
     FileUnreadableError,
     IdempotencyKeyReusedError,
+    LedgerUnreadableError,
+    NoApiKeyError,
     NotFoundError,
     PotterError,
+    RequestTooLargeError,
+    SendRefusedError,
     ServiceUnavailableError,
+    SlugTakenError,
     TaskUncancellableError,
     UnauthorizedError,
 )
@@ -983,11 +1003,11 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         grant_paths.provider_config,
         {"google": {"client_id": "c", "client_secret": ["the-secret"], "redirect_uri": "r"}},
     )
-    with pytest.raises(OIDCConfigError) as refused:
+    with pytest.raises(FileUnreadableError) as refused:
         load_provider_config(grant_paths.provider_config)
     assert "the-secret" not in str(refused.value), "an oidc.json refusal leaked the secret"
     write_json(grant_paths.provider_config, {"okta": {}})
-    with pytest.raises(OIDCConfigError):
+    with pytest.raises(FileUnreadableError):
         load_provider_config(grant_paths.provider_config)
     grant_paths.provider_config.unlink()
 
@@ -1820,3 +1840,93 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         assert not queuing.list_queued(), "a retried launch launched again"
     for detached in list(launcher_launch._DETACHED):
         detached.cancel()
+
+
+# 5. One refusal, every door
+
+
+@pytest.mark.usefixtures("offline")
+async def test_every_door_serves_a_refusal_as_one_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Every kind as its own raiser refuses, each folded into the one type.
+    oidc = tmp_path / "oidc.json"
+    oidc.write_text('{"providers": "not a list"}', encoding="utf-8")
+    with pytest.raises(PotterError) as stored_config:
+        load_provider_config(oidc)
+    packs = tmp_path / "packs"
+    (packs / "broken").mkdir(parents=True)
+    (packs / "broken" / PACK_FILE).write_text("{}", encoding="utf-8")
+    (pack,) = PackShelf(account=packs).refusals().values()
+    with pytest.raises(PotterError) as template:
+        validate_template("l1_generate", OptimizerPromptTemplate(instruction="{{no_such_slot}}"))
+    kinds: list[PotterError] = [
+        stored_config.value,
+        pack,
+        template.value,
+        LedgerUnreadableError(ledger="events.jsonl", offset=3, reason="no arm", campaign_id="c1"),
+        LedgerUnreadableError(
+            ledger="events.jsonl", offset=None, reason="no head", campaign_id=None
+        ),
+        SlugTakenError("sums", "sums-2"),
+        SendRefusedError("the ceiling binds", category=ErrorCategory.SPEND_CEILING),
+        NoApiKeyError(provider="groq", key="GROQ_API_KEY"),
+        RequestTooLargeError(provider_name="groq", limit=6000, requested=9000),
+        ContextOverflowError(provider_name="groq", said="past 8k"),
+    ]
+    asked = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "app": app})
+    for refused in kinds:
+        value = Refusal.of(refused).model_dump(mode="json")
+        assert value["details"], f"{refused.code} carried none of its facts"
+        rest = json.loads(bytes((await potter_error_handler(asked, refused)).body))
+        assert (rest["error"], rest["message"], rest["details"]) == (
+            value["code"],
+            value["message"],
+            value["details"],
+        ), f"REST served {refused.code} another way"
+        (tool_text,) = refusal_result(refused).content
+        assert isinstance(tool_text, mcp_types.TextContent)
+        assert json.loads(tool_text.text) == value, f"a tool call served {refused.code} another way"
+        assert _refused(refused).error.data == value, f"an MCP request served {refused.code} apart"
+
+        async def raising(_args: argparse.Namespace, refused: PotterError = refused) -> Any:
+            raise refused
+
+        monkeypatch.setattr(campaign_runner, "_handler", lambda _verb: raising)
+        monkeypatch.setattr(sys, "argv", ["promptpotter", "--json", "reindex"])
+        with pytest.raises(SystemExit):
+            # The terminal runs its own loop, so off this test's.
+            await asyncio.to_thread(campaign_runner.main)
+        said = capsys.readouterr()
+        printed = json.loads(said.out)
+        assert (printed.pop("error"), printed.pop("message"), printed) == (
+            value["code"],
+            value["message"],
+            value["details"],
+        ), f"the terminal served {refused.code} another way"
+        assert said.err.startswith(f"Error: {value['message']}"), "the terminal reworded it"
+
+    # The same refused start-run over the REST route and a host's tools/call: one value.
+    run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": -1}}
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "off")
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    monkeypatch.setattr(app.state, "job_registry", registry, raising=False)
+    signed_in = build_identity_bundle(default_identity_paths())
+    monkeypatch.setattr(app.state, "identity_bundle", signed_in, raising=False)
+    posted = TestClient(app).post(
+        f"/api/v1/commands/{CommandKind.START_RUN}",
+        json=run,
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert posted.status_code == 422, posted.text
+    async with _stdio_host(f"refusal-{uuid.uuid4().hex[:8]}", "terminal") as host:
+        called = await host("start-run", {**run, "idempotency_key": uuid.uuid4().hex})
+    assert called.get("isError"), called
+    over_mcp = json.loads(called["content"][0]["text"])
+    served = posted.json()
+    assert served["details"]["errors"], "guard: the refused start-run named no field"
+    assert (over_mcp["code"], over_mcp["message"], over_mcp["details"]) == (
+        served["error"],
+        served["message"],
+        served["details"],
+    ), "a host's refused start-run carried other words or facts than the route's"

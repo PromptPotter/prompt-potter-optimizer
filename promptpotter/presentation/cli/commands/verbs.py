@@ -42,7 +42,7 @@ def _rescore_count_arg(raw: str) -> RescoreCount:
     try:
         return rescore_count(int(raw))
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"expected a rescore count >= 2, got {raw!r}") from exc
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _read_verb(

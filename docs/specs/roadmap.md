@@ -195,7 +195,7 @@ Delete from the plan:
 | **M11** typed run records | U3 | engine B and C, `StatusMark`, `rewound`, the act record, the cell beat, `cached` / `key_source`, the export's spend | one wipe shared with M10 (yes) | ~30 files | M9 |
 | **M12** spend | S | S, the payer-rule and host-coupon rows, the lost mirror, the reserved hold, stale `run_limits` | a re-grant counts from `granted_at` (yes) | ~30 files, migrates `charges.jsonl` | M3, M9 |
 | **M13** one scoring pass | U4 | § One record shape, the skipped verify, noise-floor and seed-screen on the ledger, the catch-up cells | the verb is "held-out" (yes) | ~30 files | M2, M9 |
-| **M14** faults | Q3 | a: census B, one refusal type; b: `logging` leaves `application/` and `domain/` | — | a small; b ~65 files, mechanical | b: M9 |
+| **M14b** faults | Q3 | `logging` leaves `application/` and `domain/` | — | ~65 files, mechanical | M9 |
 | **M15** change feed | Q2 | Q2, census E | a subject is the `Subject` path (yes) | ~30 files | M2, M9 |
 | **M16** webapp | swept C, U5 | a: lineage reads the served tree; b: one arm row, the selection in the hash | b: a swiped-in column stays blank until its reads land (yes) | a ~12, b ~40 files | b: M15 |
 | **M17** store hygiene | K3a rest | census A's `_read` copies, `banks_sharing`, the file mode, the landing proving a manifest, the `Fate.RUN` dict rows, `MAX_PATH` | read through `io.py`'s readers (yes) | ~20 files | — |
@@ -203,7 +203,7 @@ Delete from the plan:
 | **M19** the election | D | the election root, PoBB's lock-in, the collapse gate, the lift bars, CAPO's survivor ranking | offline first, then priced | — | M13 |
 
 Waves:
-1. M1, M2, M3, M4, M17, M16a, M14a: no dependencies, disjoint files.
+1. M1, M2, M3, M4, M17, M16a: no dependencies, disjoint files.
 2. M5, M6, M8.
 3. M7, M9.
 4. M10 with M11 (one wipe), M12, M13, M14b.

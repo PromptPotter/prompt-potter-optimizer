@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 
 from promptpotter.application.datasets.draft_campaign import owned_draft
+from promptpotter.application.refusal import Refusal
+from promptpotter.config.prompt_blocks import PACK_REFUSAL_KINDS
 from promptpotter.domain.prompt_block import (
     AUTHORED_SOURCE,
     Authored,
     BlockPack,
     Cited,
-    PackRefusal,
     Presumption,
     PromptPart,
     Snippet,
@@ -85,19 +86,19 @@ class LibraryResponse(StrictModel):
     snippets: list[LibrarySnippet] = Field(
         description="The install's packs by name, then the account's, each in its own order"
     )
-    refused: list[PackRefusal] = Field(
+    refused: list[Refusal] = Field(
         description="Each pack held but served none of, then each snippet of the account's "
-        "skipped as an install pack's, and why: the rest serve on"
+        f"skipped as an install pack's, and why: the rest serve on. {PACK_REFUSAL_KINDS}"
     )
 
 
 def library(shelf: PackShelf) -> LibraryResponse:
     snippets: list[LibrarySnippet] = []
     sources: dict[str, LibrarySource] = {}
-    refused: list[PackRefusal] = []
+    refused: list[Refusal] = []
     for name, pack in shelf.shelved().items():
-        if isinstance(pack, PackRefusal):
-            refused.append(pack)
+        if not isinstance(pack, BlockPack):
+            refused.append(Refusal.of(pack))
             continue
         for s in pack.snippets:
             cited = s.provenance if isinstance(s.provenance, Cited) else None
@@ -130,7 +131,7 @@ def library(shelf: PackShelf) -> LibraryResponse:
         parts=list(PromptPart),
         sources=list(sources.values()),
         snippets=snippets,
-        refused=[*refused, *shelf.skipped()],
+        refused=[*refused, *map(Refusal.of, shelf.skipped())],
     )
 
 

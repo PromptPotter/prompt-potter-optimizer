@@ -2,7 +2,7 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
-/** What every refusal and failure answers, whatever raised it. */
+/** What every refusal and failure answers, whatever raised it: a refusal's */
 export interface ErrorEnvelope {
   /** The code a client branches on. */
   error: string;
@@ -355,8 +355,14 @@ export interface LibraryResponse {
   /** The install's packs by name, then the account's, each in its own order */
   snippets: LibrarySnippet[];
   /** Each pack held but served none of, then each snippet of the account's skipped
-   * as an install pack's, and why: the rest serve on */
-  refused: PackRefusal[];
+   * as an install pack's, and why: the rest serve on. `block_pack_invalid`:
+   * its `pack.json` is no pack; `block_pack_collision`: the install and this
+   * account both hold the name; `block_pack_repeats`: an install pack holding
+   * a text an install pack before it in name order holds;
+   * `block_snippet_held`: one snippet of the account's pack whose text an
+   * install pack holds, which serves as that snippet while the rest of the
+   * account's pack serves on. One text is one snippet */
+  refused: Refusal[];
 }
 
 /** One cited work a snippet names, as its pack declares it; an authored snippet names none. */
@@ -401,19 +407,15 @@ export interface LibrarySnippet {
   author: string | null;
 }
 
-/** What the shelf holds but does not serve, a whole pack or one snippet of the account's: the */
-export interface PackRefusal {
-  /** Its directory name, as a `packs` knob names it */
-  name: string;
-  /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
-   * install and this account both hold the name; `block_pack_repeats`: an
-   * install pack holding a text an install pack before it in name order
-   * holds; `block_snippet_held`: one snippet of the account's pack whose text
-   * an install pack holds, which serves as that snippet while the rest of the
-   * account's pack serves on. One text is one snippet */
-  code: 'block_pack_invalid' | 'block_pack_collision' | 'block_pack_repeats' | 'block_snippet_held';
-  /** What to fix, in a sentence */
-  reason: string;
+/** A refusal as served: the rest of the answer it rides in serves on beside it. */
+export interface Refusal {
+  /** The code a client branches on: the refusal's kind. */
+  code: string;
+  /** The sentence an operator reads, naming its remedy and the Account tab it lives
+   * in, where it names one. */
+  message: string;
+  /** The refusal's facts, by name. */
+  details: Record<string, unknown>;
 }
 
 export interface BackendResponse {
@@ -3641,8 +3643,14 @@ export interface PoolRow {
    * the facts a Start mints against are known */
   packs: PackOffer[];
   /** The packs it would offer but refuses, each with why, served beside `packs`:
-   * one bad pack never hides the rest */
-  refused: PackRefusal[];
+   * one bad pack never hides the rest. `block_pack_invalid`: its `pack.json`
+   * is no pack; `block_pack_collision`: the install and this account both
+   * hold the name; `block_pack_repeats`: an install pack holding a text an
+   * install pack before it in name order holds; `block_snippet_held`: one
+   * snippet of the account's pack whose text an install pack holds, which
+   * serves as that snippet while the rest of the account's pack serves on.
+   * One text is one snippet */
+  refused: Refusal[];
 }
 
 /** One path an initializer's `active` knob may name, with what it keeps. */

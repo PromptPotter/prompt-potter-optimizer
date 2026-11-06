@@ -18,6 +18,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -32,14 +33,13 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
             )
         campaign = stores.campaigns.load_campaign(campaign_id)
         if campaign is None:
-            raise SystemExit(f"ERROR: campaign {campaign_id!r} has no manifest on disk.")
+            raise NotFoundError(f"campaign {campaign_id!r} has no manifest on disk.")
         return campaign.root_hop
     hop = active_pointer(stores)
     if hop is None:
-        raise SystemExit(
-            "ERROR: no active campaign — pass --campaign, or start one:\n\n"
-            + no_dataset_hint(stores)
-        )
+        refused = NotFoundError("no active campaign — pass --campaign, or start one.")
+        refused.add_note(no_dataset_hint(stores))
+        raise refused
     if not args.cycle:
         return hop
     return CycleHop(

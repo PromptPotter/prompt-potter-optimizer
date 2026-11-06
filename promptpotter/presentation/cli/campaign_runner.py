@@ -16,15 +16,10 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.presentation.cli.commands.verbs import VERBS
 from promptpotter.presentation.cli.parsers import build_parser
-from promptpotter.shared.errors import (
-    PotterError,
-    SendRefusedError,
-    UngeneratedRequestError,
-)
+from promptpotter.shared.errors import PotterError
 from promptpotter.shared.named_rows import imported
 
 if TYPE_CHECKING:
@@ -83,12 +78,17 @@ def main() -> None:
     runner = asyncio.Runner()
     try:
         result = runner.run(run)
-    except (UngeneratedRequestError, SendRefusedError, PotterError) as exc:
+    except PotterError as exc:
         runner.close()
-        said = refusal_words(exc)
-        if args.json_output and isinstance(exc, PotterError):
-            print(json.dumps({"error": exc.code, "message": said, **exc.details}, default=str))
-        print(f"Error: {said}", file=sys.stderr)
+        # Named as a string like the handlers: `--help` loads no use case.
+        refusal = importlib.import_module("promptpotter.application.refusal")
+        refused = refusal.Refusal.of(exc)
+        if args.json_output:
+            served = {"error": refused.code, "message": refused.message, **refused.details}
+            print(json.dumps(served, default=str))
+        # A verb's next step rides the refusal as a note: what this terminal alone can do about it.
+        said = [f"Error: {refused.message}", *getattr(exc, "__notes__", ())]
+        print("\n\n".join(said), file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.

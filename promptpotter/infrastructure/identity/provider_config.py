@@ -12,7 +12,7 @@ from pydantic import Field, ValidationError
 
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import read_bytes_optional
-from promptpotter.shared.errors import validation_reason
+from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
 
 _NonEmpty = Annotated[str, Field(min_length=1)]
 
@@ -55,10 +55,6 @@ class SignInClient(Protocol):
     async def exchange_code(self, *, code: str, nonce: str) -> ProviderIdentity: ...
 
 
-class OIDCConfigError(ValueError):
-    pass
-
-
 _ERROR_CODE = re.compile(r"[a-z_]{1,64}")
 
 
@@ -81,12 +77,14 @@ class CodeExchangeError(RuntimeError):
 
 
 def load_provider_config(path: Path) -> ProviderConfigBundle:
+    """Refused as the `FileKind.STORED_CONFIG` it is, each failing field by its path and rule:
+    a value (a client secret) never leaves."""
     raw = read_bytes_optional(path)
     if raw is None:
         return ProviderConfigBundle()
     try:
         return ProviderConfigBundle.model_validate_json(raw)
     except ValidationError as exc:
-        raise OIDCConfigError(
-            f"oidc.json does not validate: {validation_reason(exc, shown=3)}"
+        raise FileUnreadableError(
+            FileKind.STORED_CONFIG, path=str(path), reason=validation_reason(exc, shown=3)
         ) from exc

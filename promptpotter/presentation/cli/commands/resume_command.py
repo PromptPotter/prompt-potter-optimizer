@@ -36,7 +36,7 @@ from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.presentation.cli.session import load_session
-from promptpotter.shared.errors import PayloadInvalidError, ResumeDivergenceError
+from promptpotter.shared.errors import BadRequestError, PayloadInvalidError, ResumeDivergenceError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -136,22 +136,22 @@ def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[s
         key, sep, raw = spec.partition("=")
         node, dot, param = key.strip().partition(".")
         if not sep or not dot or not node or not param:
-            raise SystemExit(f"ERROR: --steer expects NODE.PARAM=VALUE, got {spec!r}")
+            raise BadRequestError(f"--steer expects NODE.PARAM=VALUE, got {spec!r}")
         declared_node = schema.get_node(node)
         if declared_node is None:
             names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
-            raise SystemExit(f"ERROR: --steer names no node called {node!r}; nodes: {names}")
+            raise BadRequestError(f"--steer names no node called {node!r}; nodes: {names}")
         kind = declared_node.param_types.get(param)
         if kind is None:
             known = ", ".join(sorted(declared_node.param_types)) or "(none)"
-            raise SystemExit(f"ERROR: --steer: {node!r} carries no {param!r}; params: {known}")
+            raise BadRequestError(f"--steer: {node!r} carries no {param!r}; params: {known}")
         value: Any = raw.strip()
         if kind != "string":
             try:
                 value = json.loads(value)
             except ValueError:
-                raise SystemExit(
-                    f"ERROR: --steer {node}.{param} is declared {kind}; {value!r} is not one "
+                raise BadRequestError(
+                    f"--steer {node}.{param} is declared {kind}; {value!r} is not one "
                     f"(spell it as JSON)."
                 ) from None
         overlay.setdefault(node, {})[param] = value
@@ -250,7 +250,7 @@ async def _pivot_to_fresh(
         f"Start a fresh campaign on `{drift.dataset_name}` instead?", default_no=True
     )
     if answer is None:
-        raise SystemExit(f"ERROR: {drift}")
+        raise drift
     if not answer:
         raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
     return await mint_and_run(
@@ -275,11 +275,11 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
 
     resume_from_round: int | None = args.resume_from_round
     if resume_from_round is not None and resume_from_round < 0:
-        raise SystemExit(f"ERROR: --from must be >= 0, got {resume_from_round}")
+        raise BadRequestError(f"--from must be >= 0, got {resume_from_round}")
     rewinding = args.rewind_to_round is not None
     steering = bool(args.steer)
     if rewinding and steering:
-        raise SystemExit("ERROR: --rewind and --steer each cut a fork — pass one per `resume`.")
+        raise BadRequestError("--rewind and --steer each cut a fork — pass one per `resume`.")
 
     try:
         if rewinding:

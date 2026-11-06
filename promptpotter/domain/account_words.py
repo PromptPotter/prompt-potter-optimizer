@@ -1,12 +1,12 @@
-"""The Account view's tabs in words, and a refusal as every surface says it: the API's error
-handler, the jobs layer and the terminal's refusal path each word a refusal through it."""
+"""The Account view's tabs in words, and a refusal as every surface says it: every door's
+`application/refusal.py::Refusal` and the jobs layer word a refusal through it."""
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
 from promptpotter.shared.account_tabs import AccountTab
-from promptpotter.shared.errors import SendRefusedError
+from promptpotter.shared.errors import PotterError, SendRefusedError
 from promptpotter.shared.worded import Worded
 
 
@@ -34,7 +34,7 @@ ACCOUNT_TAB_INFO: Worded[AccountTab, AccountTabInfo] = Worded(
 )
 
 
-def refusal_words(refused: BaseException) -> str:
+def refusal_words(refused: PotterError) -> str:
     """A refusal as every surface says it: its sentence, then the Account tab its remedy lives
     in, where it names one (`SendRefusedError.tab`)."""
     tab = refused.tab if isinstance(refused, SendRefusedError) else None

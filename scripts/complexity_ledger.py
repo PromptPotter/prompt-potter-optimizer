@@ -45,8 +45,9 @@ BASELINE = {
     # transition written as a branch beside the tables was policy the count could not see.
     "escalation_rules": 11,
     # Function-local imports of the package's own modules. The bare invocation's first-run check
-    # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
-    "deferred_imports": 6,
+    # is an application read, and `--help` loads no use case, so it is named as a string in `main()`;
+    # so is the terminal door's `application/refusal.py::Refusal`.
+    "deferred_imports": 7,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 17,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
@@ -65,7 +66,7 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 28,
+    "test_functions": 29,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

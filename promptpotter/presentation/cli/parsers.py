@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.spend import Budget
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -68,16 +69,15 @@ NO_WAIT = Arg(
 
 
 def _budget_axis(axis: str, cast: Callable[[str], float]) -> Callable[[str], Budget]:
-    """A one-axis Budget, so `none` (the lift) stays apart from an omitted flag's ``None``."""
+    """A one-axis Budget, so `none` (the lift) stays apart from an omitted flag's ``None``;
+    refused in the words a request body's `Budget` is."""
 
     def parse(raw: str) -> Budget:
         try:
             value = None if raw.strip().lower() == "none" else cast(raw)
-            return Budget.model_validate({axis: value})
-        except ValueError as exc:
-            raise argparse.ArgumentTypeError(
-                f"expected a {axis} value or `none`, got {raw!r}"
-            ) from exc
+            return PayloadInvalidError.validating(Budget, {axis: value})
+        except (PayloadInvalidError, ValueError) as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
 
     return parse
 

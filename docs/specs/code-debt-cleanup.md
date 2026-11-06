@@ -228,11 +228,10 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   request (the gate's `GateDecision`, the arms shape for `submit-arms`), answered as the existing
   command; otherwise never claim `input_required`. Untested against a live client. **Rides with:**
   A3/A4. **Re-test:** a host calling `tasks/result` on a held origin gate receives an input request.
-- **A refusal is answered four ways** — MCP `tools/call` drops `details` and `refusal_words`, MCP
-  `tasks/result` raises a JSON-RPC error, REST serves `ErrorEnvelope`, the CLI a third shape and the
-  only door catching `SendRefusedError` / `UngeneratedRequestError` (`RuntimeError`s, a REST 500).
-  Action: one refusal value in `application/` each door only renders. **Rides with:** M14a.
-  **Re-test:** the same refused `start-run` over MCP and REST carries the same `refusal_words`.
+- **`tasks/result` serves a refusal apart** — `presentation/mcp/server.py`'s `tasks/result` raises
+  a JSON-RPC error carrying the refusal's `code` alone, where every other door serves its
+  `application/refusal.py::Refusal`. Action: it serves the one value. **Rides with:** M2.
+  **Re-test:** a refused `tasks/result` carries the same `details` as the call's `tools/call` would.
 - **`resume --rewind/--steer` with `--max-usd` crashes with a traceback** — `resume_command.py`
   builds a fork seed's budget on the money axis it refuses; a fork has no launch-budget field
   (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload` and
@@ -1151,17 +1150,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   in `llm/heartbeat.py`, `campaign_store/store.py::CampaignStore.list_campaigns` and
   `user_store.py::read_accounts` are held by no test. Action: a survey serves a bad row with its fault,
   and a test holds each catch. **Re-test:** a tenant tree with one unreadable dataset lists the rest.
-
-**B. A refusal spelled per door.** **Rides with:** Q3.
-- `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and
-  `shared/errors.py::LedgerUnreadableError` stand beside the one refusal type. A taken slug is refused
-  twice, as `LaunchError` and as `shared/errors.py::SlugTakenError`.
-  `injections/registry.py::validate_template` raises `KeyError`. Action: one type, its kind a row.
-  **Re-test:** `git grep -nE "class (OIDCConfigError|PackRefusal)\b" -- promptpotter`.
-- The CLI rewrites refusals: `parsers.py::_budget_axis` and `verbs.py::_rescore_count_arg` word their
-  own, and `cli/commands/new.py`, `ab.py` and `resume_command.py` print `ERROR:` beside `Error:`.
-  Action: the CLI prints the refusal's served sentence. **Re-test:**
-  `git grep -n '"ERROR:' -- promptpotter/presentation/cli`.
 
 **C. One address resolved twice.** **Rides with:** Q1.
 - `cycle_addressing.py::resolve_campaign_id` is a second resolver over `resolve_subject`'s matcher,
