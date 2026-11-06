@@ -807,7 +807,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
         "potter",
         rounds,
         bench_trigger="manual",
-        knobs={"escalation": EVERY_L2, "pobb": {"early_stop": False}},
+        knobs={"escalation": EVERY_L2, "pobb": {"epsilon_stop": False, "lock_in": False}},
     )
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()

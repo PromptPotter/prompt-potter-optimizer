@@ -161,13 +161,19 @@ class PoBBKnobs(StrictModel):
             "``epsilon`` instead — the ``epsilon_floor_inverted`` coupling reports it."
         ),
     )
-    early_stop: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
+    epsilon_stop: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
         description=(
-            "PoBB's two stops: a candidate stops measuring once its posterior probability of "
-            "being the round's best falls below ε(n) — eliminated — or reaches the selector's "
-            "own admission bar against the parent and every earlier arm — locked in. A "
-            "selector with no such bar locks none in. Off → neither fires and every candidate "
-            "runs its full budget."
+            "Elimination: a candidate stops measuring once its posterior probability of being "
+            "the round's best falls below ε(n). Off → no candidate is cut for futility."
+        ),
+    )
+    lock_in: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
+        description=(
+            "Lock-in: a candidate stops measuring once its posterior probability of being the "
+            "round's best reaches the selector's own admission bar against the parent and every "
+            "earlier arm, and joins the priors every later arm races. The bar is re-read after "
+            "every cell (optional stopping), which inflates false locks. A selector with no "
+            "such bar locks none in. Off → every candidate not cut runs its full budget."
         ),
     )
 
