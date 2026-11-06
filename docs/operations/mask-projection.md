@@ -27,7 +27,7 @@ The round a `score:` mask parts at is the round the fork is cut at: `fork-cycle`
 ## What it will not claim
 
 - **A record is campaign-scoped; the tree is not.** An L4 inner run is its own campaign in its own `.inner/` sandbox; a `null` bar there is a read nobody made.
-- **Abort is computable only one way.** Suppressing a contributor that fired is computable; adding one the run lacked is not (lock-in keys off a `p_best` trajectory the snapshot does not carry) — that needs a real sibling cycle.
+- **Abort is computable only one way.** Suppressing a contributor that fired is computable; adding one the run lacked is not (lock-in keys off a θ-lift evidence trajectory the snapshot does not carry) — that needs a real sibling cycle.
 - **No backfill.** Masked readings are graded from persisted rows at read time; a term a row lacks leaves that row unscored; a node lacking the masked input is *unknown*, never divergent.
 - **One-step counterfactual, one active mask** — name the measured alternative at a divergence; claim nothing deeper until a real fork runs. `backprop.py` is a second fold over the same record.
 

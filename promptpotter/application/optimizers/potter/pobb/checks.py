@@ -12,9 +12,10 @@ from promptpotter.application.scoring.selection import (
     PairedPosterior,
     cells_read,
     discordance,
-    elimination_p_best_bounds,
+    locks_in,
     paired_grades,
     paired_p_best,
+    stop_bounds,
 )
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.validators import StopSignal
@@ -54,12 +55,13 @@ assert set(ABORT_LENS_LABELS) == {Lens("abort", body).spelling for body in ABORT
 
 
 class EliminationContext(TypedDict, total=False):
-    """``gate`` says which keys EXIST: lock-in adds the admission bar it met, ε the ε(n) that fired."""
+    """``gate`` says which keys EXIST: lock-in adds its level and the evidence that met it, ε the ε(n) that fired."""
 
     gate: EliminationGate
     p_best: float
     epsilon: float
-    admission: float
+    lock_in_alpha: float
+    evidence: float
     leader: ArmKey
     queries_scored: int
     total_queries: int
@@ -84,7 +86,6 @@ class PoBBCheck:
         self,
         knobs: PoBBKnobs,
         *,
-        admission: float | None,
         n_min: int,
         n_samples: int,
         ruler: DeltaRuler | None,
@@ -96,9 +97,9 @@ class PoBBCheck:
         self.n_min = n_min
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
-        self.early_stop = knobs.early_stop
-        # The selector's own promotion bar (`Selector.admission`); ``None`` locks no leader in.
-        self.admission = admission
+        self.epsilon_stop = knobs.epsilon_stop
+        self.lock_in = knobs.lock_in
+        self.lock_in_alpha = knobs.lock_in_alpha
         self.n_samples = n_samples
         # The GRADED response and verdict, never a binarized hit, degenerate on a graded backend.
         self.priors_by_sample: dict[ArmKey, dict[str, PairedGrade]] = {}
@@ -171,8 +172,6 @@ class PoBBCheck:
                 )
             )
 
-        if not self.early_stop:
-            return None
         context: EliminationContext = {
             "p_best": float(fit.p_best),
             "leader": leader,
@@ -180,18 +179,23 @@ class PoBBCheck:
             "total_queries": self.n_samples,
             "n_priors": len(fit.priors),
         }
-        # Past the selector's own bar on every prior, the round's parent among them, it is decided.
-        if self.admission is not None and fit.p_best >= self.admission:
+        # Past the anytime-valid bound on every prior, the round's parent among them, it is decided.
+        if self.lock_in and locks_in(fit.evidence, self.lock_in_alpha):
             return PoBBStop(
                 self.name,
                 "locked_in",
-                {**context, "gate": EliminationGate.LOCK_IN, "admission": self.admission},
+                {
+                    **context,
+                    "gate": EliminationGate.LOCK_IN,
+                    "lock_in_alpha": self.lock_in_alpha,
+                    "evidence": float(fit.evidence),
+                },
                 fit=fit,
                 paired_breakdown=paired_breakdown,
             )
         # ε is the ONLY futility gate; the priors include the round's parent (`potter/race.py`).
         bar = self.epsilon_at(read)
-        if fit.p_best >= bar:
+        if not self.epsilon_stop or fit.p_best >= bar:
             return None
         return PoBBStop(
             self.name,
@@ -209,7 +213,7 @@ class PoBBCheck:
         unresolved: Mapping[ArmKey, Iterable[GradedCell]] | None = None,
     ) -> int | None:
         """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
-        if not self.early_stop:
+        if not (self.epsilon_stop or self.lock_in):
             return None
         measured = [cell for cell in results if cell.scored]
         grades = paired_grades(measured)
@@ -239,10 +243,8 @@ class PoBBCheck:
                 for pid, g in priors.items()
                 if pid not in pending and all(s in g for s in cells)
             ]
-            low, high = elimination_p_best_bounds(
-                cells, grades, priors, self.ruler, settled=settled
-            )
-            locks = self.admission is not None and high >= self.admission
-            if locks or low < self.epsilon_at(read):
+            bounds = stop_bounds(cells, grades, priors, self.ruler, settled=settled)
+            locks = self.lock_in and locks_in(bounds.evidence_high, self.lock_in_alpha)
+            if locks or (self.epsilon_stop and bounds.p_best_low < self.epsilon_at(read)):
                 return m
         return None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -158,12 +159,21 @@ def elect_round_winner(
     return winner, abilities
 
 
+class PairedRead(NamedTuple):
+    """One prior against the candidate on the cells they share."""
+
+    # Bounded `P(θ_cand > θ_prior)`: the ε futility gate's reading.
+    p_better: float
+    # `lift_evidence` of the θ lift: the lock-in's reading.
+    evidence: float
+
+
 def elimination_p_best(
     candidate_grades: Sequence[PairedGrade],
     paired_prior_grades: Mapping[ArmKey, Sequence[PairedGrade]],
     candidate_cells: Sequence[str],
     ruler: DeltaRuler | None,
-) -> tuple[float, dict[ArmKey, float]]:
+) -> tuple[float, dict[ArmKey, PairedRead]]:
     """A stopping rule, not a verdict: ``P(θ_cand > θ_prior)`` CAPPED by what the discordant pairs support."""
     if not paired_prior_grades:
         return 1.0, {}
@@ -180,12 +190,36 @@ def elimination_p_best(
 
     theta_c, se_c = read(candidate_grades)
 
-    per_prior: dict[ArmKey, float] = {}
+    per_prior: dict[ArmKey, PairedRead] = {}
     for pid, grades in paired_prior_grades.items():
         theta_p, se_p = read(grades)
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
-        per_prior[pid] = _capped(p, sign_posterior(*discordance(candidate_grades, grades)))
-    return min(per_prior.values()), per_prior
+        per_prior[pid] = PairedRead(
+            _capped(p, sign_posterior(*discordance(candidate_grades, grades))),
+            lift_evidence(theta_c - theta_p, se_c * se_c + se_p * se_p),
+        )
+    return min(paired.p_better for paired in per_prior.values()), per_prior
+
+
+# The sd of the normal mixture over the θ lift, in logits: the pilot's N(0, 1.5²).
+LIFT_MIXTURE_SD = 1.5
+
+
+def lift_evidence(lift: float, variance: float) -> float:
+    """``log`` of Robbins' normal-mixture likelihood ratio for a θ lift read at *variance*, against
+    none: by Ville's inequality it ever reaches ``log(1/α)`` under no lift with probability at most
+    α, however often it is read. A lift at or under zero is no evidence for a lock-in: 0."""
+    if lift <= 0.0:
+        return 0.0
+    tau_sq = LIFT_MIXTURE_SD * LIFT_MIXTURE_SD
+    return lift * lift * tau_sq / (2.0 * variance * (variance + tau_sq)) - 0.5 * math.log1p(
+        tau_sq / variance
+    )
+
+
+def locks_in(evidence: float, alpha: float) -> bool:
+    """The lock-in's one bar: an anytime-valid test of a positive lift at level *alpha*."""
+    return evidence >= math.log(1.0 / alpha)
 
 
 class PairedPosterior(NamedTuple):
@@ -195,6 +229,8 @@ class PairedPosterior(NamedTuple):
     priors: dict[ArmKey, dict[str, PairedGrade]]
     p_best: float
     p_better: dict[ArmKey, float]
+    # The least `lift_evidence` over the priors: the lock-in's reading.
+    evidence: float
 
 
 def paired_p_best(
@@ -214,13 +250,21 @@ def paired_p_best(
     }
     if not paired:
         return None
-    p_better = {
+    reads = {
         pid: elimination_p_best(
             [own[c] for c in shared], {pid: list(shared.values())}, list(shared), ruler
-        )[0]
+        )[1][pid]
         for pid, shared in paired.items()
     }
-    return PairedPosterior(list(own), list(own.values()), paired, min(p_better.values()), p_better)
+    p_better = {pid: read.p_better for pid, read in reads.items()}
+    return PairedPosterior(
+        list(own),
+        list(own.values()),
+        paired,
+        min(p_better.values()),
+        p_better,
+        min(read.evidence for read in reads.values()),
+    )
 
 
 def _capped(p: float, bound: float) -> float:
@@ -234,15 +278,26 @@ _UNSOLVED = PairedGrade(0.0, 0.0)
 _SOLVED = PairedGrade(1.0, 1.0)
 
 
-def elimination_p_best_bounds(
+class StopBounds(NamedTuple):
+    """How far each stop's reading can reach on *cells*, whatever their open grades turn out."""
+
+    # The least `p_best` can read: the ε gate's.
+    p_best_low: float
+    # The most the least `lift_evidence` over the priors can read: the lock-in's.
+    evidence_high: float
+
+
+def stop_bounds(
     cells: Sequence[str],
     candidate: Mapping[str, PairedGrade],
     priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
     ruler: DeltaRuler | None,
     *,
     settled: Collection[ArmKey],
-) -> tuple[float, float]:
-    """``high`` is over ``settled`` priors alone: any other may drop out, which can only RAISE the minimum."""
+) -> StopBounds:
+    """``evidence_high`` is over ``settled`` priors alone: any other may drop out, which can only
+    RAISE the minimum. The mixture ratio grows with the lift and, past its one minimum, with the
+    precision, so the widest lift at the floored SE bounds it."""
     sids = list(cells)
     entries = ruler.entries_covering(sids) if ruler is not None else None
     known = {s: candidate[s] for s in sids if s in candidate}
@@ -262,13 +317,11 @@ def elimination_p_best_bounds(
         _, can_lose = discordance(
             [candidate.get(s, _UNSOLVED) for s in rest], [grades.get(s, _SOLVED) for s in rest]
         )
-        can_win, _ = discordance(
-            [candidate.get(s, _SOLVED) for s in rest], [grades.get(s, _UNSOLVED) for s in rest]
-        )
         worst = p_exceeds(c_low, c_floor, p_high, p_floor) if c_low < p_high else 0.5
-        best = p_exceeds(c_high, c_floor, p_low, p_floor) if c_high > p_low else 0.5
         low[pid] = _capped(worst, sign_posterior(wins, losses + can_lose))
-        high[pid] = _capped(best, sign_posterior(wins + can_win, losses))
+        high[pid] = lift_evidence(c_high - p_low, c_floor * c_floor + p_floor * p_floor)
     if not low:
-        return 1.0, 1.0
-    return min(low.values()), min(high[p] for p in settled) if settled else max(high.values())
+        return StopBounds(1.0, 0.0)
+    return StopBounds(
+        min(low.values()), min(high[p] for p in settled) if settled else max(high.values())
+    )

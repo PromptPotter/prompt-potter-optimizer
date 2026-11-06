@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
     PairedGrade,
+    PairedPosterior,
     elect_round_winner,
+    locks_in,
     paired_p_best,
 )
 from promptpotter.domain.origin_panel import election_rows
@@ -48,7 +50,7 @@ def _replay_round_winner(
 
 def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> float | None:
+) -> PairedPosterior | None:
     """``None`` where a cell the live check fit on is no longer among the arm's rows."""
     rows = ctx.round_data.rows(ArmKey(inputs_ref["arm"])).by_key()
     cells = [str(key) for key in data["candidate_cells"]]
@@ -58,29 +60,28 @@ def _pobb_replay_snapshot(
         ArmKey(pid): {str(cell): PairedGrade(**grade) for cell, grade in grades.items()}
         for pid, grades in data["prior_histories"].items()
     }
-    fit = paired_p_best(
+    return paired_p_best(
         [rows[cell] for cell in cells], priors, ctx.ruler, min_shared=int(inputs_ref["n_min"])
     )
-    return None if fit is None else fit.p_best
 
 
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
-    if p_best is None:
+    fit = _pobb_replay_snapshot(ctx, inputs_ref, data)
+    if fit is None:
         return False
-    return p_best < float(inputs_ref["epsilon"])
+    return fit.p_best < float(inputs_ref["epsilon"])
 
 
 def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
-    if p_best is None:
+    fit = _pobb_replay_snapshot(ctx, inputs_ref, data)
+    if fit is None:
         return False
     # ``min`` over priors is the lock-in metric; no separate leader guard.
-    return p_best >= float(inputs_ref["admission"])
+    return locks_in(fit.evidence, float(inputs_ref["lock_in_alpha"]))
 
 
 # The two escalation triggers are archived: each folds the cycle's escalation history, which no replayer holds.

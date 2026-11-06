@@ -140,7 +140,31 @@ class L1GenerateKnobs(StrictModel):
 class PoBBKnobs(StrictModel):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
-    # Under 0.5, so it never reaches a selector's admission bar and the two stops never cross.
+    epsilon_stop: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
+        description=(
+            "Elimination: a candidate stops measuring once its posterior probability of being "
+            "the round's best falls below ε(n). Off → no candidate is cut for futility."
+        ),
+    )
+    lock_in: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
+        description=(
+            "Lock-in: a candidate stops measuring once its θ lift over the parent and every "
+            "earlier arm passes an anytime-valid bound at ``lock_in_alpha``, and joins the priors "
+            "every later arm races. Off → every candidate not cut runs its full budget."
+        ),
+    )
+    lock_in_alpha: Annotated[float, Knob(Estimand.STOPPING)] = Field(
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Each arm's level for a false lock-in: the chance an arm no better than a prior is "
+            "locked in at ANY cell. The lock reads a normal-mixture likelihood ratio on the θ "
+            "lift over each prior, which Ville's inequality bounds at 1/alpha however often it is "
+            "read, so it is the round's stated level split over its arms. Smaller → fewer, "
+            "later locks."
+        ),
+    )
+    # Under 0.5: a positive lift holds every bounded p_better at or over 0.5, so the stops never cross.
     epsilon: Annotated[float, Knob(Estimand.STOPPING)] = Field(
         gt=0.0,
         lt=0.5,
@@ -159,15 +183,6 @@ class PoBBKnobs(StrictModel):
             "rather than on the thinnest reading, and an arm clearly behind is still cut "
             "however few cells remain. Set ABOVE ``epsilon`` and the bar goes flat at "
             "``epsilon`` instead — the ``epsilon_floor_inverted`` coupling reports it."
-        ),
-    )
-    early_stop: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
-        description=(
-            "PoBB's two stops: a candidate stops measuring once its posterior probability of "
-            "being the round's best falls below ε(n) — eliminated — or reaches the selector's "
-            "own admission bar against the parent and every earlier arm — locked in. A "
-            "selector with no such bar locks none in. Off → neither fires and every candidate "
-            "runs its full budget."
         ),
     )
 

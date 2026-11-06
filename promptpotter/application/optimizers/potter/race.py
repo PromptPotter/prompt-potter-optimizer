@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -42,8 +43,8 @@ def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
     priors = f"(of {n} prior{'' if n == 1 else 's'})"
     if ctx["gate"] is EliminationGate.LOCK_IN:
         return (
-            f"leader locked {q}  p_best={ctx['p_best']:.1%} >= admission={ctx['admission']:.0%}  "
-            f"{priors}"
+            f"leader locked {q}  θ-lift log mixture LR={ctx['evidence']:.2f} "
+            f">= log(1/alpha)={-math.log(ctx['lock_in_alpha']):.2f} (anytime-valid)  {priors}"
         )
     return (
         f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
@@ -159,7 +160,6 @@ class PoBBRace(CatchUpPool):
         super().__init__(
             PoBBCheck(
                 ctx.knobs(PoBBKnobs),
-                admission=ctx.read(Bounds).admission,
                 n_min=ctx.read(Bounds).elimination_n_min,
                 n_samples=len(panel.cells),
                 ruler=ctx.read(Ruler).difficulty.ruler,
@@ -220,7 +220,8 @@ class PoBBRace(CatchUpPool):
         }
         if gate is EliminationGate.LOCK_IN:
             kind = PotterCheckpointKind.LEADER_LOCK_IN
-            inputs["admission"] = context["admission"]
+            inputs["lock_in_alpha"] = context["lock_in_alpha"]
+            inputs["recorded_evidence"] = context["evidence"]
         else:
             kind = PotterCheckpointKind.ELIMINATION_CUT
             inputs["epsilon"] = context["epsilon"]

@@ -778,12 +778,11 @@ async def _walk(
     # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
     priors = CatchUpPool(
         PoBBCheck(
-            pobb_knobs(),
+            pobb_knobs(lock_in=False),
             n_min=6,
             n_samples=len(dataset),
             ruler=None,
             parent=ArmKey("parent"),
-            admission=None,
         ),
         _backfill,
         "elimination",
