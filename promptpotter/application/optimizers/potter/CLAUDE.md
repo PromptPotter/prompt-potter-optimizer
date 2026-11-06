@@ -40,7 +40,7 @@ Routing: [`dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
-**`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py`) is an invariant**: the operator sets a backend node's route in the dataset overlay ([`datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last. `model` is an axis opened per node by `optimizer.param_keys` within `param_allowed_values["model"]`; steering outside it is [decisions](../../../../docs/decisions.md) § 0005's.
+**`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py`) is an invariant**: the operator sets a backend node's route in the dataset overlay ([`promptpotter/assets/datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last. `model` is an axis opened per node by `optimizer.param_keys` within `param_allowed_values["model"]`; steering outside it is [decisions](../../../../docs/decisions.md) § 0005's.
 
 ## Editing a renderer's PROSE is a measurement change
 

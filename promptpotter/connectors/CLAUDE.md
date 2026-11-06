@@ -2,7 +2,7 @@
 
 **A built-in connector is one module here defining `CONNECTOR`, a `Connector(...)` binding (`protocol.py`), never a `register()` call** <!-- probe: git grep -cE "\bregister\(" -- promptpotter/connectors/*.py == 0 -->; `_validate` refuses the rest. `promptpotter` lives in `application/runner/inner/connector.py` (`__init__.py::_APPLICATION_BUILT_INS`); `llm_only` is a NODE on a `termnorm` pipeline, not a connector.
 
-**Core never infers what a connector should declare**: what the next connector must reach into core to fix becomes a declaration on `Connector` or a fact derived from `extract_experiment`'s return, never a branch at the symptom site. Backend tunables ride the dataset overlay — [`datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route.
+**Core never infers what a connector should declare**: what the next connector must reach into core to fix becomes a declaration on `Connector` or a fact derived from `extract_experiment`'s return, never a branch at the symptom site. Backend tunables ride the dataset overlay — [`promptpotter/assets/datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route.
 
 ## TermNorm is not a third party
 

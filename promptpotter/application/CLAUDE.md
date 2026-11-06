@@ -15,12 +15,12 @@
 - Per-call telemetry from deep async chains uses `emit_*`, not `RunCallbacks` — [`adding-a-surface.md`](../../docs/developer/adding-a-surface.md) §1.
 - **`commands/dispatcher.py` is the sole writer of `CommandRecord`** <!-- probe: git grep -cE "emit_command\(" -- promptpotter/application/*.py <= 2 --> **and imports no handler** <!-- probe: git grep -cE "^from promptpotter\.application\.commands\." -- promptpotter/application/commands/dispatcher.py == 0 -->: a `CommandKind` row names its `module:handler`, imported at dispatch.
 
-- **Every ingress edits an origin through an `EditDraftPatch`, and the rules applying it live in `datasets/draft_patch.py`**, never in `api/routers/`. **A pure projection off a draft lives in `datasets/draft_campaign.py`** (`draft_build.py` the served ones, `origin_readiness.py` the gate and write-back): `pipeline_resolve` reads a draft and `jobs/launcher/` calls `pipeline_resolve`, so a projection parked in the launcher closes an import cycle.
+- **Every ingress edits an origin through an `EditDraftPatch`, and the rules applying it live in `datasets/draft_patch.py`**, never in `api/routers/`. **A pure projection off a draft lives in `promptpotter/application/datasets/draft_campaign.py`** (`draft_build.py` the served ones, `origin_readiness.py` the gate and write-back): `pipeline_resolve` reads a draft and `jobs/launcher/` calls `pipeline_resolve`, so a projection parked in the launcher closes an import cycle.
 - **A draft is kept only once its response is built** (`datasets/ingest.py::_kept`, the `edit-draft-campaign` and `resolve-origin` handlers): a build that raises keeps nothing.
 
 ## Backend overlay
 
-- This layer merges the overlay, never authors one — owned by [`datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route.
+- This layer merges the overlay, never authors one — owned by [`promptpotter/assets/datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route.
 - **The backend's pipeline is read live through `pipeline_resolve.py::served_pipeline` and stored on no draft** <!-- probe: git grep -cE "fetch_pipeline\(" -- promptpotter/*.py == 2 -->; each reader (run init, `dataset_pipeline`, a check-in's `draft_served`) lays its own definition on it. An unreachable backend raises `BackendUnreachableError`, never a stand-in schema.
 - **Pipeline params are ONE fold, `pipeline_resolve.py::ParamLayers`**, in `ParamLayer`'s declared order; each subject (run, draft, campaign, candidate) picks its layers by the data it lays. <!-- probe: git grep -cE "apply_node_overlay\(" -- promptpotter/application/*.py == 1 -->
 - **`embedded_run.py` holds no machine slot, but a ceiling share and a reservation** (`jobs/launcher/admission.py::embedded_share`) — a declared exemption from `request_jobs`.
