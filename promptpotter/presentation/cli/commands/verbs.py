@@ -40,7 +40,7 @@ from promptpotter.presentation.cli.parsers import (
 
 def _rescore_count_arg(raw: str) -> RescoreCount:
     try:
-        return rescore_count(int(raw))
+        return rescore_count(raw)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 

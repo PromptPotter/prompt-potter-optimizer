@@ -341,14 +341,31 @@ def _holders(stores: Stores, name: str) -> list[ResolvedDataset]:
     return [dataset for dataset in tiers if is_dataset_dir(dataset.directory)]
 
 
-def claim_own_definition(stores: Stores, slug: str, *, new: bool) -> None:
+def _taken(stores: Stores, name: str) -> bool:
+    return stores.tenant_datasets.slug_exists(name) or bool(_holders(stores, name))
+
+
+def claim_own_definition(
+    stores: Stores, slug: str, *, new: bool, source: Mapping[str, Any] | None = None
+) -> None:
     """THE claim on the name of an account's definition: refused where the install or research
-    tier holds it, since the account's would shadow theirs. A re-write of a name the account holds
+    tier holds it, since the account's would shadow theirs. The account holds a name whose
+    directory it has, whatever files a crash left there. A re-write of a name the account holds
     is admitted; *new* is a draft naming a dataset the account does not hold yet, refused where it
-    does. The suggestion is a name no tier holds."""
+    does; *source* is an upload landing, admitted over the account's name only where that same
+    upload's definition stands. The suggestion is a name no tier holds."""
     held = _holders(stores, slug)
-    if held and (new or held[0].tier != "yours"):
-        free = next(f"{slug}-{n}" for n in count(2) if not _holders(stores, f"{slug}-{n}"))
+    own = stores.tenant_datasets.dataset_dir(slug)
+    ours = own.is_dir()
+    if new or not ours:
+        refused = ours or bool(held)
+    elif source is None:
+        refused = bool(held) and held[0].tier != "yours"
+    else:
+        landed = read_dataset_definition(tenant_dataset(slug, own))
+        refused = landed is None or landed.source != dict(source)
+    if refused:
+        free = next(f"{slug}-{n}" for n in count(2) if not _taken(stores, f"{slug}-{n}"))
         raise SlugTakenError(slug, free)
 
 

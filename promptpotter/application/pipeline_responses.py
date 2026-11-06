@@ -12,8 +12,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
-from promptpotter.application.refusal import Refusal
-from promptpotter.config.prompt_blocks import PACK_REFUSAL_KINDS
+from promptpotter.application.refusal import ShelfRefusal
 from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
@@ -114,9 +113,9 @@ class PoolRow(StrictModel):
         "order; none for a pool no pack feeds or no member draws, and none before the facts a "
         "Start mints against are known"
     )
-    refused: list[Refusal] = Field(
+    refused: list[ShelfRefusal] = Field(
         description="The packs it would offer but refuses, each with why, served beside `packs`: "
-        f"one bad pack never hides the rest. {PACK_REFUSAL_KINDS}"
+        "one bad pack never hides the rest"
     )
 
 
@@ -346,7 +345,7 @@ def _pool_fills(
 
 def _pack_offers(
     selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
-) -> tuple[list[PackOffer], list[Refusal]]:
+) -> tuple[list[PackOffer], list[ShelfRefusal]]:
     if (named := initializer.packs(selected)) is None or mint is None:
         return [], []
     refused = mint.shelf.refusals()
@@ -359,7 +358,7 @@ def _pack_offers(
         for name in mint.shelf.shelved()
         if name not in refused
     ]
-    return offered, [Refusal.of(pack) for pack in refused.values()]
+    return offered, [ShelfRefusal.of(pack) for pack in refused.values()]
 
 
 def _opened_parts(target: PipelineSchema) -> set[str]:

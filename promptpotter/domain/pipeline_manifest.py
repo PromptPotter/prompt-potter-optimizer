@@ -91,6 +91,11 @@ class PipelineManifest(FrozenModel):
                     raise ValueError(f"llm node {name!r}: {exc}") from exc
         return self
 
+    def read_from(self, path: str) -> Self:
+        """Each prompt it resolves stamped with the file it was read from."""
+        located = {key: t.located(path) for key, t in self.resolved_prompts.items()}
+        return self.model_copy(update={"resolved_prompts": located})
+
     def laid_over(self, overlay: Mapping[str, Mapping[str, Any]]) -> PipelineManifest:
         nodes = {
             name: node.model_copy(update={"config": {**node.config, **overlay[name]}})

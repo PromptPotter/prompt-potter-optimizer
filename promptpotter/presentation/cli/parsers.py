@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -68,15 +69,24 @@ NO_WAIT = Arg(
 )
 
 
-def _budget_axis(axis: str, cast: Callable[[str], float]) -> Callable[[str], Budget]:
-    """A one-axis Budget, so `none` (the lift) stays apart from an omitted flag's ``None``;
-    refused in the words a request body's `Budget` is."""
+def _json_value(raw: str) -> object:
+    """*raw* as a request body would carry it: a JSON scalar, else the text itself."""
+    try:
+        value: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return value
+
+
+def _budget_axis(axis: str) -> Callable[[str], Budget]:
+    """A one-axis Budget, so `none` (the lift) stays apart from an omitted flag's ``None``; the
+    text read as a request body's JSON value, and refused in the words its `Budget` is."""
 
     def parse(raw: str) -> Budget:
+        value = None if raw.strip().lower() == "none" else _json_value(raw)
         try:
-            value = None if raw.strip().lower() == "none" else cast(raw)
             return PayloadInvalidError.validating(Budget, {axis: value})
-        except (PayloadInvalidError, ValueError) as exc:
+        except PayloadInvalidError as exc:
             raise argparse.ArgumentTypeError(str(exc)) from exc
 
     return parse
@@ -86,7 +96,7 @@ BUDGET_AXES = (
     Arg(
         "--max-usd",
         dest="max_usd",
-        type=_budget_axis("usd", float),
+        type=_budget_axis("usd"),
         default=None,
         metavar="USD|none",
         help="Campaign USD ceiling (optimizer + backend, every live cycle); 0 halts after the "
@@ -95,7 +105,7 @@ BUDGET_AXES = (
     Arg(
         "--max-tokens",
         dest="max_tokens",
-        type=_budget_axis("tokens", int),
+        type=_budget_axis("tokens"),
         default=None,
         metavar="N|none",
         help="Campaign token ceiling (in + out) — the unit that survives an unpriced model; "
@@ -104,7 +114,7 @@ BUDGET_AXES = (
     Arg(
         "--max-rounds",
         dest="max_rounds",
-        type=_budget_axis("rounds", int),
+        type=_budget_axis("rounds"),
         default=None,
         metavar="N|none",
         help="L1 round cap, read at the next round boundary; `none` lifts it, so the spend "
@@ -113,7 +123,7 @@ BUDGET_AXES = (
     Arg(
         "--max-wall-clock",
         dest="max_wall_clock",
-        type=_budget_axis("wall_clock_s", float),
+        type=_budget_axis("wall_clock_s"),
         default=None,
         metavar="S|none",
         help="Wall-clock bound in seconds for each launch; a remote cell still open at the edge "

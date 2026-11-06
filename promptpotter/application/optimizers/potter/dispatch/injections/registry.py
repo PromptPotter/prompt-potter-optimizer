@@ -84,8 +84,8 @@ def validate_template(name: str, template: OptimizerPromptTemplate) -> None:
     if unknown:
         raise FileUnreadableError(
             FileKind.OPTIMIZER_PROMPT,
-            path=f"{name}'s optimizer prompt",
-            reason=f"unknown slot(s) {sorted(unknown)}: register a renderer "
+            path=template.read_from,
+            reason=f"{name}'s unknown slot(s) {sorted(unknown)}: register a renderer "
             f"(dispatch/injections/), or add a caller-supplied extra to "
             f"NODE_LAYOUTS[{name!r}].caller_extras",
         )

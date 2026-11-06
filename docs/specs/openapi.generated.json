@@ -6064,19 +6064,13 @@
       },
       "ErrorEnvelope": {
         "additionalProperties": false,
-        "description": "What every refusal and failure answers, whatever raised it: a refusal's\n`application/refusal.py::Refusal`, its `code` served as `error`.",
+        "description": "What every failure answers; a refusal's is its `Refusal`, the `code` served as `error`.",
         "properties": {
           "details": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Details"
+            "additionalProperties": true,
+            "description": "The refusal's facts, by name; none for a failure.",
+            "title": "Details",
+            "type": "object"
           },
           "error": {
             "description": "The code a client branches on.",
@@ -8755,9 +8749,9 @@
             "type": "array"
           },
           "refused": {
-            "description": "Each pack held but served none of, then each snippet of the account's skipped as an install pack's, and why: the rest serve on. `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and this account both hold the name; `block_pack_repeats`: an install pack holding a text an install pack before it in name order holds; `block_snippet_held`: one snippet of the account's pack whose text an install pack holds, which serves as that snippet while the rest of the account's pack serves on. One text is one snippet",
+            "description": "Each pack held but served none of, then each snippet of the account's skipped as an install pack's, and why: the rest serve on",
             "items": {
-              "$ref": "#/components/schemas/Refusal"
+              "$ref": "#/components/schemas/ShelfRefusal"
             },
             "title": "Refused",
             "type": "array"
@@ -12173,6 +12167,17 @@
         "title": "PackOffer",
         "type": "object"
       },
+      "PackRefusalKind": {
+        "description": "Each kind the shelf holds but does not serve, a whole pack or one snippet of the account's,\nwhile the rest of the library serves on: its code, and what it is. A refusal names its pack in\n`details`.",
+        "enum": [
+          "block_pack_invalid",
+          "block_pack_collision",
+          "block_pack_repeats",
+          "block_snippet_held"
+        ],
+        "title": "PackRefusalKind",
+        "type": "string"
+      },
       "PairGuard": {
         "additionalProperties": false,
         "description": "The comparability guard: whether the bench headlines it is taken over — a pair's, a row's\nagainst the table's standard, the whole table's — are one quantity. It LABELS a comparison\nand refuses none: a pair that differs is still read, and says on what.",
@@ -12851,9 +12856,9 @@
             "type": "string"
           },
           "refused": {
-            "description": "The packs it would offer but refuses, each with why, served beside `packs`: one bad pack never hides the rest. `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and this account both hold the name; `block_pack_repeats`: an install pack holding a text an install pack before it in name order holds; `block_snippet_held`: one snippet of the account's pack whose text an install pack holds, which serves as that snippet while the rest of the account's pack serves on. One text is one snippet",
+            "description": "The packs it would offer but refuses, each with why, served beside `packs`: one bad pack never hides the rest",
             "items": {
-              "$ref": "#/components/schemas/Refusal"
+              "$ref": "#/components/schemas/ShelfRefusal"
             },
             "title": "Refused",
             "type": "array"
@@ -13503,35 +13508,6 @@
           "reason"
         ],
         "title": "Reelection",
-        "type": "object"
-      },
-      "Refusal": {
-        "additionalProperties": false,
-        "description": "A refusal as served: the rest of the answer it rides in serves on beside it.",
-        "properties": {
-          "code": {
-            "description": "The code a client branches on: the refusal's kind.",
-            "title": "Code",
-            "type": "string"
-          },
-          "details": {
-            "additionalProperties": true,
-            "description": "The refusal's facts, by name.",
-            "title": "Details",
-            "type": "object"
-          },
-          "message": {
-            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "details"
-        ],
-        "title": "Refusal",
         "type": "object"
       },
       "RemoveApiKeyPayload": {
@@ -15458,6 +15434,34 @@
         ],
         "title": "SetupStep",
         "type": "string"
+      },
+      "ShelfRefusal": {
+        "additionalProperties": false,
+        "description": "A refusal the block-pack shelf holds beside what it serves, its code a table row.\n\nA code no `PackRefusalKind` row holds is refused at serving.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/PackRefusalKind",
+            "description": "`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and this account both hold the name; `block_pack_repeats`: an install pack holding a text an install pack before it in name order holds; `block_snippet_held`: one snippet of the account's pack whose text an install pack holds, which serves as that snippet while the rest of the account's pack serves on. One text is one snippet"
+          },
+          "details": {
+            "additionalProperties": true,
+            "description": "The refusal's facts, by name.",
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
+        ],
+        "title": "ShelfRefusal",
+        "type": "object"
       },
       "SiteRecordBody": {
         "additionalProperties": false,

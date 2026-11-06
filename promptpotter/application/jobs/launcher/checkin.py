@@ -9,7 +9,7 @@ from pydantic import Field, JsonValue
 
 from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.datasets.loaders import Source, cut_bank, definition_source
+from promptpotter.application.datasets.loaders import cut_bank
 from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.free_tier import free_fence
 from promptpotter.application.initialization.wiring import init_services
@@ -52,7 +52,7 @@ from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.dataset_access import claim_own_definition, tenant_dataset
+from promptpotter.infrastructure.store.dataset_access import claim_own_definition
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -129,14 +129,8 @@ def _land_draft(
             else None
         )
     source = upload_source(draft, basis)
-    # The writer's own claim, asked before the mint's refusals: a held name is refused as itself.
-    claim_own_definition(stores, draft.slug, new=False)
-    datasets = stores.tenant_datasets
-    if datasets.slug_exists(draft.slug) and definition_source(
-        tenant_dataset(draft.slug, datasets.dataset_dir(draft.slug))
-    ) != Source.of(source):
-        # Another upload's definition holds the name: refused as a new name a tier holds is.
-        claim_own_definition(stores, draft.slug, new=True)
+    # The whole claim, asked once before the mint's refusals: a held name is refused as itself.
+    claim_own_definition(stores, draft.slug, new=False, source=source)
     rows = cut_bank(stores, source)
     for overlay in overlays:
         config = with_optimization(pipeline.config, overlay)

@@ -91,8 +91,8 @@ A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk
   data by itself; unknown files refuse on their own; `_sources` and its builder move into the checkout.
   **Rides with:** M17. **Re-test:** `land-data --dry-run` on a desk holding both.
 - **An unreadable file's remedy sends the operator to hand-deletion** — `shared/errors.py` `JOB` ("No
-  migration exists: delete it once no run it names is live"), `LedgerUnreadableError` ("No migration
-  exists: no verb repairs it"), `MANIFEST` (names `reset`), though `job_ending` maps the job and the
+  migration exists: delete it once no run it names is live"), `LEDGER` (`_ledger_remedy`: "No
+  migration exists: no verb repairs it"), `MANIFEST` (names `reset`), though `job_ending` maps the job and the
   landing drops run data. Action: one remedy, the landing's. **Rides with:** M17. **Re-test:**
   `git grep -n "No migration exists" -- promptpotter/shared/errors.py`.
 - **A launch refused before admission reaches a host as a task** —
@@ -232,6 +232,23 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   a JSON-RPC error carrying the refusal's `code` alone, where every other door serves its
   `application/refusal.py::Refusal`. Action: it serves the one value. **Rides with:** M2.
   **Re-test:** a refused `tasks/result` carries the same `details` as the call's `tools/call` would.
+- **A refused launch is served a second shape** — `application/jobs/quota.py::LaunchRefusal` restates
+  a `NoApiKeyError` / `HostAllowanceExhaustedError` beside `application/refusal.py::Refusal`.
+  Action: a launch's refusal is the one value. **Re-test:** `git grep -n "class LaunchRefusal" --
+  promptpotter` is empty.
+- **A released claim keeps a refusal as its sentence alone** — `jobs/launcher/admission.py` writes
+  `detail=str(exc)`, dropping the refusal's code and `details`. Action: the claim keeps the
+  `Refusal`. **Re-test:** a refused launch's released claim names its code.
+- **The REST envelope names the refusal's code `error`** — `main.py::ErrorEnvelope`'s `error` is
+  `Refusal.code` renamed at one door. Action: the envelope serves `code`, the webapp reads it.
+  **Re-test:** `git grep -n "error: str" -- promptpotter/main.py` is empty.
+- **The treatment digests hash every refusal class** — a refusal's wording or status moves potter,
+  capo and capo-pobb's digests though no prompt changed. Action: the digest closure stops at what
+  shapes a prompt. **Re-test:** a reworded `shared/errors.py` remedy leaves `offline_run.py --digests`
+  unchanged.
+- **The TS generator cuts a model's doc at its first line** — `webapp/lib/api/types.generated.ts`
+  keeps a docstring's first line, so a wrapped sentence serves half. Action: the generator keeps the
+  first paragraph. **Re-test:** a two-line docstring arrives whole.
 - **`resume --rewind/--steer` with `--max-usd` crashes with a traceback** — `resume_command.py`
   builds a fork seed's budget on the money axis it refuses; a fork has no launch-budget field
   (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload` and

@@ -247,6 +247,7 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import fo
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
+    ORIGIN_FILE,
     DatasetCard,
     ResolvedDataset,
     backend_type_of_dataset,
@@ -2763,6 +2764,23 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert built_stores.tenant_datasets.held_version("email-tagging") == held_before, (
         "a refused Start recorded a cut"
     )
+    # So is a name whose directory a crashed landing left without its definition: what files it
+    # holds never decides that the name is free.
+    crashed = built_stores.tenant_datasets.dataset_dir("crash-left")
+    write_yaml(crashed / ORIGIN_FILE, {"classify": {"instruction": "x"}})
+    built_stores.drafts.write_draft(
+        owned_draft(built_stores, uploaded.draft_id).patch(slug="crash-left")
+    )
+    with pytest.raises(SlugTakenError) as over_crash:
+        asyncio.run(
+            dispatch_start_checkin(
+                built_stores,
+                CommandCall(StartCheckinPayload(draft_id=uploaded.draft_id), "onto-crash"),
+                inline=Inline(),
+            )
+        )
+    assert over_crash.value.code == "slug_collision", "a Start landed over a crash-left name"
+    assert not (crashed / DEFINITION_FILE).is_file(), "a Start landed over a crash-left name"
     opened = asyncio.run(
         checkin_launch.open_checkin(built_stores, draft.draft_id, served, overlays=[])
     )

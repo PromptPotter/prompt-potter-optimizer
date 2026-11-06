@@ -128,13 +128,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 class ErrorEnvelope(StrictModel):
-    """What every refusal and failure answers, whatever raised it: a refusal's
-    `application/refusal.py::Refusal`, its `code` served as `error`."""
+    """What every failure answers; a refusal's is its `Refusal`, the `code` served as `error`."""
 
     error: str = Field(description="The code a client branches on.")
     message: str = Field(description="The sentence an operator reads, naming its remedy.")
     error_id: str = Field(description="Names the server log line that holds this failure.")
-    details: dict[str, Any] | None
+    details: dict[str, Any] = Field(description="The refusal's facts, by name; none for a failure.")
 
 
 app = FastAPI(
@@ -214,7 +213,7 @@ def _error_response(
             f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
             status,
         )
-    body = ErrorEnvelope(error=code, message=message, error_id=error_id, details=details or None)
+    body = ErrorEnvelope(error=code, message=message, error_id=error_id, details=details or {})
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"), headers=headers)
 
 

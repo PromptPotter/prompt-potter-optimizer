@@ -14,7 +14,6 @@ from promptpotter.application.bench.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimizer_manifest import checkin_manifest, running_prompt
-from promptpotter.config.paths import checkin_manifest_path
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import (
@@ -221,7 +220,7 @@ def checkin_template() -> OptimizerPromptTemplate:
     if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
         raise FileUnreadableError(
             FileKind.OPTIMIZER_PROMPT,
-            path=str(checkin_manifest_path()),
+            path=template.read_from,
             reason=f"unknown slot(s) {sorted(unknown)}",
         )
     return template

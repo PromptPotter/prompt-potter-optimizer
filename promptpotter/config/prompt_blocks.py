@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from pydantic import ValidationError
 
@@ -25,21 +26,40 @@ if TYPE_CHECKING:
 PACK_FILE = "pack.json"
 
 
-# Each refusal kind the shelf holds, the pack it names in `details`: what it holds but does not
-# serve, a whole pack or one snippet of the account's, while the rest of the library serves on.
+class PackRefusalKind(enum.StrEnum):
+    """Each kind the shelf holds but does not serve, a whole pack or one snippet of the account's,
+    while the rest of the library serves on: its code, and what it is. A refusal names its pack in
+    `details`."""
+
+    reason: str
+
+    def __new__(cls, code: str, reason: str) -> Self:
+        kind = str.__new__(cls, code)
+        kind._value_ = code
+        kind.reason = reason
+        return kind
+
+    INVALID = "block_pack_invalid", "its `pack.json` is no pack"
+    COLLISION = "block_pack_collision", "the install and this account both hold the name"
+    REPEATS = (
+        "block_pack_repeats",
+        "an install pack holding a text an install pack before it in name order holds",
+    )
+    SNIPPET_HELD = (
+        "block_snippet_held",
+        "one snippet of the account's pack whose text an install pack holds, which serves as that "
+        "snippet while the rest of the account's pack serves on",
+    )
+
+
 PACK_REFUSAL_KINDS = (
-    "`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and "
-    "this account both hold the name; `block_pack_repeats`: an install pack holding a text an "
-    "install pack before it in name order holds; `block_snippet_held`: one snippet of the "
-    "account's pack whose text an install pack holds, which serves as that snippet while the rest "
-    "of the account's pack serves on. One text is one snippet"
+    "; ".join(f"`{kind}`: {kind.reason}" for kind in PackRefusalKind) + ". One text is one snippet"
 )
 
 
-def _refused(name: str, code: str, reason: str) -> ConflictError:
-    return ConflictError(
-        f"block pack {name!r} is refused: {reason}", code=code, details={"pack": name}
-    )
+def _refused(kind: PackRefusalKind, name: str, said: str) -> ConflictError:
+    """Each raiser's one door: a refusal of the shelf is a row of `PackRefusalKind`."""
+    return ConflictError(said, code=kind.value, details={"pack": name})
 
 
 def _parsed(name: str, file: Path) -> BlockPack | ConflictError:
@@ -48,9 +68,10 @@ def _parsed(name: str, file: Path) -> BlockPack | ConflictError:
         return BlockPack.model_validate_json(file.read_bytes())
     except ValidationError as exc:
         return _refused(
+            PackRefusalKind.INVALID,
             name,
-            "block_pack_invalid",
-            f"its pack.json is no pack ({validation_reason(exc, shown=3)}); fix or remove it",
+            f"block pack {name!r} is refused: its pack.json is no pack "
+            f"({validation_reason(exc, shown=3)}); fix or remove it",
         )
 
 
@@ -100,9 +121,10 @@ class PackShelf:
         held = self._files(name)
         if len(held) > 1:
             return _refused(
+                PackRefusalKind.COLLISION,
                 name,
-                "block_pack_collision",
-                "the install and this account both hold a pack of this name; rename one",
+                f"block pack {name!r} is refused: the install and this account both hold a pack "
+                "of this name; rename one",
             )
         return _parsed(name, held[0])
 
@@ -119,10 +141,11 @@ class PackShelf:
                 ids = [snippet_id(s.text) for s in opened.snippets]
                 if repeated := next((i for i in ids if i in holder), None):
                     opened = _refused(
+                        PackRefusalKind.REPEATS,
                         name,
-                        "block_pack_repeats",
-                        f"its snippet {repeated} is pack {holder[repeated]!r}'s text too, "
-                        "and one text is one snippet; remove it from one",
+                        f"block pack {name!r} is refused: its snippet {repeated} is pack "
+                        f"{holder[repeated]!r}'s text too, and one text is one snippet; remove "
+                        "it from one",
                     )
                 else:
                     holder.update(dict.fromkeys(ids, name))
@@ -136,11 +159,11 @@ class PackShelf:
                 for s in opened.snippets:
                     if (sid := snippet_id(s.text)) in holder:
                         read.skipped.append(
-                            ConflictError(
+                            _refused(
+                                PackRefusalKind.SNIPPET_HELD,
+                                name,
                                 f"block pack {name!r}: its snippet {sid} is pack "
                                 f"{holder[sid]!r}'s text, so it serves as that pack's snippet",
-                                code="block_snippet_held",
-                                details={"pack": name},
                             )
                         )
                     else:
@@ -192,9 +215,10 @@ class PackShelf:
         """Where the account's own pack *name* is written, refused while the install holds that name."""
         assert self.account is not None, "a write names the account it lands in"
         if (block_packs_root() / name / PACK_FILE).is_file():
-            raise ConflictError(
+            raise _refused(
+                PackRefusalKind.COLLISION,
+                name,
                 f"the install holds a block pack named {name!r}, so this account cannot write one",
-                code="block_pack_collision",
             )
         return self.account / name / PACK_FILE
 

@@ -4,7 +4,7 @@ import asyncio
 import enum
 import logging
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any
 
@@ -121,13 +121,16 @@ class SendRefusedError(PotterError):
     ``tab`` is the Account tab its remedy lives in, as a KEY: each surface words it
     (`domain/account_words.py::refusal_words`), so no navigation wording rides the sentence."""
 
-    http_status = 422
     code = "send_refused"
     tab: AccountTab | None = None
 
     def __init__(self, message: str, *, category: ErrorCategory) -> None:
         super().__init__(message, details={"category": category})
         self.category = category
+
+    @property
+    def http_status(self) -> int:  # type: ignore[override]  # its category's row, the one holder
+        return REFUSAL_HTTP_STATUS[self.category]
 
 
 class BadRequestError(PotterError):
@@ -237,7 +240,6 @@ class CycleBusyError(PotterError):
 class NoApiKeyError(SendRefusedError):
     """Refused before the wire, so nothing is billed: neither the account nor the box holds a key."""
 
-    http_status = 422
     code = "no_api_key"
 
     def __init__(self, *, provider: str, key: str) -> None:
@@ -266,7 +268,6 @@ class HostAllowanceExhaustedError(SendRefusedError):
     """The host's coupon refuses a send that draws it: at admission, or at a send in flight, where
     it ends the run ``host_allowance``."""
 
-    http_status = 422
     code = "host_allowance_exhausted"
 
     def __init__(self, facts: str, *, reason: LaunchRefusalReason, provider: str | None) -> None:
@@ -358,63 +359,87 @@ class ServiceUnavailableError(PotterError):
     code = "service_unavailable"
 
 
-class FileKind(enum.Enum):
-    """What a file the store refuses whole IS: its code, status and remedy, said here once."""
+type Remedy = Callable[[Mapping[str, Any]], str]
 
-    def __init__(self, code: str, http_status: int, remedy: str) -> None:
+
+def _fixed(remedy: str) -> Remedy:
+    return lambda _details: remedy
+
+
+def _ledger_remedy(details: Mapping[str, Any]) -> str:
+    campaign = details["campaign_id"]
+    repair = (
+        "no verb repairs it"
+        if campaign is None
+        else f"`python -m promptpotter delete {campaign}` removes its campaign and keeps every "
+        "measurement cache"
+    )
+    return f"No migration exists: {repair}."
+
+
+class FileKind(enum.Enum):
+    """What a file the store refuses whole IS: its code, status and remedy, said here once; the
+    remedy formatted from the refusal's `details`."""
+
+    def __init__(self, code: str, http_status: int, remedy: Remedy) -> None:
         self.code = code
         self.http_status = http_status
         self.remedy = remedy
 
-    STORE = ("file_unreadable", 409, "No reader repairs it.")
+    STORE = ("file_unreadable", 409, _fixed("No reader repairs it."))
     BANK = (
         "bank_unreadable",
         409,
-        "No reader repairs it: delete it, and a dataset with a source re-fetches it on its next "
-        "start.",
+        _fixed(
+            "No reader repairs it: delete it, and a dataset with a source re-fetches it on its "
+            "next start."
+        ),
     )
-    EXPORT = ("export_unreadable", 409, "An export is disposable: re-run the cycle to export it.")
+    EXPORT = (
+        "export_unreadable",
+        409,
+        _fixed("An export is disposable: re-run the cycle to export it."),
+    )
     # Never migrated: the run data it belongs to is wiped whole.
     MANIFEST = (
         "manifest_unreadable",
         409,
-        "No migration exists: `python -m promptpotter reset` wipes it with the rest of the run "
-        "data.",
+        _fixed(
+            "No migration exists: `python -m promptpotter reset` wipes it with the rest of the "
+            "run data."
+        ),
     )
-    JOB = ("job_unreadable", 409, "No migration exists: delete it once no run it names is live.")
-    # A ledger is run data, never migrated: a line this build cannot read refuses every reader.
-    LEDGER = ("ledger_unreadable", 409, "No migration exists: no verb repairs it.")
-    CAMPAIGN_LEDGER = (
-        "ledger_unreadable",
+    JOB = (
+        "job_unreadable",
         409,
-        "No migration exists: `python -m promptpotter delete <campaign>` removes its campaign "
-        "and keeps every measurement cache.",
+        _fixed("No migration exists: delete it once no run it names is live."),
     )
+    # A ledger is run data, never migrated: a line this build cannot read refuses every reader.
+    LEDGER = ("ledger_unreadable", 409, _ledger_remedy)
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
-    STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
+    STORED_CONFIG = ("stored_config_invalid", 500, _fixed("Fix the file."))
     # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.
     OPTIMIZER_PROMPT = (
         "optimizer_prompt_invalid",
         500,
-        "Fix its template: it fills only the slots its node declares.",
+        _fixed("Fix its template: it fills only the slots its node declares."),
     )
 
 
 class FileUnreadableError(PotterError):
-    """THE refusal of a file the store refuses whole, carrying its path and its `FileKind`: no
-    reader yields its bytes as a dict or reads past them. Never a `ValueError`: a survey reads this
-    type by name and lists its one subject unreadable, and every other door answers it as itself.
-    *offset* is the line refused; ``None`` refuses the file whole."""
+    """THE refusal of a file the store refuses whole, carrying its `FileKind`: no reader yields
+    its bytes as a dict or reads past them. Never a `ValueError`: a survey reads this type by name
+    and lists its one subject unreadable, and every other door answers it as itself."""
 
-    def __init__(
-        self, kind: FileKind, *, path: str, reason: str, offset: int | None = None
-    ) -> None:
+    def __init__(self, kind: FileKind, *, path: str, reason: str) -> None:
+        self._refuse(kind, where=path, reason=reason, details={"path": path, "reason": reason})
+
+    def _refuse(self, kind: FileKind, *, where: str, reason: str, details: dict[str, Any]) -> None:
         self.kind = kind
-        where = path if offset is None else f"{path} line {offset}"
-        super().__init__(
-            f"{where} is unreadable by this build ({reason}). {kind.remedy}",
-            details={"path": path, "reason": reason}
-            | ({} if offset is None else {"offset": offset}),
+        PotterError.__init__(
+            self,
+            f"{where} is unreadable by this build ({reason}). {kind.remedy(details)}",
+            details=details,
         )
 
     @property
@@ -427,19 +452,23 @@ class FileUnreadableError(PotterError):
 
 
 class LedgerUnreadableError(FileUnreadableError):
-    """A ledger's `FileKind` row: `CAMPAIGN_LEDGER` where a campaign holds it, else `LEDGER`.
-    *offset* ``None``: the ledger lacks a record every reader of it relies on."""
+    """The `LEDGER` row: *offset* the line refused, ``None`` where the ledger lacks a record every
+    reader of it relies on; *campaign_id* the campaign holding it, which its remedy deletes."""
 
     def __init__(
         self, *, ledger: str, offset: int | None, reason: str, campaign_id: str | None
     ) -> None:
-        super().__init__(
-            FileKind.LEDGER if campaign_id is None else FileKind.CAMPAIGN_LEDGER,
-            path=ledger,
+        self._refuse(
+            FileKind.LEDGER,
+            where=ledger if offset is None else f"{ledger} line {offset}",
             reason=reason,
-            offset=offset,
+            details={
+                "ledger": ledger,
+                "offset": offset,
+                "reason": reason,
+                "campaign_id": campaign_id,
+            },
         )
-        self.details["campaign_id"] = campaign_id
 
 
 class UngeneratedRequestError(PotterError):
@@ -574,3 +603,25 @@ ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] 
     ErrorCategory.UNKNOWN: True,
 }
 assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"
+
+# What a door serves a refused send (`SendRefusedError`) as. A 4xx only where the caller's own act
+# clears it (a key, a lower ceiling); a refusal no change to the request clears is a 5xx or a
+# 429, so a client retries it rather than reading it as an invalid ask.
+REFUSAL_HTTP_STATUS: dict[ErrorCategory, int] = {
+    ErrorCategory.CLIENT: 422,
+    ErrorCategory.SERVER: 502,
+    ErrorCategory.CONNECTION: 503,
+    ErrorCategory.PROVIDER_CREDIT: 503,
+    ErrorCategory.PROVIDER_THROTTLED: 429,
+    ErrorCategory.SPEND_CEILING: 503,
+    ErrorCategory.TOKEN_CEILING: 503,
+    ErrorCategory.HOST_ALLOWANCE: 422,
+    ErrorCategory.WALL_CLOCK: 503,
+    ErrorCategory.PRICE_LIST_UNREACHABLE: 503,
+    ErrorCategory.NO_RATE: 503,
+    ErrorCategory.PIPELINE: 500,
+    ErrorCategory.HALTED: 500,
+    ErrorCategory.UNSCOREABLE: 500,
+    ErrorCategory.UNKNOWN: 500,
+}
+assert set(REFUSAL_HTTP_STATUS) == set(ErrorCategory), "every ErrorCategory must serve a status"

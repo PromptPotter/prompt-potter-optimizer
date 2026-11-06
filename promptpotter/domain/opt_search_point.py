@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator
 
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
@@ -68,6 +68,18 @@ class OptimizerPromptTemplate(StrictModel):
     instruction: str = ""
     thinking_style: str = ""
     answer_format: str = ""
+    # The manifest it was read from, which a refusal of it names; no field, so no text it renders.
+    _read_from: str | None = PrivateAttr(default=None)
+
+    @property
+    def read_from(self) -> str:
+        assert self._read_from is not None, "a running template is read from a manifest"
+        return self._read_from
+
+    def located(self, path: str) -> Self:
+        located = self.model_copy()
+        located._read_from = path
+        return located
 
     @shapes_optimizer_prompt
     def render_fields(self) -> list[tuple[str, str]]:

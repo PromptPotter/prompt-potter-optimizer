@@ -49,7 +49,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from offline_world import Router
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from starlette.types import Message, Receive, Scope, Send
 
 from promptpotter.application import account, health, site_records
@@ -97,12 +97,12 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
-from promptpotter.application.refusal import Refusal
+from promptpotter.application.refusal import Refusal, ShelfRefusal
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
-from promptpotter.config.prompt_blocks import PACK_FILE, PackShelf
+from promptpotter.config.prompt_blocks import PACK_FILE, PackRefusalKind, PackShelf
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign_config import OptimizerChoice
@@ -118,7 +118,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import JOB_ADAPTER, CampaignLaunch, Job, ScoringPass
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
     PRODUCER_STATE_INFO,
@@ -219,6 +219,7 @@ from promptpotter.presentation.cli.commands.read import cmd_read
 from promptpotter.presentation.cli.commands.result import said_text
 from promptpotter.presentation.mcp.server import _refused, refusal_result
 from promptpotter.shared.errors import (
+    REFUSAL_HTTP_STATUS,
     ConflictError,
     ContextOverflowError,
     CycleBusyError,
@@ -1858,13 +1859,36 @@ async def test_every_door_serves_a_refusal_as_one_value(
     (packs / "broken").mkdir(parents=True)
     (packs / "broken" / PACK_FILE).write_text("{}", encoding="utf-8")
     (pack,) = PackShelf(account=packs).refusals().values()
+    # A shelf refusal is served by its row: a code the table holds no row for never leaves.
+    assert ShelfRefusal.of(pack).code is PackRefusalKind.INVALID, "the shelf served a stray code"
+    with pytest.raises(ValidationError):
+        ShelfRefusal.of(ConflictError("x", code="block_pack_stray", details={"pack": "p"}))
+    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    shipped = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
     with pytest.raises(PotterError) as template:
-        validate_template("l1_generate", OptimizerPromptTemplate(instruction="{{no_such_slot}}"))
+        validate_template("l1_generate", shipped.model_copy(update={"instruction": "{{no_slot}}"}))
+    # Refused by the file it was read from, which the operator opens to fix it.
+    assert Path(template.value.details["path"]).parts[-2:] == ("potter", "pipeline.yaml"), (
+        f"a template refusal named no file: {template.value.details}"
+    )
+    ledger = LedgerUnreadableError(
+        ledger="events.jsonl", offset=3, reason="no arm", campaign_id="c1"
+    )
+    assert "`python -m promptpotter delete c1`" in str(ledger), (
+        "the ledger remedy lost its campaign"
+    )
+    assert ledger.details == {
+        "ledger": "events.jsonl",
+        "offset": 3,
+        "reason": "no arm",
+        "campaign_id": "c1",
+    }, "the ledger refusal's facts moved"
     kinds: list[PotterError] = [
+        NotFoundError("no such thing"),
         stored_config.value,
         pack,
         template.value,
-        LedgerUnreadableError(ledger="events.jsonl", offset=3, reason="no arm", campaign_id="c1"),
+        ledger,
         LedgerUnreadableError(
             ledger="events.jsonl", offset=None, reason="no head", campaign_id=None
         ),
@@ -1877,7 +1901,6 @@ async def test_every_door_serves_a_refusal_as_one_value(
     asked = Request({"type": "http", "method": "GET", "path": "/", "headers": [], "app": app})
     for refused in kinds:
         value = Refusal.of(refused).model_dump(mode="json")
-        assert value["details"], f"{refused.code} carried none of its facts"
         rest = json.loads(bytes((await potter_error_handler(asked, refused)).body))
         assert (rest["error"], rest["message"], rest["details"]) == (
             value["code"],
@@ -1906,8 +1929,18 @@ async def test_every_door_serves_a_refusal_as_one_value(
         ), f"the terminal served {refused.code} another way"
         assert said.err.startswith(f"Error: {value['message']}"), "the terminal reworded it"
 
+    # A refused send is served at its category's row: one no change to the request clears is a
+    # 5xx or a 429, which a client retries, never an invalid ask.
+    caller_clears = {ErrorCategory.CLIENT, ErrorCategory.HOST_ALLOWANCE}
+    for category in ErrorCategory:
+        sent = await potter_error_handler(asked, SendRefusedError("refused", category=category))
+        assert sent.status_code == REFUSAL_HTTP_STATUS[category], f"{category} left its row"
+        assert category in caller_clears or sent.status_code >= 500 or sent.status_code == 429, (
+            f"a {category} refusal no request change clears read as an invalid ask"
+        )
+
     # The same refused start-run over the REST route and a host's tools/call: one value.
-    run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": -1}}
+    run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
     monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "off")
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     monkeypatch.setattr(app.state, "job_registry", registry, raising=False)
@@ -1930,3 +1963,12 @@ async def test_every_door_serves_a_refusal_as_one_value(
         served["message"],
         served["details"],
     ), "a host's refused start-run carried other words or facts than the route's"
+    # A terminal flag the same model refuses is refused in that sentence, never a cast's own text.
+    for argv, sentence in (
+        (["new", "x", "--max-usd", "abc"], served["message"].removeprefix("budget.")),
+        (["noise-floor", "c1", "--k", "abc"], "a rescore count is a whole number"),
+    ):
+        monkeypatch.setattr(sys, "argv", ["promptpotter", *argv])
+        with pytest.raises(SystemExit):
+            campaign_runner.main()
+        assert sentence in capsys.readouterr().err, f"`{argv[0]}` worded its own refusal"

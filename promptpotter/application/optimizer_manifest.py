@@ -98,7 +98,8 @@ def _read_manifest(path: Path, _mtime_ns: int) -> PipelineManifest | ManifestSwi
     # Keyed on path AND mtime: an operator's edit or tenant shadow takes effect without a restart.
     if not path.is_file():
         raise FileNotFoundError(f"no optimizer manifest at {path}")
-    return AUTHORED_MANIFEST.validate_python(read_yaml(path))
+    authored = AUTHORED_MANIFEST.validate_python(read_yaml(path))
+    return authored if isinstance(authored, ManifestSwitch) else authored.read_from(str(path))
 
 
 def authored_manifest(path: Path) -> PipelineManifest | ManifestSwitch:
@@ -947,7 +948,7 @@ class CheckinManifest:
 @shapes_optimizer_prompt
 @functools.lru_cache(maxsize=2)
 def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
-    manifest = CHECKIN_MANIFEST.validate_python(read_yaml(path))
+    manifest = CHECKIN_MANIFEST.validate_python(read_yaml(path)).read_from(str(path))
     schemas = _read_schemas(checkin_assets_root() / "resolved_schemas.json")
     return CheckinManifest(manifest=manifest, schema=_parse(manifest, schemas))
 
