@@ -464,6 +464,10 @@ export interface HierarchyCampaign {
   /** Its sentences under the figures, without a value; what could not be read is
    * among them. */
   lines: Said[];
+  /** The few characters that tell it from its siblings, where a row has no room for
+   * `label`: a campaign's id suffix, a root course's origin hash, a fork's or
+   * diag's kind and tail (`f·…`, `d·…`). */
+  short_label: string;
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
@@ -610,6 +614,10 @@ export interface HierarchyCourse {
   /** Its sentences under the figures, without a value; what could not be read is
    * among them. */
   lines: Said[];
+  /** The few characters that tell it from its siblings, where a row has no room for
+   * `label`: a campaign's id suffix, a root course's origin hash, a fork's or
+   * diag's kind and tail (`f·…`, `d·…`). */
+  short_label: string;
   state: HierarchyState;
   span: HierarchySpan;
   level: 'course';
@@ -1114,6 +1122,10 @@ export interface SubtreeCampaign {
   /** Its sentences under the figures, without a value; what could not be read is
    * among them. */
   lines: Said[];
+  /** The few characters that tell it from its siblings, where a row has no room for
+   * `label`: a campaign's id suffix, a root course's origin hash, a fork's or
+   * diag's kind and tail (`f·…`, `d·…`). */
+  short_label: string;
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
@@ -1159,6 +1171,10 @@ export interface SubtreeCourse {
   /** Its sentences under the figures, without a value; what could not be read is
    * among them. */
   lines: Said[];
+  /** The few characters that tell it from its siblings, where a row has no room for
+   * `label`: a campaign's id suffix, a root course's origin hash, a fork's or
+   * diag's kind and tail (`f·…`, `d·…`). */
+  short_label: string;
   state: HierarchyState;
   span: HierarchySpan;
   level: 'course';

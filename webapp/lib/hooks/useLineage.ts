@@ -1,13 +1,19 @@
 import { useCallback, useMemo, useState } from "react";
 import { postCommand } from "@/lib/api";
-import type { HierarchyCourse, SubtreeCampaign, DisplayMetric } from "@/lib/api/types";
+import type {
+  DisplayMetric,
+  HierarchyCourse,
+  SubtreeCampaign,
+  SubtreeCourse,
+} from "@/lib/api/types";
 import {
   candidatesAtPath,
   courseAt,
   nodeOverlays,
   primaryMetric,
+  spawnParentAt,
 } from "@/lib/derivations";
-import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
+import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/state/view-memory";
@@ -39,19 +45,17 @@ interface Lineage {
   revealLane: (courseKey: string) => void;
   totalDescendants: number;
   viewedHasRounds: boolean;
-  isInheritedSibling: boolean;
-  parentId: string | null;
+  // The course the viewed fork or diag was cut from; null on a root.
+  spawnParent: SubtreeCourse | null;
   cleanup: LineageCleanup;
 }
 
 export function useLineage({
   campaignId,
-  cycleId,
   path,
   electedMetric,
 }: {
   campaignId: string | null;
-  cycleId: string | null;
   electedMetric: DisplayMetric;
   path: CyclePath | null;
 }): Lineage {
@@ -119,8 +123,7 @@ export function useLineage({
   const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, metric), [index, metric]);
 
   const viewedHasRounds = candidatesAtPath(index, path).length > 0;
-  const parentId = cycleId ? rootCycleId(cycleId) : null;
-  const isInheritedSibling = parentId != null && parentId !== cycleId;
+  const spawnParent = spawnParentAt(index, path);
 
   const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup");
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -162,8 +165,7 @@ export function useLineage({
     revealLane,
     totalDescendants: Math.max(index.courses.length - 1, 0),
     viewedHasRounds,
-    isInheritedSibling,
-    parentId,
+    spawnParent,
     cleanup,
   };
 }

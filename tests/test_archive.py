@@ -1234,6 +1234,35 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert line_course.facts.standing.changes == line_stood[0].facts.reading.changes_description, (
         "the course's standing names another pick's change than the candidate it stands"
     )
+    # Every surface names a campaign and its courses by the listing's short label; none parses an id.
+    _mint_sibling(
+        store,
+        displaced,
+        "cycle_displaced_diag_d7",
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_DIAG,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=0, arm=ArmKey(prefix[0])),
+        ),
+        cut_round=1,
+    )
+    [relisted] = list_hierarchy(
+        stores,
+        inside=(),
+        dataset=None,
+        lifecycle="all",
+        campaign_id=displaced.campaign_id,
+        attached_only=False,
+        depth=1,
+    ).entries
+    assert isinstance(relisted, HierarchyCampaign), "guard"
+    assert [relisted.short_label, *sorted(c.short_label for c in relisted.children)] == [
+        "20260101-000000",
+        "displace",
+        "d·d7",
+        "f·r1",
+    ], "a campaign, its origin, a diag or a fork is served without the label every row names it by"
 
     # ONE line resolver over a fork-of-a-fork-of-a-fork: every (course, round) reads off the course
     # owning it, as the mint records say. The trunk crowns o, a, z; the kid cuts it at 2 and holds;

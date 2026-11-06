@@ -3,6 +3,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PairwiseComparison } from "@/lib/api/types";
 import { clearReadCache } from "@/lib/read-cache";
+import { SelectionProvider } from "@/lib/SelectionContext";
+import { ThreadProvider } from "@/lib/chat/thread";
+import { IngestFlowProvider } from "@/lib/ingest-flow";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
 import { WorkspaceProvider } from "@/lib/workspace";
@@ -22,7 +25,13 @@ function view(pane: ReactNode) {
   return render(
     <AuthProvider>
       <ViewMemoryProvider>
-        <WorkspaceProvider>{pane}</WorkspaceProvider>
+        <WorkspaceProvider>
+          <ThreadProvider>
+            <IngestFlowProvider>
+              <SelectionProvider cycleId={null}>{pane}</SelectionProvider>
+            </IngestFlowProvider>
+          </ThreadProvider>
+        </WorkspaceProvider>
       </ViewMemoryProvider>
     </AuthProvider>,
   );
@@ -58,10 +67,15 @@ describe("a cells read's answer, as its panes say it", () => {
       if (path.endsWith("/sessions/active")) {
         return Response.json({ tenant_id: "t", campaign_id: "c", cycle_id: "y" });
       }
-      if (path.endsWith("/hierarchy")) {
-        const course = subtreeCourse({ address: "c::y", tags: courseTags("root", "ds") });
-        return Response.json({ entries: [subtreeCampaign({ address: "c", children: [course] })] });
-      }
+      const course = subtreeCourse({ address: "c::y", parent: "c", tags: courseTags("root", "ds") });
+      const campaign = subtreeCampaign({
+        address: "c",
+        tags: [{ kind: "dataset", value: "ds", label: "ds" }],
+        children: [course],
+      });
+      if (path.endsWith("/hierarchy")) return Response.json({ entries: [campaign] });
+      // The viewed tree: its campaign entry's tag names the dataset the cells read asks.
+      if (path.endsWith("/hierarchy/c")) return Response.json(campaign);
       return new Response(null, { status: path.endsWith("/cells") ? 403 : 404 });
     });
     const hit = pairedReading(0.1, [0.05, 0.15]);

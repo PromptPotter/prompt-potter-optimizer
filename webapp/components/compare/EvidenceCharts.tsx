@@ -11,7 +11,9 @@ import {
   type IntervalDomain,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
+import { subjectName } from "@/lib/derivations";
+import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
+import { useRegistry } from "@/lib/hooks/useRegistry";
 import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
@@ -36,10 +38,6 @@ function axisScales(title: string, stacked: boolean) {
   };
 }
 
-function seriesLabel(row: SubjectReading): string {
-  return row.kind === "campaign" ? shortId(row.label) : row.label;
-}
-
 export const EvidenceCharts = memo(function EvidenceCharts({
   evidence,
   view,
@@ -48,6 +46,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   view: CompareView;
 }) {
   useThemeVersion();
+  const { byAddress } = useRegistry();
   const cells = evidence.metric.covered_cells;
   const series = evidence.subjects;
   const axis = evidence.metric.spec.axis_label;
@@ -64,7 +63,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   }
 
   const datasets = series.map((s, i) => ({
-    label: seriesLabel(s),
+    label: subjectName(s, byAddress),
     data: cells.map((cell) => s.values[cell] ?? null),
     borderColor: seriesColor(i),
     backgroundColor: seriesColor(i),
@@ -105,6 +104,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 });
 
 export function Coverage({ evidence }: { evidence: Evidence }) {
+  const { byAddress } = useRegistry();
   const cells = evidence.metric.covered_cells;
   const gaps = evidence.subjects.some(
     (s) => s.unscorable_cells.length > 0 || s.n_cells < cells.length,
@@ -117,7 +117,7 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
       width: "minmax(10ch, 18ch)",
       cell: (s) => (
         <span className="cmp-coverage-name" title={s.key}>
-          {seriesLabel(s)}
+          {subjectName(s, byAddress)}
         </span>
       ),
     },
@@ -161,6 +161,7 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
 }
 
 function Merged({ evidence }: { evidence: Evidence }) {
+  const { byAddress } = useRegistry();
   const rows = evidence.subjects;
   const domain = intervalDomain(
     [...rows, ...rows.flatMap((r) => r.winner_chain ?? [])].flatMap((r) =>
@@ -177,7 +178,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
       {rows.map((r, i) => (
         <div key={r.key}>
           <MergedRow
-            label={seriesLabel(r)}
+            label={subjectName(r, byAddress)}
             title={r.key}
             row={r}
             metric={evidence.metric.spec}
@@ -257,6 +258,7 @@ export function SeriesLegend({
   masking: string | null;
   onMask: (address: string) => void;
 }) {
+  const { byAddress } = useRegistry();
   return (
     <ul className="cmp-legend">
       {evidence.subjects.map((s, i) => {
@@ -268,7 +270,7 @@ export function SeriesLegend({
               style={{ background: seriesVar(i) }}
               aria-hidden="true"
             />
-            <code title={s.key}>{seriesLabel(s)}</code>
+            <code title={s.key}>{subjectName(s, byAddress)}</code>
             <span className="l4-dim">{s.kind}</span>
             {s.mask?.lens && <span className="cmp-tag">masked</span>}
             {s.mask?.samples && (

@@ -857,21 +857,6 @@ fixtures.
   word, so a served coverage field is a dashboard reshape outside the wording arc. Action: served
   per-sample coverage. **Re-test:** `git grep -n "roundsCoveringSample\|fullyCovered" -- webapp`.
 
-**C. Lineage reads the served tree.**
-- **A campaign's short label is parsed three ways**: `format.ts::shortId` (`{dataset}__{rand6}`),
-  `ForestRows::shortOrigin` (`cycle_`), `ids.ts::shortFamilyTail`, used by `ComparePane::channelNames`,
-  `EvidenceCharts::seriesLabel`, `SearchpointPanels`. Action: a served short label per subject and node.
-  **Re-test:** `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
-- **`ids.ts::rootCycleId` regexes `_fork_` / `_diag_`** to give `useLineage::parentId` /
-  `isInheritedSibling` what the served tree carries. Action: read parent and spawn off the tree.
-  **Re-test:** `git grep -n "rootCycleId(" -- webapp/lib webapp/components`.
-- **`SearchpointPanels.tsx::buildSpines` walks `parent_ids[0]`** beside the served `main_line`
-  (`lineage-candidates.ts::mainLineOf` says never walk up). Action: spines from `main_line`.
-  **Re-test:** `git grep -n "parent_ids\[0\]" -- webapp/components`.
-- **`hooks/useLeafDatasetName.ts` reads a campaign pipeline for a `dataset_name`** the viewed subtree's
-  entry already tags (`application/hierarchy.py::_campaign_tags`). Action: read the tag; delete the hook.
-  **Re-test:** `git grep -n "useLeafDatasetName" -- webapp`.
-
 **D. One selection and view store.** Extends § The webapp's vanilla pass "Several doors".
 - **The picked candidate lives in two stores**, `workspace.tsx::viewedCandidateId` and
   `SelectionContext.candidate`: `useSelectNode.pick` writes both, `MeasurementRun.onSelectCandidate`,

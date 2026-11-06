@@ -8,7 +8,6 @@ import {
   fmtLift,
   fmtLiftInterval,
   fmtPValue,
-  shortId,
   sideTone,
 } from "@/lib/format";
 
@@ -73,7 +72,7 @@ function pairRow(row: PairwiseComparison): PairRow {
 }
 
 function pairColumns(names: ReadonlyMap<string, string>): Column<PairRow>[] {
-  const subject = (key: string) => <code title={key}>{names.get(key) ?? shortId(key)}</code>;
+  const subject = (key: string) => <code title={key}>{names.get(key) ?? key}</code>;
   const num = (
     id: string,
     label: string,

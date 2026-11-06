@@ -6,7 +6,7 @@ import { cx } from "@/lib/cx";
 import { Said } from "@/components/ui";
 import { ChannelDetail } from "./ChannelDetail";
 import { HeadlineBadges, HeadlineFacts, Metric, Swatch, benchLead } from "./channel-parts";
-import { shortId, type MetricFormat } from "@/lib/format";
+import type { MetricFormat } from "@/lib/format";
 import {
   channelInk,
   channelLevel,
@@ -90,7 +90,7 @@ function ChannelIdRow({
             ? headline.optimizer
             : reading && reading.kind !== "campaign"
               ? reading.label
-              : run?.label || shortId(channel.rootCampaignId)}
+              : (run?.label ?? channel.rootCampaignId)}
         </span>
         <span className="cmp-channel-sub" title={subject}>
           {reading ? `${SUBJECT_KIND_LABELS[reading.kind]} · ${reading.campaign_id}` : "nothing measured"}

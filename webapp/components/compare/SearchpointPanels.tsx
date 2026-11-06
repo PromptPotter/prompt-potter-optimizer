@@ -1,10 +1,10 @@
 import { useMemo } from "react";
-import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api/types";
+import type { Evidence, HierarchyEntry, SubjectReading } from "@/lib/api/types";
 import { CardFrame, DataTable, Empty, ReadState, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { LineageIndex } from "@/lib/derivations";
-import { pathOfAddress } from "@/lib/ids";
-import { shortId } from "@/lib/format";
+import { campaignAt, spinesOf, subjectName } from "@/lib/derivations";
+import { PLACEHOLDER } from "@/lib/format";
+import { useRegistry } from "@/lib/hooks/useRegistry";
 import { shownData } from "@/lib/hooks/useRead";
 import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
@@ -15,6 +15,7 @@ function configured(evidence: Evidence): SubjectReading[] {
 }
 
 function ConfigPanels({ evidence }: { evidence: Evidence }) {
+  const { byAddress } = useRegistry();
   const rows = configured(evidence);
 
   const differs = evidence.config_keys?.differs ?? [];
@@ -56,7 +57,7 @@ function ConfigPanels({ evidence }: { evidence: Evidence }) {
       <DataTable
         ariaLabel="Configuration by searchpoint"
         className="cmp-cfg"
-        columns={configColumns(rows, evidence.subjects)}
+        columns={configColumns(rows, evidence.subjects, byAddress)}
         groups={[
           {
             key: "differs",
@@ -90,6 +91,7 @@ interface ConfigKey {
 function configColumns(
   rows: readonly SubjectReading[],
   subjects: readonly SubjectReading[],
+  byAddress: ReadonlyMap<string, HierarchyEntry>,
 ): Column<ConfigKey>[] {
   return [
     {
@@ -112,7 +114,7 @@ function configColumns(
               style={{ background: seriesVar(subjects.indexOf(r)) }}
               aria-hidden="true"
             />
-            {r.kind === "campaign" ? shortId(r.label) : r.label}
+            {subjectName(r, byAddress)}
             <ChannelRestore subjectKey={pointKeyOf(r)} />
           </span>
         ),
@@ -131,13 +133,6 @@ function configColumns(
       }),
     ),
   ];
-}
-
-interface Spine {
-  campaignId: string;
-  cycleId: string;
-  chain: HierarchyCandidate[];
-  marked: Map<string, string[]>;
 }
 
 function AncestryPanels({ evidence }: { evidence: Evidence }) {
@@ -176,12 +171,13 @@ function CampaignSpines({
   const read = useLineageTree(campaignId, true);
   const root = shownData(read);
   const index = lineageIndexOf(root);
+  const listed = campaignAt(useRegistry().byAddress, campaignId);
 
-  const spines = useMemo(() => buildSpines(index, subjects), [index, subjects]);
+  const spines = useMemo(() => spinesOf(index, subjects), [index, subjects]);
 
   if (root === null) {
     return (
-      <ReadState read={read} subject={`${shortId(campaignId)}’s lineage`}>
+      <ReadState read={read} subject={`${listed?.short_label ?? campaignId}’s lineage`}>
         {() => null}
       </ReadState>
     );
@@ -189,7 +185,7 @@ function CampaignSpines({
   if (spines.length === 0) {
     return (
       <p className="note-info">
-        {shortId(campaignId)}: no ancestry to draw — its channels read at points the tree does not
+        {root.short_label}: no ancestry to draw — its channels read at points the tree does not
         place, which is the case for an L4 inner run in its own sandbox.
       </p>
     );
@@ -200,7 +196,7 @@ function CampaignSpines({
       {spines.map((spine) => (
         <div className="cmp-spine" key={`${spine.campaignId}|${spine.cycleId}`}>
           <span className="cmp-spine-name" title={`${spine.campaignId} / ${spine.cycleId}`}>
-            {shortId(spine.campaignId)} · {shortId(spine.cycleId)}
+            {spine.campaign?.short_label ?? PLACEHOLDER} · {spine.course?.short_label ?? PLACEHOLDER}
           </span>
           <ol className="cmp-spine-chain">
             {spine.chain.map((node) => {
@@ -235,48 +231,6 @@ function CampaignSpines({
   );
 }
 
-function buildSpines(
-  index: LineageIndex,
-  subjects: readonly SubjectReading[],
-): Spine[] {
-  const nodes = new Map<string, HierarchyCandidate>();
-  for (const cand of index.candidates) {
-    if (cand.facts.answers_for_id) nodes.set(cand.facts.individual, cand);
-  }
-
-  const chains = new Map<string, { chain: HierarchyCandidate[]; marked: Map<string, string[]> }>();
-  for (const s of subjects) {
-    const head = nodes.get(s.candidate_id);
-    if (!head) continue;
-    const chain: HierarchyCandidate[] = [];
-    const seen = new Set<string>();
-    let cursor: HierarchyCandidate | undefined = head;
-    while (cursor && !seen.has(cursor.facts.individual)) {
-      seen.add(cursor.facts.individual);
-      chain.unshift(cursor);
-      const parent: string | undefined = cursor.facts.parent_ids[0];
-      cursor = parent ? nodes.get(parent) : undefined;
-    }
-    const rootId = chain[0]?.facts.individual ?? s.candidate_id;
-    const prior = chains.get(rootId);
-    const merged = !prior || chain.length > prior.chain.length ? chain : prior.chain;
-    const marked = prior?.marked ?? new Map<string, string[]>();
-    marked.set(s.candidate_id, [...(marked.get(s.candidate_id) ?? []), s.label]);
-    chains.set(rootId, { chain: merged, marked });
-  }
-
-  return [...chains.values()].map(({ chain, marked }) => {
-    const head = chain.at(-1);
-    const leaf = head ? pathOfAddress(head.address).at(-1) : undefined;
-    return {
-      campaignId: leaf?.campaignId ?? "",
-      cycleId: leaf?.cycleId ?? "",
-      chain,
-      marked,
-    };
-  });
-}
-
 export function SearchpointCards({ evidence }: { evidence: Evidence }) {
   return (
     <>
@@ -285,7 +239,7 @@ export function SearchpointCards({ evidence }: { evidence: Evidence }) {
       </CardFrame>
       <CardFrame title="How we got here" headingTag="h2">
         <p className="note-lede">
-          The parent chain to each point. Two points on one chain share a spine — the shorter one
+          The main line to each point. Two points on one chain share a spine — the shorter one
           is a prefix of the longer, so both are marked on the same line rather than drawn twice.
         </p>
         <AncestryPanels evidence={evidence} />

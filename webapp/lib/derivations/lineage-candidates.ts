@@ -2,15 +2,17 @@ import type {
   GeneSource,
   HierarchyCandidate,
   HierarchyCourse,
+  HierarchyEntry,
   LineageNode,
+  SubjectReading,
   SubtreeCampaign,
   SubtreeCourse,
   SubtreeEntry,
   DisplayMetric,
 } from "@/lib/api/types";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
-import { tagValue } from "./hierarchy";
-import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { campaignAt, tagValue } from "./hierarchy";
+import { courseAddressOf, encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import { metricLevel } from "./headline-stats";
 
 export interface RetiredGroup {
@@ -75,10 +77,39 @@ export function courseAt(index: LineageIndex, path: CyclePath | null): SubtreeCo
   return entry?.level === "course" ? entry : null;
 }
 
-function courseOf(index: LineageIndex, node: LineageNode): SubtreeCourse | null {
+export function courseOf(index: LineageIndex, node: LineageNode): SubtreeCourse | null {
   if (node.level === "course") return node;
   const entry = index.byAddress.get(courseAddressOf(node.address));
   return entry?.level === "course" ? entry : null;
+}
+
+// A course's campaign is its served `parent`.
+export function campaignOf(index: LineageIndex, course: SubtreeCourse | null): SubtreeCampaign | null {
+  const entry = course?.parent ? index.byAddress.get(course.parent) : undefined;
+  return entry?.level === "campaign" ? entry : null;
+}
+
+// The dataset the course at *path* measures: its campaign's served `dataset` tag.
+export function datasetAt(index: LineageIndex, path: CyclePath | null): string | null {
+  return tagValue(campaignOf(index, courseAt(index, path)), "dataset");
+}
+
+// The course a fork or diag at *path* was cut from, off its served spawn; null on a root.
+export function spawnParentAt(index: LineageIndex, path: CyclePath | null): SubtreeCourse | null {
+  const spawn = courseAt(index, path)?.facts.spawn;
+  const entry = spawn ? index.byAddress.get(spawn.parent) : undefined;
+  return entry?.level === "course" ? entry : null;
+}
+
+// What a compare surface names a subject: a listed campaign by its entry's short label, every
+// other subject (and a sandbox's campaign, which no listing holds) by the label its reading serves.
+export function subjectName(
+  s: SubjectReading,
+  byAddress: ReadonlyMap<string, HierarchyEntry>,
+): string {
+  const listed =
+    s.kind === "campaign" && s.inside.length === 0 ? campaignAt(byAddress, s.campaign_id) : null;
+  return listed === null ? s.label : listed.short_label;
 }
 
 function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
@@ -125,6 +156,52 @@ export function mainLineOf(index: LineageIndex, head: HierarchyCandidate): LineS
       const node = candidateAt(index, address);
       return node ? [{ kind: "step", node }] : [];
     });
+  });
+}
+
+export interface Spine {
+  campaignId: string;
+  cycleId: string;
+  // The course of the spine's head and its campaign, as the tree serves them.
+  course: SubtreeCourse | null;
+  campaign: SubtreeCampaign | null;
+  // The served main line to the head, origin first; a held round adds no point.
+  chain: HierarchyCandidate[];
+  // The subject labels marked on each individual of the chain.
+  marked: Map<string, string[]>;
+}
+
+// One spine per main line the subjects read on: a subject on a prefix of a longer one is marked
+// on it, never drawn twice.
+export function spinesOf(index: LineageIndex, subjects: readonly SubjectReading[]): Spine[] {
+  const nodes = new Map<string, HierarchyCandidate>();
+  for (const cand of index.candidates) {
+    if (cand.facts.answers_for_id) nodes.set(cand.facts.individual, cand);
+  }
+  const chains = new Map<string, { chain: HierarchyCandidate[]; marked: Map<string, string[]> }>();
+  for (const s of subjects) {
+    const head = nodes.get(s.candidate_id);
+    if (!head) continue;
+    const chain = mainLineOf(index, head).flatMap((step) => (step.kind === "step" ? [step.node] : []));
+    const rootId = chain[0]?.facts.individual ?? s.candidate_id;
+    const prior = chains.get(rootId);
+    const merged = !prior || chain.length > prior.chain.length ? chain : prior.chain;
+    const marked = prior?.marked ?? new Map<string, string[]>();
+    marked.set(s.candidate_id, [...(marked.get(s.candidate_id) ?? []), s.label]);
+    chains.set(rootId, { chain: merged, marked });
+  }
+  return [...chains.values()].map(({ chain, marked }) => {
+    const head = chain.at(-1);
+    const leaf = head ? pathOfAddress(head.address).at(-1) : undefined;
+    const course = head ? courseOf(index, head) : null;
+    return {
+      campaignId: leaf?.campaignId ?? "",
+      cycleId: leaf?.cycleId ?? "",
+      course,
+      campaign: campaignOf(index, course),
+      chain,
+      marked,
+    };
   });
 }
 

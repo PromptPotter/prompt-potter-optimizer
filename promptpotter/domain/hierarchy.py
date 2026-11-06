@@ -394,6 +394,11 @@ class _HierarchyEntry(_HierarchyNode):
 class _RunEntry(_HierarchyEntry):
     """What only a level with a run of its own carries."""
 
+    short_label: str = Field(
+        description="The few characters that tell it from its siblings, where a row has no room "
+        "for `label`: a campaign's id suffix, a root course's origin hash, a fork's or diag's "
+        "kind and tail (`f·…`, `d·…`)."
+    )
     state: HierarchyState
     span: HierarchySpan
 

@@ -87,7 +87,6 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const { metric, forkedFrom, revealLane, setShowForest, totalDescendants } = useLineage({
     campaignId,
-    cycleId,
     path: viewedPath,
     electedMetric,
   });

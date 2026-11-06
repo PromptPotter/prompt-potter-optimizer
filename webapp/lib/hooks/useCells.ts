@@ -6,7 +6,8 @@ import { useViewedDashboard } from "../poll";
 import type { ReadResult } from "../read-cache";
 import { createModuleStore } from "../state/module-store";
 import { useMomentAt, useWorkspace } from "../workspace";
-import { useLeafDatasetName } from "./useLeafDatasetName";
+import { datasetAt } from "../derivations";
+import { useViewedLineage } from "../lineage";
 import { useRead } from "./useRead";
 
 // The roster's controls. `rankedBy` moves on click, while every LABEL names the served `order`
@@ -43,9 +44,9 @@ interface Cells {
 export function useCells(preset: CellsPreset | null, status?: CellStatus): Cells {
   const { viewedPath } = useWorkspace();
   const { scope, rankedBy } = useCellsView();
-  const leafDatasetName = useLeafDatasetName();
+  const viewedDatasetName = datasetAt(useViewedLineage().index, viewedPath);
   const path = preset?.path ?? viewedPath;
-  const datasetName = preset?.datasetName ?? leafDatasetName;
+  const datasetName = preset?.datasetName ?? viewedDatasetName;
   const at = useMomentAt(path);
   // The dashboard's liveness is the VIEWED unit's; a preset on another one does not poll.
   const { isLive } = useViewedDashboard();

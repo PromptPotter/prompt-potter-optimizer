@@ -16,7 +16,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
 import { selectedNodeOf } from "@/lib/derivations";
-import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
+import { encodeCyclePath, pathLeaf, pathOfAddress } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { useLineage } from "@/lib/hooks/useLineage";
@@ -35,12 +35,7 @@ export function ForestCard() {
 }
 
 function ReadForestCard({ dash }: { dash: ServedDashboard }) {
-  const {
-    campaignId,
-    cycleId,
-    viewedPath,
-    navigate,
-  } = useWorkspace();
+  const { campaignId, viewedPath, navigate } = useWorkspace();
   const { candidate, setSelectionForCandidate } = useSelection();
   const selection = useViewedCourse()?.facts.standing?.selection ?? null;
   const {
@@ -53,12 +48,10 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     setShowForest,
     totalDescendants,
     viewedHasRounds,
-    isInheritedSibling,
-    parentId,
+    spawnParent,
     cleanup,
   } = useLineage({
     campaignId,
-    cycleId,
     path: viewedPath,
     electedMetric: dash.display_metric,
   });
@@ -135,21 +128,17 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
         </div>
         {!viewedHasRounds && (
           <Empty className="lineage-empty">
-            {isInheritedSibling && parentId ? (
+            {spawnParent ? (
               <>
                 inherited from{" "}
-                {campaignId ? (
-                  <button
-                    type="button"
-                    className="lineage-inherit-link"
-                    onClick={() => navigate({ path: [{ campaignId, cycleId: parentId }] })}
-                    title={`Switch to ${parentId}`}
-                  >
-                    {shortFamilyTail(parentId) || parentId}
-                  </button>
-                ) : (
-                  <span>{shortFamilyTail(parentId) || parentId}</span>
-                )}
+                <button
+                  type="button"
+                  className="lineage-inherit-link"
+                  onClick={() => navigate({ path: pathOfAddress(spawnParent.address) })}
+                  title={`Switch to ${pathLeaf(pathOfAddress(spawnParent.address)).cycleId}`}
+                >
+                  {spawnParent.short_label}
+                </button>
                 {selection ? ` · selection ${selection.label}` : ""}
                 {" · no new rounds yet"}
               </>

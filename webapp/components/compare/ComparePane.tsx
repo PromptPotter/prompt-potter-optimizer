@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Evidence, HierarchyCourse, SubjectReading, MeasuredLift } from "@/lib/api/types";
+import type { Evidence, HierarchyCourse, HierarchyEntry, SubjectReading, MeasuredLift } from "@/lib/api/types";
 import {
   CardFrame,
   DataTable,
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import { campaignAt, readPaired } from "@/lib/derivations";
+import { campaignAt, readPaired, subjectName } from "@/lib/derivations";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import { shownData } from "@/lib/hooks/useRead";
@@ -25,7 +25,6 @@ import {
   fmtSigned,
   fmtUnit,
   PLACEHOLDER,
-  shortId,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
 import { PairedLift } from "@/components/shell/PairedLift";
@@ -48,12 +47,6 @@ const VIEWS: readonly { value: CompareView; label: string; title: string }[] = [
     title: "Cells merged: one estimate per subject, with its 95% interval",
   },
 ];
-
-function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, string> {
-  return new Map(
-    subjects.map((s) => [s.key, s.kind === "campaign" ? shortId(s.label) : s.label]),
-  );
-}
 
 export function ComparePane() {
   const { channels, subjects: selected, replace } = useCompareSelection();
@@ -107,7 +100,10 @@ export function ComparePane() {
 
   const comparability = evidence?.comparability ?? null;
   const readable = !!evidence && evidence.subjects_read > 0;
-  const names = useMemo(() => channelNames(evidence?.subjects ?? []), [evidence?.subjects]);
+  const names = useMemo(
+    () => new Map((evidence?.subjects ?? []).map((s) => [s.key, subjectName(s, byAddress)])),
+    [evidence?.subjects, byAddress],
+  );
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;
   if (masking !== null && evidence && maskTarget === null) setMasking(null);
@@ -497,6 +493,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
 }
 
 function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: number }) {
+  const { byAddress } = useRegistry();
   const m = evidence.metric;
   if (!evidence.ranking_computed) {
     return (
@@ -528,7 +525,7 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
     <>
       <DataTable
         ariaLabel="Edits ranked over their origin"
-        columns={rankColumns(m.spec.label)}
+        columns={rankColumns(m.spec.label, byAddress)}
         rows={rows}
         getRowId={({ row }) => `${row.campaign_id}/${row.sp_hash}`}
       />
@@ -549,7 +546,10 @@ interface RankedEdit {
   cells: number | null;
 }
 
-function rankColumns(label: string): Column<RankedEdit>[] {
+function rankColumns(
+  label: string,
+  byAddress: ReadonlyMap<string, HierarchyEntry>,
+): Column<RankedEdit>[] {
   return [
     {
       id: "rank",
@@ -565,7 +565,10 @@ function rankColumns(label: string): Column<RankedEdit>[] {
       cell: ({ row }) => (
         <span className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
           <code>{row.sp_hash}</code> {row.label}
-          <span className="l4-dim"> {shortId(row.campaign_id)}</span>
+          <span className="l4-dim">
+            {" "}
+            {campaignAt(byAddress, row.campaign_id)?.short_label ?? row.campaign_id}
+          </span>
         </span>
       ),
     },

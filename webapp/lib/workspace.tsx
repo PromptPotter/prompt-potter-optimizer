@@ -31,7 +31,7 @@ import {
 } from "./address";
 import type { ListedCampaign } from "@/lib/api/types";
 import { GONE_NOTICE_MS } from "./cadence";
-import { hasTag, tagValue } from "./derivations/hierarchy";
+import { hasTag } from "./derivations/hierarchy";
 import { useActivePointer, useCampaign, useEntry, useRegistry } from "./hooks/useRegistry";
 import { useViewMemory } from "./state/view-memory";
 
@@ -85,13 +85,6 @@ export function useViewedNode(): SelectedNode | null {
 // An inner run is absent from the listing and correctly reads false.
 export function useLeafIsL4(): boolean {
   return hasTag(useEntry(useWorkspace().leafCampaignId), "self_optimization");
-}
-
-// The ROOT hop's dataset; a drilled-in leaf's is `useLeafDatasetName`.
-export function useViewedDatasetName(): string | null {
-  const { campaignId, cycleId } = useWorkspace();
-  const root = campaignId && cycleId ? encodeCyclePath([{ campaignId, cycleId }]) : null;
-  return tagValue(useEntry(root), "dataset");
 }
 
 // The viewed subject's listing: a check-in's unstarted campaign by its draft id, else the run's

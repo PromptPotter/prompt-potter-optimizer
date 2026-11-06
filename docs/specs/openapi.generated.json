@@ -7936,6 +7936,11 @@
             "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
             "title": "Parent"
           },
+          "short_label": {
+            "description": "The few characters that tell it from its siblings, where a row has no room for `label`: a campaign's id suffix, a root course's origin hash, a fork's or diag's kind and tail (`f·…`, `d·…`).",
+            "title": "Short Label",
+            "type": "string"
+          },
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
           },
@@ -7957,6 +7962,7 @@
           "tags",
           "figures",
           "lines",
+          "short_label",
           "state",
           "span",
           "facts",
@@ -8117,6 +8123,11 @@
             ],
             "description": "The run's pinned line from what no clock reads (`run_said`): a producer's row is its dashboard's alone. Null where nothing needs the operator."
           },
+          "short_label": {
+            "description": "The few characters that tell it from its siblings, where a row has no room for `label`: a campaign's id suffix, a root course's origin hash, a fork's or diag's kind and tail (`f·…`, `d·…`).",
+            "title": "Short Label",
+            "type": "string"
+          },
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
           },
@@ -8138,6 +8149,7 @@
           "tags",
           "figures",
           "lines",
+          "short_label",
           "state",
           "span",
           "facts",
@@ -16544,6 +16556,11 @@
             "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
             "title": "Parent"
           },
+          "short_label": {
+            "description": "The few characters that tell it from its siblings, where a row has no room for `label`: a campaign's id suffix, a root course's origin hash, a fork's or diag's kind and tail (`f·…`, `d·…`).",
+            "title": "Short Label",
+            "type": "string"
+          },
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
           },
@@ -16565,6 +16582,7 @@
           "tags",
           "figures",
           "lines",
+          "short_label",
           "state",
           "span",
           "facts",
@@ -16730,6 +16748,11 @@
             ],
             "description": "The run's pinned line from what no clock reads (`run_said`): a producer's row is its dashboard's alone. Null where nothing needs the operator."
           },
+          "short_label": {
+            "description": "The few characters that tell it from its siblings, where a row has no room for `label`: a campaign's id suffix, a root course's origin hash, a fork's or diag's kind and tail (`f·…`, `d·…`).",
+            "title": "Short Label",
+            "type": "string"
+          },
           "span": {
             "$ref": "#/components/schemas/HierarchySpan"
           },
@@ -16751,6 +16774,7 @@
           "tags",
           "figures",
           "lines",
+          "short_label",
           "state",
           "span",
           "facts",

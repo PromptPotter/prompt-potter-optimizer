@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_LINEAGE, type CompareItem } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 import { clearReadCache } from "@/lib/read-cache";
+import { SelectionProvider } from "@/lib/SelectionContext";
+import { ThreadProvider } from "@/lib/chat/thread";
+import { IngestFlowProvider } from "@/lib/ingest-flow";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
 import { WorkspaceProvider } from "@/lib/workspace";
@@ -44,7 +47,13 @@ function wrapper({ children }: { children: ReactNode }) {
     <AuthProvider>
       <ViewMemoryProvider>
         <WorkspaceProvider>
-          <ScenarioEditsProvider value={EDITING}>{children}</ScenarioEditsProvider>
+          <ThreadProvider>
+            <IngestFlowProvider>
+              <SelectionProvider cycleId={null}>
+                <ScenarioEditsProvider value={EDITING}>{children}</ScenarioEditsProvider>
+              </SelectionProvider>
+            </IngestFlowProvider>
+          </ThreadProvider>
         </WorkspaceProvider>
       </ViewMemoryProvider>
     </AuthProvider>
