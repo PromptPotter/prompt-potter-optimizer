@@ -10,6 +10,7 @@ import {
   summaryRound,
 } from "@/lib/test-fixtures";
 import { groupByRound, liveCandidate, liveCandidates, roundCandidates } from "../round-candidates";
+import { roundReading } from "../round-reading";
 
 describe("liveCandidates", () => {
   it("returns the same reference on the no-candidate path", () => {
@@ -43,7 +44,6 @@ describe("liveCandidate key join", () => {
     expect(liveCandidate(d, "C2.2")).toBeNull();
   });
 });
-import { roundReading } from "../round-reading";
 
 function l2Terminal() {
   const scoredRound = (round: number, crowned: string | null) =>

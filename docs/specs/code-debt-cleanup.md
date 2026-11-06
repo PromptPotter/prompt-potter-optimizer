@@ -781,14 +781,14 @@ import-graph script before and after; close each wave with `gate.py --only layer
 - **The Vite build leaves four things standing**:
   - The derivations barrel still reaches `hooks/useRead` at runtime: `connector-state.ts::nodeSchemaReading`
     reads a `ReadResult`, so it is no reading of served data; it moves to the pipeline read's hook,
-    re-pointing its four importers. No chunk moves with it: `app/mount.tsx`'s auth provider already
+    re-pointing its importers (`git grep -l "nodeSchemaReading" -- webapp/components`). No chunk moves with it: `app/mount.tsx`'s auth provider already
     puts `api/client`, `read-cache` and `api/reads` in the chunk every page loads.
   - Babel (React Compiler) is about 90% of build time (a build with `@rolldown/plugin-babel` dropped
     takes a tenth as long).
   - The main entry chunk exceeds 500 kB.
-  - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank`, `@next/next/*`.
+  - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank` (`@next/next/*` died with Next). They come back with the `eslint-plugin-react` devDependency, whose 7.37.5 takes minimatch `^3.1.2`.
 - **minimatch alert #171** (dev-scope, lint-time only): no eslint / `@eslint/eslintrc` / jsx-a11y /
-  typescript-estree release takes minimatch >= 11.0.1. **Rides with:** the first eslint / ts-eslint / jsx-a11y
+  typescript-estree release takes minimatch >= 11.0.1, and `eslint-plugin-react` 7.37.5 takes `^3.1.2`. **Rides with:** the first eslint / ts-eslint / jsx-a11y
   release on minimatch >= 11.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
@@ -1083,6 +1083,17 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
   and displacing what stood past it — that `ledger_scan.py::_Standing.feed` splits again. Action:
   two records, or one whose displacement is its own field. **Rides with:** the `arc/records` arc.
   **Re-test:** `git grep -n "rewound" -- promptpotter/domain/run_records.py`.
+- **Two `--staged` checks queue only because their caches land where a sibling gate reads them**:
+  eslint's `--cache` writes `webapp/.eslintcache` (CI restores it in `ci.yml`'s `actions/cache`
+  step), and `webapp/tsconfig.json`'s `incremental` writes `tsconfig.tsbuildinfo`, each in the tree a
+  sibling gate's `eslint` / `tsc` reads, so neither check is `gate.py::Check.light`. Action: each
+  cache writes only on change, or outside the tracked tree, and the two go light. **Re-test:**
+  `git grep -n -A3 '"eslint"' -- scripts/gate.py` names `light=True`.
+- **The scripts' writer and the store's are two**: `scripts/processes.py::replace_changed` carries
+  the bounded `PermissionError` retry `store/io.py::_atomic_replace` carries, because the gate's
+  stdlib-only interpreter imports no `promptpotter`. Action: one owner both import, or the decision
+  that keeps them two. **Re-test:** `git grep -c "except PermissionError" -- scripts/processes.py
+  promptpotter/infrastructure/store/io.py` sums to 1.
 
 ### The origin gate (batch-2 reviews, 2026-11-05)
 

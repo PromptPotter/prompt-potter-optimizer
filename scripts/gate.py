@@ -41,6 +41,7 @@ from processes import (
     metered,
     open_job,
     queue_behind_siblings,
+    replace_changed,
     run,
 )
 
@@ -107,13 +108,27 @@ def _node(exe: str, *args: str) -> list[str]:
     return [shutil.which(exe) or exe, *args]
 
 
-def _snapshot(paths: Sequence[str]) -> list[bytes | None]:
+# A file as a regenerator leaves it: its bytes, and the inode and mtime a rewrite moves.
+_Written = tuple[bytes, int, int] | None
+
+
+def _snapshot(paths: Sequence[str]) -> list[_Written]:
     # Prior CONTENT, never the index: a model edit leaves the regenerated file right but unstaged.
-    return [(REPO / p).read_bytes() if (REPO / p).exists() else None for p in paths]
+    def written(path: Path) -> _Written:
+        with contextlib.suppress(FileNotFoundError):
+            held = path.stat()
+            return path.read_bytes(), held.st_ino, held.st_mtime_ns
+        return None
+
+    return [written(REPO / p) for p in paths]
 
 
-def _stale(paths: Sequence[str], before: Sequence[bytes | None]) -> Outcome:
-    stale = [p for p, now, was in zip(paths, _snapshot(paths), before, strict=True) if now != was]
+def _stale(paths: Sequence[str], before: Sequence[_Written]) -> Outcome:
+    moved = [(p, now, was) for p, now, was in zip(paths, _snapshot(paths), before, strict=True)]
+    stale = [p for p, now, was in moved if now != was]
+    # Equal bytes written anew: a `light` regenerator writes nothing when green.
+    if rewritten := [p for p, now, was in moved if now and was and now != was and now[0] == was[0]]:
+        return 1, f"{', '.join(rewritten)} rewritten unchanged — write through `replace_changed`."
     if stale:
         return 1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm."
     return 0, ""
@@ -845,9 +860,25 @@ def _eslint(sel: Selection) -> Outcome:
 
 # Potter's straight leg of the offline run: the campaigns `walk` serves a copy of (`e2e/walk_world.py`).
 _WALK_WORLD = clone_cache() / OFFLINE_RUN / "potter"
+# What each `builds` check built carries the key that built it, filed by the built path: the world
+# is the clone's and one per clone, `webapp/out` is each tree's own.
+_BUILT_KEYS = clone_cache() / "built"
 
 
 def _playwright(_sel: Selection) -> Outcome:
+    # The walk world is an input, never a check this one brings along: a world built from other
+    # sources (a sibling worktree's) or none at all refuses.
+    builder = next(c for c in CHECKS if c.name == OFFLINE_RUN)
+    store = LastGreen.open()
+    if not _WALK_WORLD.is_dir():
+        refused = "missing"
+    elif store is not None and not builder.built(builder.key(store)):
+        refused = "built from other sources"
+    else:
+        refused = ""
+    if refused:
+        build = f"python scripts/gate.py --only {OFFLINE_RUN}"
+        return 1, f"the walk world {_WALK_WORLD} is {refused}: run `{build}` first."
     # `spend` costs real money; an empty `PP_E2E_BASE_URL` keeps a desk's server out of the walk.
     projects = ("--project=cold", "--project=walk")
     world = {"PP_E2E_WALK_WORLD": str(_WALK_WORLD), "PP_E2E_BASE_URL": ""}
@@ -993,13 +1024,14 @@ class Check:
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak is more than any lane beside it leaves free.
     alone: bool = False
-    # The checks that build what it reads: earlier in its lane, or in a lane before an `alone`
-    # check; brought along by a selection that leaves them out (`--only`, `--web`).
-    after: tuple[str, ...] = ()
+    # The check of its own kind that builds what it reads: earlier in its lane, and brought along by
+    # `--only`. What another kind builds is an input, never brought along: a kind's selection holds
+    # only its kind's checks.
+    after: str = ""
     # Empty is its kind's prefixes; `!prefix` is everything outside one. A callable is derived at
     # first use, so importing the gate parses nothing.
     reads: tuple[str, ...] | Callable[[], tuple[str, ...]] = ()
-    # A file it BUILDS: its verdict is kept only while that file stands.
+    # A path it BUILDS: its verdict is kept only while that path stands, stamped with the key asked.
     builds: str = ""
     # Directories it reads of what its `after` built; their content is in its key.
     product: tuple[str, ...] = ()
@@ -1018,8 +1050,21 @@ class Check:
             return None
         return digest(store.key(prefixes, self.product).encode()).hex()
 
+    def stamp(self) -> Path:
+        built = str((REPO / self.builds).resolve())
+        return _BUILT_KEYS / f"{self.name}-{digest(built.encode()).hex()[:16]}"
+
+    def built(self, key: str | None) -> bool:
+        """What it builds stands, and was built from the sources *key* names."""
+        if key is None or not (REPO / self.builds).exists():
+            return False
+        try:
+            return self.stamp().read_text(encoding="utf-8") == key
+        except FileNotFoundError:
+            return False
+
     def kept(self, store: LastGreen, key: str | None) -> bool:
-        standing = not self.builds or (REPO / self.builds).exists()
+        standing = not self.builds or self.built(key)
         return key is not None and standing and store.holds(self.name, key)
 
 
@@ -1327,7 +1372,7 @@ CHECKS: tuple[Check, ...] = (
         _playwright,
         landing=True,
         alone=True,
-        after=("vite-build", OFFLINE_RUN),
+        after="vite-build",
         product=("webapp/out",),
         # Both servers' backend is the offline world's (`e2e/serve_app.py`); the walk world is
         # keyed on what made it, the offline run's sources.
@@ -1338,9 +1383,9 @@ CHECKS: tuple[Check, ...] = (
     Check("advisories", "release", _advisories),
 )
 # A lane runs in this order, so what a check reads is built before it.
-assert all(
-    any(b.name == name for b in CHECKS[:i]) for i, c in enumerate(CHECKS) for name in c.after
-)
+assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)
+# A kind's selection holds only its kind's checks.
+assert all(b.kind == c.kind for c in CHECKS for b in CHECKS if b.name == c.after)
 
 
 @dataclass(frozen=True)
@@ -1365,6 +1410,15 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     return result if result.kept else dataclasses.replace(result, peak_mb=peak)
 
 
+def _unstamp(check: Check, store: LastGreen | None, key: str | None) -> None:
+    """Before a rebuild: what another key built goes, so no tool keeps it as its own green."""
+    foreign = store is not None and not check.built(key)
+    check.stamp().unlink(missing_ok=True)
+    built = REPO / check.builds
+    if foreign and built.is_dir():
+        shutil.rmtree(built)
+
+
 def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     began = time.monotonic()
     try:
@@ -1374,12 +1428,17 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
         if sel.changed is not None and check.narrow is not None:
             mine = [path for path in sel.changed if reads(path, check.inputs() or ())]
             sel = dataclasses.replace(sel, narrowed=check.narrow(mine))
+        if check.builds:
+            _unstamp(check, store, key)
         rc, out = check.run(sel)
         narrowed = sel.narrowed is not None or sel.staged
         if narrowed or (store is not None and check.key(store) != key):
             key = (
                 None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
             )
+        if check.builds and not rc and key is not None:
+            check.stamp().parent.mkdir(parents=True, exist_ok=True)
+            replace_changed(check.stamp(), key)
     except Exception as exc:  # a broken check is a red check, never a silent skip
         logger.exception("check %s raised", check.name)
         rc, out, key = 1, f"{type(exc).__name__}: {exc}", None
@@ -1664,15 +1723,12 @@ def main() -> int:
             if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
         ]
     if not args.staged:
-        # `--only playwright` brings `vite-build` and `offline-run` along, so it never reads a build
-        # or a world older than its sources.
+        # `--only playwright` brings `vite-build` along, so it never reads a build older than its sources.
         named = {c.name: c for c in CHECKS}
-        due = list(checks)
-        while due:
-            for builder in (named[name] for name in due.pop().after):
-                if builder not in checks:
-                    checks.append(builder)
-                    due.append(builder)
+        for check in list(checks):
+            while check.after and named[check.after] not in checks:
+                check = named[check.after]
+                checks.append(check)
     checks.sort(key=CHECKS.index)
     if args.push:
         # Before any re-exec: each checkout pins its own, and a path pinned here would name this tree.

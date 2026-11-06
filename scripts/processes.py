@@ -258,7 +258,16 @@ def replace_changed(path: Path, content: str) -> bool:
     staged = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         staged.write_bytes(data)
-        os.replace(staged, path)
+        # Retried as `store/io.py::_atomic_replace` is: Windows fails with WinError 5 while a reader
+        # holds the destination.
+        for attempt in range(3):
+            try:
+                os.replace(staged, path)
+                break
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.1)
     finally:
         staged.unlink(missing_ok=True)
     return True

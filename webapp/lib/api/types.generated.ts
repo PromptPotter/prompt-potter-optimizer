@@ -21,7 +21,8 @@ export interface HealthResponse {
   version: string;
 }
 
-/** The caller's identity envelope, with the provider and consent state the account and consent gates read. */
+/** The caller's identity envelope, with the provider and consent state the account and consent gates
+ * read. */
 export interface MeResponse {
   user_id: string;
   tenant_id: string;
@@ -346,7 +347,8 @@ export interface OptimizerEntry {
   origin: string | null;
 }
 
-/** Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike. */
+/** Every snippet the account reads: the install's packs beside its own, for target and optimizer
+ * prompts alike. */
 export interface LibraryResponse {
   /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
   parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
@@ -401,7 +403,8 @@ export interface LibrarySnippet {
   author: string | null;
 }
 
-/** What the shelf holds but does not serve, a whole pack or one snippet of the account's: the */
+/** What the shelf holds but does not serve, a whole pack or one snippet of the account's: the rest of
+ * the library serves on without it. */
 export interface PackRefusal {
   /** Its directory name, as a `packs` knob names it */
   name: string;
@@ -977,7 +980,8 @@ export interface LiftCost {
   absent: 'no_lift' | 'unpriced_tokens' | 'zero_spend' | null;
 }
 
-/** One dataset's rows of a bench spanning several, read apart: a level is never averaged */
+/** One dataset's rows of a bench spanning several, read apart: a level is never averaged across
+ * datasets. */
 export interface BenchScope {
   /** The dataset these rows measure; `None` is the one the cycle is filed under. */
   dataset: string | null;
@@ -1014,7 +1018,8 @@ export interface CourseClimb {
   note: Said;
 }
 
-/** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
+/** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, line
+ * or run. Its `address` is the draft id Start mints from and `discard-draft` deletes. */
 export interface UnstartedCampaign {
   /** Server-minted and stable: the key of every row and every open set. A course's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
@@ -1529,7 +1534,12 @@ export interface LineageDivergence {
   alternative_candidate_id: string | null;
 }
 
-/** A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the */
+/** A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the serving seam
+ * can say — the run phase and its producer, the controls armed now, the campaign's own meter, and
+ * every reading a surface would otherwise decide for itself. Nothing here reaches disk, and every
+ * field is required: one builder (``_serve``) states them all, for the head and for a replay
+ * alike. What the banked state holds as an INPUT to one of those readings
+ * (``LiveDashboardState``'s own fields) is not served beside it. */
 export interface ServedDashboard {
   at_offset: number;
   langfuse_trace_url: string | null;
@@ -1675,7 +1685,8 @@ export interface RoundHealth {
   reading: HealthReading | null;
 }
 
-/** A graded cause in words, read off the facts its round stamped (`results_health.py::health_reading`). */
+/** A graded cause in words, read off the facts its round stamped
+ * (`results_health.py::health_reading`). */
 export interface HealthReading {
   cause: 'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | 'transient';
   /** The round and its cause in one line. */
@@ -1750,7 +1761,8 @@ export interface AbilityReading {
   pinned_share: number | null;
 }
 
-/** The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed by ``own``) */
+/** The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed by ``own``) less the
+ * rows of ``excluded``, the parent line it held. A cold stamp's ``id`` is flat. */
 export interface RulerStamp {
   id: string;
   version: number;
@@ -1759,13 +1771,15 @@ export interface RulerStamp {
   excluded: string[];
 }
 
-/** A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which */
+/** A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which is
+ * what a fresh run of itself would read. */
 export interface RulerOwn {
   campaign: string;
   since: number;
 }
 
-/** What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through */
+/** What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through cells
+ * they share, and two datasets share none, so a δ is never compared across datasets. */
 export interface RulerScope {
   scorer: string;
   dataset: string;
@@ -1821,7 +1835,8 @@ export interface ServedBackpressure {
   resumes_in_s: number | null;
 }
 
-/** The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays */
+/** The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays the
+ * standing budget over it. */
 export interface RunLimits {
   budget: Budget;
   optimizer: OptimizerLimit[];
@@ -1836,13 +1851,16 @@ export interface OptimizerLimit {
   integer: boolean;
 }
 
-/** Something the run's declaration is a delta over moved since it was declared, so the launch */
+/** Something the run's declaration is a delta over moved since it was declared, so the launch runs
+ * today's value under the same declaration. */
 export interface DefaultsDrift {
   declared: DefaultsPin;
   running: DefaultsPin;
 }
 
-/** What a declaration is a delta over, in two halves: the bench's defaults, which every arm of */
+/** What a declaration is a delta over, in two halves: the bench's defaults, which every arm of a
+ * head-to-head shares, and its optimizer's whole treatment — manifest, source and prompts — which
+ * differs by arm by design. */
 export interface DefaultsPin {
   bench: string;
   treatment: Treatment;
@@ -1902,7 +1920,8 @@ export interface LiveCandidate {
   composite_fitness_formula_short: string | null;
 }
 
-/** One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``. */
+/** One prompt node's loci: its fields by name and its shots, both written only through ``derive`` /
+ * ``edited``. */
 export interface NodePrompt {
   /** Each field it sets, by the name its node declares; an empty field is absent. */
   fields: Record<string, string>;
@@ -2019,7 +2038,8 @@ export interface NodeBlock {
   schema_repair_errors: string[];
 }
 
-/** What a node's call was asked: the template it rendered, or its bare messages where it rendered none. */
+/** What a node's call was asked: the template it rendered, or its bare messages where it rendered
+ * none. */
 export interface NodeInput {
   template_name: string | null;
   template_fields: Record<string, unknown>;
@@ -2043,7 +2063,8 @@ export interface RacingBlock {
   top: Record<string, unknown>[];
 }
 
-/** One cycle's producer as served: its state and its two server-measured clocks. Its words are */
+/** One cycle's producer as served: its state and its two server-measured clocks. Its words are
+ * `PRODUCER_STATE_INFO[state]`, pinned where its tone is loud enough (`producer_row`). */
 export interface ProducerReading {
   state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
   /** A process holds this cycle — running it, or launching it (`claimed`) — so the
@@ -2057,7 +2078,8 @@ export interface ProducerReading {
   silent_for_s: number | null;
 }
 
-/** The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its */
+/** The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its control
+ * offers. A replay takes no armed control, so it reads depth 1 and nothing armed. */
 export interface SampleLookahead {
   /** The depth IN FORCE — how many cells the walk holds in flight: the armed
    * request bounded by `ceiling`. */
@@ -2104,7 +2126,8 @@ export interface LookaheadDepth {
   pickable: boolean;
 }
 
-/** What a cycle's rounds cap has left, which an offshoot takes as its own. Spend is no */
+/** What a cycle's rounds cap has left, which an offshoot takes as its own. Spend is no remainder: the
+ * ceiling is the campaign's, and its book already counts every cycle's. */
 export interface ForkRemainder {
   /** Rounds closed AFTER the origin — what `budget.rounds` counts */
   rounds_closed: number;
@@ -2114,7 +2137,8 @@ export interface ForkRemainder {
   rounds: number | null;
 }
 
-/** The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the */
+/** The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the cursor is
+ * declared, never promised — an eliminator can stop the arm before its tail. */
 export interface SampleWalk {
   /** The declared order; before the arm declares one, the cells it has measured and
    * the one in flight. */
@@ -2139,7 +2163,11 @@ export interface RoundAxis {
   position: number | null;
 }
 
-/** What a cycle with no dashboard state serves, at 200 rather than 404 so a surface renders */
+/** What a cycle with no dashboard state serves, at 200 rather than 404 so a surface renders
+ * "initialising" instead of appearing offline: a cycle replayed to a moment inside the check-in
+ * its draft's ledger brought in has declared nothing to stand a state on (``RunWiringRecord``),
+ * and no other cycle is without one. The run phase is served here as everywhere — a body with
+ * none is what lets a browser invent one. */
 export interface WarmingDashboard {
   warming_up: true;
   campaign_id: string;
@@ -2150,7 +2178,9 @@ export interface WarmingDashboard {
   pause: PauseReading | null;
 }
 
-/** One closed round as a surface reads it: its arms and its verdict. Its rows are the */
+/** One closed round as a surface reads it: its arms and its verdict. Its rows are the measurement
+ * log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds, diagnostics,
+ * optimizer state — stays on the ledger. */
 export interface RoundView {
   round: number;
   arms: Record<string, Proposed | Measuring | Cut | Measured>;
@@ -2170,14 +2200,16 @@ export interface Proposed {
   state: 'proposed';
 }
 
-/** Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``. */
+/** Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its
+ * round's ``total``. */
 export interface ArmSlot {
   round: number;
   idx: number;
   total: number;
 }
 
-/** The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage. */
+/** The individual: a value per locus of the roster — prompt fields and shots per prompt node, node
+ * config — plus its lineage. */
 export interface OptSearchPoint {
   /** Per prompt node, the loci it sets there; a node it sets nothing on is absent. */
   prompts: Record<string, NodePrompt>;
@@ -2373,7 +2405,8 @@ export interface ScoreboardRow {
   reading: ArmReading;
 }
 
-/** One round's audit twin: each optimizer node's call in firing order, and the warnings the round raised. */
+/** One round's audit twin: each optimizer node's call in firing order, and the warnings the round
+ * raised. */
 export interface RoundAudit {
   round: number;
   /** Null where the calls landed before the round's entry. */
@@ -2510,7 +2543,10 @@ export interface Evidence {
   spread: EditSpread;
 }
 
-/** One subject, read under the selected metric — its identity, its per-cell values and the one */
+/** One subject, read under the selected metric — its identity, its per-cell values and the one
+ * estimate they merge to. ONE row, because a roster row and a metric reading that live in
+ * separate lists can disagree about the same subject, and under the default metric they held the
+ * same number reached two ways. */
 export interface SubjectReading {
   key: string;
   kind: 'campaign' | 'course' | 'candidate';
@@ -2563,13 +2599,16 @@ export interface SubjectReading {
   levels: Record<string, string>;
 }
 
-/** The mask this channel is read under, echoed back. Served rather than left implicit in the */
+/** The mask this channel is read under, echoed back. Served rather than left implicit in the key, so
+ * a chart legend can say what a channel IS without re-splitting an address. */
 export interface SubjectMask {
   lens: string | null;
   samples: number[] | null;
 }
 
-/** One step of the branch standing behind a subject — the winner chain from the origin up to */
+/** One step of the branch standing behind a subject — the winner chain from the origin up to its
+ * head, each point read on ITS OWN cells under the selected metric. Opt-in
+ * (``include_winner_chain``), because every point past the origin opens a round file. */
 export interface WinnerChainPoint {
   candidate_id: string;
   round: number;
@@ -2580,7 +2619,8 @@ export interface WinnerChainPoint {
   n_cells: number;
 }
 
-/** Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a */
+/** Whether the selection's ABSOLUTE levels are one quantity, and WHY — two ways to fail and a reader
+ * must be able to tell them apart. */
 export interface Comparability {
   verdict: boolean | null;
   reason: 'one_ruler' | 'rulers_differ' | 'ruler_unstamped' | 'datasets_differ';
@@ -2656,7 +2696,9 @@ export interface Arm {
   replicate: number;
 }
 
-/** The comparability guard: whether the bench headlines it is taken over — a pair's, a row's */
+/** The comparability guard: whether the bench headlines it is taken over — a pair's, a row's against
+ * the table's standard, the whole table's — are one quantity. It LABELS a comparison and refuses
+ * none: a pair that differs is still read, and says on what. */
 export interface PairGuard {
   state: 'controlled' | 'uncontrolled' | 'differs';
   /** `state` in words, with what differs behind it. */
@@ -2669,13 +2711,15 @@ export interface PairGuard {
   differs_on: ('instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading')[];
 }
 
-/** What stops a run short of its budget, so no arm outlasts another on a stall the other was */
+/** What stops a run short of its budget, so no arm outlasts another on a stall the other was stopped
+ * for. */
 export interface StoppingRule {
   lives: Record<string, number> | null;
   convergence_patience: number | null;
 }
 
-/** What a campaign PINS on every optimizer call — how the draw is made and which host makes */
+/** What a campaign PINS on every optimizer call — how the draw is made and which host makes it.
+ * Applied last, so it beats the node's file config and any per-call override alike. */
 export interface DeterminismClamp {
   /** Sampling temperature EVERY optimizer node runs at, overriding its own —
    * including `l1_generate`'s `temperature`, the dominant run-to-run noise
@@ -2698,7 +2742,8 @@ export interface DeterminismClamp {
   route_order: string[] | null;
 }
 
-/** The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or */
+/** The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or carries
+ * a caveat — there θ is not ability, and the election reads on accuracy. */
 export interface ElectionColumn {
   /** What the electing round's selector ranked on. */
   elects_on: 'accuracy' | 'composite' | 'ability';
@@ -2760,7 +2805,8 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline */
+/** Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline column: per
+ * row, b's replicate mean less a's, and the row is the cluster. */
 export interface ArmContrast {
   a: ContrastArm;
   b: ContrastArm;
@@ -2793,7 +2839,8 @@ export interface ContrastArm {
   replicates: string[];
 }
 
-/** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
+/** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a stale
+ * render cannot then show new bars under the old metric's label. */
 export interface MetricReading {
   spec: MetricSpec;
   catalogue: MetricSpec[];
@@ -2804,7 +2851,8 @@ export interface MetricReading {
   n_tests: number;
 }
 
-/** One pickable metric. Served rather than restated in the browser, so a label and a unit have */
+/** One pickable metric. Served rather than restated in the browser, so a label and a unit have one
+ * owner and a picker cannot drift from what the server actually computed. */
 export interface MetricSpec {
   key: string;
   label: string;
@@ -2820,7 +2868,9 @@ export interface MetricSpec {
   axis_label: string;
 }
 
-/** One unordered pair of the roster. ``a`` precedes ``b`` in its oldest-first order — by cycle, */
+/** One unordered pair of the roster. ``a`` precedes ``b`` in its oldest-first order — by cycle, then
+ * by round within one — so every lift here reads parent-to-descendant across the table. Every
+ * pair is served: one that shares too little says so in its reading's ``state``. */
 export interface PairwiseComparison {
   subject_a: string;
   subject_b: string;
@@ -2888,7 +2938,11 @@ export interface FactorCell {
   n_cells: number;
 }
 
-/** One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran */
+/** One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran more than
+ * once. Computed over ``campaign`` subjects only: a course and a candidate share their campaign's
+ * round-0 hashes, so grouping them by it would report a branch as a replicate of the trunk it
+ * grew out of. ``level_spread`` is the cheapest noise reading on the board — taken from campaigns
+ * already paid for, and invisible to a roster that lists campaigns rather than arms. */
 export interface ArmReplicate {
   arm_id: string;
   campaign_ids: string[];
@@ -2916,7 +2970,8 @@ export interface EvidencePower {
   cells_for_largest_gap: number | null;
 }
 
-/** Run order against outcome. A one-at-a-time comparison confounds the subject with WHEN it */
+/** Run order against outcome. A one-at-a-time comparison confounds the subject with WHEN it ran — the
+ * archive grows between runs, so the ruler and the caches both move with the calendar. */
 export interface OrderConfound {
   level_vs_order: number | null;
   spend_vs_order: number | null;
@@ -2924,7 +2979,10 @@ export interface OrderConfound {
   order_confounded: boolean;
 }
 
-/** One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the */
+/** One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the subjects'
+ * spread at this cell over the roster's pooled residual — which environments tell the subjects
+ * apart, read without a replicate, which the content-addressed instrument cannot give. A held-out
+ * cell reads the subjects' bench passes, which only a round's selection has. */
 export interface EnvironmentReading {
   cell: string;
   held_out: boolean;
@@ -2938,7 +2996,9 @@ export interface EnvironmentReading {
   best_subject: string | null;
 }
 
-/** Friedman over the cells every subject scored — each cell ranks the subjects, ties at average */
+/** Friedman over the cells every subject scored — each cell ranks the subjects, ties at average rank
+ * — with Kendall's W beside it. Low W at high p: no environment orders the subjects alike. Low W
+ * at low p: a small ordering the environments agree on. */
 export interface RankAgreement {
   n_cells: number;
   n_subjects: number;
@@ -2951,7 +3011,8 @@ export interface RankAgreement {
   mean_rank: Record<string, number>;
 }
 
-/** How many of a subject's own cells moved, by sign — a lift's BREADTH beside its mean. Served */
+/** How many of a subject's own cells moved, by sign — a lift's BREADTH beside its mean. Served only
+ * under a delta metric: a level has no zero to sit on either side of. */
 export interface LiftProfile {
   key: string;
   n_cells: number;
@@ -2960,7 +3021,8 @@ export interface LiftProfile {
   dropped: number;
 }
 
-/** One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config */
+/** One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config edit, an
+ * optimizer-prompt edit on the recursion; the arithmetic does not care which. */
 export interface RankedEdit {
   sp_hash: string;
   campaign_id: string;
@@ -3009,7 +3071,8 @@ export interface HeadToHeadPrice {
   serial_s: number | null;
 }
 
-/** Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned, */
+/** Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned, priced
+ * and admitted before any is minted, so a refused arm leaves none behind. */
 export interface MintHeadToHeadPayload {
   dataset_name: string;
   head_to_head: HeadToHeadRequest;
@@ -3034,7 +3097,10 @@ export interface ArmRequest {
   optimization: OptimizationOverrides;
 }
 
-/** An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's. */
+/** An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's. Only the
+ * fields sent move anything, so no field states a default a reader could take for one that
+ * applies. Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read
+ * through it, so a reused dataset may exceed it. */
 export interface OptimizationOverrides {
   /** The optimizer manifest this campaign runs — a directory under
    * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
@@ -3090,7 +3156,8 @@ export interface CellPrice {
   cells: number;
 }
 
-/** What one round of an optimizer's own calls cost, over its newest campaigns here, any */
+/** What one round of an optimizer's own calls cost, over its newest campaigns here, any treatment of
+ * it. */
 export interface OptimizerRoundPrice {
   /** Mean optimizer USD incurred per round that called it. */
   usd: number;
@@ -3200,7 +3267,8 @@ export interface DraftCampaignWire {
   setup_schema: Record<string, unknown>;
 }
 
-/** The criterion a draft runs, read once off its laid ``config.scoring``: what a check-in */
+/** The criterion a draft runs, read once off its laid ``config.scoring``: what a check-in picks from.
+ * An edit sends these keys back as ``EditDraftPatch.config.scoring``. */
 export interface DraftCriterion {
   /** The matcher the per-sample formula calls; null where it calls none or several. */
   matcher: string | null;
@@ -3340,7 +3408,8 @@ export interface JudgeStage {
   max_tokens: number | null;
 }
 
-/** The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs */
+/** The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs are
+ * its nodes' ``config`` in its manifest, never fields here. */
 export interface OptimizationConfig {
   /** The optimizer manifest this campaign runs — a directory under
    * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
@@ -3447,7 +3516,8 @@ export interface OptimizationConfig {
   determinism: DeterminismClamp | null;
 }
 
-/** Improvement-banked round budget: banks a life each round that promotes an arm, loses one */
+/** Improvement-banked round budget: banks a life each round that promotes an arm, loses one each
+ * round that does not. ``budget.rounds`` and spend stay the ceilings. */
 export interface LivesConfig {
   /** Lives a run starts with (a fully-stalling run does exactly this many rounds). */
   start: number;
@@ -3456,7 +3526,9 @@ export interface LivesConfig {
   cap: number;
 }
 
-/** One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``. */
+/** One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``. The
+ * peer of ``resolve_dataset`` one question up: that seam answers which bytes are on disk, this
+ * one which values a campaign runs (``architecture.md`` § Two resolution seams). */
 export interface CampaignPipelineResponse {
   campaign_id: string;
   cycle_id: string;
@@ -3495,7 +3567,8 @@ export interface CampaignPipelineResponse {
   cell_terms: CellTerm[];
 }
 
-/** What the selected optimizer runs under a config, derived once for check-in and campaign: */
+/** What the selected optimizer runs under a config, derived once for check-in and campaign: its
+ * graph, knobs, prompts and pools as that config selects them. */
 export interface OptimizerSetup {
   /** The graph topology — the same shape a campaign pipeline serves */
   view: PipelineView | null;
@@ -3766,7 +3839,8 @@ export interface OriginReadiness {
   complete: boolean;
 }
 
-/** One origin field that still blocks mint — also the ``422 origin_incomplete`` body's ``details.gaps``. */
+/** One origin field that still blocks mint — also the ``422 origin_incomplete`` body's
+ * ``details.gaps``. */
 export interface FieldGap {
   /** Checklist field id, e.g. `column.query`. */
   field: string;
@@ -3787,7 +3861,8 @@ export interface LaunchRefusal {
   sentence: string;
 }
 
-/** `resolution.json`: the last resolver turn; the mint gate is the draft's `readiness`, */
+/** `resolution.json`: the last resolver turn; the mint gate is the draft's `readiness`, recomputed on
+ * every read. */
 export interface OriginResolution {
   /** Null until a resolver turn ran, and again after a later edit. */
   last_resolution: OriginLastResolution | null;
@@ -3832,7 +3907,9 @@ export interface EditDraftCampaignPayload {
   patch: EditDraftPatch;
 }
 
-/** Sparse mutation payload — only declared fields ride through. The one origin-edit vocabulary */
+/** Sparse mutation payload — only declared fields ride through. The one origin-edit vocabulary every
+ * ingress shares; the rules that apply one are ``draft_patch.py``'s, and stay out of this module
+ * so a command payload naming the type loads no resolver. */
 export interface EditDraftPatch {
   slug: string | null;
   connector: string | null;
@@ -3860,7 +3937,8 @@ export interface ParamIntent {
   allowed: string[];
 }
 
-/** One node's authored output contract: the schema whole, and the fields carrying the answer */
+/** One node's authored output contract: the schema whole, and the fields carrying the answer where
+ * the operator named them. */
 export interface NodeOutputEdit {
   node: string;
   output_schema: Record<string, unknown>;
@@ -3880,7 +3958,8 @@ export interface ForkPreviewResponse {
   permitted: Record<string, string[]>;
 }
 
-/** Built off the couplings the pre-run preflight warning reads, so no surface disagrees with */
+/** Built off the couplings the pre-run preflight warning reads, so no surface disagrees with the
+ * engine on which knobs collide. */
 export interface ConfigMapResponse {
   /** Estimand groups, in declared order */
   groups: ConfigEstimandGroup[];
@@ -3997,7 +4076,8 @@ export interface DatasetIndexEntry {
   start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
 }
 
-/** One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology */
+/** One dataset's pipeline as DECLARED — the body of ``GET /datasets/{name}/pipeline``. Topology only:
+ * the level a ``nests`` pointer names, which no campaign has to have run. */
 export interface DatasetPipelineResponse {
   /** The connector the definition declares, as `CampaignPipelineResponse.connector`
    * names it */
@@ -4236,7 +4316,8 @@ export interface StartCheckinResponse {
   hop: CycleHop | null;
 }
 
-/** What a head-to-head's act answers, and its retry under the same key: each arm's job and */
+/** What a head-to-head's act answers, and its retry under the same key: each arm's job and the root
+ * cycle it minted. Arms never queue, so every hop is resolved. */
 export interface HeadToHeadStarted {
   head_to_head_id: string;
   arms: ArmStarted[];
@@ -4272,7 +4353,8 @@ export interface VerifyPass {
   scorer_id: string;
 }
 
-/** A verify that bought nothing: every sample of the candidate's search split was already */
+/** A verify that bought nothing: every sample of the candidate's search split was already measured
+ * for its config. Its answer, and the effect a retry under its key answers. */
 export interface VerifySaturated {
   kind: 'verify_saturated';
   dataset_name: string;
@@ -4326,12 +4408,14 @@ export interface SiteRecordsDropped {
   dropped: number;
 }
 
-/** Record the caller's acceptance of the Terms, server-stamped; a version other than the live one is refused. */
+/** Record the caller's acceptance of the Terms, server-stamped; a version other than the live one is
+ * refused. */
 export interface AcceptTermsPayload {
   version: string;
 }
 
-/** Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree */
+/** Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree does
+ * not move. */
 export interface ArchiveCampaignPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4341,7 +4425,8 @@ export interface ArchiveCampaignPayload {
   reason: string;
 }
 
-/** Bank an edited library snippet into this account's own block pack as the next version of */
+/** Bank an edited library snippet into this account's own block pack as the next version of the one
+ * it was edited from; a text the library already holds is that snippet. */
 export interface BankSnippetPayload {
   /** The id of the snippet the text was edited from. */
   supersedes: string;
@@ -4357,7 +4442,10 @@ export interface CancelQueuedRunPayload {
   job_id: string;
 }
 
-/** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or */
+/** Raise or lower an existing cycle's spend, token, round or wall-clock bound; a budget- or round-
+ * halted cycle continues by a higher ceiling, then `resume`. Spend is clamped against the account
+ * allowance. On an arm of a head-to-head it moves that arm alone, and leaves the comparison only
+ * when a ceiling moved. */
 export interface ChangeRunLimitsPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4376,7 +4464,8 @@ export interface CleanupEmptyCyclesPayload {
   cycle_id: string;
 }
 
-/** ``apply`` defaults to False on every mode, including the destructive one: a preview is what */
+/** ``apply`` defaults to False on every mode, including the destructive one: a preview is what the
+ * operator consents on, so the write has to be asked for rather than defaulted into. */
 export interface CompactArchivePayload {
   mode: 'compact' | 'restore' | 'purge-cold';
   dataset: string | null;
@@ -4396,7 +4485,8 @@ export interface DeleteCampaignPayload {
   keep_results: boolean;
 }
 
-/** Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding */
+/** Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding rounds
+ * or a live producer (pause it first). */
 export interface DeleteCyclePayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4410,7 +4500,8 @@ export interface DiscardDraftPayload {
   draft_id: string;
 }
 
-/** The cut, and the shape of the fork's first run (``mode``) — one act, so one command. */
+/** The cut, and the shape of the fork's first run (``mode``) — one act, so one command. A parent a
+ * producer still holds is paused by the applier once the fork's run is admitted. */
 export interface ForkCyclePayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4444,7 +4535,8 @@ export interface RunMode {
   diag: boolean;
 }
 
-/** A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the forked cycle's */
+/** A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the forked cycle's own rows
+ * and stamps the `origin_source` the wire omits. */
 export interface ForkSeed {
   origin_prompts: Record<string, NodePrompt>;
   pipeline_overlay: Record<string, unknown>;
@@ -4486,12 +4578,14 @@ export interface MintCampaignPayload {
   task_text: string | null;
 }
 
-/** Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-checkin``. */
+/** Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-
+ * checkin``. */
 export interface OpenDatasetDraftPayload {
   dataset_name: string;
 }
 
-/** Open a prior origin as a prefilled check-in draft, its prompts verbatim; nothing runs until ``start-checkin``. */
+/** Open a prior origin as a prefilled check-in draft, its prompts verbatim; nothing runs until
+ * ``start-checkin``. */
 export interface OpenOriginDraftPayload {
   origin_id: string;
 }
@@ -4529,7 +4623,8 @@ export interface ResolveOriginPayload {
   draft_id: string;
 }
 
-/** Hold the caller's own key for a provider: its sends there go out on it, past the coupon. */
+/** Hold the caller's own key for a provider: its sends there go out on it, past the coupon. Never
+ * served back, and recorded masked. */
 export interface SetApiKeyPayload {
   provider: string;
   secret: string;
@@ -4545,7 +4640,8 @@ export interface SetCampaignLabelPayload {
   label: string;
 }
 
-/** How many campaigns this account may hold at once, queued launches included; at most the */
+/** How many campaigns this account may hold at once, queued launches included; at most the machine's
+ * capacity, and an account on the host's key cannot move its own. */
 export interface SetConcurrentCyclesPayload {
   /** The new limit. */
   max_concurrent_cycles: number;
@@ -4578,7 +4674,8 @@ export interface SkipSearchpointPayload {
   cycle_id: string;
 }
 
-/** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no */
+/** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no draft field
+ * holds it. Acked at admission, so it rides the draft's ledger into the root cycle. */
 export interface StartCheckinPayload {
   draft_id: string;
   budget: Budget;
@@ -4590,7 +4687,8 @@ export interface StartCheckinPayload {
   head_to_head: HeadToHeadRequest | null;
 }
 
-/** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
+/** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it takes
+ * (``mode``). */
 export interface StartRunPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4613,7 +4711,8 @@ export interface StepCyclePayload {
   step_rounds: number;
 }
 
-/** Answer a cycle holding for a round's arms (`optimization.arm_gate`) with arms of its own, */
+/** Answer a cycle holding for a round's arms (`optimization.arm_gate`) with arms of its own, drafts
+ * kept, or both. */
 export interface SubmitArmsPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4650,7 +4749,11 @@ export interface UnarchiveCampaignPayload {
   reason: string;
 }
 
-/** ``samples`` omitted is the ANSWER, not an absence: the count is derived from the */
+/** ``samples`` omitted is the ANSWER, not an absence: the count is derived from the per-candidate
+ * round budget and the rounds run since this cycle's last verification
+ * (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
+ * refused, naming the budget — which is what keeps one click on a million-row dataset from being
+ * a million-cell bill. */
 export interface VerifyCandidatePayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its

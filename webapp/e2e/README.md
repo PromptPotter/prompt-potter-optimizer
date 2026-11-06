@@ -15,8 +15,9 @@ npx playwright test --project=walk -g "theme"    # one slice
 First time on a machine: `npx playwright install chromium`.
 
 **`gate.py` runs `cold` and `walk`**, never `spend`, which needs money. Its `playwright` check
-runs after `offline-run` and `vite-build` (`gate.py::Check.after`) and names potter's straight run,
-`.gate_cache/offline-run/potter`, as the walk world. `walk` reads no operator campaign when
+runs after `vite-build` (`gate.py::Check.after`) and names potter's straight run,
+`.gate_cache/offline-run/potter`, as the walk world: an input `offline-run` builds, refused when
+missing or built from other sources (`python scripts/gate.py --only offline-run` builds it). `walk` reads no operator campaign when
 `PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`)
 names a run, and `walk_world.py` serves a throwaway copy of it whose account agreed to the live
 terms, with the `offline` backend. Unset, `walk` reads the checkout's own workspace, a desk tier

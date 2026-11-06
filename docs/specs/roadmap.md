@@ -50,7 +50,7 @@ L, K3a, with #63 and #65.
 | **H** | § Open — from the head-to-head arc, minus the INVESTIGATE rows the paid twins read and the forks below; § Config resolution item 11 (`evidence`); the origin's absolute path (filed twice) | `application/evidence/`, `head_to_head_price.py`, `jobs/mint.py::arm_plans`, `runner/bench.py` depth, `origin.py` | cloud · Opus | — |
 | **W1** | webapp read discipline: § The webapp swept by shape E; § The webapp's vanilla pass "Failures dropped to booleans"; `CommitInput` | `webapp/lib/hooks/`, `webapp/lib/poll.tsx`, `webapp/lib/state/auth.tsx` | cloud · Opus | — |
 | **W6** | webapp dead code and ratchets: § swept G; size literals and the latch; CSS moves; `vitest.config.ts`; the onboarding buttons | webapp deletions, `app/styles/` | cloud · Sonnet | — |
-| **VITE** | build with Vite (§ Open — multi-arc, "Next.js only as a build tool"), so a side worktree passes the full gate; the gate walks the offline world (§ vanilla, "The `walk` tier rots unseen") | `webapp/package.json` + lock, build config, `scripts/gate.py` web checks | cloud · Opus | — |
+| **VITE** | build with Vite (§ Open — multi-arc, "Next.js only as a build tool"), so a side worktree passes the full gate; the gate walks the offline world | `webapp/package.json` + lock, build config, `scripts/gate.py` web checks | cloud · Opus | — |
 
 Also in batch 1, filed in later waves:
 

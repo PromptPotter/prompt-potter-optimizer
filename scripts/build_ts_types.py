@@ -414,9 +414,13 @@ def _emit_cycle_path_grammar() -> str:
 
 
 def _doc_block(owner: type) -> str:
-    doc = (owner.__doc__ or "").strip().splitlines()
+    # The first paragraph, whole: a first line alone stops mid-sentence.
+    lead = (owner.__doc__ or "").strip().split("\n\n", 1)[0]
     # A dataclass declared with no docstring is handed its signature as one.
-    return f"/** {doc[0]} */\n" if doc and not doc[0].startswith(f"{owner.__name__}(") else ""
+    if not lead or lead.startswith(f"{owner.__name__}("):
+        return ""
+    text = " ".join(line.strip() for line in lead.splitlines())
+    return f"/** {textwrap.fill(text, width=98, subsequent_indent=' * ')} */\n"
 
 
 def _emit_record(record: type) -> str:

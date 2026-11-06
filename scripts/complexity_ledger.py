@@ -65,7 +65,7 @@ BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
-    "test_functions": 29,
+    "test_functions": 31,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"
