@@ -6,14 +6,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.19] — 2026-11-06
+
+> An n8n workflow is a backend, every command and read is a host tool over MCP, and a node can grade several fields in one call. An account's bill is its own charges, a landing migrates what must survive and proves every file before it writes, and the webapp builds with Vite. Breaking on disk: run data is wiped. 61 commits since `v0.8.18`.
+
 ### Added
 
-- **The `n8n` connector.** Each cell posts the candidate prompt to an n8n eval-harness webhook (`N8N_HARNESS_URL`, secret `N8N_HARNESS_TOKEN` in `N8N_HARNESS_AUTH_HEADER`) and grades the `answer` it returns; the model is the n8n node's, and no usage is reported, so a ceiling refuses its cells. A remote connector now declares its wire: `cell_path`, `read_reply`, `round_trip_is_latency`, `auth_scheme`, and a `pipeline_declaration` in place of `GET /pipeline`.
-- **Several graded fields, one item per call.** `fields_match(predicted, ground_truth)` grades a node's JSON reply field by field against an object gold (`{field: [accepted, …]}`, `null` ungraded); a cell's fitness is the share right, and `field_accuracy` reaches the readout per arm and per round.
+- **The `n8n` connector.** Each cell posts the candidate prompt to an n8n eval-harness webhook (`N8N_HARNESS_URL`, secret `N8N_HARNESS_TOKEN` in `N8N_HARNESS_AUTH_HEADER`) and grades the `answer` it returns; the model is the n8n node's, and no usage is reported, so a ceiling refuses its cells. A remote connector now declares its wire: `cell_path`, `read_reply`, `round_trip_is_latency`, `auth_scheme`, and a `pipeline_declaration` in place of `GET /pipeline`. (ba968afa8)
+- **Several graded fields, one item per call.** `fields_match(predicted, ground_truth)` grades a node's JSON reply field by field against an object gold (`{field: [accepted, …]}`, `null` ungraded); a cell's fitness is the share right, and `field_accuracy` reaches the readout per arm and per round. (187d1f251)
+- **One host registry, in-process and over MCP.** Every pressable command kind and once-answered read kind is a host tool, served by `HostSession` and over stdio by `promptpotter mcp`, admitted at its answer; a task is claimed only on a call that declares the Tasks extension. (fca59552b, 57edb3337)
+- **The read catalogue.** Each read is a `ReadKind` naming its answer and mounted from its row; `ingest-upload`, `open-dataset-draft`, `open-origin-draft`, `set-user-settings`, `accept-terms`, `set-api-key` and `remove-api-key` are command kinds, and a draft-open retry under its key answers the draft it opened. (d16fdafb8, 676a186f8)
+- **A landing migrates survivors and proves every file first.** `data_root.py::KINDS` names every file under the data root, its fate and its shape (`docs/specs/data-root.generated.json`); `land-data` stages each migration, proves every file as it would then stand and writes only when none refuses; `--reset` drops run data first; `update.sh` dry-runs the landing before it stops services. Two migrations ship: consent into `consent.jsonl`, and released jobs into `jobs/ended/`. (e065f7fec, fca59552b)
+- **Tool calls on `ChatRequest`**, with multi-turn `ChatMessage`, wired and parsed by both clients; Harbor's terminus-2 agent sends on PromptPotter's own client. (079d752dc)
+- **L2/L3 re-elect an arm** through `fork_proposal.stand_on`; `Election.reelection` renders in the webapp and the readout. (61e2d0f05)
+- **A stage view.** `RunStanding.climb` reaches REST, CLI, readout and chat, and a Preferences toggle draws it large; one served `UNIT_FORMATS` prints every level, lift, band and token count. (0b728c9ba)
+- **The operator channel**: one bot per listener, each notice declaring whether it rings; `health` gains `channel:telegram`; outside visits and their daily digest, which never count the host admin's browser. (2920cf83a, c132f13bc, e3b376a27)
 
 ### Changed
 
-- **BREAKING — a node's `answer_field` is `answer_fields: list[str]`** (node config, `NodeOutputEdit`, the TermNorm wire); a node naming several is pinned to `response_format: json`. A measurement filed under `answer_field` matches no config.
+- **BREAKING — a node's `answer_field` is `answer_fields: list[str]`** (node config, `NodeOutputEdit`, the TermNorm wire); a node naming several is pinned to `response_format: json`. A measurement filed under `answer_field` matches no config. (187d1f251)
+- **BREAKING — start clean: run data is wiped at landing** (`update.sh <tag> --reset`). Reshaped: `draft.json`, now one partial `CampaignConfig` laid over its basis (73b501cec); `ResolvedRunRecord` and `CycleSeedRecord` (aa372229f); `RoundClosedRecord`, whose standing counts `worked_s` (0b728c9ba); `Arm.replicate` (4b84f8237); `Election.reelection` (61e2d0f05); `.runtime/streams` is gone (113111440). Survivors are migrated, never wiped.
+- **BREAKING — `promptpotter-self` moves to the research tier** (`research/datasets/`): a checkout runs it and no deployment offers it, so a `DATASET_OFFER` naming it refuses the landing. (c187dde37)
+- **An account's bill is its own `charges.jsonl`**, never a fold of its campaigns' ledgers: a held charge before each send, a billed charge per priced part; the bill, the coupon and the Activity pane read the charges. (2fc5062bb)
+- **A course names its connector once**: `CampaignPipelineResponse.connector` is the id `GET /backends` lists, and `backend_type` and the `backend_name` overlay are gone from the responses and `defaults.yaml`; `Connector.credential_header` builds the credential's header; an unregistered `backend_type` is refused naming the registered connectors. (57edb3337)
+- **A dropped link is resent**: a wait no read clock bounds runs on TCP keepalive, so a connection lost mid-cell surfaces in about 30 s and `send_failure` resends it. `OptimizationOverrides.budget` states no default: only the fields sent move anything. (57edb3337)
+- **The webapp builds with Vite**; Next.js is gone. `NEXT_PUBLIC_*` is `VITE_*`, static assets serve under `/assets/`, and the CSP's `script-src` drops `'unsafe-inline'`. (06b2b4150)
+- **One optimizer selection door and a typed `NodeConfig`**: a mistyped manifest refuses its landing. (389653b95)
+- **A store read refuses what it cannot parse.** (113111440)
+- **One `Said` row and one `Tone` carry every composed line**; the screen is a subject plus open views, laid out as snapping columns. Grade on bench moves to the Leader card and the masthead is read-only; Trend, Score Frequency and the canvas tooltip are gone. (40a0b511a, 70e860660, d36f9af7e)
+- A refused command or launch exits 1, and under `--json` prints its error's code, message and details. (5c5d69669)
+- Fewer rebuilds per poll: a warm family-tree build 38.0 → 12.2 ms. (965c5d32f)
+
+### Fixed
+
+- **The upload check-in works again**: an upload whose headers are not `query` / `ground_truth` opens its draft; a paid turn that came back empty is served with its cause; a blank task is refused, and a blank cell in a chosen column names its row. (eadded181, 1cfd00b01)
+- The campaign pipeline read no longer answers 500 when a course names no `backend_name`. (57edb3337)
+- The Files walk and the empty-directory prune reach past `MAX_PATH`. (0440be98b)
 
 ## [0.8.18] — 2026-10-31
 
