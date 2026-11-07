@@ -107,7 +107,7 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
     MintCampaignPayload,
     ReadKind,
-    StepCyclePayload,
+    StartRunPayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
@@ -1785,7 +1785,9 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
     caller.stores.campaigns.mint_cycle(step_hop)
     queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
     stepping = HostSession(Caller(caller.stores, queuing))
-    step = StepCyclePayload(campaign_id=step_hop.campaign_id, cycle_id=step_hop.cycle_id)
+    step = StartRunPayload(
+        campaign_id=step_hop.campaign_id, cycle_id=step_hop.cycle_id, step_rounds=1
+    )
     endings = {"completed": StopReason.CONVERGED, "failed": StopReason.CRASHED, "cancelled": None}
     # A waiter re-polls at once, so one woken on an ended job raises without a wall-clock wait.
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
@@ -1812,7 +1814,7 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
             queuing.reap_orphans()
         assert queuing.get(launched.job_id) is None, "guard: the job was not reaped"
         retried = {**step.model_dump(mode="json"), "idempotency_key": key}
-        task = (await stepping.answer(CallTool("step-cycle", retried))).task
+        task = (await stepping.answer(CallTool("start-run", retried))).task
         assert task is not None
         await stepping.answer(TaskResultOf(task.task_id))
         read_back = await stepping.answer(TaskStatusOf(task.task_id))

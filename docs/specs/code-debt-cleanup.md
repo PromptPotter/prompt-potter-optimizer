@@ -377,13 +377,9 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   **Re-test:** the same refused `start-run` over MCP and REST carries the same `refusal_words`.
 - **`resume --rewind/--steer` with `--max-usd` crashes with a traceback** — `resume_command.py`
   builds a fork seed's budget on the money axis it refuses; a fork has no launch-budget field
-  (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload` and
-  `StepCyclePayload` take the launch's budget through the one door. **Rides with:** M12.
+  (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload`
+  takes the launch's budget through the one door. **Rides with:** M12.
   **Re-test:** `resume --rewind 1 --max-usd 1` refuses typed or runs.
-- **`step-cycle` is a second door into `start-run {step_rounds}`** — the difference is the capability
-  rung, and `step_rounds` admits 100 rounds; no webapp sender. Action: delete the kind, payload and
-  handler; the `campaign.step` rung keeps no launch. **Rides with:** M6. **Re-test:**
-  `git grep -n "STEP_CYCLE" -- promptpotter` is empty.
 - **A queued launch dies with the asking process** — the queue wait runs in the caller
   (`jobs/launcher/launch.py`), so a CLI-derived kind exits and an MCP stdio session ends, while the
   door reported success. Action: the queued job on disk is promoted by whoever frees the slot.

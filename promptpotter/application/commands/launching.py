@@ -79,7 +79,6 @@ if TYPE_CHECKING:
         MintHeadToHeadPayload,
         StartCheckinPayload,
         StartRunPayload,
-        StepCyclePayload,
     )
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -189,24 +188,6 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
                 step_rounds=payload.step_rounds,
             ),
             payload.mode,
-            stores=dispatcher.stores,
-            job_registry=dispatcher.job_registry,
-            inline=dispatcher.inline,
-        ),
-        refused_on=hop,
-    )
-
-
-async def step_cycle(dispatched: DispatchedToCycle[StepCyclePayload]) -> Applier[Launched]:
-    dispatcher, hop = dispatched.dispatcher, dispatched.hop
-    request = ExistingCycle(
-        hop, dispatched.campaign, Budget(), step_rounds=dispatched.payload.step_rounds
-    )
-    return _launch_applier(
-        dispatcher,
-        lambda: launch(
-            request,
-            RunMode(),
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
