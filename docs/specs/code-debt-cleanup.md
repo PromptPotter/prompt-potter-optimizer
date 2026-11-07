@@ -228,6 +228,18 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 - **A refused L4 arm's identity is the floor's** — `potter/dispatch/layout.py::layout_levers` folds a
   breach into the floor and drops it from the resolved overrides, so `spawn.py::inner_cell_hop` and the
   envelope read the floor arm's campaign. Action: the identity reads the refusal. **Rides with:** M8.
+- **The optimizer prompt spells slots its own way** — it writes `[#N]` / `#N`
+  (`potter/dispatch/injections/` `panels.py`, `catalogues.py`, `layer_state.py`), while every surface prints
+  `domain/sample.py::sample_tag`'s `#007`. Changing it is a prompt-shaping edit. Action: the prompt
+  renders its slots through `sample_tag`. **Rides with:** M8 (its re-key). **Re-test:**
+  `git grep -nE "\[#\{|#\{" -- promptpotter/application/optimizers/potter` names no slot.
+- **The recursion guard rebuilds the registry's origin label** — `connectors/__init__.py::_validate`
+  decides "only an application built-in" by re-spelling `f"{BUILT_IN}: {m}"`, a second spelling of
+  `shared/plugin_registry.py::Registry`'s, so a reworded label refuses `promptpotter` at every boot.
+  Action: one `plugin_registry` helper builds the built-in origin, read by both. Editing
+  `plugin_registry.py` re-keys every treatment digest (it shapes the optimizer prompt), so it waits for
+  a re-key. **Rides with:** M8 (its re-key). **Re-test:** `git grep -n 'BUILT_IN}: ' -- promptpotter`
+  names one line.
   **Re-test:** a breaching and a floor arm get different inner campaign ids.
 - **The landing does not run wherever code meets an unlanded root** — the boot landing is cut. Sites:
   `presentation/cli/campaign_runner.py` and `main.py` (no boot landing), the `_sources` registries
@@ -244,11 +256,13 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** M17.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **A file created by `open` or `write_text` takes the umask** — a run's stderr log in
-  `jobs/launcher/run_job.py` opens `jobs/logs/*.log` for append (0644 on a 022 box), and
-  `config/first_run.py` writes a secret `.env` with `write_text`. Action: both create private through
-  `store/io.py`'s one writer. **Rides with:** M17. **Re-test:** `git grep -nE "open\([^)]*\"ab\"|\.write_text\("
-  -- promptpotter/application/jobs promptpotter/config` names no file the box keeps secret.
+- **A job's log outlives its campaign**: `jobs/launcher/run_job.py::spawn_job` writes
+  `jobs/logs/{job_id}.log` and nothing deletes it, so `jobs/logs` grows without bound. Decision
+  (operator, 2026-11-07): a job's log is deleted with its campaign, on the channel that deletes the
+  campaign (`commands/workspace_edits.py` → `CampaignStore.delete_campaign`), with no separate
+  expiry. The log is keyed by job id, which the campaign tree does not name. **Rides with:** M6.
+  **Re-test:** a deleted
+  campaign's job ids name no file under `jobs/logs`.
 - **One torn `grant.json` fails the install-spend survey** — `application/jobs/install_spend.py` catches
   `OSError` and `LedgerUnreadableError`, not the unreadable-file refusal `GrantStore.load` raises, while
   `application/account.py` and `application/datasets/startability.py` catch it. Action: a survey serves
@@ -294,6 +308,11 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   `search_point_scorer.py` branches only on its being empty, which `tests/factories.py` relies on.
   Action: delete it; readers take `backend_client.connector.name`; a test asks for no archive
   explicitly. **Rides with:** M4b. **Re-test:** `git grep -n "backend_id" -- promptpotter/application/initialization/session.py` is empty.
+- **A campaign's connector has two sources** — `wiring.py` picks the session's connector from the
+  definition's `backend_type`, while `mask/load.py`, `hierarchy.py`, `admission.py` and
+  `embedded_run.py` read `Campaign.connector`; a resume after the definition is retargeted reads
+  both. Action: one source, the campaign's, read by every site. **Rides with:** M4b. **Re-test:**
+  retarget a minted campaign's definition; every reader names one connector or the resume refuses.
 - **Three TermNorm defaults in core** — `connectors/__init__.py` `DEFAULT_CONNECTOR` and `shipped`
   (repeating the one `serves_uploads` declaration), and `Settings.TERMNORM_URL` defaulting to
   loopback, so a box with no TermNorm lists it configured and health reports it broken. Connector
@@ -1053,10 +1072,6 @@ fixtures.
   service; `channel:telegram` caught it at deploy. One file must serve both. Either the CLI reads
   `ENV_FILE`, which needs read access for the login user, or the services read the checkout file,
   which SELinux denies under `$HOME`. That choice is the operator's.
-- **A site-record file's mode is the writing process's umask**: `store/site_records.py::SiteRecordStore.keep`
-  appends through `store/io.py::append_jsonl`, which sets no mode. On the box the admin bot wrote
-  `app_visit_digests.jsonl` 0644 beside the API's 0600 tables. The store must create its files private
-  itself, whichever service writes first.
 - **A landing proves an install-shadowed manifest by its shape, not its reader**: `data_root.py`'s
   "optimizer manifest" and "check-in manifest" rows type the YAML (call keys included), but a knob or
   roster fault in an optimizer shadow, or a parse fault in the check-in (`optimizer_manifest.py::_parse`),
@@ -1664,8 +1679,6 @@ word's `git grep -c` for that sense is 0.
   - `LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed (the book holds it
     as unreported), so `_AgentModel.cost_usd` can read a reported sum below the book's. **Re-test:** one
     5xx then an answer, read the row's `cost_usd` against the ledger.
-- **Seen removing the migrations** (2026-10-30):
-  - `jobs/logs/{job_id}.log` (`launcher/run_job.py`) outlives its job: nothing deletes it.
 
 ## Bypasses — held for one holistic pass
 

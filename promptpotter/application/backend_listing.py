@@ -24,7 +24,6 @@ class BackendResponse(StrictModel):
 
 
 class BackendHealthResponse(StrictModel):
-    backend_id: str = Field(description="Backend identifier")
     base_url: str = Field(description="Backend API base URL probed")
     status: BackendReachability = Field(
         description="Reachability, worded by `BACKEND_REACHABILITY_INFO`"
@@ -53,7 +52,6 @@ async def backend_health(backend_id: str) -> BackendHealthResponse:
         raise NotFoundError(f"Backend '{backend_id}' not found")
     down = await probe_backend(connector.name)
     return BackendHealthResponse(
-        backend_id=connector.name,
         base_url=connector.base_url(),
         status=backend_reachability(down),
         checked_at=utcnow_iso(),
