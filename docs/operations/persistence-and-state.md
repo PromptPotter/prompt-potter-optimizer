@@ -38,7 +38,7 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 
 | Verb | Does |
 |---|---|
-| `new <name \| file.csv>` | mint from a dataset, or ingest a CSV into a check-in draft and Start it once the readiness gate passes (a gap prints its questions and exits non-zero: `--set k=v`, re-run); `--diag`, `--halt-at` |
+| `new <name \| file.csv>` | mint from a dataset, or ingest a CSV into a check-in draft and Start it once the readiness gate passes (a gap prints its questions and exits non-zero: `--set k=v`, re-run); `--diag` |
 | `head-to-head --head-to-head ID --arm …` | mint every arm of one controlled comparison in one act |
 | `resume` | continue from the last closed round; `--from N`, `--rewind N`, `--fork-on-divergence`, `--no-check`, `--steer`, `--diag` |
 | `verify <subject>`, `bench` | fresh search cells on one candidate (never a re-ask of a scored one); grade origin and selection on the bench rows |
