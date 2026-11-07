@@ -205,11 +205,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   not recognized"; `vendor-marks` read a missing package as "simple-icons has no 'anthropic'").
   Action: borrow from the clone's main checkout, or refuse at once and name the missing folder.
   **Re-test:** push main from a fresh worktree.
-- **A kept offline-run green counts a workspace by its directory** — `scripts/offline_run.py::still_green`
-  asks only that the directory stands, and `claim_home` stamps the run's arguments, not its keys, so a
-  clone-shared home answers for a tree that did not build it. Action: stamp each workspace with the key
-  that built it, and compare. **Rides with:** M1. **Re-test:** two worktrees with different engine
-  sources share a home; the second rebuilds.
 - **`Check.after`'s lane rule is stated, not checked** — `scripts/gate.py::Check` says a dependency is
   earlier in its lane, but the module assert only orders `CHECKS`, so a check whose `after` names another
   kind runs in a parallel lane and reads a half-built product. Action: the assert also requires the
@@ -1483,12 +1478,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `round_walks` each decide which walk counts as a round of its own.
 - **The capo offline bench turns on one seed**: lift +0.700 or none after a draw-order change, so the
   fixture cannot tell a mating-law change from a reshuffle.
-- **The controlled offline leg's arm-memory count moves between identical runs** (`arm potter: memory
-  holds 380` then `375` own answers on one tree): a cell coalesced with a twin in flight is answered
-  from memory, not sent. A printed reading, not a decision. Action: count filed answers, not distinct
-  ones — the count is `scripts/offline_run.py::run_controlled`'s (`file_answers` mints a ref per
-  filing, and a coalesced cell files none). Separately, `--controlled` stops at `_variant_edit`
-  ("no framing to cite") on the foreign potter campaign, on main too. **Re-test:** two `--controlled` runs of one tree print one count.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
