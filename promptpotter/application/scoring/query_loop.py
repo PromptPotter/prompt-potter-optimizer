@@ -218,14 +218,13 @@ async def _maybe_recover_degraded(
 
     if not is_deprecated(result):
         return result
-    recovered, _step = await execute_stale_data_protocol(
+    return await execute_stale_data_protocol(
         sample,
         result,
         ctx.session,
         pipeline_params=ctx.search_point.pipeline_params,
         sample_index=ctx.sample_index,
     )
-    return recovered
 
 
 @dataclass
