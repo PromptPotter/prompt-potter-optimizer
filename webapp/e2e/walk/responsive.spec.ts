@@ -31,6 +31,23 @@ for (const vp of WIDTHS) {
       await noSidewaysScroll(page);
     });
 
+    // A sidebar row is its card's trigger, and on a phone the row spans the screen: no side of it has room.
+    test("a sidebar row's hover card opens inside its viewport", async ({ page, rich }) => {
+      void rich; // skips a world with no campaign row to hover
+      await open(page);
+      // A phone reopens the last campaign; its title row's back button is the way to the list.
+      const back = page.getByRole("button", { name: /^Campaigns/ });
+      if (await back.isVisible()) await back.click();
+      await page.locator(".unit-library-family").first().hover();
+      const card = page.getByRole("note");
+      await expect(card).toBeVisible();
+      const box = (await card.boundingBox())!;
+      expect(box.x, "the card starts left of the viewport").toBeGreaterThanOrEqual(0);
+      expect(box.y, "the card starts above the viewport").toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, "the card ends right of the viewport").toBeLessThanOrEqual(vp.width);
+      expect(box.y + box.height, "the card ends below the viewport").toBeLessThanOrEqual(vp.height);
+    });
+
     test("the lineage forest fits its viewport", async ({ page, rich }) => {
       await open(page, `${rich.addr}/candidates`);
       await page.getByRole("button", { name: /the lineage forest/i }).click();

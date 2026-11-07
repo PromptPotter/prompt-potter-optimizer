@@ -20,7 +20,7 @@
 .subject-headline-cut{font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-headline-acc,.subject-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
 .subject-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
-.subject-lift-card{max-width:280px}
+.subject-lift-card{--hovercard-max-w:280px}
 .subject-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
 .subject-lift-note+.subject-lift-note{margin-top:4px}
 
@@ -44,7 +44,7 @@
 .subject-flip-line strong{font-family:var(--font-mono);color:var(--color-text-primary)}
 .subject-flip-line.is-gained strong{color:var(--color-success)}
 .subject-flip-line.is-lost strong{color:var(--color-danger)}
-.subject-flip-card{max-width:340px;max-height:280px;overflow:hidden}
+.subject-flip-card{--hovercard-max-w:340px;--hovercard-max-h:280px;overflow:hidden}
 .subject-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:var(--text-xs)}
 .subject-flip-list li{display:flex;align-items:baseline;gap:var(--space-6);white-space:nowrap}
 .subject-flip-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto}

@@ -1006,11 +1006,12 @@ fixtures.
 
 ### What a cycle writes to disk (storage survey 2026-11-01)
 
-- **`storage_report.py::_leaf_of` files an unrow'd campaign file under `trace`**, and
-  `campaign_store/store.py::_keepsake` drops it on `delete --keep-results`: the storage report never
-  shows a writer no `CAMPAIGN_ROWS` row names, and a row with no writer is never detected either.
-  Action: serve an unrow'd file as unclassified, never fold it into a leaf. **Re-test:**
-  `git grep -n "counts as loop trace" -- promptpotter`.
+- **A `store/data_root.py::CAMPAIGN_ROWS` row that nothing writes is never detected**: the storage
+  survey reports files found, so a dead row stays declared forever (batch 9 closed the other half,
+  an unrowed file, as the `unclassified` leaf). Action: a test walks a finished offline-run campaign
+  and asserts every row's glob matches a file or names why it may be absent. **Re-test:** the test
+  exists and fails when a row's glob is misspelled.
+
 - **`OBS_ENABLED` is a second switch over two sinks that each have their own** (`LANGFUSE_ENABLED`
   and its keys, `MLFLOW_TRACKING_URI`), read once in `tracing/bridge.py::configured_sinks`. Kept
   because `config/settings.py` is reached by the L4 treatment digests. Action: delete it with the

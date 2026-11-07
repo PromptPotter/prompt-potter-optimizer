@@ -8591,7 +8591,8 @@
           "state",
           "trace",
           "history",
-          "reports"
+          "reports",
+          "unclassified"
         ],
         "title": "Leaf",
         "type": "string"

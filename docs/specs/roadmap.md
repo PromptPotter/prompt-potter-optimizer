@@ -157,7 +157,7 @@ wave.
 
 | Arc | Was | Closes | Decision first | Size | Waits on |
 |---|---|---|---|---|---|
-| **M1** gate cost | T rest | eslint's cache and tsc's typegen made `light`, the `optimizer-schemas` probe's outputs, the walk tier, the Vite leftovers | the walk tier runs in the full gate; `eslint-plugin-react` restores the dropped rules (operator, 2026-11-06) | ~15 files | — |
+| **M1** gate cost | T rest | eslint's cache and tsc's typegen made `light`, the `optimizer-schemas` probe's outputs, the walk tier, the Vite leftovers | the walk tier runs in the full gate (operator, 2026-11-06) | ~15 files | — |
 | **M2** command log | Q1 | Q1, census C, the `_tasks` test, the noise-floor stop, the pass with no address; EA's cut state table is its acceptance test (`origin/arc/ea-8`) | amend architecture §0 Control-remote and decision 0001 so commands leave the cycle ledger | ~32 files, wipes run data | — |
 | **M3** run scope | U1a | config items 4 and 7 (the L4 override as one overlay), `bind_cache`, `LaunchState.ledger`, the `set_cycle_ledger` binders | bind at `runner/entry.py` now; an unusable L4 mutation is refused, typed and served, by the rule that refuses an unknown overlay | ~28 files, one L4 re-key | — |
 | **M4** typed pipeline carrier | U1a | engine A, config items 8 and 9, the free-tier layer and its model axis, the three merges as one wherever behaviour equals main | `steps` leaves the params bag; every treatment digest re-keys (accepted) | ~35 files | — |

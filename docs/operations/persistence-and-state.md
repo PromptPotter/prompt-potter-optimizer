@@ -165,4 +165,4 @@ The scorer compiles once at run init (`initialization/loop_start.py::populate_se
 
 ## Lifecycle — archive, delete
 
-`archive` is a flag (`lifecycle_status`), restorable by `unarchive`; `delete` removes the tree, or with `--keep-results` spares the keepsake. Both refuse only while a cycle is LIVE, record on the **workspace** ledger first, and never touch the measurement store. Every byte lands in one `store/data_root.py::Leaf` of `CAMPAIGN_ROWS`, reported by `application/maintenance/storage_report.py` off `store/layout.py::declared_files`: a surface missing from it is deleted by `--keep-results`.
+`archive` is a flag (`lifecycle_status`), restorable by `unarchive`; `delete` removes the tree, or with `--keep-results` spares the keepsake. Both refuse only while a cycle is LIVE, record on the **workspace** ledger first, and never touch the measurement store. Every byte lands in one `store/data_root.py::Leaf`, its `CAMPAIGN_ROWS` row's or `UNCLASSIFIED` where no row names it, reported by `application/maintenance/storage_report.py` off `store/layout.py::declared_files`: a surface missing from it is deleted by `--keep-results`.

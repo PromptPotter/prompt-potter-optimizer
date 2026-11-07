@@ -303,6 +303,7 @@ class Leaf(Enum):
     TRACE = "trace"
     HISTORY = "history"
     REPORTS = "reports"
+    UNCLASSIFIED = "unclassified"
 
 
 class LeafInfo(NamedTuple):
@@ -322,6 +323,11 @@ LEAF_INFO: Worded[Leaf, LeafInfo] = Worded(
         Leaf.HISTORY: LeafInfo("History", "The loop's event spine: its ledger.", True),
         Leaf.REPORTS: LeafInfo(
             "Reports", "Readable output: manifest, reports, hard samples.", True
+        ),
+        Leaf.UNCLASSIFIED: LeafInfo(
+            "Unclassified",
+            "A file no data-root row names: no leaf claims it, and land-data refuses it.",
+            False,
         ),
     }
 )

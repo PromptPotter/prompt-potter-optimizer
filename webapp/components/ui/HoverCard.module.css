@@ -16,10 +16,13 @@
   border-radius: 3px;
 }
 
-/* Pointer events stay ON: the operator points into the card to select an id out of it. */
+/* Pointer events stay ON: the operator points into the card to select an id out of it. A host caps
+   the card with `--hovercard-max-w` / `-h`; the placement's free space (`--hovercard-room-*`,
+   `HoverCard.tsx::anchor`) caps it too. */
 .card {
   z-index: 1100;
-  max-height: calc(var(--vh-full) - 16px);
+  max-width: min(var(--hovercard-max-w, 100vw), var(--hovercard-room-w));
+  max-height: min(var(--hovercard-max-h, 100vh), var(--hovercard-room-h));
   overflow-y: auto;
   background: var(--color-background-secondary);
   border: 0.5px solid var(--color-border);
