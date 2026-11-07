@@ -982,7 +982,7 @@ class StandingBudgetRecord(FrozenModel):
     record_type: Literal["standing_budget"] = "standing_budget"
     # The cycle axes an operator named; the money axes are the campaign's (`CampaignCeilingRecord`).
     budget: Budget = Budget()
-    # RUN-scoped: the closed-round count at which the launch in flight pauses (``step-cycle``).
+    # RUN-scoped: the closed-round count at which the launch in flight pauses (``start-run {step_rounds}``).
     pause_at_round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 

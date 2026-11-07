@@ -48,7 +48,7 @@ One minter and reader, `domain/cycle_paths.py::Subject` (`address` / `parse_addr
 | `compact-archive <inventory \| compact \| restore \| purge-cold> [--apply]` | the only verb that can destroy a measurement: `compact` moves `domain/scoring.py::UNREAD_PIPELINE_KEYS` off `panel` answers into `measurements/cold/`, `restore` puts them back, `purge-cold` is irreversible; `origin`/`parent` answers are never eligible |
 | `reset`, `land-data`, `close-admission` | the data-root verbs — [`../decisions.md`](../decisions.md) § 0011 |
 | `reindex`, `pin-roster`, `offer-extras`, `health` | rebuild `measurements/index.jsonl`; pin a Harbor roster; list the extras the offered datasets need; check backends and sign-in providers |
-| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `step-cycle`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
+| `pause`, `origin-gate`, `submit-arms`, `skip-searchpoint`, `set-limits`, `set-concurrent-cycles`, `cancel-queued`, `delete-cycle`, `cleanup-empty-cycles`, `archive`, `unarchive`, `delete [--keep-results]`, `rename`, `bank-snippet`, `discard-draft` | `CommandKind` verbs, each a `CommandRecord` the dispatcher acks |
 
 Ctrl+C once pauses (exit 130), twice force-quits; a sent call is cancelled only where that stops its bill (`Connector.cancel_stops_billing`). Nothing the loop decides reads a diagnostic. A paid diagnostic or `bench` holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued (`application/jobs/launcher/admission.py::paid_pass`).
 

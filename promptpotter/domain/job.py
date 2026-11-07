@@ -109,7 +109,7 @@ class Job:
     producer_id: str = ""
     # What its run returned, stamped with `released_at`; a scoring pass that returned has none.
     ending: StopReason | None = None
-    # Its run paused at the round allowance it was launched with (`step-cycle`).
+    # Its run paused at the round allowance it was launched with (`start-run {step_rounds}`).
     stepped: bool = False
     # How it ended where no run returned, stamped with `released_at` in place of an `ending`.
     lapse: JobLapse | None = None

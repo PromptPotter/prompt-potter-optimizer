@@ -15873,51 +15873,6 @@
         ],
         "type": "string"
       },
-      "StepCyclePayload": {
-        "additionalProperties": false,
-        "description": "Let a paused cycle run a bounded number of rounds, then stop again.",
-        "properties": {
-          "campaign_id": {
-            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "descend": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Descend"
-          },
-          "step_rounds": {
-            "default": 1,
-            "description": "Rounds to run.",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Step Rounds",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "cycle_id"
-        ],
-        "title": "StepCyclePayload",
-        "type": "object"
-      },
       "StepFacts": {
         "additionalProperties": false,
         "properties": {
@@ -20807,61 +20762,6 @@
           }
         },
         "summary": "Start-Run",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
-    "/api/v1/commands/step-cycle": {
-      "post": {
-        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
-        "operationId": "step_cycle_api_v1_commands_step_cycle_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StepCyclePayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Step-Cycle",
         "tags": [
           "Commands"
         ]
