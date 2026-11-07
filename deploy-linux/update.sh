@@ -44,6 +44,8 @@ source "$HERE/brand-env.sh"
 # wait_healthy — shared with every other script that starts something.
 source "$HERE/health.sh"
 source "$HERE/uv.sh"
+# unit_hardening — the units' block, which `as_unit` runs every verb under.
+source "$HERE/hardening.sh"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
@@ -65,10 +67,14 @@ checkout() {
   git -C "$1" reset --hard --quiet "$2"
   ok "$(basename "$1") at $(git -C "$1" describe --tags --always) ($(git -C "$1" rev-parse --short HEAD))"
 }
-# A verb under the unit's environment: this shell holds neither its keys, its bot token nor its data
-# root, so a verb run here would judge whatever the checkout's .env happens to hold.
+# A verb under the unit's environment and its hardening: this shell holds neither its keys, its bot
+# token nor its data root, so a verb run here would judge whatever the checkout's .env happens to hold.
 as_unit() {
-  sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" \
+  local line props=()
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] || props+=(-p "$line")
+  done < <(unit_hardening "${DATA_DIR:-$INSTALL_DIR}")
+  sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" "${props[@]}" \
     -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
     -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
     "$INSTALL_DIR/.venv/bin/python" -m promptpotter "$@"

@@ -349,6 +349,8 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
 ### Secret hygiene
 
 - `.env` is `chmod 600` and never committed.
+- The app holds the data root at `0700` whoever launches it (`store/private_root.py::hold_private`),
+  and `update.sh`'s verbs run under the units' own hardening block (`hardening.sh::unit_hardening`).
 - A leaked `ADMIN_BOT_TELEGRAM_TOKEN`: re-issue via @BotFather, paste it into the app's `.env`,
   restart both units.
 
