@@ -453,7 +453,7 @@ class QuotaStatus(StrictModel):
     max_concurrent_cycles: int
     max_concurrent_cycles_writable: bool = Field(
         description="Whether this caller may move `max_concurrent_cycles` through "
-        "`set-concurrent-cycles`. False on the host's key, where the host sets it."
+        "`set-concurrent-cycles`. False for any caller but the host account with the budget capability."
     )
     ceiling: int = Field(description="The machine's `MACHINE_RUN_CAPACITY`.")
     bound: SlotBound | None = Field(

@@ -1663,7 +1663,6 @@ word's `git grep -c` for that sense is 0.
     re-granted as `grant.json`. **Re-test:** `ls .promptpotter/projects/*/grant.json` after a restamp.
   - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
     **Re-test:** the Host allowance section with a token-bound grant.
-  - `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
 - **Seen moving harbor's agent onto our client** (2026-11-04):
   - `LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed (the book holds it
     as unreported), so `_AgentModel.cost_usd` can read a reported sum below the book's. **Re-test:** one

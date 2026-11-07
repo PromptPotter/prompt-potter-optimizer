@@ -13277,7 +13277,7 @@
             "type": "integer"
           },
           "max_concurrent_cycles_writable": {
-            "description": "Whether this caller may move `max_concurrent_cycles` through `set-concurrent-cycles`. False on the host's key, where the host sets it.",
+            "description": "Whether this caller may move `max_concurrent_cycles` through `set-concurrent-cycles`. False for any caller but the host account with the budget capability.",
             "title": "Max Concurrent Cycles Writable",
             "type": "boolean"
           }
