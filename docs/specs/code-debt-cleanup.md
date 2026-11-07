@@ -1316,10 +1316,6 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `n` keeps its total.
 - `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
   replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
-- `quota.py::set_concurrent_cycles` gates `is_host` only, while the field is writable only under
-  `CAMPAIGN_BUDGET_CAP` too (`quota.py::concurrent_cycles_writable`): two rules for one write.
-  Action: the setter refuses by `concurrent_cycles_writable`. **Re-test:**
-  `git grep -n "if not is_host(stores.identity)" -- promptpotter/application/jobs/quota.py`.
 
 ## Open — multi-arc
 
