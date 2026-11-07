@@ -1210,9 +1210,7 @@ What batch E's reviews found outside the arc under review, grouped by shape.
 
 **A. A file read past its store's one reader.** **Rides with:** M17.
 - `wallet_store.py::GrantStore` and `wallet_store.py::TenantApiKeyStore` load their files raw, and so do
-  `tenant_dataset_store.py::load_task_context`, `default_claim.py` and
-  `intelligence/hard_sample_sorter.py`. `dataset_access.py::_named` reads `task.md` and `origin.yaml`
-  itself, so one malformed `dataset.yaml` gets four answers. Action: each file reads through its
+  `default_claim.py` and `intelligence/hard_sample_sorter.py`. Action: each file reads through its
   store's typed row, and a file the store cannot read is refused once. **Re-test:**
   `git grep -nE "def _read\b" -- promptpotter/infrastructure promptpotter/application`.
 - `tenant_dataset_store.py::banks_sharing` fails the whole survey on one bad entry. The survey catches
