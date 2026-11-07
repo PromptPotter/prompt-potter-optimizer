@@ -240,8 +240,8 @@ function LimitControl({ quota }: { quota: QuotaStatus }) {
     return (
       <div className="account-limit readonly">
         <p className="account-note">
-          <strong>Set by whoever runs this server.</strong> This account runs on their provider
-          key, so they decide how many of its runs share the machine. Ask them to raise it.
+          <strong>Set by whoever runs this server.</strong> Whoever runs this server sets how
+          many of this account's runs share the machine. Ask them to raise it.
         </p>
       </div>
     );

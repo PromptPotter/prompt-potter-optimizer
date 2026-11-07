@@ -56,7 +56,8 @@ export interface QuotaStatus {
   concurrent_queued: number;
   max_concurrent_cycles: number;
   /** Whether this caller may move `max_concurrent_cycles` through `set-concurrent-
-   * cycles`. False on the host's key, where the host sets it. */
+   * cycles`. False for any caller but the host account with the budget
+   * capability. */
   max_concurrent_cycles_writable: boolean;
   /** The machine's `MACHINE_RUN_CAPACITY`. */
   ceiling: number;
