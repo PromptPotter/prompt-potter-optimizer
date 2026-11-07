@@ -900,12 +900,11 @@ import-graph script before and after; close each wave with `gate.py --only layer
   `e2e/walk_world.py`, and the host it walks as is exempt from the read bucket
   (`quota.py::refuse_request_rate`). Action: the gate's `playwright` check builds that world and adds
   `--project=walk` on it. **Re-test:** `gate.py` lists a walk check.
-- **The Vite build leaves five things standing**:
+- **The Vite build leaves four things standing**:
   - The derivations barrel pulls the network layer into every chunk that imports it.
   - Babel (React Compiler) is 87% of build time.
   - Chunks exceed 500 kB.
   - ESLint rules dropped with `eslint-config-next`: `react/jsx-key`, `react/no-unescaped-entities`, `react/display-name`, `react/jsx-no-target-blank`, `@next/next/*`.
-  - `headers.py::_WEBAPP_CSP` `style-src 'self'` may now hold, with no inline style from the framework: check the console first.
 - **Several doors into one state**: candidate selection minted at each
   `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
   `setSelectionForSampleSet` from several surfaces, `FileTree::onSelect` drilled through its parents.
