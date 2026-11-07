@@ -4,4 +4,4 @@ Your spec is § AE of `briefs/census_3.md` on this brief branch (`git show origi
 
 Commit: a conventional subject from the section's title, ≤72 chars.
 
-Decided: the notice names only this process's own runs, wording kept, as the section recommends. Also own `docs/specs/roadmap.md`'s "the shutdown notice" items (U2 and M6, `:71` and `:167` on batch/5): drop that item there, the rest of each row stays.
+Decided: the notice names only this process's own runs, wording kept, as the section recommends. Leave `docs/specs/roadmap.md` alone: AB edits the same U2/M6 lines, and the orchestrator trims "the shutdown notice" there.
