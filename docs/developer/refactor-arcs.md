@@ -72,7 +72,9 @@ Every brief carries the following:
 ## Fix passes and stopping
 
 - **A fix pass names each finding's invariant**, fixes every in-layer holder the census lists, and
-  adds the test that holds it: reverting the fix fails the test.
+  adds what holds it: reverting the fix fails it. That is a test only where
+  [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)'s charter admits one. Otherwise it is a check in
+  the owning module, or the code's own shape. A failure that a re-run fixes gets no test.
 - **A small INTRODUCED finding is fixed in the branch.** A PRE-EXISTING finding becomes a row,
   never another pass.
 - **Arcs that conflict get one fix pass.** It runs on their merge (`git merge-tree` names the
@@ -84,6 +86,10 @@ Every brief carries the following:
     operator cuts or re-scopes it before another build;
   - a mechanism whose every round finds a new state is cut back, not hardened;
   - a written diagnosis that hands a mechanism to another arc stops work on it that turn.
+- **A stopped or cut arc's tip is tagged `salvage/<id>`.** The tag is annotated with what its
+  reviews found clean and what must not be ported. Later small arcs port from it piece by piece
+  (`git tag -l 'salvage/*' -n9`). Never delete a `salvage/` tag or its branch before its rows land.
+  The last link to land deletes both.
 - **One independent review covers the assembled batch** before its PR.
 
 **Why.** A batch of five arcs (2026-11-05) spent most of about 48 builds on work it later cut. Three
