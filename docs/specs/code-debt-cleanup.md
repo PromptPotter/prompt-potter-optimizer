@@ -198,9 +198,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 - **The TS type generator keeps only a docstring's first line**, so 57 interface docs in
   `types.generated.ts` stop mid-sentence. Action: `build_ts_types.py` carries the first paragraph.
   **Rides with:** M1. **Re-test:** no generated doc ends without a full stop.
-- **`M13` and `M14` each name both a medium arc and a roadmap milestone** (M14 is also the
-  preprint). Action: the milestones take names. **Rides with:** the next roadmap edit. **Re-test:**
-  `git grep -nE "\bM1[34] \((publication|the preprint)\)" -- docs` is empty.
 - **The scripts' writer and the store's are two**: `store/io.py::_atomic_replace` and
   `scripts/processes.py::replace_changed` each state one bounded retry on Windows' WinError 5; the
   stdlib-only interpreter the scripts run under is what varies. Action: one retry rule stated by one

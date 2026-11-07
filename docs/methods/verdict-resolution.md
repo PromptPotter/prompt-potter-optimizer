@@ -57,7 +57,7 @@ underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.
 
 **1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`enable_2pl_graduation`, on).
 2PL is the field default, so 1PL is what needs defending —
-[`../research/external-constraints.md`](../research/external-constraints.md) § M14 carries the
+[`../research/external-constraints.md`](../research/external-constraints.md) § The preprint carries the
 benchmarks. 2PL adds per-sample discrimination `aₛ`; it graduates per dataset, behind the same θ
 interface, only when it beats 1PL out-of-sample (with hysteresis), so a thin dataset never regresses.
 

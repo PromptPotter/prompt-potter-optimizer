@@ -126,8 +126,8 @@ read for the L2/L3 repair rate and the errored-cell INVESTIGATE; then L4 validat
 call order, errors and configuration it could handle itself, and whether the code would get simpler if
 it were deleted. A new seam needs something that actually varies.
 
-The paid run comes after D, H and the re-key batch: the M13 CAPO head-to-head on `hotpotqa-closedbook`
-(§ The bench (M13)), priced first. Then the board (§ Optimizer tuning — the standing board).
+The paid run comes after D, H and the re-key batch: the bench's CAPO head-to-head on `hotpotqa-closedbook`
+(§ The bench), priced first. Then the board (§ Optimizer tuning — the standing board).
 
 **Forks left to the operator.** Until he decides, an arc leaves each one as it stands:
 - what "calls held equal" holds equal;
@@ -201,7 +201,7 @@ LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride 
 1. **Recombination at $0** (C9). Paid: the mode head-to-head (§ Variation and pools, item 1).
 2. **The optimizer climbs** (§ Optimizer tuning — the standing board). Paid: the board's path, steps
    (1)–(4).
-3. **The preprint's evidence (M14).**
+3. **The preprint's evidence.**
    - Code: the N-arm mint verb, and `bbeh` re-ingested with a wider bench partition.
    - Code: anytime-valid confidence sequences become the default stopping rule. Today's PoBB stays a
      selectable rule, and a replay over banked rounds reports where the two disagree
@@ -220,7 +220,7 @@ LA, LB, LC, LW, TS and R stay last. S no longer waits on G: the payer rows ride 
 6. **Embedding (§ Embedding (M15)):** headlined by the Langflow setup. R1 comes first, because C5 and R2
    wait on it; the rest are independent of each other.
 
-Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
+Lanes by dependency. Front priority: Lane A and the bench lane, concurrently; C9 ahead of
 the rest of Lane C.
 
 ### Lane A — the hosted beta, usable by a coupon account end to end
@@ -243,15 +243,15 @@ the rest of Lane C.
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
-**M14 (publication)** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
+**The preprint** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
 zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
-## The bench (M13)
+## The bench
 
-**M13:** every optimizer, peers included, is a manifest the bench runs, inheriting measurement,
+Every optimizer, peers included, is a manifest the bench runs, inheriting measurement,
 archive, spend ledger, persistence, the five entry points and the control plane; the headline is the
 held-out bench score. It closes when ONE peer (CAPO first) runs end to end in a head-to-head whose
-only difference is the optimizer. **M14 (the preprint):** the stopping rule and the comparability
+only difference is the optimizer. **The preprint:** the stopping rule and the comparability
 guard are executable here and every peer ran under them ([`../../paper/`](../../paper/README.md)).
 
 The contract is [`../architecture.md`](../architecture.md) § Bench and optimizer; node types are
@@ -337,7 +337,7 @@ misses; (2) screen library blocks without the optimizer — authored arms, origi
 ## Variation and pools
 
 The contract is [`variation-and-pools.md`](variation-and-pools.md); why is
-[`../decisions.md`](../decisions.md) § 0007. Part of M13; each M14 ablation row quotes
+[`../decisions.md`](../decisions.md) § 0007. Part of the bench; each preprint ablation row quotes
 `rounds_to_separable`. It must not become a fifth sealed optimizer, a second overlay beside
 `optimization.nodes`, a pool written by a file edit, or a credit model steering before a reading
 shows it informative.
@@ -553,7 +553,7 @@ winner; traces in (OTel GenAI JSONL first) beside § What PromptPotter emits.
 **Free compute — spend it where calls bind.** Through R4 an open-weight model on free GPUs answers on
 no provider's bill (its rate may be zero; R7 meters the GPU-seconds). First the models the instruments
 already run — another host is another instrument, so screen its agreement with the cloud host on one
-panel before a campaign moves; then the call-heavy rungs: L4 inner cycles, M14's seeds and budget
+panel before a campaign moves; then the call-heavy rungs: L4 inner cycles, the preprint's seeds and budget
 points, the optimizer-model screen (§ Optimizer tuning — the standing board, step 3); then R6's
 exhibit, which needs the GPUs themselves.
 

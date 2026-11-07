@@ -1,12 +1,12 @@
-# paper/ — the M14 manuscript
+# paper/ — the preprint manuscript
 
 Why this is not under `docs/`: that tree describes the system to someone working on it, and a page
 that argues about a *field* has no owner there. The one exception is
 [`docs/research/landscape.md`](../docs/research/landscape.md), the argument against the peers,
 which the public `README.md` links; the manuscript cites it and keeps no second copy.
 
-**What M14 is, and its rules — owned by [`roadmap.md`](../docs/specs/roadmap.md) § Sequence.**
-Read it there. **The subject changed when M13 became the bench:** the contribution is
+**What the preprint is, and its rules — owned by [`roadmap.md`](../docs/specs/roadmap.md) § Sequence.**
+Read it there. **The subject changed when the bench came first:** the contribution is
 that the stopping rule and the comparability guard are *executable* here and that every peer ran
 under them. Pricing a lift in wall clock and dollars is the evidence for that, no longer the claim.
 
@@ -56,8 +56,8 @@ them; copying one here is what makes two of them.
 
 Stages close on a verification. **If something has to give, the benchmark count gives, never the
 rigor** — two benchmarks with a held-out split are citable, five with selection-biased numbers are
-the gap this paper writes about. M13's comparability run and budget dimension
-([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) § The bench (M13), stages 5–6) are
+the gap this paper writes about. The bench's comparability run and budget dimension
+([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) § The bench, stages 5–6) are
 the matrix; what follows is what the paper needs beside them.
 
 1. **The unlock — nothing runs unattended before it.** The per-cell wall-clock and spend envelope and
@@ -87,7 +87,7 @@ the matrix; what follows is what the paper needs beside them.
    / `full`; random search and best-of-N at matched wall clock; our lift on the peers' models
    beside their published numbers, never in a shared cell; HITL against auto; amortized
    break-even per arm; transfer of an evolved prompt across models.
-8. **Write** — the citation filter below, run at the outline. The full spec review M13 owes comes
+8. **Write** — the citation filter below, run at the outline. The full spec review the bench owes comes
    after stage 4, never beside a measurement programme.
 
 ## The first runs to publish

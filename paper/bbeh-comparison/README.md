@@ -2,7 +2,7 @@
 
 The uncontrolled reference arm: **PromptPotter vs CAPO vs DSPy optimizers** on BBEH (Big-Bench
 Extra Hard), each peer run its own way. The controlled arms are one `head-to-head` —
-[`../../docs/specs/roadmap.md`](../../docs/specs/roadmap.md) § The bench (M13).
+[`../../docs/specs/roadmap.md`](../../docs/specs/roadmap.md) § The bench.
 
 ## The protocol
 

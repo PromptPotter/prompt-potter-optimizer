@@ -67,7 +67,7 @@ template; MLflow's `eval_fn` is the connector and the caller's scorers are the g
 ## 7. MLflow's optimizers on the bench
 
 GEPA is already here. **The meta-prompt optimizer is the only new method**: one proposing `llm` member over
-the shared measurement ([`roadmap.md`](roadmap.md) § The bench (M13)). Low priority.
+the shared measurement ([`roadmap.md`](roadmap.md) § The bench). Low priority.
 
 ## 8. A box that keeps nothing
 
