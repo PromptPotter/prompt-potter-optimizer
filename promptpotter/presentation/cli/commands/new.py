@@ -99,11 +99,6 @@ def _settable() -> str:
     )
 
 
-def _sets_of(args: argparse.Namespace) -> list[str]:
-    halt = args.halt_at_accuracy
-    return [*args.sets, *([] if halt is None else [f"halt_at_accuracy={halt}"])]
-
-
 def _checkin_line(step: str, detail: str) -> None:
     logger.info("✓ %-13s — %s", step, detail)
 
@@ -268,7 +263,7 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             "ERROR: `new` requires a dataset name. Pass it as a positional "
             "(`new justlogic/d234`) or via `--dataset-name <name>`.\n\n" + no_dataset_hint(stores)
         )
-    knobs = _set_knobs(_sets_of(args))
+    knobs = _set_knobs(args.sets)
     task_text = (
         Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
     )
@@ -296,7 +291,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
         stores = open_stores(args)
         return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
-    sets = _sets_of(args)
+    sets = args.sets
     patch = _sets_to_patch(sets) if sets else None
     stores = open_stores(args)
     draft_id = await _ingest_checkin(args, stores)

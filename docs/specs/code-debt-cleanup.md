@@ -390,8 +390,7 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   hand-keeps four command wrappers (and `cli/commands/maintenance.py` imports from it); two typed
   REST routes (`edit-draft-campaign`, `resolve-origin`) duplicate the generic loop with a second
   description; `compact-archive inventory`, `ab` and the tenant `trail` are CLI-only undeclared;
-  `--halt-at` is a second door to `--set halt_at_accuracy`; steer values parse three ways and the
-  server types none. Action: the sweep moves under the one admission; the wrappers and typed routes
+  steer values parse three ways and the server types none. Action: the sweep moves under the one admission; the wrappers and typed routes
   are deleted; a CLI-only reason sits on the `Verb` row, gate-checked; the server types an overlay
   against the served `param_types`. **Rides with:** M6 (sweep, wrappers), M4c (steer). **Re-test:**
   `git grep -n "def compact_archive" -- promptpotter/application/embedded_run.py` is empty.
