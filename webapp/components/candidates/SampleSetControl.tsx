@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { MeasuredUnit, OverlapReading, ServedRound } from "@/lib/api/types";
-import { unitCount } from "@/lib/format";
+import { fmtSampleTag, unitCount } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
 import {
@@ -63,7 +63,7 @@ export function SampleSetControl({
               className={cx("ss-cell", on && "on", everywhere && "everywhere", shared.has(sid) && "shared")}
               aria-pressed={on}
               aria-label={`Sample ${sid} — ${on ? "in" : "not in"} the overlap set. ${note}`}
-              title={`Sample #${sid} — ${on ? "in" : "not in"} the overlap set. Click to toggle. ${note}`}
+              title={`Sample ${fmtSampleTag(sid)} — ${on ? "in" : "not in"} the overlap set. Click to toggle. ${note}`}
               onClick={() => setSelectionForSampleSet(toggleInSet(sampleSet, sid))}
             >
               {sid}

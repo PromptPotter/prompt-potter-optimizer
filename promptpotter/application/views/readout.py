@@ -489,7 +489,7 @@ class ReadoutProjection(Projection):
         if not prior_keys:
             return
         tags = [self._labels.get(key, key[:6]) for key in prior_keys]
-        self._write(f"  {DIM}↻ {member} catch-up #{position}:{RESET} " + ", ".join(tags))
+        self._write(f"  {DIM}↻ {member} catch-up {sample_tag(position)}:{RESET} " + ", ".join(tags))
 
     def _render_block_lines(self) -> list[str]:
         lines = []

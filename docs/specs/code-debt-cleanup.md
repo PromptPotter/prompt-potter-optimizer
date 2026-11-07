@@ -1216,10 +1216,6 @@ own family, and `noise-floor` and `seed-screen` write nothing to the ledger.
 
 ### Words and the sample tag (batch-2 reviews, 2026-11-05)
 
-- **Unpadded `#N` outlives the one `sample_tag`**: `TrajectorySeriesView.tsx::SeriesHoverPopup`, the
-  `L1Variants.tsx` targets line and `readout.py::on_race_catch_up` spell the id themselves.
-  Action: each reads `format.ts::fmtSampleTag` / `domain/sample.py::sample_tag`. **Re-test:**
-  `git grep -nE "#\\$\\{|'#' \\+|f\"#\\{" -- webapp/components promptpotter/application/views`.
 - **`config/settings.py::_git_head` answers `UNVERSIONED` silently** for a ref in neither the loose
   refs nor `packed-refs` (a reftable repo, corrupt refs). Action: the landing's refusal names the
   checkout it could not version. **Re-test:** a landing from a reftable clone names why.

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { SegmentedControl } from "@/components/ui";
 import { promptFieldLabel } from "@/lib/prompt-fields";
-import { fmtValue } from "@/lib/format";
+import { fmtSampleTag, fmtValue } from "@/lib/format";
 
 // The LLM's output as the audit twin banked it, not a served model: read defensively.
 interface Variant {
@@ -104,7 +104,7 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
       {shown.targets_rows && shown.targets_rows.length > 0 && (
         <div className="l1v-block">
           <span className="l1v-block-head">Targets rows</span>
-          <p className="l1v-targets">{shown.targets_rows.map((id) => `#${id}`).join(" ")}</p>
+          <p className="l1v-targets">{shown.targets_rows.map((id) => fmtSampleTag(id)).join(" ")}</p>
         </div>
       )}
 
