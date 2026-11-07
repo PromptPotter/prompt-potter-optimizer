@@ -69,16 +69,10 @@ export interface QuotaStatus {
 
 /** The host's allowance for this account, and who pays a send on each provider. */
 export interface CouponStatus {
-  state: 'unmetered' | 'used_up' | 'held' | 'open';
   /** The allowance in one line: its state's label, what the box's keys drew of the
    * face on the unit drawn nearest it (else the state's word), and the
    * providers the account's own keys pay. */
   headline: Said;
-  /** What this account's running campaigns reserve of the face. */
-  held: Budget;
-  /** What a new launch may still hold: the face less what is drawn and `held`, at
-   * most the unpriced grace while a bill is a floor. */
-  left: Budget;
   /** What is drawn over the face on the unit drawn nearest it, at most 1; null
    * where no unit is bounded. */
   used_share: number | null;
@@ -100,21 +94,6 @@ export interface Said {
   sub: string | null;
   /** The longer reading, a tap away. */
   detail: string | null;
-}
-
-/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits. */
-export interface Budget {
-  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
-  usd?: number | null;
-  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
-   * where a model has no rate on file. */
-  tokens?: number | null;
-  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
-   * measures the origin only. */
-  rounds?: number | null;
-  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
-   * open at the edge is cut and the run stops `wall_clock`. */
-  wall_clock_s?: number | null;
 }
 
 /** What an account, or one campaign's share of it, was billed over its whole life. */
@@ -1825,6 +1804,21 @@ export interface ServedBackpressure {
 export interface RunLimits {
   budget: Budget;
   optimizer: OptimizerLimit[];
+}
+
+/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits. */
+export interface Budget {
+  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
+  usd?: number | null;
+  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
+   * where a model has no rate on file. */
+  tokens?: number | null;
+  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
+   * measures the origin only. */
+  rounds?: number | null;
+  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
+   * open at the edge is cut and the run stops `wall_clock`. */
+  wall_clock_s?: number | null;
 }
 
 /** One knob an optimizer declares as bounding its run, which a fork may reconcile. */
@@ -3780,9 +3774,6 @@ export interface FieldGap {
 /** A launch refused whole, as ``admit_launch`` raises it. */
 export interface LaunchRefusal {
   reason: 'used_up' | 'held' | 'over_declared' | 'no_key';
-  /** The provider whose send is refused; null where a backend's cells, which go out
-   * on the box's keys whatever keys the account holds, draw the allowance. */
-  provider: string | null;
   /** What binds and the remedy, in the refusal's own words. */
   sentence: string;
 }

@@ -169,13 +169,17 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   one spine per line. **Rides with:** M16b. **Re-test:** compare two branches of one campaign; both
   draw.
 - **A refusal still has three more shapes besides the one Refusal value**:
-  - `jobs/quota.py::LaunchRefusal` is served with `reason`, `provider` and `sentence`.
+  - `jobs/quota.py::LaunchRefusal` is served with `reason` and `sentence`.
   - A job persists its refusal as `str(exc)` (`jobs/registry.py`, `domain/job.py`), and MCP `tasks/get`
     reads that back as a code plus text.
   - REST's envelope calls the code `error`, and the CLI's `--json` spreads `details` beside it.
 
   Action: every door and every persisted job carries the Refusal value. **Rides with:** M6.
   **Re-test:** `git grep -n "class LaunchRefusal" -- promptpotter` is empty.
+- **`launch_refusal` names two things** — `jobs/quota.py::launch_refusal` (served as
+  `DraftBuild.launch_refusal`) is the coupon's refusal, while `phases.py::RunState.launch_refusal` is
+  a cycle-busy string read by `commands/launching.py`. Action: rename the phases one. **Rides with:**
+  M6. **Re-test:** `git grep -n "launch_refusal" -- promptpotter/domain` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
@@ -185,6 +189,9 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   digests with no prompt change. Action: the digest hashes what shapes a prompt, never a refusal's
   text. **Rides with:** M8 (the digest reach). **Re-test:** edit one refusal sentence; `offline_run.py
   --digests` does not move.
+  - Parked behind it: `NoApiKeyError.provider` and `HostAllowanceExhaustedError.provider`
+    (`shared/errors.py`) have no reader since `LaunchRefusal.provider` went; deleting them moves the
+    potter and capo-pobb digests (`arc/w2x3` 7aeab5219 holds the cut).
 - **The unknown-slot refusal is spelled twice** — `bench/task_context.py` and the potter injection
   registry each validate a template's slots. Action: one template-slot validation. **Rides with:** M8.
   **Re-test:** one function words an unknown slot.
@@ -1088,8 +1095,6 @@ fixtures.
     (`clamp_budget_change`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
     send's payer is `None`); `launch_refusal` refuses `NO_KEY`, and `coupon.py::keyed_client` is the one
     raise at send (today `provider_send` spells it again). **Re-test:** `git grep -n "NoApiKeyError(" -- promptpotter/application/jobs`.
-  - `CouponStatus.state` / `.held` / `.left` and `LaunchRefusal.provider` are served with no reader.
-    Action: delete. **Re-test:** grep each in `webapp/components webapp/lib` and `promptpotter/presentation`.
   - **An in-process connector whose cells send through `keyed_client` declares a fixed payer**: the L4
     `promptpotter` connector keeps `Connector.cell_payer = "host"`, so an own-key L4 run is refused on a
     used-up allowance. Action: an in-process connector's cells are per-provider sends (the target

@@ -108,7 +108,6 @@ export function providerRoute(provider: string, key: AccountKey | null = null): 
 
 export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
   return {
-    state: "open",
     headline: {
       key: "allowance:open",
       tone: "quiet",
@@ -117,8 +116,6 @@ export function couponStatus(over: Partial<CouponStatus> = {}): CouponStatus {
       sub: null,
       detail: null,
     },
-    held: { usd: 0, tokens: 0 },
-    left: { usd: 5, tokens: null },
     used_share: 0,
     host_key_spend: lifetimeSpend(),
     own_key_spend: lifetimeSpend(),

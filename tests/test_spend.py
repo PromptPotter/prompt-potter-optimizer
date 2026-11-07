@@ -100,6 +100,7 @@ from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     LaunchRefusal,
     QuotaExceededError,
+    account_wallet,
     admit_launch,
     clamp_budget_change,
     coupon_status,
@@ -2971,7 +2972,7 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
     finally:
         unbind()
     refused = LaunchRefusal.of(box_paid.value)
-    assert (refused.reason, refused.provider) == (LaunchRefusalReason.USED_UP, "openai"), (
+    assert (refused.reason, box_paid.value.provider) == (LaunchRefusalReason.USED_UP, "openai"), (
         "a send past the coupon was refused for another cause, or named no provider to key"
     )
     spent_out.charges.append(
@@ -2986,10 +2987,11 @@ def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
             tokens=9_000_000,
         )
     )
-    status = coupon_status(spent_out)
-    assert (status.left.usd, status.state) == (0.0, AllowanceState.USED_UP), (
+    wallet = account_wallet(spent_out)
+    assert (wallet.headroom.usd, wallet.state) == (0.0, AllowanceState.USED_UP), (
         "the coupon read another remainder than the box's keys left it"
     )
+    status = coupon_status(spent_out)
     assert status.own_key_spend.billed_usd == pytest.approx(5.0), "the own key's spend went unread"
     payers = {route.provider: route.payer for route in status.routes}
     assert (payers["openrouter"], payers["openai"]) == ("user", "host"), (
