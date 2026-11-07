@@ -23,4 +23,4 @@
 
 ## Picking a JSON reader is a decision
 
-`read_json_tolerant` collapses *absent* and *corrupt*; `read_json_optional` lets corrupt raise. Tolerant only for a cross-cycle survey; optional wherever the caller acts differently on the two (the identity readers, where collapsing would fail OPEN). Hand-rolled `json.loads(path.read_text())` in a `try` is the bug. <!-- probe: git grep -cE "json\.loads\(.*read_text\(" -- promptpotter/infrastructure/*.py == 0 -->
+`read_json_tolerant` collapses *absent* and *corrupt*; `read_json_optional` lets corrupt raise. Tolerant only for a cross-cycle survey; optional wherever the caller acts differently on the two (the identity readers, through `read_model.py::read_file`, where collapsing would fail OPEN). Hand-rolled `json.loads(path.read_text())` in a `try` is the bug. <!-- probe: git grep -cE "json\.loads\(.*read_text\(" -- promptpotter/infrastructure/*.py == 0 -->

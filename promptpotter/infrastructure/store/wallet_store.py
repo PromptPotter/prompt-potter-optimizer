@@ -14,17 +14,18 @@ from typing import Literal
 
 from pydantic import Field, SecretStr, TypeAdapter
 
+from promptpotter.domain.run_records import SpendHoldRecord
 from promptpotter.domain.spend import Budget, KeySource, TokenUsageKind
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     append_line,
-    read_bytes_optional,
-    read_json_optional,
     take_lock,
     write_json,
     write_lock_name,
 )
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import FileKind
 
 _KEYS_LOCK_WAIT_S = 5.0
 
@@ -49,8 +50,7 @@ class GrantStore:
         self.path = account_dir / GRANT_FILE
 
     def load(self) -> CouponGrant | None:
-        raw = read_json_optional(self.path)
-        return None if raw is None else CouponGrant.model_validate(raw)
+        return read_file(self.path, CouponGrant.model_validate_json, FileKind.STORED_CONFIG)
 
     def save(self, grant: CouponGrant) -> None:
         write_json(self.path, grant.model_dump(mode="json"))
@@ -76,8 +76,8 @@ class TenantApiKeyStore:
 
     def load(self) -> dict[str, HeldKey]:
         # Optional, not tolerant: a corrupt file read as "no keys" would bill the host's.
-        raw = read_bytes_optional(self.path)
-        return {} if raw is None else HELD_KEYS.validate_json(raw)
+        held = read_file(self.path, HELD_KEYS.validate_json, FileKind.STORED_CONFIG)
+        return {} if held is None else held
 
     def put(self, provider: str, secret: SecretStr) -> HeldKey:
         held = HeldKey(secret=secret)
@@ -147,6 +147,11 @@ class BilledCharge(FrozenModel):
 
 
 ChargeRecord = HeldCharge | BilledCharge
+
+
+def held_tokens(hold: SpendHoldRecord | HeldCharge) -> int:
+    """An uncapped reply holds no tokens: such a send is admitted only where no token ceiling stands."""
+    return 0 if hold.output_tokens is None else hold.input_tokens + hold.output_tokens
 
 
 class ChargeBook:
