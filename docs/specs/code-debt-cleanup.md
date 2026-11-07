@@ -943,13 +943,11 @@ Seen while removing the canvas tooltip; the panel work is [`roadmap.md`](roadmap
 
 - `useCandidatesModel` writes the module store during render (the per-cycle metric and overlap seeding).
 - Two sources for one question: `wonOnTheta` reads `facts.elects_on`, `electedMetric` reads `dash.display_metric`.
-- `FitnessChart::parentIdx` names the standing selection, not a parent.
 - Three interval formatters: `format.ts::fmtInterval`, `VerifyReading::band`, `SearchpointDrillIn::band`.
 - Two `cell_means` renderers: `SubjectSignals` and `channel-parts::CellMeans`.
 - Three ways into Compare (the toolbar menu, `CompareOriginAction`, the forest).
 - Teaching prose in `title=`: the `FitnessLegend` hint, the toolbar, the dendrogram `<title>`, `CompareOriginAction`, `RoundVerdict`.
 - `TrajectorySeriesView::SeriesHoverPopup` is a hand-built popover beside `ui/Popover`.
-- `.ov-forest` is styled in `compare-evidence.css` for `OuterSignalPanel`, and collides with `candidates/Forest`.
 - `EvidenceCharts` and `CostStrip` lost their hover readouts with the tooltip; a per-cell or per-round value they need opens in the DOM.
 
 ### The webapp swept by shape (debt hunt 2026-11-02)

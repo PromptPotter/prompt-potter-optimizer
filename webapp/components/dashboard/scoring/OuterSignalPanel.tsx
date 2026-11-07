@@ -120,7 +120,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
             {latest.label} lifts <strong>{bandOf(latest)}</strong> over the origin, on the origin
             panel.
           </p>
-          <div className="ov-forest">
+          <div className="ov-interval-rows">
             {lifts.map((d) => (
               <LiftRow key={d.round} d={d} domain={domain} latest={d === latest} />
             ))}

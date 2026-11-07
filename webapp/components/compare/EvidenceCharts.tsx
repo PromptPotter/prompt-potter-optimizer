@@ -173,7 +173,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
     );
   }
   return (
-    <div className="ov-forest">
+    <div className="ov-interval-rows">
       {rows.map((r, i) => (
         <div key={r.key}>
           <MergedRow
