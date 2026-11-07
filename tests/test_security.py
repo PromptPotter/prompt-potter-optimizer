@@ -638,6 +638,11 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
                 check=True,
             )
             assert root.stat().st_mode & 0o777 == 0o700, f"{root.name} reached other users"
+        narrowed = tmp_path / "narrowed-root"
+        narrowed.mkdir(mode=0o500)
+        hold_private(narrowed)
+        assert narrowed.stat().st_mode & 0o777 == 0o500, "a root its owner narrowed was widened"
+        narrowed.chmod(0o700)
         opened.chmod(0o755)
 
         def not_owner(*_: object) -> None:

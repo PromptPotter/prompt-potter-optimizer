@@ -169,11 +169,9 @@ if ! dry_out="$(as_unit land-data --dry-run ${RESET:+--reset})"; then
   roll_back "the data root does not land under this code"
 fi
 printf '%s\n' "$dry_out"
-# The offer is read from the file the UNIT loads and handed in, as PROMPTPOTTER_HOME is below: this
-# shell does not load $ENV_FILE. The verb refuses a name naming no dataset, before the exact sync
-# drops what that name's extras were.
-offer_out="$(cd "$INSTALL_DIR" && DATASET_OFFER="$(read_env_kv "$ENV_FILE" DATASET_OFFER)" .venv/bin/python -m promptpotter offer-extras)" \
-  || roll_back "DATASET_OFFER names what this code cannot offer"
+# DATASET_OFFER is read from the file the UNIT loads. The verb refuses a name naming no dataset,
+# before the exact sync drops what that name's extras were.
+offer_out="$(as_unit offer-extras)" || roll_back "DATASET_OFFER names what this code cannot offer"
 offer_extras=()
 for extra in $offer_out; do offer_extras+=(--extra "$extra"); done
 ( cd "$INSTALL_DIR" && "$UV" sync --frozen --extra all "${offer_extras[@]}" ) || roll_back "the exact sync failed"
