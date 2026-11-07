@@ -29,7 +29,7 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import HeldBudget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.io import open_append, write_text
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import NotFoundError
@@ -131,7 +131,7 @@ async def spawn_job(
 def _start(spec: JobSpec, log_path: Path) -> subprocess.Popen[bytes]:
     """The run's process, its spec on stdin; stdout is `_adoption`'s, stderr the job's log."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "ab") as log:
+    with open_append(log_path) as log:
         child = subprocess.Popen(
             [sys.executable, "-X", "utf8", "-m", __spec__.name],
             stdin=subprocess.PIPE,
