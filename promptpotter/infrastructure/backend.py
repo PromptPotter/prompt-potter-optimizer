@@ -14,7 +14,6 @@ import httpx
 
 from promptpotter.config.paths import MACHINE_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
-from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.pricing import inline_route
@@ -63,7 +62,7 @@ CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
-    from promptpotter.domain.connector import ConnectorExecution, MeasuredUnit
+    from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
@@ -174,10 +173,6 @@ class BackendClient:
         return self._connector
 
     @property
-    def execution(self) -> ConnectorExecution:
-        return self._connector.execution
-
-    @property
     def max_cells_in_flight(self) -> int:
         return self._connector.max_cells_in_flight
 
@@ -186,32 +181,8 @@ class BackendClient:
         return self._connector.measured_unit
 
     @property
-    def answer_key(self) -> str | None:
-        return self._connector.answer_key
-
-    @property
-    def holds_own_sends(self) -> bool:
-        return self._connector.holds_own_sends
-
-    @property
-    def cancel_stops_billing(self) -> bool:
-        return self._connector.cancel_stops_billing
-
-    @property
-    def cell_payer(self) -> KeySource:
-        return self._connector.cell_payer
-
-    @property
     def cell_attempts(self) -> int:
         return self._connector.cell_attempts
-
-    @property
-    def prompt_fields_as_node_params(self) -> bool:
-        return self._connector.prompt_fields_as_node_params
-
-    @property
-    def derives_spend_bounds(self) -> bool:
-        return self._connector.sent_spend_bound is not None
 
     def cell_envelope_s(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
         return self._connector.cell_envelope_s(sample, pipeline_params)
@@ -363,7 +334,7 @@ class BackendClient:
             unreachable: httpx.TransportError | None = None
             async with self.backpressure.send() as ticket:
                 with admitted(
-                    CELL, bound, model=None, provider=None, paid_by=self.cell_payer
+                    CELL, bound, model=None, provider=None, paid_by=self._connector.cell_payer
                 ) as admission:
                     started = time.monotonic()
                     try:
@@ -473,10 +444,12 @@ class BackendClient:
         with contextlib.ExitStack() as hold:
             admission: Admission | None = None
             if bound is not None and self._connector.holds_own_sends:
-                hold.enter_context(reserved(CELL, bound, paid_by=self.cell_payer))
+                hold.enter_context(reserved(CELL, bound, paid_by=self._connector.cell_payer))
             elif bound is not None:
                 admission = hold.enter_context(
-                    admitted(CELL, bound, model=None, provider=None, paid_by=self.cell_payer)
+                    admitted(
+                        CELL, bound, model=None, provider=None, paid_by=self._connector.cell_payer
+                    )
                 )
             started = time.monotonic()
             try:
