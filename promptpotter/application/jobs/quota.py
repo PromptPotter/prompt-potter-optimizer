@@ -17,7 +17,6 @@ from promptpotter.application.jobs.coupon import (
     ALLOWANCE_STATE_INFO,
     AccountKey,
     AccountWallet,
-    AllowanceState,
     BackendCells,
     Send,
     bind_account,
@@ -355,10 +354,6 @@ class LaunchRefusal(StrictModel):
     """A launch refused whole, as ``admit_launch`` raises it."""
 
     reason: LaunchRefusalReason
-    provider: str | None = Field(
-        description="The provider whose send is refused; null where a backend's cells, which go "
-        "out on the box's keys whatever keys the account holds, draw the allowance."
-    )
     sentence: str = Field(description="What binds and the remedy, in the refusal's own words.")
 
     @classmethod
@@ -368,7 +363,7 @@ class LaunchRefusal(StrictModel):
             if isinstance(refused, HostAllowanceExhaustedError)
             else LaunchRefusalReason.NO_KEY
         )
-        return cls(reason=reason, provider=refused.provider, sentence=refusal_words(refused))
+        return cls(reason=reason, sentence=refusal_words(refused))
 
 
 class ProviderRoute(StrictModel):
@@ -385,16 +380,10 @@ class ProviderRoute(StrictModel):
 class CouponStatus(StrictModel):
     """The host's allowance for this account, and who pays a send on each provider."""
 
-    state: AllowanceState
     headline: Said = Field(
         description="The allowance in one line: its state's label, what the box's keys drew of "
         "the face on the unit drawn nearest it (else the state's word), and the providers the "
         "account's own keys pay."
-    )
-    held: Budget = Field(description="What this account's running campaigns reserve of the face.")
-    left: Budget = Field(
-        description="What a new launch may still hold: the face less what is drawn and `held`, "
-        "at most the unpriced grace while a bill is a floor."
     )
     used_share: float | None = Field(
         description="What is drawn over the face on the unit drawn nearest it, at most 1; null "
@@ -438,7 +427,6 @@ def coupon_status(stores: Stores) -> CouponStatus:
     words = ALLOWANCE_STATE_INFO[wallet.state]
     own = [route.provider for route in routes if route.payer == "user"]
     return CouponStatus(
-        state=wallet.state,
         headline=Said(
             key=f"allowance:{wallet.state}",
             tone=words.tone,
@@ -447,8 +435,6 @@ def coupon_status(stores: Stores) -> CouponStatus:
             sub=f"your own key pays {', '.join(own)}" if own else None,
             detail=words.lede,
         ),
-        held=wallet.held,
-        left=wallet.headroom,
         used_share=None if binding is None else shares[binding],
         host_key_spend=LifetimeSpend.of(paid.host),
         own_key_spend=LifetimeSpend.of(paid.user),
