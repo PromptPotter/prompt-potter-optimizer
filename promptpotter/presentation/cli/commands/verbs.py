@@ -744,7 +744,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "offer-extras",
         "offer:cmd_offer_extras",
         help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
-        "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Read-only.",
+        "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Writes nothing but a missing data root.",
         needs_registries=False,
     ),
     Verb(

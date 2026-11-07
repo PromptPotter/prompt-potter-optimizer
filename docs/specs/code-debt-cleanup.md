@@ -1242,6 +1242,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   behind an `assert`: a manifest deleted between the two reads fails the read as a bare
   `AssertionError`, a 500. Action: pass `at.campaign`. **Re-test:**
   `git grep -n "a subject resolves through its campaign's directory" -- promptpotter`.
+- `llm/pricing.py::CACHE_PATH` binds `rates.json` to the data root at import, while every other reader
+  resolves the root per call: a home set after the import reads and writes the first root's rates
+  (batch 6's review). Action: the path resolves per call, through the store's reader. **Re-test:**
+  `git grep -n "^CACHE_PATH = user_data_root()" -- promptpotter/infrastructure/llm/pricing.py`.
 
 **B. A refusal spelled per door.** **Rides with:** Q3.
 - `provider_config.py::OIDCConfigError`, `prompt_block.py::PackRefusal` and

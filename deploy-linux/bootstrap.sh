@@ -34,6 +34,12 @@ source "$HERE/uv.sh"
 
 [[ "$(uname -s)" == "Linux" ]] || die "this script is Linux-only"
 [[ "$REPO_URL" != *"CHANGE-ME"* ]] || die "edit REPO_URL at the top of bootstrap.sh first (or pass REPO_URL=...)"
+# hardening.sh's block needs systemd 247 (`ProtectProc`): a unit file skips a key it does not know,
+# but `update.sh`'s `systemd-run -p` refuses it, so every deploy verb would fail.
+SYSTEMD_MIN=247
+SYSTEMD_HAVE="$(systemctl --version 2>/dev/null | awk 'NR==1 {print $2}')"
+[[ "$SYSTEMD_HAVE" =~ ^[0-9]+$ ]] && (( SYSTEMD_HAVE >= SYSTEMD_MIN )) \
+    || die "systemd ${SYSTEMD_HAVE:-not found}; the hardened units need systemd >= $SYSTEMD_MIN"
 
 # --- 0. detect package manager ------------------------------------------
 if command -v dnf >/dev/null 2>&1; then

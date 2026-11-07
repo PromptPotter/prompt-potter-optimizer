@@ -246,7 +246,11 @@ Each step is idempotent.
 1. **Apply the hardened unit** — `./install-service.sh`, then `systemctl status $APP_NAME` and the
    health curl. A unit that fails to start: first suspects are `ProtectSystem=strict` (add the write
    path to `ReadWritePaths`) and `SystemCallFilter`. `MemoryDenyWriteExecute` is omitted on purpose;
-   add it only after a clean smoke test.
+   add it only after a clean smoke test. **systemd ≥ 247** (`ProtectProc`; `bootstrap.sh` checks it):
+   a unit file skips a key it does not know, but `update.sh`'s `systemd-run -p` refuses it, so on
+   an older systemd every verb of a deploy fails. `@privileged` and `@resources` are denied with
+   `EPERM`; on the box, `systemctl show $APP_NAME -p SystemCallFilter --value | grep -cw setpriority`
+   prints `0`.
 2. **(Optional) cgroup bound** — `MEMORY_MAX="2G"` in `deploy.config`, re-run `install-service.sh`;
    a memory-starved run then dies as a clean cgroup OOM.
 3. **Provision the PP↔TermNorm token.** A first install's `bootstrap.sh` generates `TERMNORM_TOKEN`;
@@ -349,6 +353,9 @@ tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit
 ### Secret hygiene
 
 - `.env` is `chmod 600` and never committed.
+- The app holds the data root closed to group and others whoever launches it
+  (`store/private_root.py::hold_private`), and every verb `update.sh` runs, `offer-extras` included,
+  runs under the units' own environment and hardening block (`hardening.sh::unit_hardening`).
 - A leaked `ADMIN_BOT_TELEGRAM_TOKEN`: re-issue via @BotFather, paste it into the app's `.env`,
   restart both units.
 

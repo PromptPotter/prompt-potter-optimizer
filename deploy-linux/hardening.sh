@@ -29,6 +29,8 @@ ProtectHostname=true
 ProtectProc=invisible
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
-SystemCallFilter=~@privileged ~@resources
+# One leading ~ denies the whole list; a second ~ would name no syscall group.
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
 EOF
 }

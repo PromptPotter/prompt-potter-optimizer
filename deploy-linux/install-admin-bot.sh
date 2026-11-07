@@ -72,8 +72,9 @@ fi
 # ADMIN_BOT_MODULE is the one knob whose default is a PLACEHOLDER (`myapp.…`), so a deploy that
 # never set it installs a unit whose ExecStart cannot resolve. systemd reports that as
 # "unavailable resources" and auto-restarts forever, naming neither the module nor the file to
-# fix. Resolve it here, where the answer is one line in deploy.config.
-"$INSTALL_DIR/.venv/bin/python" -c "import $ADMIN_BOT_MODULE" 2>/dev/null \
+# fix. Resolve it here, where the answer is one line in deploy.config. The import holds the data
+# root, so it is handed the unit's root, and its stderr names a refused one as itself.
+PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" "$INSTALL_DIR/.venv/bin/python" -c "import $ADMIN_BOT_MODULE" \
     || die "ADMIN_BOT_MODULE=$ADMIN_BOT_MODULE does not import — set it in deploy-linux/deploy.config"
 
 UNIT_FILE=/etc/systemd/system/$BOT_SERVICE_NAME.service
