@@ -573,8 +573,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, billed: Path | None) -> Se
             root_content_hash=plan.origin_hash,
             treatment=plan.treatment,
             declaration=declaration,
-            backend_id=session.backend_id,
-            backend_url=session.backend_client.base_url,
             owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
             lifecycle_changed_at=now,

@@ -213,7 +213,7 @@ def load_mask_record(
         origin_rows = [
             cell for sheet in (origin_file.cells if origin_file else {}).values() for cell in sheet
         ]
-        terms = campaign_terms(campaign.backend_id)
+        terms = campaign_terms(campaign.connector)
         formula = realize_dials(
             parse_dials(lens.body, terms),
             _dial_anchors(cycle_config(stores, campaign, None).config, origin_rows, terms),

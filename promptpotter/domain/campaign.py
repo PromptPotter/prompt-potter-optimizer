@@ -304,8 +304,6 @@ class CampaignEdit(TypedDict, total=False):
     lifecycle_status: LifecycleStatus
     lifecycle_changed_at: str
     lifecycle_reason: str
-    backend_id: str
-    backend_url: str
 
 
 class Campaign(FrozenModel):
@@ -321,9 +319,6 @@ class Campaign(FrozenModel):
     root_content_hash: str
     treatment: Treatment
     declaration: RunDeclaration
-    backend_id: str = ""
-    # Every later launch of any of its cycles runs here.
-    backend_url: str = ""
     lifecycle_status: LifecycleStatus = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""

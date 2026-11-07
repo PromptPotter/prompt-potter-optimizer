@@ -154,7 +154,6 @@ def new_draft(
         origin_prompts={},
         decomposed_task_context={},
         candidate_library=(),
-        reused_origin_id="",
         resolver_ran=False,
     ).at(mint_draft_id())
 
