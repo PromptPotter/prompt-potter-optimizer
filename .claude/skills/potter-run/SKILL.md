@@ -92,7 +92,7 @@ class and next step from `STOP_REASON_INFO`, `promptpotter/domain/phases.py`; co
 [`candidate-elimination.md`](../../../docs/methods/candidate-elimination.md)): a tail of 1s is the difficulty
 ORDER (`build_round_order`), never a surge; `p_better` (buy more?) and `improved` (adopt?) can disagree,
 neither broken — on `improved: false` read the final `paired_breakdown` in
-`.runtime/streams/round_NNNN_pobb.jsonl`, report both, never retune `epsilon`; a `vs_reference` rate where
+the ledger's `race_standing` records, report both, never retune `epsilon`; a `vs_reference` rate where
 `panel.scored < panel.expected` is not a standing.
 
 ## Configs are the source of truth

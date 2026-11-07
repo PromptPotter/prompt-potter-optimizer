@@ -256,6 +256,11 @@ class CycleLayout:
         """Held beside the producer lock while a paid pass, not a loop, holds the cycle."""
         return self.runtime / "pass.lock"
 
+    @property
+    def job_log(self) -> Path:
+        """A detached launch's stderr; every launch of the cycle appends to it."""
+        return self.runtime / "job.log"
+
 
 @dataclass(frozen=True, slots=True)
 class CampaignLayout:

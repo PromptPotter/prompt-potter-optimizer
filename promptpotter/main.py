@@ -26,6 +26,7 @@ from promptpotter.application.account import record_refusal
 from promptpotter.application.commands.dispatcher import command_answer
 from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.jobs.interlock import minted_producer
 from promptpotter.application.jobs.quota import RateLimitedError
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
@@ -79,7 +80,8 @@ logger = logging.getLogger(__name__)
 
 def _telegram_shutdown_notice(registry: JobRegistry) -> None:
     """A clean exit 0 leaves ``Restart=on-failure`` quiet; a SIGKILL or OOM never reaches this hook."""
-    running = registry.list_running()
+    own = minted_producer(registry.jobs_dir)
+    running = [] if own is None else [j for j in registry.list_running() if j.producer_id == own]
     if running:
         interrupted = ", ".join(job.what for job in running)
         notify_operator(
@@ -88,7 +90,9 @@ def _telegram_shutdown_notice(registry: JobRegistry) -> None:
             ring=True,
         )
     else:
-        notify_operator(f"{settings.BRAND_SERVICE_NAME} stopped (nothing running).", ring=False)
+        notify_operator(
+            f"{settings.BRAND_SERVICE_NAME} stopped (nothing of its own running).", ring=False
+        )
 
 
 @asynccontextmanager

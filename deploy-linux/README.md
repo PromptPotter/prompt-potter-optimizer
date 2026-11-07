@@ -298,9 +298,10 @@ HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
   warns.
 
 **What it tells you, and how loud.** It rings for what wants you now: a health probe turning broken,
-a new account (`/block` it or not), a sign-up refused at `MAX_ACCOUNTS`, the server stopping with
-runs in flight, the box losing power or its battery reaching 15%. It is silent for the record: a
-probe working again, a stop with nothing running, power back, the daily outside-visits digest. The
+a new account (`/block` it or not), a sign-up refused at `MAX_ACCOUNTS`, the server stopping
+runs it was serving, the box losing power or its battery reaching 15%. It is silent for the record:
+a probe working again, a stop with nothing of its own running (a detached run continues,
+unannounced), power back, the daily outside-visits digest. The
 bot keeps its own clock whether or not commands can arrive: health and the briefing feed every 30
 minutes, power every minute on a machine with a battery, the digest once a day after 07:00 box time.
 

@@ -252,13 +252,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** M17.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **A job's log outlives its campaign**: `jobs/launcher/run_job.py::spawn_job` writes
-  `jobs/logs/{job_id}.log` and nothing deletes it, so `jobs/logs` grows without bound. Decision
-  (operator, 2026-11-07): a job's log is deleted with its campaign, on the channel that deletes the
-  campaign (`commands/workspace_edits.py` → `CampaignStore.delete_campaign`), with no separate
-  expiry. The log is keyed by job id, which the campaign tree does not name. **Rides with:** M6.
-  **Re-test:** a deleted
-  campaign's job ids name no file under `jobs/logs`.
 - **One torn `grant.json` fails the install-spend survey** — `application/jobs/install_spend.py` catches
   `OSError` and `LedgerUnreadableError`, not the unreadable-file refusal `GrantStore.load` raises, while
   `application/account.py` and `application/datasets/startability.py` catch it. Action: a survey serves
@@ -1302,6 +1295,10 @@ What batch E's reviews found outside the arc under review, grouped by shape.
   `n` keeps its total.
 - `tests/test_scoring.py` writes `HostSession._tasks` past the interface. Action: Q1's log read
   replaces it. **Re-test:** `git grep -n "_tasks\[" -- tests`.
+- `cycle_files.py::read_cycle_file` at campaign scope serves any shown file under the campaign root
+  (another cycle's, a sandbox's), while `list_cycle_files` lists only `CampaignLayout.files()` (batch
+  7's fix pass). Action: the campaign scope reads what it lists. **Re-test:** a campaign-scope read of
+  `cycles/<id>/readout.log` is refused.
 
 ## Open — multi-arc
 
@@ -1586,12 +1583,6 @@ word's `git grep -c` for that sense is 0.
   - The bar and the sidebar lead with the 6-cell 0%; the 39% shows only as the overlap series.
   - Collapse must be judged against the truth labels the cells hold, and against the parent's answers on
     the same cells. An engine decision: prove it with an offline run.
-- **The server's shutdown notice counts runs it does not host**: `main.py::_telegram_shutdown_notice`
-  reads `JobRegistry.list_running()`, which holds the machine's CLI runs too. A server stopped beside a
-  CLI campaign reports it "stopped … in flight" and says "Resume from the campaign once it is back up",
-  but the run continues. The notice must name only the jobs this process owns. Seen 2026-10-30 against
-  `promptpotter-self.panel__606cc9`; the same stop logged `ASGI callable returned without completing
-  response` for its open `events:subscribe` stream.
 - **A member knob's `NodeConfigParam` serves no estimand**, which the config map shows for every campaign
   knob (`application/knobs.py`), so the setup screen cannot say what moving one moves.
 - **Seen building the setup screen**:
