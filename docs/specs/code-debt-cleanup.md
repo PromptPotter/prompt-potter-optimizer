@@ -219,10 +219,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   kind runs in a parallel lane and reads a half-built product. Action: the assert also requires the
   builder to share the lane or the check to run alone. **Rides with:** M1. **Re-test:** point one
   check's `after` at a check of the other kind; import fails.
-- **`roundOf` names three things** — `lib/poll.tsx` (the dashboard's live round),
-  `components/candidates/dendrogram.ts` (a bar's round) and `forest-layout.ts` (a hierarchy
-  candidate's round). Action: three distinct names. **Rides with:** M16. **Re-test:** `git grep -n
-  "roundOf" -- webapp` names one definition.
 - **A workspace and a hop are re-derived from a path by parent counting** —
   `jobs/reaper.py::_tenant_root_of` and `sweep_dead_cycles`, `campaign_store/store.py` (the cycle's
   hop beside `cycle_dir.parent.parent`) and `store/account_trail.py` (a campaign id from
