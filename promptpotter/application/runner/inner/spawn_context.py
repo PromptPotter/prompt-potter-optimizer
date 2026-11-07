@@ -63,7 +63,7 @@ _INNER_SPAWN: Annotated[
 def _outer_cells(session: Session) -> InnerCells | None:
     """``None`` off the recursion. The workload's panel, never a second read of the file the
     samples and fingerprint came from."""
-    if not is_self_optimization(session.backend_id):
+    if not is_self_optimization(session.backend_client.connector.name):
         return None
     return parse_resolved(session.backend_client.workload.experiment).panel.resolve_cells(
         session.store

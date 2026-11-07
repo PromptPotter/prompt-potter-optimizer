@@ -438,7 +438,8 @@ async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
     session = held.session
     dataset_name = session.dataset_name or "?"
     _checkin_line(
-        "backend", backend_reach_line(session.backend_id, session.backend_client.base_url)
+        "backend",
+        backend_reach_line(session.backend_client.connector.name, session.backend_client.base_url),
     )
     _checkin_line("dataset", f"{dataset_name} ({len(session.bank.samples)} queries)")
     _checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
