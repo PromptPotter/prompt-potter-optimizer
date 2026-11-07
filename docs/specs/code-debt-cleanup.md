@@ -149,10 +149,6 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
 
 ### Wave 1's census (2026-11-06)
 
-- **The hover card spells its own "root pipeline did not resolve"** — `RowHoverCard.tsx` writes a
-  generic sentence whenever `runs_with` is null, beside the served `unresolved` caveat. Item 8's defect
-  survives one layer up. Action: render the served caveat only. **Rides with:** M16. **Re-test:**
-  `git grep -n "did not resolve" -- webapp/app` is empty.
 - **`derived` returns `T | None`, so every keyed caller re-narrows** — `read_model.py::derived` folds
   "no signature" into the answer type. Callers include `closed_rounds.py`, `measurement_log.py`,
   `difficulty.py`, `evidence/read.py`, `capabilities.py` and `tenant_dataset_store.py`. Action: a

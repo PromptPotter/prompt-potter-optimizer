@@ -93,28 +93,22 @@ function EntryBody({ entry }: { entry: HierarchyEntry | UnstartedCampaign }) {
       />
       <Facts facts={facts} />
 
-      {campaign && (
+      {campaign && runsWith && (
         <section>
           <p className="rowhover-heading">Runs with</p>
-          {runsWith ? (
-            <dl className="rowhover-facts">
-              {runsWith.params.map((s) => (
-                <Fragment key={`${s.node}.${s.key}`}>
-                  <dt>
-                    {s.node} · {s.key}
-                  </dt>
-                  <dd>
-                    {settingValue(s.value)}
-                    <span className="rowhover-source">{s.source}</span>
-                  </dd>
-                </Fragment>
-              ))}
-            </dl>
-          ) : (
-            <p className="rowhover-note">
-              The root pipeline did not resolve, so what this campaign runs with is unknown.
-            </p>
-          )}
+          <dl className="rowhover-facts">
+            {runsWith.params.map((s) => (
+              <Fragment key={`${s.node}.${s.key}`}>
+                <dt>
+                  {s.node} · {s.key}
+                </dt>
+                <dd>
+                  {settingValue(s.value)}
+                  <span className="rowhover-source">{s.source}</span>
+                </dd>
+              </Fragment>
+            ))}
+          </dl>
         </section>
       )}
 
