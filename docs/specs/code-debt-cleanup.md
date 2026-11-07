@@ -169,13 +169,17 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   one spine per line. **Rides with:** M16b. **Re-test:** compare two branches of one campaign; both
   draw.
 - **A refusal still has three more shapes besides the one Refusal value**:
-  - `jobs/quota.py::LaunchRefusal` is served with `reason`, `provider` and `sentence`.
+  - `jobs/quota.py::LaunchRefusal` is served with `reason` and `sentence`.
   - A job persists its refusal as `str(exc)` (`jobs/registry.py`, `domain/job.py`), and MCP `tasks/get`
     reads that back as a code plus text.
   - REST's envelope calls the code `error`, and the CLI's `--json` spreads `details` beside it.
 
   Action: every door and every persisted job carries the Refusal value. **Rides with:** M6.
   **Re-test:** `git grep -n "class LaunchRefusal" -- promptpotter` is empty.
+- **`launch_refusal` names two things** — `jobs/quota.py::launch_refusal` (served as
+  `DraftBuild.launch_refusal`) is the coupon's refusal, while `phases.py::RunState.launch_refusal` is
+  a cycle-busy string read by `commands/launching.py`. Action: rename the phases one. **Rides with:**
+  M6. **Re-test:** `git grep -n "launch_refusal" -- promptpotter/domain` is empty.
 - **A taken name is read two ways** — `slug_exists` (the directory exists) against the definition's
   holders (`dataset.json` exists), across `stores.py`, `draft_patch.py`, `ingest.py` and
   `mint_and_start.py`. Action: one read of a tenant name's hold. **Rides with:** M6. **Re-test:**
