@@ -174,7 +174,7 @@ async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignW
     campaign = canonical_origin_campaign(stores, origin_id)
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
-    overrides: dict[str, Any] = {"reused_origin_id": origin_id}
+    overrides: dict[str, Any] = {}
     seed = cycle_config(stores, campaign, campaign.root_hop).origin
     if seed is not None:
         overrides["origin_prompts"] = {

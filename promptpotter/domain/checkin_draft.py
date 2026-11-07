@@ -67,8 +67,6 @@ class DraftFile(FrozenModel):
     origin_prompts: dict[str, dict[str, str]]
     decomposed_task_context: dict[str, Any]
     candidate_library: tuple[str, ...]
-    # Non-empty routes the check-in's Start through the ``origin_override`` seed.
-    reused_origin_id: str
     # A resolver turn has run on it: an edit keeps it, so a reopen reviews, never re-resolves.
     resolver_ran: bool
 
