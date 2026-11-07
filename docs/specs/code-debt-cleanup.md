@@ -1078,8 +1078,6 @@ fixtures.
     (`clamp_budget_change`) refuses a limit over a missing key. Action: `sends_on` is total (a no-key
     send's payer is `None`); `launch_refusal` refuses `NO_KEY`, and `coupon.py::keyed_client` is the one
     raise at send (today `provider_send` spells it again). **Re-test:** `git grep -n "NoApiKeyError(" -- promptpotter/application/jobs`.
-  - `CouponStatus.state` / `.held` / `.left` and `LaunchRefusal.provider` are served with no reader.
-    Action: delete. **Re-test:** grep each in `webapp/components webapp/lib` and `promptpotter/presentation`.
   - **An in-process connector whose cells send through `keyed_client` declares a fixed payer**: the L4
     `promptpotter` connector keeps `Connector.cell_payer = "host"`, so an own-key L4 run is refused on a
     used-up allowance. Action: an in-process connector's cells are per-provider sends (the target

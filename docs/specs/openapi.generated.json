@@ -531,17 +531,6 @@
         "title": "ActivityState",
         "type": "object"
       },
-      "AllowanceState": {
-        "description": "What the host's allowance does for this account's next launch: one closed set, each surface\nreading its words off `ALLOWANCE_STATE_INFO`.",
-        "enum": [
-          "unmetered",
-          "used_up",
-          "held",
-          "open"
-        ],
-        "title": "AllowanceState",
-        "type": "string"
-      },
       "ArchiveCampaignPayload": {
         "additionalProperties": false,
         "description": "Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree\ndoes not move.",
@@ -4155,17 +4144,9 @@
             "$ref": "#/components/schemas/Said",
             "description": "The allowance in one line: its state's label, what the box's keys drew of the face on the unit drawn nearest it (else the state's word), and the providers the account's own keys pay."
           },
-          "held": {
-            "$ref": "#/components/schemas/Budget",
-            "description": "What this account's running campaigns reserve of the face."
-          },
           "host_key_spend": {
             "$ref": "#/components/schemas/LifetimeSpend",
             "description": "What the box's keys paid for this account."
-          },
-          "left": {
-            "$ref": "#/components/schemas/Budget",
-            "description": "What a new launch may still hold: the face less what is drawn and `held`, at most the unpriced grace while a bill is a floor."
           },
           "own_key_spend": {
             "$ref": "#/components/schemas/LifetimeSpend",
@@ -4178,9 +4159,6 @@
             },
             "title": "Routes",
             "type": "array"
-          },
-          "state": {
-            "$ref": "#/components/schemas/AllowanceState"
           },
           "used_share": {
             "anyOf": [
@@ -4196,10 +4174,7 @@
           }
         },
         "required": [
-          "state",
           "headline",
-          "held",
-          "left",
           "used_share",
           "host_key_spend",
           "own_key_spend",
@@ -8582,18 +8557,6 @@
         "additionalProperties": false,
         "description": "A launch refused whole, as ``admit_launch`` raises it.",
         "properties": {
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The provider whose send is refused; null where a backend's cells, which go out on the box's keys whatever keys the account holds, draw the allowance.",
-            "title": "Provider"
-          },
           "reason": {
             "$ref": "#/components/schemas/LaunchRefusalReason"
           },
@@ -8605,7 +8568,6 @@
         },
         "required": [
           "reason",
-          "provider",
           "sentence"
         ],
         "title": "LaunchRefusal",
