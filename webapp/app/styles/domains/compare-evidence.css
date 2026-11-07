@@ -63,7 +63,7 @@
   color: var(--color-text-secondary);
 }
 
-.ov-forest {
+.ov-interval-rows {
   display: flex;
   flex-direction: column;
   gap: 1px;

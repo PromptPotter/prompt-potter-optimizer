@@ -38,7 +38,7 @@ declare module "chart.js" {
   // Type param arity must match chart.js's own declaration to merge; unused here.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
-    barCaps?: { counts: (number | null)[]; parent: number | null; crown: string };
+    barCaps?: { counts: (number | null)[]; standing: number | null; crown: string };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     ciWhisker?: { bands: WhiskerBand[]; shaded: boolean };
@@ -50,7 +50,7 @@ declare module "chart.js" {
 const CROWN = "♛";
 const barCapsPlugin: Plugin<
   "bar",
-  { counts: (number | null)[]; parent: number | null; crown: string }
+  { counts: (number | null)[]; standing: number | null; crown: string }
 > = {
   id: "barCaps",
   afterDatasetsDraw(chart, _args, opts) {
@@ -80,7 +80,7 @@ const barCapsPlugin: Plugin<
       ctx.fillStyle = getCss("--color-text-secondary");
       ctx.fillText(String(n), xScale.getPixelForValue(i), Math.max(topY - 4, chartArea.top + 10));
     });
-    const w = opts.parent;
+    const w = opts.standing;
     if (w != null && w >= 0) {
       const topY = topOf(w);
       if (Number.isFinite(topY)) {
@@ -389,17 +389,17 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [views, selectedKey, themeVersion]);
 
-  const parentIdx = useMemo(() => {
+  const standingIdx = useMemo(() => {
     const idx = views.findIndex((v) => v.reading !== null && v.node.facts.stands);
     return idx >= 0 ? idx : null;
   }, [views]);
 
   const crown = useMemo(() => {
-    const lift = parentIdx == null ? null : liftOf(views[parentIdx]?.reading?.vs_reference ?? null);
+    const lift = standingIdx == null ? null : liftOf(views[standingIdx]?.reading?.vs_reference ?? null);
     return lift == null || lift.estimate.side === "spans"
       ? ""
       : ` ${fmtLift(lift.measurand.unit, lift.estimate.value)}`;
-  }, [views, parentIdx]);
+  }, [views, standingIdx]);
 
   const cutCounts = useMemo(
     () => views.map((v) => (v.reading?.panel.cut ? v.reading.panel.scored : null)),
@@ -527,7 +527,7 @@ export const FitnessChart = memo(function FitnessChart({
       target.style.cursor = elements[0] ? "pointer" : "default";
     },
     scales: {
-      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === parentIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === parentIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
+      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === standingIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === standingIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.2 } },
       // Declared only while θ shows: the right gutter shifts every dendrogram fraction.
       ...(showAbility
@@ -549,7 +549,7 @@ export const FitnessChart = memo(function FitnessChart({
     },
     plugins: {
       legend: { display: false },
-      barCaps: { counts: cutCounts, parent: parentIdx, crown },
+      barCaps: { counts: cutCounts, standing: standingIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       ciWhisker: { bands, shaded: asLines },
@@ -557,7 +557,7 @@ export const FitnessChart = memo(function FitnessChart({
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
+  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
     <div className="chart-frame">
