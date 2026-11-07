@@ -133,15 +133,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "round 2 (refinement overrides applied, no scoring) → halt. "
                 "index.json::final.mode lands as 'diag'.",
             ),
-            Arg(
-                "--halt-at",
-                dest="halt_at_accuracy",
-                type=float,
-                default=None,
-                metavar="ACC",
-                help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66). The "
-                "campaign's own knob, so `--set halt_at_accuracy=ACC` spelled short.",
-            ),
             NO_WAIT,
             *BUDGET_AXES,
         ),
