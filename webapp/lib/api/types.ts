@@ -6,6 +6,7 @@ import type {
   ActivityResponse,
   CampaignPipelineResponse,
   CellsResponse,
+  CommandPayloads,
   CourseFacts,
   EditDraftPatch,
   HierarchyCampaign,
@@ -32,7 +33,9 @@ export type HierarchyEntry = HierarchyCampaign | HierarchyCourse | HierarchyCand
 export type SubtreeEntry = SubtreeCampaign | SubtreeCourse | HierarchyRound | HierarchyCandidate;
 export type CourseKind = CourseFacts["mint"];
 
-export type DraftPatch = Partial<EditDraftPatch>;
+// A partial config, as sent: every key omittable at any depth.
+export type DraftPatch = Partial<Omit<EditDraftPatch, "config">> &
+  Pick<CommandPayloads["edit-draft-campaign"]["patch"], "config">;
 // served: `domain/cells.py::HeatmapScope`
 export type HardSamplesScope = CellsResponse["scope"];
 export type HardSampleOrder = CellsResponse["order"];

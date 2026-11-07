@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.spend import Budget
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
     from promptpotter.domain.command_kinds import ReadKind
 
@@ -34,6 +34,11 @@ class Verb:
     render: str | None = None
     # A read verb's flags its renderer reads, which no field of the row's model takes.
     render_args: tuple[str, ...] = ()
+    # Per payload field of a kind naming this verb, no `Arg` of its name: how the terminal carries it
+    # instead (`verbs.py::_spelled`, checked at import).
+    unspelled: Mapping[str, str] = field(default_factory=dict)
+    # A written verb dispatching no kind: why no other door carries it.
+    terminal_only: str = ""
 
 
 GLOBAL_ARGS = (

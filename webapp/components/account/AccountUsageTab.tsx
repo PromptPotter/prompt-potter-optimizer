@@ -15,6 +15,7 @@ import {
   ACCOUNT_TAB_INFO,
   SLOT_BOUND_WORDS,
   type CouponStatus,
+  type MachineQueueEntry,
   type MachineSlot,
   type MachineStatusResponse,
   type QuotaStatus,
@@ -196,6 +197,7 @@ function RunsSection({
             ariaLabel="What holds each running slot on this machine"
           />
         ) : null}
+        {machine !== null && machine.queue.length > 0 ? <QueueTable queue={machine.queue} /> : null}
         <div className="account-legend" aria-hidden="true">
           <span>
             <span className="account-slot running" /> running
@@ -230,6 +232,43 @@ const SLOT_COLUMNS: readonly Column<MachineSlot>[] = [
 
 function slotId(s: MachineSlot): string {
   return s.job_id;
+}
+
+// The caller's own waiting launches, each withdrawn by its job id: nothing ran, nothing was spent.
+function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
+  const cmd = useCommand<string>("account-queue");
+  const columns: readonly Column<MachineQueueEntry>[] = [
+    { id: "position", label: "Place", width: "4rem", cell: (q) => q.position },
+    { id: "what", label: "Waiting", width: "minmax(0,1fr)", cell: (q) => q.what },
+    { id: "since", label: "Since", width: "8rem", align: "end", cell: (q) => fmtAgo(q.created_at) },
+    {
+      id: "cancel",
+      label: "",
+      width: "6rem",
+      align: "end",
+      cell: (q) => (
+        <Button
+          disabled={cmd.pending !== null}
+          onClick={() =>
+            void cmd.run(q.job_id, () => postCommand("cancel-queued-run", { job_id: q.job_id }))
+          }
+        >
+          {cmd.pending === q.job_id ? "Cancelling…" : "Cancel"}
+        </Button>
+      ),
+    },
+  ];
+  return (
+    <>
+      <DataTable
+        columns={columns}
+        rows={queue}
+        getRowId={(q) => q.job_id}
+        ariaLabel="Your launches waiting for a slot"
+      />
+      <FailureLine failure={cmd.failure} />
+    </>
+  );
 }
 
 function LimitControl({ quota }: { quota: QuotaStatus }) {

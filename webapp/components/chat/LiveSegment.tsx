@@ -4,7 +4,9 @@ import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { CyclePath } from "@/lib/ids";
 import { FailureLine, Said } from "@/components/ui";
-import type { ActivityDecision, ActivityItem, DecisionAction } from "@/lib/api/types";
+import type { ActivityDecision, ActivityItem } from "@/lib/api/types";
+
+type DecisionAction = ActivityDecision["actions"][number];
 
 export function LiveSegment({
   notices,
@@ -27,7 +29,9 @@ export function LiveSegment({
   // The activity is the viewed leaf's, so its decision is addressed there like any command.
   const decide = (path: CyclePath, a: DecisionAction) =>
     void cmd.run(a.label, () =>
-      postCommand(a.kind, { ...cycleAddress(path), decision: a.decision }),
+      a.kind === "submit-arms"
+        ? postCommand(a.kind, { ...cycleAddress(path), keep: a.keep })
+        : postCommand(a.kind, { ...cycleAddress(path), decision: a.decision }),
     );
   const busy = cmd.pending !== null || viewedPath === null;
 

@@ -121,12 +121,6 @@ test.describe("a campaign, end to end", () => {
     const minted = (await campaigns(request)).length;
 
     // Candidate WIDTH is not set here: it rides the dataset definition's `campaign` section.
-    const capped = await command(request, "edit-draft-campaign", {
-      draft_id: draft!.draftId,
-      patch: { config: { optimization: { budget: { rounds: WANT_ROUNDS - 1 } } } },
-    });
-    expect(capped.status, `capping the draft to ${WANT_ROUNDS - 1} search round(s): ${capped.body}`).toBeLessThan(300);
-
     await open(page);
     await passConsent(page);
     await reopen(page, draft!);
@@ -137,6 +131,8 @@ test.describe("a campaign, end to end", () => {
     // After the enabled wait, so a missing field is a failure, not a race; `summary` because `getByText` also hits `<details>`.
     await page.locator("summary", { hasText: SETUP_STEP_TITLES.run }).click();
     await page.getByRole("spinbutton", { name: CAP_AXIS_INFO.usd.title }).fill(String(BUDGET_USD));
+    // The launch's round cap, as the Run step sends it: Start's `budget`, never the draft's config.
+    await page.getByRole("spinbutton", { name: CAP_AXIS_INFO.rounds.title }).fill(String(WANT_ROUNDS - 1));
 
     await start.click();
 

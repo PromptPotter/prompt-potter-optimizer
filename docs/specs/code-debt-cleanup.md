@@ -106,13 +106,6 @@ A BANKING77 campaign on an n8n harness, minted from `promptpotter mcp` on a desk
   with:** M6 (the one launch answer). **Re-test:** `mint-campaign` over `promptpotter mcp` against
   an unreadable workspace ledger answers `isError`, never a task; on a readable one the handle
   names its campaign and cycle.
-- **A mint takes its budget through three doors** — `command_kinds.py::MintCampaignPayload` carries
-  `budget`, `optimization.budget` and `campaign_config.optimization.budget`; nothing on the tool
-  says which binds when two are sent, and Claude Code reading the schema concluded that sending
-  `optimization` resets the rounds (it does not: only sent fields move). Action: one door for a
-  launch's budget on every kind (`MintCampaignPayload`, `StartCheckinPayload`, `HeadToHeadRequest`),
-  the declaration's budget never a second. **Rides with:** M12. **Re-test:** the `mint-campaign`
-  input schema names `budget` once.
 - **One fact, two words: `backend_type` and `connector`** — the definition key
   `pipeline.backend_type`, `dataset_access.py::backend_type_of_dataset`,
   `pipeline_resolve.py::draft_backend_type` and `DraftPipeline.backend_type` name what
@@ -302,13 +295,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   in-process one too, where no endpoint, token or header applies. Action: the link rides the served
   connector's wire kind. **Rides with:** M18. **Re-test:**
   `git grep -n "SECURITY_DOC_URL" -- webapp/components`.
-- **The host prompt and tool schemas mislead a driving model** — `OptimizationOverrides` inherits
-  `optimizer: "potter"` and `arm_gate: "off"` as schema defaults (the head-to-head validator requires
-  `optimizer`); `EditDraftPatch.config` is an untyped `dict`; a "partial `CampaignConfig`" has three
-  wire shapes (that, `MintCampaignPayload.campaign_config`, `OptimizationOverrides`). Action: one
-  partial model with no defaults, generated from `CampaignConfig`, used by all three. **Rides with:**
-  M12, with the three-budget-doors row. **Re-test:** the `mint-campaign` schema shows no
-  `"default": "potter"`.
 - **One act, two names** — 18 of 34 `CommandKind` rows have a `cli_verb` other than the kind, so served
   refusals and descriptions name `set-limits`, `--max-usd`, `resume`, `new` to a host that has
   `change-run-limits`, `start-run`, `mint-campaign` (`spend.py`, `jobs/quota.py`, `preflight.py`,
@@ -328,11 +314,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   only door catching `SendRefusedError` / `UngeneratedRequestError` (`RuntimeError`s, a REST 500).
   Action: one refusal value in `application/` each door only renders. **Rides with:** M14a.
   **Re-test:** the same refused `start-run` over MCP and REST carries the same `refusal_words`.
-- **`resume --rewind/--steer` with `--max-usd` crashes with a traceback** — `resume_command.py`
-  builds a fork seed's budget on the money axis it refuses; a fork has no launch-budget field
-  (`launching.py` launches it with `Budget()`), a fourth budget door. Action: `ForkCyclePayload`
-  takes the launch's budget through the one door. **Rides with:** M12.
-  **Re-test:** `resume --rewind 1 --max-usd 1` refuses typed or runs.
 - **A queued launch dies with the asking process** — the queue wait runs in the caller
   (`jobs/launcher/launch.py`), so a CLI-derived kind exits and an MCP stdio session ends, while the
   door reported success. Action: the queued job on disk is promoted by whoever frees the slot.
@@ -340,18 +321,9 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   when the slot frees.
 - **Adapter-kept rules that belong under the dispatcher** — the leftover sweep runs before CLI
   launches and in the API's loop but never for MCP stdio or `embedded_run`; `embedded_run.__all__`
-  hand-keeps four command wrappers (and `cli/commands/maintenance.py` imports from it); two typed
-  REST routes (`edit-draft-campaign`, `resolve-origin`) duplicate the generic loop with a second
-  description; `compact-archive inventory`, `ab` and the tenant `trail` are CLI-only undeclared;
-  steer values parse three ways and the server types none. Action: the sweep moves under the one
-  admission; the wrappers and typed routes are deleted; a CLI-only reason sits on the `Verb` row,
-  gate-checked; the server types an overlay against the served `param_types`. **Rides with:** M6 (sweep, wrappers), M4c (steer). **Re-test:**
+  hand-keeps four command wrappers (and `cli/commands/maintenance.py` imports from it). Action: the
+  sweep moves under the one admission; the wrappers are deleted. **Rides with:** M6. **Re-test:**
   `git grep -n "def compact_archive" -- promptpotter/application/embedded_run.py` is empty.
-- **The webapp lacks kinds whose rows claim every door** — no sender of `submit-arms`,
-  `cancel-queued-run`, `delete-cycle`; an `arm_gate: review` campaign holds in the browser with only
-  Pause. `Press` declares terminal and host presence, never the browser's. Action: `Press` names the
-  browser door, and a gate check ties each claimed kind to a sender. **Rides with:** a new arc.
-  **Re-test:** `git grep -n "submit-arms" -- webapp/components webapp/lib/hooks`.
 - **The idempotency key promises a replay some kinds never give** — `start-checkin`,
   `set-user-settings`, `accept-terms`, `set-api-key` replay nothing. Action: the description names
   which kinds replay, until M2's log-keyed idempotency. **Rides with:** M2. **Re-test:** retry a
@@ -365,18 +337,6 @@ false `self_optimization`, `node_roles` and "Restart the server" wording. The re
   MCP adapter, not a sixth entry point. **Rides with:** M20; its auth follows
   [`access-model.md`](../operations/access-model.md). **Re-test:** in claude.ai, add a custom
   connector at the box's MCP URL; `tools/list` answers.
-- **The browser cannot advance a paused cycle N rounds** — `StartRunPayload.step_rounds` has no
-  webapp sender, and it is not a named browser carve-out. **Rides with:** M6.
-- **A written verb's flags are not derived from its payload model** — `verbs.py::_WRITTEN_VERBS`
-  spells each flag by hand, so a new payload field reaches no terminal (as `step_rounds` did not).
-  Past the address and `budget`, fields with no same-named `Arg`: `resume` → `start-run` `mode`;
-  `fork-cycle` `reason`, `mode`, `round`, `candidate_id`, `seed`, `keep_rounds`; `new` →
-  `mint-campaign` `optimization`, `campaign_config`; `start-checkin` `draft_id`, `head_to_head`;
-  `edit-draft-campaign` `draft_id`, `patch`; `resolve-origin` `draft_id`; `ingest-upload`
-  `filename`, `blob`; `head-to-head` → `dataset_name`; `verify` → `candidate_id`. Action: each field
-  has an `Arg` of its name or a declared terminal-only reason, checked at import the way
-  `verbs.py::command_verb` derives them. **Rides with:** M6. **Re-test:** add a field to
-  `StartRunPayload`; importing `verbs.py` fails.
 
 ### The excision pass (six layer audits and a plan review, 2026-11-05)
 
@@ -1435,8 +1395,8 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 word's `git grep -c` for that sense is 0.
 
 - **`candidate_library` → `answer_terms`** (the target's answer-term list, beside
-  `DraftFile.answer_space`), and `PoolSource.LIBRARY` → `PACKS`: the route
-  `/datasets/draft/candidate-library`, `EditDraftPatch` and the dataset file move, and
+  `DraftFile.answer_space`), and `PoolSource.LIBRARY` → `PACKS`: `EditDraftPatch`'s three
+  `candidate_library*` fields and the dataset file move, and
   `shared/hashing.py::content_hash`'s key re-keys root ids.
 - **"course" → "cycle" in the served and doc layer** (`HierarchyCourse`, `level: "course"`,
   `/hierarchy/{course}`, `ids.ts::courseAddressOf`); `CycleHop` stays an element of a `CyclePath`.
@@ -1540,10 +1500,6 @@ word's `git grep -c` for that sense is 0.
     Until it ships, the `me` read itself (`read_params.py::MeParams`) reads through
     `account.py::account_read`, which writes nothing; the route alone arrives, since an open box has
     no sign-in callback to arrive at.
-  - Three routes are named `edit-draft-campaign`: its `/commands/` route and the two form doors in
-    `routers/datasets/ingest.py` (`candidate-library`, `from-column`): N routes per command where a
-    read gets one. Action: one route per kind, the form doors a
-    form body on it, as `ingest-upload` is. **Re-test:** `git grep -n "name=CommandKind.EDIT_DRAFT_CAMPAIGN" -- promptpotter`.
 - **Seen building the host coupon** (2026-10-29):
   - Every connector declares its cells the box's to pay (`Connector.cell_payer`): none can send on the
     account's key, so an own-key account past its coupon is refused any run with a backend. Action: a

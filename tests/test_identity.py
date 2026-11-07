@@ -1464,8 +1464,8 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         sample_preview=[],
         headers=[],
     )
-    capo_knob = EditDraftPatch(
-        config={"optimization": {"nodes": {"blocks": {"config": {"block_size": 20}}}}}
+    capo_knob = EditDraftPatch.model_validate(
+        {"config": {"optimization": {"nodes": {"blocks": {"config": {"block_size": 20}}}}}}
     )
     knobbed = apply_draft_patch(
         on_capo, asyncio.run(plan_draft_patch(built_stores, on_capo, capo_knob))

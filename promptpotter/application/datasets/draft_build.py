@@ -30,7 +30,7 @@ from promptpotter.application.pipeline_responses import CampaignPipelineResponse
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.domain.checkin_draft import DraftFile, OriginResolution, SetupStep
-from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch
+from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.phases import LaunchStage
 from promptpotter.domain.pipeline_schema import (
@@ -313,12 +313,6 @@ def setup_schema(draft: DraftFile, *, launch: Budget, declared: Budget) -> dict[
                             "optimization": {
                                 "type": "object",
                                 "properties": {
-                                    "budget": {
-                                        "type": "object",
-                                        "properties": {
-                                            "rounds": _cap(budget, "rounds", MAX_EDITED_ROUNDS),
-                                        },
-                                    },
                                     "halt_at_accuracy": _field(
                                         optimization, "halt_at_accuracy", "Halt at accuracy"
                                     ),
@@ -334,6 +328,7 @@ def setup_schema(draft: DraftFile, *, launch: Budget, declared: Budget) -> dict[
                         "properties": {
                             "usd": _cap(budget, "usd", launch.usd),
                             "tokens": _cap(budget, "tokens", launch.tokens),
+                            "rounds": _cap(budget, "rounds"),
                             "wall_clock_s": _cap(budget, "wall_clock_s"),
                         },
                     },

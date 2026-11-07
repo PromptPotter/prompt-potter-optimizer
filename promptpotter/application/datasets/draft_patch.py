@@ -4,9 +4,12 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import scorer_of
-from promptpotter.application.datasets.draft_campaign import draft_criterion, owned_draft
+from promptpotter.application.datasets.draft_campaign import draft_criterion
 from promptpotter.application.datasets.startability import checkin_rows
-from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
+from promptpotter.application.datasets.tabular_ingest import (
+    candidate_library_from_rows,
+    parse_candidate_library,
+)
 from promptpotter.application.free_tier import (
     FreeFence,
     free_fence,
@@ -30,7 +33,7 @@ from promptpotter.application.scoring.formula.compiler import (
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import merge_config_layers
 from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
-from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
+from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     ANSWER_FIELDS_KEY,
@@ -95,28 +98,21 @@ async def plan_draft_patch(
         else held
     )
 
-    for patch_val, draft_attr in (
-        (patch.origin_prompts, "origin_prompts"),
-        (patch.candidate_library, "candidate_library"),
-    ):
-        if patch_val is not None:
-            changes[draft_attr] = patch_val
+    if patch.origin_prompts is not None:
+        changes["origin_prompts"] = patch.origin_prompts
+    if (library := _candidate_library(stores, draft, patch)) is not None:
+        changes["candidate_library"] = library
 
     config = dict(draft.config)
     was = draft_pipeline(stores, draft, held)
+    sent = {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
     if patch.config is not None:
-        if "optimization" in patch.config:
-            PayloadInvalidError.validating(
-                OptimizationOverrides,
-                patch.config["optimization"],
-                under=("patch", "config", "optimization"),
-            )
         config = _stamp_optimizer(
-            merge_config_layers(config, patch.config), was.config.optimization.optimizer
+            merge_config_layers(config, sent), was.config.optimization.optimizer
         )
-        if "scoring" in patch.config:
+        if "scoring" in sent:
             config["scoring"] = _folded_scoring(
-                was.config.scoring, patch.config["scoring"], campaign_terms(served.connector)
+                was.config.scoring, sent["scoring"], campaign_terms(served.connector)
             )
     if patch.node_output is not None:
         config = _authored_contract(config, was.params, patch.node_output)
@@ -130,7 +126,7 @@ async def plan_draft_patch(
         config["optimizer_narrowing"] = narrowed
     if config != draft.config:
         laid = draft_pipeline(stores, draft.patch(**changes, config=config), served)
-        if patch.config is not None and "scoring" in patch.config:
+        if "scoring" in sent:
             # Compiled here, so a criterion no cell could be graded by is refused, never stored.
             scorer_of(laid.config, verifier_graded=False)
         changes["config"] = _narrowing_follows_schema(
@@ -301,11 +297,26 @@ def _narrowing_follows_schema(
     return {**config, "optimizer_narrowing": out} if out != narrowed else config
 
 
-def candidate_library_from_column(stores: Stores, draft_id: str, column: str) -> tuple[str, ...]:
-    draft = owned_draft(stores, draft_id)
+_LIBRARY_SOURCES = ("candidate_library", "candidate_library_column", "candidate_library_file")
+
+
+def _candidate_library(
+    stores: Stores, draft: DraftFile, patch: EditDraftPatch
+) -> tuple[str, ...] | None:
+    """The library a patch sets, from the one source it sends: the terms, a draft column's
+    distinct values, or a parsed file."""
+    sent = [name for name in _LIBRARY_SOURCES if getattr(patch, name) is not None]
+    if len(sent) > 1:
+        raise PayloadInvalidError(f"patch sends {sent}; a library comes from one of them.")
+    if patch.candidate_library_file is not None:
+        upload = patch.candidate_library_file
+        return parse_candidate_library(upload.blob, upload.filename)
+    if (column := patch.candidate_library_column) is None:
+        return None if patch.candidate_library is None else tuple(patch.candidate_library)
     if column not in draft.headers:
         raise PayloadInvalidError(
-            f"column {column!r} is not one of the dataset's columns {list(draft.headers)}."
+            f"patch.candidate_library_column {column!r} is not one of the dataset's columns "
+            f"{list(draft.headers)}."
         )
     terms = candidate_library_from_rows(checkin_rows(stores, draft), column)
     if not terms:

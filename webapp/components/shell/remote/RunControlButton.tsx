@@ -44,6 +44,17 @@ export function RunControlButton() {
       >
         {run.running ? PAUSE_ICON : PLAY_ICON}
       </button>
+      {run.step ? (
+        <button
+          type="button"
+          className="remote-btn remote-step"
+          onClick={() => run.step?.(1)}
+          disabled={run.pending}
+          aria-label="Run one round, then pause"
+        >
+          +1
+        </button>
+      ) : null}
       {run.pausing && run.running ? (
         <Said tone="warn" label={run.pausingNote} live />
       ) : null}

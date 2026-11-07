@@ -6,6 +6,7 @@ import {
   Chip,
   CopyButton,
   Empty,
+  FailureLine,
   IconBroom,
   Loading,
   Toolbar,
@@ -56,6 +57,9 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     isInheritedSibling,
     parentId,
     cleanup,
+    deleteViewed,
+    deleting,
+    deleteFailure,
   } = useLineage({
     campaignId,
     cycleId,
@@ -152,12 +156,28 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
                 )}
                 {selection ? ` · selection ${selection.label}` : ""}
                 {" · no new rounds yet"}
+                {deleteViewed && campaignId ? (
+                  <>
+                    {" · "}
+                    <button
+                      type="button"
+                      className="lineage-inherit-link"
+                      disabled={deleting}
+                      onClick={() =>
+                        deleteViewed(() => navigate({ path: [{ campaignId, cycleId: parentId }] }))
+                      }
+                    >
+                      {deleting ? "deleting…" : "delete this empty fork"}
+                    </button>
+                  </>
+                ) : null}
               </>
             ) : (
               "No rounds on disk yet — the tree appears once round 1 lands."
             )}
           </Empty>
         )}
+        <FailureLine failure={deleteFailure} />
         {cleanup.open && cleanup.stubCount !== null && (
           <CleanupConfirmModal
             stubCount={cleanup.stubCount}

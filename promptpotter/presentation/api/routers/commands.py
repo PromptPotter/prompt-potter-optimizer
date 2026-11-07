@@ -12,12 +12,7 @@ from promptpotter.application.commands.dispatcher import (
     CommandDispatcher,
     command_answer,
 )
-from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
-from promptpotter.application.commands.origin_resolving import (
-    ResolveOriginResponse,
-    dispatch_origin_resolution,
-)
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
 from promptpotter.application.jobs.launcher.head_to_head import (
@@ -29,10 +24,8 @@ from promptpotter.domain.command_kinds import (
     CommandAcceptedBody,
     CommandKind,
     CommandPayload,
-    EditDraftCampaignPayload,
     IngestUploadPayload,
     MintHeadToHeadPayload,
-    ResolveOriginPayload,
     StartCheckinPayload,
 )
 from promptpotter.presentation.api.deps import (
@@ -44,30 +37,6 @@ from promptpotter.presentation.api.deps import (
 from promptpotter.shared.errors import PayloadInvalidError
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
-
-
-@commands_router.post(
-    f"/{CommandKind.EDIT_DRAFT_CAMPAIGN}",
-    response_model=DraftCampaignWire,
-    name=CommandKind.EDIT_DRAFT_CAMPAIGN,
-)
-async def edit_draft_campaign(
-    stores: StoresDep, payload: EditDraftCampaignPayload, key: IdempotencyKeyDep
-) -> DraftCampaignWire:
-    """Sparse-patch a `DraftFile` and return its full post-mutation shape."""
-    return await dispatch_draft_patch(stores, CommandCall(payload, key))
-
-
-@commands_router.post(
-    f"/{CommandKind.RESOLVE_ORIGIN}",
-    response_model=ResolveOriginResponse,
-    name=CommandKind.RESOLVE_ORIGIN,
-)
-async def resolve_origin(
-    stores: StoresDep, payload: ResolveOriginPayload, key: IdempotencyKeyDep
-) -> ResolveOriginResponse:
-    """Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``."""
-    return await dispatch_origin_resolution(stores, CommandCall(payload, key))
 
 
 @commands_router.post(

@@ -62,10 +62,11 @@ export function SteerForkPanel({
   const pending = cmd.pending !== null;
 
   const confirm = () => {
+    const { budget, nodes } = limits.current;
     const forkSeed: ForkSeed = {
       origin_prompts: editedPrompts.current ?? seedPrompts,
       pipeline_overlay: editedOverlay.current ?? overlay,
-      config_overrides: limits.current,
+      config_overrides: nodes ? { nodes } : {},
       ...(Object.keys(editedNarrowing.current).length > 0
         ? { node_narrowing: editedNarrowing.current }
         : {}),
@@ -78,6 +79,7 @@ export function SteerForkPanel({
           round: candidate.round,
           candidate_id: candidate.arm,
           seed: forkSeed,
+          ...(budget ? { budget } : {}),
         }),
       onDone,
     );

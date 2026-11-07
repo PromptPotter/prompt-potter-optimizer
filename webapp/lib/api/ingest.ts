@@ -18,35 +18,32 @@ export async function postIngestDataset(
   if (!r.ok) throw await toApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
+// A JSON body carries bytes base64 (`EditDraftPatch.candidate_library_file`).
+async function base64Of(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
 export async function postUploadCandidateLibrary(
   draftId: string,
   file: File,
 ): Promise<DraftCampaignWire> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("draft_id", draftId);
-  const r = await send(`${API}/datasets/draft/candidate-library`, {
-    method: "POST",
-    headers: { "Idempotency-Key": mintIdempotencyKey() },
-    body: form,
+  const blob = await base64Of(file);
+  return postCommand("edit-draft-campaign", {
+    draft_id: draftId,
+    patch: { candidate_library_file: { filename: file.name, blob } },
   });
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as DraftCampaignWire;
 }
-export async function postBuildCandidateLibraryFromColumn(
+export function postBuildCandidateLibraryFromColumn(
   draftId: string,
   column: string,
 ): Promise<DraftCampaignWire> {
-  const r = await send(`${API}/datasets/draft/candidate-library/from-column`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": mintIdempotencyKey(),
-    },
-    body: JSON.stringify({ draft_id: draftId, column }),
+  return postCommand("edit-draft-campaign", {
+    draft_id: draftId,
+    patch: { candidate_library_column: column },
   });
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as DraftCampaignWire;
 }
 // Opens a draft from the dataset's CURRENT config; no campaign exists until `start-checkin`.
 export function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {

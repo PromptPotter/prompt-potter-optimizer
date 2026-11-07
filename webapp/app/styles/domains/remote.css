@@ -54,6 +54,7 @@
 .remote-drill{color:var(--color-accent)}
 .remote-play{color:var(--color-success)}
 .remote-pause{color:var(--color-warn)}
+.remote-step{color:var(--color-success);font-variant-numeric:tabular-nums}
 /* Wraps inside the pill: a note beside the button breaks onto its own line, never clips. */
 .run-ctl{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);min-width:0;max-width:100%}
 .remote-cells-group{display:flex;align-items:center;gap:var(--space-4);width:100%}

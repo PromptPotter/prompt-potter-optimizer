@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
+from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
     draft_wire,
@@ -47,10 +47,3 @@ async def discard_draft(dispatched: Dispatched[DiscardDraftPayload]) -> Applier[
         stores.drafts.discard(stores.drafts.hold(draft_id))
 
     return Applier.silent(_apply)
-
-
-async def dispatch_draft_patch(
-    stores: Stores, call: CommandCall[EditDraftCampaignPayload]
-) -> DraftCampaignWire:
-    outcome = await CommandDispatcher(stores).answer(edit_draft_campaign, call)
-    return outcome.result

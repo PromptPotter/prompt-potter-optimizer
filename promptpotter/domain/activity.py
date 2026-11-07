@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
+from typing import Annotated, ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
@@ -116,13 +116,22 @@ class ActivityState(FrozenModel):
     )
 
 
-class DecisionAction(FrozenModel):
+class GateAction(FrozenModel):
     """One button: a press sends `decision` as `kind` to the cycle whose activity carries it."""
 
     label: str
     variant: Literal["primary", "ghost", "danger"]
     kind: Literal[CommandKind.ORIGIN_GATE_DECISION]
     decision: GateDecision
+
+
+class KeepDraftsAction(FrozenModel):
+    """One button: a press sends `keep` as `kind` to the cycle holding for its round's arms."""
+
+    label: str
+    variant: Literal["primary", "ghost", "danger"]
+    kind: Literal[CommandKind.SUBMIT_ARMS]
+    keep: list[int] = Field(description="The drafts measured as proposed, by index at the hold.")
 
 
 class ActivityDecision(FrozenModel):
@@ -132,7 +141,7 @@ class ActivityDecision(FrozenModel):
     lead: str = Field(description="The paragraph under the title.")
     facts: list[Said] = Field(description="The evidence, in reading order.")
     reasons: list[str] = Field(description="Why the run is holding, one fragment each.")
-    actions: list[DecisionAction]
+    actions: list[Annotated[GateAction | KeepDraftsAction, Field(discriminator="kind")]]
 
 
 _GATE_ACTIONS: dict[GateDecision, tuple[str, Literal["primary", "ghost", "danger"]]] = {
@@ -202,7 +211,7 @@ def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
         facts=facts,
         reasons=reasons,
         actions=[
-            DecisionAction(
+            GateAction(
                 label=label,
                 variant=variant,
                 kind=CommandKind.ORIGIN_GATE_DECISION,
@@ -214,7 +223,8 @@ def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
 
 
 def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
-    """No button: an arm is written text, so the answer is the verb the lead names."""
+    """One button keeps every draft; an arm of the operator's own is written text, so it is the
+    verb the lead names."""
     held = "The round" if round_num is None else f"Round {round_num}"
     drafted = (
         "Keep a draft below with `--keep <index>`, add arms of your own in the file, or both."
@@ -227,7 +237,16 @@ def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
         f"`python -m promptpotter submit-arms --arms <arms.yaml>`. {drafted}",
         facts=drafts,
         reasons=[],
-        actions=[],
+        actions=[
+            KeepDraftsAction(
+                label="Measure the drafts",
+                variant="primary",
+                kind=CommandKind.SUBMIT_ARMS,
+                keep=list(range(len(drafts))),
+            )
+        ]
+        if drafts
+        else [],
     )
 
 

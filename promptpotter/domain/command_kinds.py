@@ -20,7 +20,11 @@ from pydantic import (
 from promptpotter.domain.campaign import Arm, ArmName, Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.dataset_name import validate_dataset_name
-from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.draft_edit import (
+    EditDraftPatch,
+    OptimizationOverrides,
+    PartialCampaignConfig,
+)
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
@@ -35,7 +39,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import RequestBody, StrictModel, WireInt
+from promptpotter.domain.strict_model import RequestBody, StrictModel, UploadBytes, WireInt
 from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
@@ -50,17 +54,19 @@ from promptpotter.shared.worded import Worded
 
 
 class Press(NamedTuple):
-    """Who may press a kind beyond the browser: the terminal verb a person presses it by, and
-    whether a host assistant may press it for them. A row pressed at the browser alone has none
+    """Who may press a kind: the terminal verb a person presses it by, whether a host assistant
+    may press it for them, and why the browser does not, where it does not (empty: a webapp
+    source sends it, `tests/test_security.py` § 5). A row pressed at the browser alone has none
     (`BROWSER`)."""
 
     cli_verb: str
     host: bool
+    no_browser: str = ""
 
 
-def anyone(verb: str) -> Press:
-    """Every door: the browser, a terminal by *verb*, and a host's tool call."""
-    return Press(verb, host=True)
+def anyone(verb: str, *, no_browser: str = "") -> Press:
+    """The terminal by *verb* and a host's tool call, and the browser unless *no_browser* says why not."""
+    return Press(verb, host=True, no_browser=no_browser)
 
 
 def person(verb: str) -> Press:
@@ -70,6 +76,8 @@ def person(verb: str) -> Press:
 
 # The browser alone: no terminal verb and no host tool.
 BROWSER = None
+
+_MINTS_THROUGH_CHECKIN = "the browser mints through a check-in"
 
 # How a door answers a kind: inline with its applied answer, or as a task its door tracks while
 # the act runs on (a launch, a paid pass, a resolver turn).
@@ -116,6 +124,11 @@ class CommandKind(StrEnum):
     def host(self) -> bool:
         """A host assistant may press it for its person."""
         return self.press is not None and self.press.host
+
+    @property
+    def browser(self) -> bool:
+        """The webapp presses it."""
+        return self.press is None or not self.press.no_browser
 
     @property
     def browser_only(self) -> bool:
@@ -178,7 +191,7 @@ class CommandKind(StrEnum):
         "mint-campaign",
         "launching:mint_campaign",
         CAMPAIGN_CREATE_CAP,
-        anyone("new"),
+        anyone("new", no_browser=_MINTS_THROUGH_CHECKIN),
         False,
         "task",
     )
@@ -186,7 +199,7 @@ class CommandKind(StrEnum):
         "mint-head-to-head",
         "launching:mint_head_to_head",
         CAMPAIGN_CREATE_CAP,
-        anyone("head-to-head"),
+        anyone("head-to-head", no_browser=_MINTS_THROUGH_CHECKIN),
         False,
         "task",
     )
@@ -610,6 +623,12 @@ class ForkSeed(StrictModel):
         "cycle only, and a node it does not name inherits.",
     )
 
+    @model_validator(mode="after")
+    def _budget_rides_the_payload(self) -> ForkSeed:
+        if self.config_overrides.budget.named:
+            raise ValueError("a fork's budget is the payload's own `budget`, not the seed's")
+        return self
+
 
 class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):
     """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
@@ -617,6 +636,11 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
 
+    budget: Budget = Field(
+        default_factory=Budget,
+        description="Bounds the fork's first launch, as a start-run's; an axis left out is the "
+        "fork's config's, inherited from its parent.",
+    )
     mode: RunMode = RunMode()
     round: int = Field(default=0, ge=0)
     candidate_id: str = Field(default="", max_length=128)
@@ -816,13 +840,13 @@ class ArmRequest(StrictModel):
     arm_key: ArmName
     optimization: OptimizationOverrides = Field(
         description="Laid over the dataset's own `optimization`: `optimizer` is required, and "
-        "`budget` and `halt_at_accuracy` are refused, since every arm runs the head-to-head's "
-        "budget to its end."
+        "`halt_at_accuracy` is refused, since every arm runs the head-to-head's budget to its end."
     )
 
     @property
     def optimization_sent(self) -> dict[str, JsonValue]:
-        return self.optimization.model_dump(mode="json", exclude_unset=True)
+        sent: dict[str, JsonValue] = self.optimization.model_dump(mode="json", exclude_unset=True)
+        return sent
 
     @model_serializer(mode="wrap")
     def _record_what_was_sent(self, handler: SerializerFunctionWrapHandler) -> dict[str, JsonValue]:
@@ -836,10 +860,9 @@ class ArmRequest(StrictModel):
         sent = self.optimization.model_fields_set
         if "optimizer" not in sent:
             raise ValueError("an arm names the optimizer it runs")
-        if refused := sorted(sent & {"budget", "halt_at_accuracy"}):
+        if "halt_at_accuracy" in sent:
             raise ValueError(
-                f"an arm sets no {', '.join(refused)}: every arm runs the head-to-head's budget to "
-                "its end"
+                "an arm sets no halt_at_accuracy: every arm runs the head-to-head's budget to its end"
             )
         return self
 
@@ -926,10 +949,10 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         description="Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so "
         "the other run-mode fields are `start-run`'s alone.",
     )
-    campaign_config: CampaignConfig | None = Field(
+    campaign_config: PartialCampaignConfig | None = Field(
         default=None,
-        description="A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`; "
-        "`optimization` still lays over it",
+        description="A campaign declaration standing in for the dataset's own "
+        "`dataset.yaml::campaign`, laid over the defaults; `optimization` still lays over it",
     )
     task_text: str | None = Field(
         default=None,
@@ -948,22 +971,28 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
         """The ``CommandRecord`` carries this dump; a default there records a knob nobody set."""
         data: dict[str, JsonValue] = handler(self)
         data["optimization"] = self.optimization_sent or None
-        declared = self.campaign_config
+        stated = self.campaign_config
         data["campaign_config"] = (
-            None if declared is None else declared.model_dump(mode="json", exclude_unset=True)
+            None if stated is None else stated.model_dump(mode="json", exclude_unset=True)
         )
         return data
+
+    @property
+    def declared(self) -> CampaignConfig | None:
+        """The stand-in declaration, laid over `CampaignConfig`'s defaults."""
+        stated = self.campaign_config
+        return (
+            None
+            if stated is None
+            else CampaignConfig.model_validate(stated.model_dump(mode="json", exclude_unset=True))
+        )
 
     @model_validator(mode="after")
     def _name_is_a_dataset_name(self) -> MintCampaignPayload:
         validate_dataset_name(self.dataset_name)
+        # Refused at the door, as a whole declaration is.
+        _ = self.declared
         return self
-
-
-# One file's bound at every door: each transport reads one byte past it, and the bytes' own
-# validation refuses that byte (`IngestUploadPayload.blob`, the candidate-library upload).
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-UploadBytes = Annotated[bytes, Field(max_length=MAX_UPLOAD_BYTES)]
 
 
 class IngestUploadPayload(CommandPayload, kind=CommandKind.INGEST_UPLOAD):

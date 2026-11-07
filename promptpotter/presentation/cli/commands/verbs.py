@@ -78,6 +78,15 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "new",
         "new:cmd_new",
+        unspelled={
+            "filename": "the FILE positional: its name",
+            "blob": "the FILE positional: its bytes",
+            "draft_id": "the draft the FILE form's ingest-upload mints, named back on each later kind",
+            "patch": "`--set`, `--slug` and `--task-*`, folded into one patch",
+            "optimization": "`--set KNOB=VALUE`, folded per knob",
+            "campaign_config": "`--config FILE`'s `campaign` section",
+            "head_to_head": "the `head-to-head` verb mints one; a FILE form launches one campaign",
+        },
         help="Mint a fresh campaign from a dataset NAME or a raw FILE (CSV). A "
         "name uses an authored datasets/<name>/; a file is ingested → "
         "origin-resolved → committed as a tenant dataset → run (headless parity "
@@ -119,7 +128,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 default=[],
                 metavar="FIELD=VALUE",
                 help="Repeatable. Both forms take the campaign knobs — `--set optimizer=capo`, "
-                "`--set budget.rounds=3` (`none` lifts an axis), `--set nodes.<node>.<knob>=VALUE`. "
+                "`--set nodes.<node>.<knob>=VALUE`; a launch's bound is `--max-*`'s. "
                 "The file form also "
                 "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
                 "`--set column.query=input`, applied before the resolver runs.",
@@ -140,6 +149,9 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "head-to-head",
         "new:cmd_head_to_head",
+        unspelled={
+            "dataset_name": "the DATASET positional",
+        },
         help="Mint the arms of one controlled head-to-head on a dataset NAME in one act, each a "
         "campaign on the same origin and bench set that searches prompts alone, and run them side "
         "by side, each in its own process, until every arm ends. Every arm is planned, priced on "
@@ -163,7 +175,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="Repeatable, one per arm: its key, the optimizer it runs, and that "
                 "optimizer's knobs in `new --set`'s spelling — `--arm capo=capo "
                 "--arm capo-b5=capo,nodes.<node>.max_blocks=5`; an arm on an earlier arm's "
-                "treatment, this act's or a standing one's, is its next replicate, on its own seed. No `budget.*` or `halt_at_accuracy`: every arm runs the budget below to its end.",
+                "treatment, this act's or a standing one's, is its next replicate, on its own seed. No `halt_at_accuracy`: every arm runs the budget below to its end.",
             ),
             *BUDGET_AXES,
         ),
@@ -171,6 +183,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "resume",
         "resume_command:cmd_resume",
+        unspelled={
+            "mode": "`--diag`, `--no-check` and `--fork-on-divergence` compose it",
+            "round": "`--rewind ROUND`",
+            "reason": "`--rewind-reason`",
+            "keep_rounds": "`--rewind` keeps them, `--steer` does not",
+            "seed": "`--steer NODE.PARAM=VALUE`, folded into the seed's overlay",
+            "candidate_id": "a terminal fork starts from a round's line, never a named candidate",
+        },
         help="Continue the active campaign. Bare `resume` picks up where it "
         "left off; flags handle rewind / divergence / diagnostic modes.",
         args=(
@@ -264,6 +284,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "ab",
         "ab:cmd_ab",
+        terminal_only="it replays recorded decisions under the engine this checkout runs, which no server door holds",
         help="Deterministic A/B replay of a campaign (the active one, or --campaign): "
         "re-derive every recorded decision (winner / eliminations / L2-L3 triggers) under "
         "the CURRENT engine + scorer, and report where the change stops carrying over — "
@@ -286,6 +307,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "reset",
         "reset:cmd_reset",
+        terminal_only="it drops run data under the operator's own hand, which no tenant door may",
         help="Drop the selected tenant's run data and every file no row of "
         "`infrastructure/store/data_root.py` names; keep survivors (who an account is, what it "
         "holds and was charged) and the caches, so the next `new` hits cache. Refused, exit 3, "
@@ -316,6 +338,9 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "verify",
         "verify:cmd_verify",
+        unspelled={
+            "candidate_id": "the SUBJECT positional's last part, beside its campaign and cycle",
+        },
         help="Re-score one campaign candidate on search cells it has never met and bank "
         "the pass on its cycle's ledger. Use to doublecheck whether a confidence-locked "
         "candidate's verdict generalises beyond the round's leader-locked sample budget. "
@@ -358,6 +383,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "reindex",
         "reindex:cmd_reindex",
+        terminal_only="disk repair of the data root this process opens",
         help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
         "files and GC orphaned runs. The index is derived, so this loses nothing — use "
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
@@ -366,6 +392,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "compact-archive",
         "maintenance:cmd_compact_archive",
+        terminal_only="`inventory` reads the archive's disk across every tenant, which no kind's "
+        "mode carries",
         help="Count what the archive holds (`inventory`), move the fields nothing reads out of "
         "candidate measurement rows into a gzip cold store beside them (`compact`), put them back "
         "(`restore`), or delete the store (`purge-cold`). `inventory` writes nothing and refuses "
@@ -487,6 +515,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "seed-screen",
         "seed_screen:cmd_seed_screen",
+        terminal_only="a debug diagnostic of a seed bank, outside every campaign",
         help="Debug diagnostic (NOT a loop feature): score each candidate seed's bank "
         "with the dataset origin and report its constant-answer floor, its reasoning "
         "margin (origin - floor) and the disqualifier — a bank whose floor EXCEEDS "
@@ -575,6 +604,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "noise-floor",
         "noise_floor:cmd_noise_floor",
+        terminal_only="a debug diagnostic re-scoring a cached origin, outside the loop",
         help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "
         "origin --k times with force_fresh and report the mean+CI spread — the "
         "backend's own run-to-run noise. On a pp-self cycle this measures the "
@@ -607,6 +637,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "probe-reasoning",
         "probe_reasoning:cmd_probe_reasoning",
+        terminal_only="its reading fills a code table, which only a checkout edits",
         help="Debug diagnostic (NOT a loop feature): ask ONE model which reasoning rungs it "
         "honours and print the `registry._MODEL_PROFILES` row the readings support. A "
         "catalogue publishes that `reasoning_effort` EXISTS and never which values it takes, "
@@ -700,6 +731,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "close-admission",
         "machine_status:cmd_close_admission",
+        terminal_only="a landing's act on this box, before its checkout moves",
         help="A landing's first act, before its checkout moves: close this box's admission to every "
         "process not running TARGET, until the restarted server runs it. Prints `closed …`, or one "
         "`held …` line per live run on other code and closes nothing. Zero spend.",
@@ -709,6 +741,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "land-data",
         "reset:cmd_land_data",
+        terminal_only="a landing's one write to the data root, under the code it lands",
         help="A landing's one write to the data root, under THIS code: stage each survivor "
         "migration (`application/maintenance/migrate.py::MIGRATIONS`), load every file under the "
         "data root as its row of `infrastructure/store/data_root.py` shapes it would then stand, and "
@@ -734,6 +767,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "trail",
         "trail:cmd_trail",
+        terminal_only="the operator's audit read across accounts, outside every tenant's door",
         help="What an account did, oldest first, in UTC: its sign-ins, its consent, every upload, every attempt "
         "the server refused and every command, the terminal's own included. Bare, this tenant's; "
         "with an EMAIL, every account on the box that carries it. Read-only, zero spend.",
@@ -743,6 +777,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "offer-extras",
         "offer:cmd_offer_extras",
+        terminal_only="what the deploy script installs, read before any server runs",
         help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Writes nothing but a missing data root.",
         needs_registries=False,
@@ -750,6 +785,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "health",
         "machine_status:cmd_health",
+        terminal_only="the box's own probe of what it answers for",
         help="Check everything this box answers for — each remote backend, each configured "
         "sign-in provider — one line each, led by held / broken / unverified; exits 1 on a broken "
         "one. A change of state is recorded and told to the admin bot. Network only, zero LLM spend.",
@@ -757,6 +793,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "mcp",
         "mcp_host:cmd_mcp",
+        terminal_only="it is the host door, over this terminal's stdio",
         help="Serve this workspace to a local host assistant over MCP stdio: every command and "
         "read as a tool, campaigns and courses as resources, the check-in as a prompt — each "
         "call as this terminal's own principal. Runs until the host closes stdin. Needs the "
@@ -765,6 +802,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "pin-roster",
         "pin_roster:cmd_pin_roster",
+        terminal_only="the one fetch of Harbor's registry, written into the package's resources",
         help="Pin a published Harbor dataset's task roster into the harbor connector's resources "
         "(`harbor-roster.<dataset>@<version>.json`) — the ONE fetch of Harbor's registry, so no "
         "run ever dials it. Refuses to overwrite a pin the registry has since moved: a panel is "
@@ -834,6 +872,48 @@ def command_verb(kind: CommandKind) -> Verb:
         args=(*address, *fields),
     )
 
+
+def _dest(arg: Arg) -> str:
+    """The namespace attribute argparse gives *arg*."""
+    if "dest" in arg.spec:
+        return str(arg.spec["dest"])
+    flag = next((f for f in arg.flags if f.startswith("--")), arg.flags[0])
+    return flag.lstrip("-").replace("-", "_")
+
+
+def _spelled(verb: Verb) -> list[str]:
+    """What *verb* leaves unsaid: a payload field of a kind naming it (`CommandKind.cli_verb`) with
+    no `Arg` of its name
+    and no `unspelled` reason (a `Budget` is `BUDGET_AXES`), a reason for a field it spells or no
+    kind has, or a verb dispatching no kind with no `terminal_only` reason."""
+    if verb.read is not None:
+        return []
+    kinds = [kind for kind in CommandKind if kind.cli_verb == verb.name]
+    if not kinds:
+        return [] if verb.terminal_only else [f"`{verb.name}` dispatches no kind and says not why"]
+    dests = {_dest(arg) for arg in verb.args}
+    fields = {
+        name: field
+        for kind in kinds
+        for name, field in PAYLOAD_MODEL_FOR_KIND[kind].model_fields.items()
+        if name not in CyclePayload.model_fields
+    }
+    budgets = {name for name, field in fields.items() if field.annotation is Budget}
+    unsaid = [
+        f"`{verb.name}` spells no `{name}`"
+        for name in sorted(fields.keys() - budgets - dests - verb.unspelled.keys())
+    ]
+    if budgets and not set(BUDGET_AXES) <= set(verb.args):
+        unsaid.append(f"`{verb.name}` takes a budget without `BUDGET_AXES`")
+    unsaid += [
+        f"`{verb.name}` says why it does not spell `{name}`, which it spells or no kind has"
+        for name in sorted(verb.unspelled.keys() - (fields.keys() - dests))
+    ]
+    return unsaid
+
+
+if _unsaid := [line for verb in _WRITTEN_VERBS for line in _spelled(verb)]:
+    raise TypeError("; ".join(_unsaid))
 
 _WRITTEN = {verb.name for verb in _WRITTEN_VERBS}
 VERBS: tuple[Verb, ...] = (

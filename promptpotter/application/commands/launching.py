@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
@@ -46,6 +47,7 @@ from promptpotter.application.pipeline_resolve import (
     draft_pipeline,
     draft_served,
     permitted_narrowing,
+    recorded_schema,
     resolve_pipeline_for_campaign,
     steer_verdict,
 )
@@ -53,7 +55,7 @@ from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     CommandEffect,
@@ -63,7 +65,6 @@ from promptpotter.domain.run_records import (
     LaunchedJob,
     OriginSource,
 )
-from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import LedgerUnreadableError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
@@ -83,6 +84,38 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
+
+
+def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, Any]:
+    """Each steered value in its param's declared type at *schema*, as every door sends it: a
+    string stays text, and a string sent for any other type is read as JSON."""
+    typed = dict(overlay)
+    for node, cfg in node_config_items(overlay):
+        declared = schema.get_node(node)
+        if declared is None:
+            names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
+            raise PayloadInvalidError(
+                f"payload.seed steers no node called {node!r}; nodes: {names}"
+            )
+        params: dict[str, Any] = {}
+        for param, value in cfg.items():
+            kind = declared.param_types.get(param)
+            if kind is None:
+                known = ", ".join(sorted(declared.param_types)) or "(none)"
+                raise PayloadInvalidError(
+                    f"payload.seed: {node!r} carries no {param!r}; params: {known}"
+                )
+            if kind != "string" and isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    raise PayloadInvalidError(
+                        f"payload.seed steers {node}.{param}, declared {kind}; {value!r} is not "
+                        "one (spell it as JSON)"
+                    ) from None
+            params[param] = value
+        typed[node] = params
+    return typed
 
 
 def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop) -> CycleSeed:
@@ -105,7 +138,12 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
             CAMPAIGN_BABYSIT_CAP,
         )
         raise NotFoundError("Not found", code="not_found")
-    for node, cfg in node_config_items(sent.pipeline_overlay):
+    overlay = (
+        _typed_steer(sent.pipeline_overlay, recorded_schema(stores, hop))
+        if sent.pipeline_overlay
+        else {}
+    )
+    for node, cfg in node_config_items(overlay):
         allowed = narrowing[node].param_allowed_values if node in narrowing else {}
         for param, value in cfg.items():
             if param in allowed and str(value) not in allowed[param]:
@@ -115,7 +153,7 @@ def parse_cycle_seed(sent: ForkSeed, stores: Stores, of: Campaign, hop: CycleHop
                 )
     seed = CycleSeed(
         origin_prompts=sent.origin_prompts,
-        pipeline_overlay=sent.pipeline_overlay,
+        pipeline_overlay=overlay,
         optimizer_narrowing=narrowing,
         config_overrides=sent.config_overrides,
         origin_source=OriginSource.FORK_SEED,
@@ -220,9 +258,9 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         # Before it runs: it spends the arm's ceiling and pauses its parent, so the campaign leaves.
         stores.campaigns.leave_comparison(fork, ComparisonExit.FORK)
         try:
-            # Declares no budget: the seed's governs, admitted from what the parent leaves.
+            # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
             launched = await launch(
-                ExistingCycle(fork, campaign, Budget()),
+                ExistingCycle(fork, campaign, payload.budget),
                 payload.mode,
                 stores=stores,
                 job_registry=dispatcher.job_registry,
@@ -262,7 +300,7 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
             dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
             budget=payload.budget,
             optimization=payload.optimization_sent,
-            declared=payload.campaign_config,
+            declared=payload.declared,
             task_text=payload.task_text,
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.

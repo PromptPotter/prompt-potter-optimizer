@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import cycle_target
 from promptpotter.application.jobs.mint import ConfigDriftError
-from promptpotter.application.pipeline_resolve import fork_preview, recorded_schema
+from promptpotter.application.pipeline_resolve import fork_preview
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import (
     ForkCyclePayload,
@@ -20,7 +19,6 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.presentation.cli.commands.launch import (
     confirm_tty,
     cycle_result_command,
@@ -42,7 +40,6 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine
 
     from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
     from promptpotter.presentation.cli.session import SessionCtx
 
@@ -92,9 +89,6 @@ async def _dispatch_fork(
     reason: str = "",
 ) -> HeldRun:
     """A refused hold leaves no fork: the applier removes the stub it minted."""
-    budget = budget_from_args(args)
-    if budget.named:
-        seed = seed.model_copy(update={"config_overrides": ConfigOverrides(budget=budget)})
     return await _dispatch_held(
         args,
         ctx,
@@ -105,6 +99,7 @@ async def _dispatch_fork(
                 "cycle_id": ctx.cycle_id,
                 "round": from_round,
                 "seed": seed,
+                "budget": budget_from_args(args),
                 "keep_rounds": keep_rounds,
                 "reason": reason,
                 "mode": _run_mode(args, fork_on_divergence=args.fork_on_divergence),
@@ -130,38 +125,21 @@ async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> He
     return held
 
 
-def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[str, Any]]:
-    """A value is read in the param's DECLARED type, as the browser coerces (`node-config.ts::coerce`): a string stays text, anything else is JSON."""
-    overlay: dict[str, dict[str, Any]] = {}
+def _steer_overlay(specs: list[str]) -> dict[str, dict[str, str]]:
+    """Split only: the server reads each value in its param's declared type (`launching.py::_typed_steer`)."""
+    overlay: dict[str, dict[str, str]] = {}
     for spec in specs:
         key, sep, raw = spec.partition("=")
         node, dot, param = key.strip().partition(".")
         if not sep or not dot or not node or not param:
             raise SystemExit(f"ERROR: --steer expects NODE.PARAM=VALUE, got {spec!r}")
-        declared_node = schema.get_node(node)
-        if declared_node is None:
-            names = ", ".join(n.name for n in schema.declared_nodes) or "(none)"
-            raise SystemExit(f"ERROR: --steer names no node called {node!r}; nodes: {names}")
-        kind = declared_node.param_types.get(param)
-        if kind is None:
-            known = ", ".join(sorted(declared_node.param_types)) or "(none)"
-            raise SystemExit(f"ERROR: --steer: {node!r} carries no {param!r}; params: {known}")
-        value: Any = raw.strip()
-        if kind != "string":
-            try:
-                value = json.loads(value)
-            except ValueError:
-                raise SystemExit(
-                    f"ERROR: --steer {node}.{param} is declared {kind}; {value!r} is not one "
-                    f"(spell it as JSON)."
-                ) from None
-        overlay.setdefault(node, {})[param] = value
+        overlay.setdefault(node, {})[param] = raw.strip()
     return overlay
 
 
 async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
     """C0 is INHERITED; a steer to a non-PERMITTED model needs ``campaign.babysit``, the dispatcher's gate: this only warns."""
-    overlay = _steer_overlay(args.steer, recorded_schema(ctx.store, ctx.hop))
+    overlay = _steer_overlay(args.steer)
     preview = fork_preview(ctx.store, ctx.campaign_id, overlay)
     disallowed = preview.steer != "clean"
     if disallowed:

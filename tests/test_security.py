@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, cast, get_args, override
 
 import pytest
 from factories import (
@@ -99,6 +99,7 @@ from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import block_packs_root, default_projects_root
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
+from promptpotter.domain.activity import GateAction, KeepDraftsAction
 from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
@@ -1875,3 +1876,33 @@ async def test_a_host_drives_the_catalogue_as_the_terminal_does(
         assert not queuing.list_queued(), "a retried launch launched again"
     for detached in list(launcher_launch._DETACHED):
         detached.cancel()
+
+
+# 5. The browser door
+
+
+def test_every_kind_the_browser_claims_has_a_webapp_sender() -> None:
+    """A row claiming the browser door with no sender holds a campaign the browser cannot answer
+    (an `arm_gate: review` cycle waits on Pause alone); a declared absence with a sender is a
+    row that stopped describing the webapp."""
+    webapp = _REPO / "webapp"
+    sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for tier in ("components", "lib", "app")
+        for path in sorted((webapp / tier).rglob("*.ts*"))
+        if not any(part in path.name for part in (".test.", ".generated.", "test-fixtures"))
+    )
+    # A served decision's buttons press the kind they carry.
+    served = {
+        str(kind)
+        for action in (GateAction, KeepDraftsAction)
+        for kind in get_args(action.model_fields["kind"].annotation)
+    }
+    for kind in CommandKind:
+        # By name to `postCommand`, or in the `/commands/{kind}` path a file upload posts to.
+        named = rf"[\"']{re.escape(kind.value)}[\"']|/commands/{re.escape(kind.value)}\b"
+        sent = kind.value in served or re.search(named, sources)
+        if kind.browser:
+            assert sent, f"`{kind.value}` claims the browser door and no webapp source sends it"
+        else:
+            assert not sent, f"`{kind.value}` declares no browser door, and the webapp sends it"

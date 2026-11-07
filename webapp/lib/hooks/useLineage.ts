@@ -42,6 +42,10 @@ interface Lineage {
   isInheritedSibling: boolean;
   parentId: string | null;
   cleanup: LineageCleanup;
+  // The viewed fork while it holds no round: `delete-cycle` removes that one stub; null otherwise.
+  deleteViewed: ((then: () => void) => void) | null;
+  deleting: boolean;
+  deleteFailure: CommandFailure | null;
 }
 
 export function useLineage({
@@ -123,6 +127,7 @@ export function useLineage({
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 
   const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup");
+  const del = useCommand<"delete-cycle">("lineage-delete", { scope: cycleId });
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupAcked, setCleanupAcked] = useState(false);
 
@@ -165,5 +170,16 @@ export function useLineage({
     isInheritedSibling,
     parentId,
     cleanup,
+    deleteViewed:
+      campaignId && cycleId && isInheritedSibling && !viewedHasRounds
+        ? (then) =>
+            void del.run(
+              "delete-cycle",
+              () => postCommand("delete-cycle", { campaign_id: campaignId, cycle_id: cycleId }),
+              then,
+            )
+        : null,
+    deleting: del.pending !== null,
+    deleteFailure: del.failure,
   };
 }

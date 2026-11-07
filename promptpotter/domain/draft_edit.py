@@ -1,40 +1,42 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic.fields import FieldInfo
 
-from promptpotter.domain.campaign_config import OptimizationConfig, OptimizerChoice
+from promptpotter.domain.campaign_config import CampaignConfig, Knob, OptimizationConfig
 from promptpotter.domain.pipeline_schema import ParamIntent
-from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel
-
-MAX_EDITED_ROUNDS = 100
+from promptpotter.domain.strict_model import StrictModel, UploadBytes
 
 
-class OptimizationOverrides(OptimizerChoice):
-    """An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.
-    Only the fields sent move anything, so no field states a default a reader could take for one
-    that applies. Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read
-    through it, so a reused dataset may exceed it."""
+def _partial(model: type[BaseModel], *, without: str = "", **nested: type[BaseModel]) -> Any:
+    """*model*'s fields but *without*, each optional with no default and its own bounds and
+    description: a layer names only what it sets, so no unsent field states a value a reader
+    could take for one that applies. A *nested* field takes the partial named for it."""
+    fields: dict[str, Any] = {}
+    for name, info in model.model_fields.items():
+        if name == without:
+            continue
+        bounds = [m for m in info.metadata if not isinstance(m, Knob)]
+        annotation: Any = nested.get(name, info.annotation)
+        fields[name] = (
+            Annotated[annotation | None, *bounds, FieldInfo(description=info.description)],
+            None,
+        )
+    return create_model(f"_{model.__name__}Fields", __base__=StrictModel, **fields)
 
-    budget: Budget = Field(
-        default_factory=Budget,
-        description=OptimizationConfig.model_fields["budget"].description,
-    )
-    halt_at_accuracy: float | None = Field(
-        None,
-        ge=0.0,
-        le=1.0,
-        description=OptimizationConfig.model_fields["halt_at_accuracy"].description,
-    )
 
-    @field_validator("budget")
-    @classmethod
-    def _rounds_on_the_edit_path(cls, budget: Budget) -> Budget:
-        if budget.rounds is not None and budget.rounds > MAX_EDITED_ROUNDS:
-            raise ValueError(f"budget.rounds is at most {MAX_EDITED_ROUNDS} on a check-in")
-        return budget
+# No `budget`: a launch's budget is its payload's own field, the one door on every launch kind.
+class OptimizationOverrides(_partial(OptimizationConfig, without="budget")):  # type: ignore[misc]
+    """An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's,
+    laid over the one it names."""
+
+
+class PartialCampaignConfig(_partial(CampaignConfig, optimization=OptimizationOverrides)):  # type: ignore[misc]
+    """A partial `CampaignConfig`, by its own paths: a check-in edit's ``config``, a mint's
+    stand-in declaration. Only the fields sent move anything: its ``exclude_unset`` dump is the
+    layer `campaign_config.py::merge_config_layers` lays."""
 
 
 class NodeOutputEdit(StrictModel):
@@ -44,6 +46,16 @@ class NodeOutputEdit(StrictModel):
     node: str = Field(min_length=1)
     output_schema: dict[str, Any]
     answer_fields: list[str] | None = None
+
+
+class LibraryFile(StrictModel):
+    """An uploaded candidate library, under every upload's one bound."""
+
+    # A JSON door sends the bytes base64, as `ingest-upload`'s.
+    model_config = ConfigDict(val_json_bytes="base64", ser_json_bytes="base64")
+
+    filename: str = Field(default="", max_length=256)
+    blob: UploadBytes = Field(repr=False, description="The file's bytes, base64.")
 
 
 class EditDraftPatch(StrictModel):
@@ -57,11 +69,10 @@ class EditDraftPatch(StrictModel):
     connector: str | None = Field(default=None, min_length=1, max_length=64)
     # A blank task is no task: the draft holds none until one is set.
     raw_task_description: str | None = Field(default=None, max_length=16384, pattern=r"\S")
-    config: dict[str, Any] | None = Field(
+    config: PartialCampaignConfig | None = Field(
         default=None,
-        description="A partial `CampaignConfig`, by its own paths, laid over the draft's by "
-        "`campaign_config.py::merge_config_layers`; its `optimization` reads as an "
-        "`OptimizationOverrides`. A string `scoring` names the criterion whole; a `scoring` "
+        description="Laid over the draft's config by `campaign_config.py::merge_config_layers`. "
+        "A string `scoring` names the criterion whole; a `scoring` "
         "mapping is folded into the criterion the draft runs, key by key: `matcher` picks "
         "the per-sample matcher, `dials` the composite's weights (the empty string clears them), "
         "`per_sample` and `per_cell` set those formulas.",
@@ -72,7 +83,19 @@ class EditDraftPatch(StrictModel):
     column_ground_truth: str | None = Field(default=None, max_length=256)
     # Per step, its fields by name; replaces the draft's whole map.
     origin_prompts: dict[str, dict[str, str]] | None = None
+    # The library's three sources; one patch sends at most one (`draft_patch.py`).
     candidate_library: list[str] | None = Field(default=None, min_length=1)
+    candidate_library_column: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description="Build the candidate library from the distinct values of this draft column.",
+    )
+    candidate_library_file: LibraryFile | None = Field(
+        default=None,
+        description="Parse the candidate library from a file: one entry per line, or the first "
+        "column of a CSV/Excel.",
+    )
 
 
 SETTABLE_SCALARS: frozenset[str] = frozenset(

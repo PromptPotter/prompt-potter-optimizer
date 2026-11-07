@@ -19,6 +19,8 @@ interface RunControl {
   // served: `dash.pause`; null in every other phase.
   pauseNote: string | null;
   toggle: () => void;
+  // Launch the cycle for *rounds* closed rounds, then pause it as `stepped`; null while it runs.
+  step: ((rounds: number) => void) | null;
 }
 
 export function useRunControl(): RunControl | null {
@@ -51,6 +53,11 @@ export function useRunControl(): RunControl | null {
     void cmd.run("start-run", () => postCommand("start-run", cycleAddress(viewedPath)));
   };
 
+  const step = (rounds: number) =>
+    void cmd.run("start-run", () =>
+      postCommand("start-run", { ...cycleAddress(viewedPath), step_rounds: rounds }),
+    );
+
   return {
     action,
     running: action === "pause",
@@ -68,5 +75,6 @@ export function useRunControl(): RunControl | null {
       ? `Paused by ${pause.cause}${pause.detail ? ` (${pause.detail})` : ""} — ${pauseNextStep(pause)}`
       : null,
     toggle,
+    step: action === null || action === "pause" ? null : step,
   };
 }

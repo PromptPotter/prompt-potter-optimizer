@@ -39,13 +39,8 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
 from promptpotter.domain.account_words import refusal_words
-from promptpotter.domain.command_kinds import (
-    MAX_UPLOAD_BYTES,
-    CommandAcceptedBody,
-    CommandKind,
-    ReadKind,
-)
-from promptpotter.domain.strict_model import RequestBody, StrictModel
+from promptpotter.domain.command_kinds import CommandAcceptedBody, CommandKind, ReadKind
+from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
@@ -61,7 +56,6 @@ from promptpotter.presentation.api.middleware.oidc import install_oidc_middlewar
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers.auth import auth_flow_router
 from promptpotter.presentation.api.routers.commands import commands_router
-from promptpotter.presentation.api.routers.datasets import datasets_router
 from promptpotter.presentation.api.routers.reads import READ_ROUTES, reads_router
 from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
@@ -312,7 +306,6 @@ API_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(_contract, "", None),
     RouterMount(_health, _API, None),
     RouterMount(reads_router, _API, open_caller),
-    RouterMount(datasets_router, _API, open_caller),
     RouterMount(commands_router, _API, open_caller),
     RouterMount(auth_flow_router, _API, None),
     RouterMount(site_records_router, _API, require_site_records_token),

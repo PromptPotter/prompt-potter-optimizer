@@ -163,7 +163,21 @@
         "properties": {
           "actions": {
             "items": {
-              "$ref": "#/components/schemas/DecisionAction"
+              "discriminator": {
+                "mapping": {
+                  "origin-gate-decision": "#/components/schemas/GateAction",
+                  "submit-arms": "#/components/schemas/KeepDraftsAction"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/GateAction"
+                },
+                {
+                  "$ref": "#/components/schemas/KeepDraftsAction"
+                }
+              ]
             },
             "title": "Actions",
             "type": "array"
@@ -2884,47 +2898,6 @@
         "title": "DatasetSplit",
         "type": "object"
       },
-      "DecisionAction": {
-        "additionalProperties": false,
-        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
-        "properties": {
-          "decision": {
-            "enum": [
-              "rescore",
-              "proceed",
-              "abort"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "kind": {
-            "const": "origin-gate-decision",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "variant": {
-            "enum": [
-              "primary",
-              "ghost",
-              "danger"
-            ],
-            "title": "Variant",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "variant",
-          "kind",
-          "decision"
-        ],
-        "title": "DecisionAction",
-        "type": "object"
-      },
       "DefaultsDrift": {
         "additionalProperties": false,
         "description": "Something the run's declaration is a delta over moved since it was declared, so the launch\nruns today's value under the same declaration.",
@@ -3735,6 +3708,47 @@
         "title": "ForkTrigger",
         "type": "string"
       },
+      "GateAction": {
+        "additionalProperties": false,
+        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "kind": {
+            "const": "origin-gate-decision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "primary",
+              "ghost",
+              "danger"
+            ],
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "variant",
+          "kind",
+          "decision"
+        ],
+        "title": "GateAction",
+        "type": "object"
+      },
       "HealthRecord": {
         "additionalProperties": false,
         "description": "On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one.",
@@ -4011,6 +4025,46 @@
           }
         },
         "title": "Invalid",
+        "type": "object"
+      },
+      "KeepDraftsAction": {
+        "additionalProperties": false,
+        "description": "One button: a press sends `keep` as `kind` to the cycle holding for its round's arms.",
+        "properties": {
+          "keep": {
+            "description": "The drafts measured as proposed, by index at the hold.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Keep",
+            "type": "array"
+          },
+          "kind": {
+            "const": "submit-arms",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "primary",
+              "ghost",
+              "danger"
+            ],
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "variant",
+          "kind",
+          "keep"
+        ],
+        "title": "KeepDraftsAction",
         "type": "object"
       },
       "LLMCallProgressRecord": {

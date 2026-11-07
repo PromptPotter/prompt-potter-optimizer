@@ -52,4 +52,4 @@ When the operator says the data is ready **and it loads cleanly**, author the or
 
 If `{name}` has never produced a measurement (`measurements/cells/{config_key}.jsonl`), one round (it mints,
 so the autonomy mode decides):
-`python -m promptpotter new {name} --set budget.rounds=1 --set nodes.l1_generate.n_variants=3 --set nodes.adaptive_queue.sp_budget_round=5 --set nodes.escalation.l1_patience=1`.
+`python -m promptpotter new {name} --max-rounds 1 --set nodes.l1_generate.n_variants=3 --set nodes.adaptive_queue.sp_budget_round=5 --set nodes.escalation.l1_patience=1`.

@@ -13,11 +13,14 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
 
-from promptpotter.application.commands import launching, workspace_edits
+from promptpotter.application.commands import (
+    draft_editing,
+    launching,
+    origin_resolving,
+    workspace_edits,
+)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
-from promptpotter.application.commands.origin_resolving import dispatch_origin_resolution
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
     validated_campaign_config,
@@ -29,7 +32,6 @@ from promptpotter.application.pipeline_resolve import draft_pipeline, draft_serv
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.command_kinds import (
-    MAX_UPLOAD_BYTES,
     ArmRequest,
     EditDraftCampaignPayload,
     HeadToHeadRequest,
@@ -42,6 +44,8 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
     ctrl_c_pauses,
@@ -75,11 +79,10 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 _NODES = "nodes"
-_BUDGET = "budget"
 # A check-in's criterion, by `EditDraftPatch.config.scoring`'s keys: the server folds each in.
 _SCORING = "scoring"
 _SET_SCORING = (f"{_SCORING}.matcher", f"{_SCORING}.dials")
-_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES, _BUDGET}
+_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES}
 
 # A checklist field is set by the name the check-in spells it, never its patch key.
 _PATCH_KEY_OF: dict[str, str] = {
@@ -93,7 +96,6 @@ def _settable() -> str:
     return ", ".join(
         [
             *sorted(_SET_FIELDS | _SET_KNOBS | set(_SET_SCORING)),
-            f"{_BUDGET}.<axis>",
             f"{_NODES}.<node>.<knob>",
         ]
     )
@@ -122,9 +124,6 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
             config.setdefault(_SCORING, {})[field.split(".", 1)[1]] = raw
         elif field in _SET_KNOBS:
             knobs[field] = raw
-        elif field.startswith(f"{_BUDGET}.") and field.count(".") == 1:
-            axis = field.split(".")[1]
-            knobs.setdefault(_BUDGET, {})[axis] = None if raw.lower() == "none" else _value(raw)
         elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
             _, node, knob = field.split(".")
             knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"][knob] = _value(
@@ -148,12 +147,14 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
         return {}
     patch = _sets_to_patch(sets)
     spelled = {model: cli for cli, model in _PATCH_KEY_OF.items()}
-    config = patch.config or {}
+    config = (
+        {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
+    )
     stray = sorted(spelled.get(f, f) for f in patch.model_fields_set - {"config"})
     if stray := [*stray, *sorted(set(config) - {"optimization"})]:
         raise SystemExit(
             f"ERROR: --set {', '.join(stray)} confirms a check-in field, which a dataset name "
-            f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, {_BUDGET}.<axis>, "
+            f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, "
             f"{_NODES}.<node>.<knob>."
         )
     return dict(config["optimization"])
@@ -217,8 +218,8 @@ async def _hold_checkin(
 ) -> HeldRun:
     # Dispatched, as the browser's: a direct draft write records nothing and re-bills every retry.
     if patch is not None:
-        await dispatch_draft_patch(
-            stores,
+        await CommandDispatcher(stores).answer(
+            draft_editing.edit_draft_campaign,
             CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch)),
         )
     draft = owned_draft(stores, draft_id)
@@ -229,10 +230,10 @@ async def _hold_checkin(
     if not origin_readiness(draft, draft_pipeline(stores, draft, served)).complete:
         _checkin_line("origin resolver", "running AI check-in")
         # One turn: a residual gap surfaces below with --set instructions, not more LLM turns.
-        turn = await dispatch_origin_resolution(
-            stores, CommandCall(ResolveOriginPayload(draft_id=draft_id))
+        turn = await CommandDispatcher(stores).answer(
+            origin_resolving.resolve_origin, CommandCall(ResolveOriginPayload(draft_id=draft_id))
         )
-        last_turn = turn.resolution
+        last_turn = turn.result.resolution
         draft = owned_draft(stores, draft_id)
 
     readiness = origin_readiness(draft, draft_pipeline(stores, draft, served))
@@ -254,9 +255,15 @@ async def _hold_checkin(
 
 def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
     declared = None
+    budget = budget_from_args(args)
     if args.config:
         path = Path(args.config)
-        declared = validated_campaign_config(campaign_file_block(path), path=path)
+        declared = validated_campaign_config(campaign_file_block(path), path=path).model_dump(
+            mode="json", exclude_unset=True
+        )
+        # A file's budget bounds this launch, under the `--max-*` flags: the payload's one door.
+        filed = declared.get("optimization", {}).pop("budget", {})
+        budget = Budget.model_validate(filed).over(budget)
     dataset_name = args.dataset or args.dataset_name
     if not dataset_name:
         raise SystemExit(
@@ -276,7 +283,7 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             "diag": args.diag,
             "campaign_config": declared,
             "task_text": task_text,
-            "budget": budget_from_args(args),
+            "budget": budget,
         },
     )
 

@@ -224,7 +224,21 @@
         "properties": {
           "actions": {
             "items": {
-              "$ref": "#/components/schemas/DecisionAction"
+              "discriminator": {
+                "mapping": {
+                  "origin-gate-decision": "#/components/schemas/GateAction",
+                  "submit-arms": "#/components/schemas/KeepDraftsAction"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/GateAction"
+                },
+                {
+                  "$ref": "#/components/schemas/KeepDraftsAction"
+                }
+              ]
             },
             "title": "Actions",
             "type": "array"
@@ -1343,7 +1357,7 @@
           },
           "optimization": {
             "$ref": "#/components/schemas/OptimizationOverrides",
-            "description": "Laid over the dataset's own `optimization`: `optimizer` is required, and `budget` and `halt_at_accuracy` are refused, since every arm runs the head-to-head's budget to its end."
+            "description": "Laid over the dataset's own `optimization`: `optimizer` is required, and `halt_at_accuracy` is refused, since every arm runs the head-to-head's budget to its end."
           }
         },
         "required": [
@@ -2110,29 +2124,6 @@
           "reads_before"
         ],
         "title": "BenchStatus",
-        "type": "object"
-      },
-      "Body_edit_draft_campaign_api_v1_datasets_draft_candidate_library_post": {
-        "properties": {
-          "draft_id": {
-            "description": "Draft to attach the library to.",
-            "maxLength": 128,
-            "minLength": 8,
-            "title": "Draft Id",
-            "type": "string"
-          },
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "description": "Target library — one entry per line, or a single-column CSV/Excel.",
-            "title": "File",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file",
-          "draft_id"
-        ],
-        "title": "Body_edit_draft_campaign_api_v1_datasets_draft_candidate_library_post",
         "type": "object"
       },
       "Body_ingest_upload_api_v1_commands_ingest_upload_post": {
@@ -5034,47 +5025,6 @@
         "title": "DatasetSplit",
         "type": "object"
       },
-      "DecisionAction": {
-        "additionalProperties": false,
-        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
-        "properties": {
-          "decision": {
-            "enum": [
-              "rescore",
-              "proceed",
-              "abort"
-            ],
-            "title": "Decision",
-            "type": "string"
-          },
-          "kind": {
-            "const": "origin-gate-decision",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "variant": {
-            "enum": [
-              "primary",
-              "ghost",
-              "danger"
-            ],
-            "title": "Variant",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "variant",
-          "kind",
-          "decision"
-        ],
-        "title": "DecisionAction",
-        "type": "object"
-      },
       "DefaultsDrift": {
         "additionalProperties": false,
         "description": "Something the run's declaration is a delta over moved since it was declared, so the launch\nruns today's value under the same declaration.",
@@ -5629,6 +5579,31 @@
             ],
             "title": "Candidate Library"
           },
+          "candidate_library_column": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Build the candidate library from the distinct values of this draft column.",
+            "title": "Candidate Library Column"
+          },
+          "candidate_library_file": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LibraryFile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Parse the candidate library from a file: one entry per line, or the first column of a CSV/Excel."
+          },
           "column_ground_truth": {
             "anyOf": [
               {
@@ -5656,15 +5631,13 @@
           "config": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/PartialCampaignConfig"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "A partial `CampaignConfig`, by its own paths, laid over the draft's by `campaign_config.py::merge_config_layers`; its `optimization` reads as an `OptimizationOverrides`. A string `scoring` names the criterion whole; a `scoring` mapping is folded into the criterion the draft runs, key by key: `matcher` picks the per-sample matcher, `dials` the composite's weights (the empty string clears them), `per_sample` and `per_cell` set those formulas.",
-            "title": "Config"
+            "description": "Laid over the draft's config by `campaign_config.py::merge_config_layers`. A string `scoring` names the criterion whole; a `scoring` mapping is folded into the criterion the draft runs, key by key: `matcher` picks the per-sample matcher, `dials` the composite's weights (the empty string clears them), `per_sample` and `per_cell` set those formulas."
           },
           "connector": {
             "anyOf": [
@@ -6904,6 +6877,10 @@
         "additionalProperties": false,
         "description": "The cut, and the shape of the fork's first run (``mode``) — one act, so one command.\nA parent a producer still holds is paused by the applier once the fork's run is admitted.",
         "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Bounds the fork's first launch, as a start-run's; an axis left out is the fork's config's, inherited from its parent."
+          },
           "campaign_id": {
             "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
             "maxLength": 128,
@@ -7128,6 +7105,47 @@
         ],
         "title": "ForkTrigger",
         "type": "string"
+      },
+      "GateAction": {
+        "additionalProperties": false,
+        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "kind": {
+            "const": "origin-gate-decision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "primary",
+              "ghost",
+              "danger"
+            ],
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "variant",
+          "kind",
+          "decision"
+        ],
+        "title": "GateAction",
+        "type": "object"
       },
       "GeneSource": {
         "additionalProperties": false,
@@ -8482,6 +8500,46 @@
         "title": "JudgeStage",
         "type": "object"
       },
+      "KeepDraftsAction": {
+        "additionalProperties": false,
+        "description": "One button: a press sends `keep` as `kind` to the cycle holding for its round's arms.",
+        "properties": {
+          "keep": {
+            "description": "The drafts measured as proposed, by index at the hold.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Keep",
+            "type": "array"
+          },
+          "kind": {
+            "const": "submit-arms",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "primary",
+              "ghost",
+              "danger"
+            ],
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "variant",
+          "kind",
+          "keep"
+        ],
+        "title": "KeepDraftsAction",
+        "type": "object"
+      },
       "KindSpend": {
         "additionalProperties": false,
         "description": "One spend kind as every surface reads it: metered, billed, rate-priced and incurred.",
@@ -8702,6 +8760,31 @@
           "unchanged"
         ],
         "title": "LensShift",
+        "type": "object"
+      },
+      "LibraryFile": {
+        "additionalProperties": false,
+        "description": "An uploaded candidate library, under every upload's one bound.",
+        "properties": {
+          "blob": {
+            "contentEncoding": "base64",
+            "contentMediaType": "application/octet-stream",
+            "description": "The file's bytes, base64.",
+            "maxLength": 26214400,
+            "title": "Blob",
+            "type": "string"
+          },
+          "filename": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob"
+        ],
+        "title": "LibraryFile",
         "type": "object"
       },
       "LibraryResponse": {
@@ -10307,13 +10390,13 @@
           "campaign_config": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CampaignConfig"
+                "$ref": "#/components/schemas/PartialCampaignConfig"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`; `optimization` still lays over it"
+            "description": "A campaign declaration standing in for the dataset's own `dataset.yaml::campaign`, laid over the defaults; `optimization` still lays over it"
           },
           "dataset_name": {
             "maxLength": 64,
@@ -11311,22 +11394,95 @@
       },
       "OptimizationOverrides": {
         "additionalProperties": false,
-        "description": "An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's.\nOnly the fields sent move anything, so no field states a default a reader could take for one\nthat applies. Its ``budget.rounds`` bound is theirs alone; a dataset's own block is never read\nthrough it, so a reused dataset may exceed it.",
+        "description": "An ``optimization`` an operator sends: a check-in edit's, a mint's, a head-to-head arm's,\nlaid over the one it names.",
         "properties": {
           "arm_gate": {
-            "default": "off",
-            "description": "Hold every round, before any arm is measured, until the operator answers with the arms it measures (`submit-arms`). ``off`` (default) never holds. ``review``: the proposers run, their proposals are drafts, and the operator keeps any of them by index, adds arms of their own, or both. ``author``: no proposer runs and every arm is the operator's. An arm of theirs is an edit of the round's parent — prompt fields, a pipeline overlay — and is measured and elected like any other. The hold has no deadline; a pause ends it resumably, and a resume holds again unless an answer was already banked.",
-            "enum": [
-              "off",
-              "review",
-              "author"
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "review",
+                  "author"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Arm Gate",
-            "type": "string"
+            "description": "Hold every round, before any arm is measured, until the operator answers with the arms it measures (`submit-arms`). ``off`` (default) never holds. ``review``: the proposers run, their proposals are drafts, and the operator keeps any of them by index, adds arms of their own, or both. ``author``: no proposer runs and every arm is the operator's. An arm of theirs is an edit of the round's parent — prompt fields, a pipeline overlay — and is measured and elected like any other. The hold has no deadline; a pause ends it resumably, and a resume holds again unless an answer was already banked.",
+            "title": "Arm Gate"
           },
-          "budget": {
-            "$ref": "#/components/schemas/Budget",
-            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+          "convergence_patience": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Consecutive closed rounds without an advance of the best-so-far line on the origin panel (``RunStanding.rounds_without_advance``) after which the run stops ``converged``, under any optimizer. A promotion resets it, separated from the origin or not; a round whose origin-panel reading was not taken counts neither way. ``None`` → no such stop.",
+            "title": "Convergence Patience"
+          },
+          "degradation_fatal_fastpath": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End a candidate at the first FATAL sample (empty response, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
+            "title": "Degradation Fatal Fastpath"
+          },
+          "degradation_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degradation Threshold"
+          },
+          "determinism": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeterminismClamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pin the optimizer's decoding and its route so a re-run reproduces this campaign's trajectory and can name the host that produced each number. `None` (default) → every node runs at its own file settings and the gateway routes per call. An L4 inner cell is one caller among the rest: its panel's `inner_optimizer_temperature` and its cell seed arrive here."
+          },
+          "elimination_n_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minimum distinct samples before θ is read as ability: the δ ruler stays flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — the floor on n for a posterior to be meaningful.",
+            "title": "Elimination N Min"
+          },
+          "enable_2pl_graduation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-discriminating dataset wins held-out cross-validation. The switch is gated — cold/non-discriminating datasets stay 1PL — so this only ever changes the ruler where 2PL provably fits better out-of-sample; it can never regress a dataset. Off → always 1PL (the slice-2 behaviour).",
+            "title": "Enable 2Pl Graduation"
           },
           "halt_at_accuracy": {
             "anyOf": [
@@ -11342,20 +11498,93 @@
             "description": "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
             "title": "Halt At Accuracy"
           },
+          "lift_reference": {
+            "anyOf": [
+              {
+                "enum": [
+                  "best_so_far",
+                  "parents"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What each arm's lift is read against — member `a` of its `vs_reference` reading. ``best_so_far`` (default): the round's selected best-so-far individual, re-scored on the round's panel and paired with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, each re-measured on exactly the cells the arm measured; a crossover child is read against the better of its parents there, the bar it must clear to have added anything over what it recombined. An arm with no parent has no reference.",
+            "title": "Lift Reference"
+          },
+          "lives": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LivesConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: null}``."
+          },
           "nodes": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ManifestNodeOverlay"
-            },
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ManifestNodeOverlay"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs, a paper's configuration and each llm node's ``config.model`` all ride here; each node validates its own knobs when the optimizer is selected.",
-            "title": "Nodes",
-            "type": "object"
+            "title": "Nodes"
           },
           "optimizer": {
-            "default": "potter",
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "The optimizer manifest this campaign runs — a directory under ``promptpotter/assets/optimizers/``. Every entry point selects it here; nothing selects it install-wide.",
-            "minLength": 1,
-            "title": "Optimizer",
-            "type": "string"
+            "title": "Optimizer"
+          },
+          "origin_gate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "strict",
+                  "critical_only",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hold after round 0 for the operator's decision when the origin's degradation verdict is non-healthy, instead of optimizing against a broken floor — the common failure while bringing up a new connector. ``strict`` (default) holds on ``critical`` or ``degraded``; ``critical_only`` holds only on a structurally-broken origin; ``off`` disarms the gate. The decision (`origin-gate-decision`) proceeds into the search anyway, re-scores the origin, or aborts the cycle. An origin that scored no cell halts instead, and starting the cycle again re-measures it.",
+            "title": "Origin Gate"
+          },
+          "panel_gate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "strict",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Halt at the end of a round whose electable candidates carry HOLES — cells the loop attempted and got no measurement back from, or a spend or token ceiling left unbought — instead of electing a winner from a comparison whose arms ran different cell sets. ``strict`` (default) halts on any hole; ``off`` disarms, and a selector that can elect on a cut panel then does. The halt is resumable and the round is not persisted, so a ``resume`` re-runs it once the bound that cut the cells has room: the cached candidates replay, the missing cells are re-measured, and the round decides on a complete panel. A PoBB elimination is NOT a hole (a rule stopped that arm on evidence) and neither is a classifier-deprecated sample.",
+            "title": "Panel Gate"
           }
         },
         "title": "OptimizationOverrides",
@@ -12448,6 +12677,208 @@
           "allowed"
         ],
         "title": "ParamIntent",
+        "type": "object"
+      },
+      "PartialCampaignConfig": {
+        "additionalProperties": false,
+        "description": "A partial `CampaignConfig`, by its own paths: a check-in edit's ``config``, a mint's\nstand-in declaration. Only the fields sent move anything: its ``exclude_unset`` dump is the\nlayer `campaign_config.py::merge_config_layers` lays.",
+        "properties": {
+          "accuracy_ceiling": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The accuracy a best-reachable prompt would score on this dataset at this campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against `CEILING_FRACTION` of it, and the value is banked beside that count so a reader never has to guess the denominator. `None` (default) → the clock reports nothing, which is the honest reading: a ceiling is a joint claim about the dataset AND the model, so only the dataset owner can declare one (`dataset.yaml::campaign`) and a guessed value makes every campaign on it publish a round count nobody can defend. DISPLAY config — it moves no gate, no selection and no stop.",
+            "title": "Accuracy Ceiling"
+          },
+          "bench_trigger": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manual",
+                  "at_end",
+                  "each_round"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `each_round`: that, and every round that selects a new individual is graded too. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "title": "Bench Trigger"
+          },
+          "dataset_split": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetSplit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search split and there is no bench score."
+          },
+          "display_metric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisplayMetric"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+          },
+          "exclude_nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Nodes"
+          },
+          "hard_sample_order": {
+            "anyOf": [
+              {
+                "enum": [
+                  "info_gain",
+                  "difficulty"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which key ranks the hard-sample leaderboard — the heatmap, the table and the `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by the queue mechanism's acquisition score (`pick_value`: decision-information gain + δ learning gain) read on the cycle's ruler at the frontier's stamped ability, contested-at-the-frontier samples first; `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a scope with no stamped ability (dataset scope) is served whatever this says. DISPLAY config: it picks the order the human READS and never what the engine scores, which is `build_round_order` and reaches no knob. Client-overridable per session, like `display_metric`.",
+            "title": "Hard Sample Order"
+          },
+          "judges": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JudgeSpec"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM-as-judge graders for datasets whose answer is free text, where no deterministic matcher can grade a cell. Each value names a registered judge (`promptpotter.judges`) and the models to run it on; its verdict is banked as a per-sample observation the `scoring` formula reads. **The KEY is the term that formula reads, not the judge's name** — so one cell can carry several graded terms, which is what a multi-step schema (retrieve -> ground -> answer) is, and two terms may run the same rubric on different models without one verdict landing on top of the other. Declaration order is the step order. Swapping a judge invalidates every verdict taken under the old one, so a resume must run divergence detection rather than carry them forward. **Their models are declared here and inherited from nowhere** — not from the permitted model set, not from the pipeline's node config, not from the optimizer's own LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last steered to would not be one.",
+            "title": "Judges"
+          },
+          "optimization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationOverrides"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "optimizer_narrowing": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NodeSearchNarrowing"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
+            "title": "Optimizer Narrowing"
+          },
+          "pipeline_overlay": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline Overlay"
+          },
+          "run_seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order. An L4 seat seeds its determinism clamp and its solver node from it too.",
+            "title": "Run Seed"
+          },
+          "scoring": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scoring"
+          },
+          "sp_budget_origin": {
+            "anyOf": [
+              {
+                "maximum": 150.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Origin eval budget — how many bank samples the origin (C0) is scored on at check-in. The bench's, whatever the optimizer: a round's own panel is its sampler's knob. Wide because origin breadth is the one breadth that is nearly free: θ_origin is the term EVERY delta subtracts, and its rows are content-addressed cache replayed into every candidate arm, fork and resume — paid once per config. Candidate breadth is paid per candidate, per round. Every comparison downstream is matched by sample key or θ-space, so an origin scored on a superset stays like-for-like. A bank smaller than this scores on the whole bank (`sample_dataset` is a prefix slice) — not an error.",
+            "title": "Sp Budget Origin"
+          },
+          "task_framing": {
+            "anyOf": [
+              {
+                "enum": [
+                  "committed",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which task framing every target render splices in. `committed` (default) runs under the front matter of the dataset's `task.md`, which the first mint decomposes from its body when none is committed yet. `off` runs UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign manifest keeps the delta, so the result never reads as a framed one.",
+            "title": "Task Framing"
+          }
+        },
+        "title": "PartialCampaignConfig",
         "type": "object"
       },
       "PassStop": {
@@ -17832,30 +18263,6 @@
         ],
         "title": "WorkspaceStorageResponse",
         "type": "object"
-      },
-      "_BuildLibraryBody": {
-        "additionalProperties": false,
-        "description": "Body for building a candidate library from one of the draft's own columns.",
-        "properties": {
-          "column": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Column",
-            "type": "string"
-          },
-          "draft_id": {
-            "maxLength": 128,
-            "minLength": 8,
-            "title": "Draft Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "draft_id",
-          "column"
-        ],
-        "title": "_BuildLibraryBody",
-        "type": "object"
       }
     }
   },
@@ -19624,7 +20031,7 @@
     },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
-        "description": "Sparse-patch a `DraftFile` and return its full post-mutation shape.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
           {
@@ -20229,7 +20636,7 @@
     },
     "/api/v1/commands/resolve-origin": {
       "post": {
-        "description": "Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``.",
+        "description": "The kind's payload is the body; the answer is the model the kind applies, where it applies\none, else the `CommandRecord` it appended.",
         "operationId": "resolve_origin_api_v1_commands_resolve_origin_post",
         "parameters": [
           {
@@ -20932,116 +21339,6 @@
         "summary": "Datasets",
         "tags": [
           "Reads"
-        ]
-      }
-    },
-    "/api/v1/datasets/draft/candidate-library": {
-      "post": {
-        "description": "Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft.",
-        "operationId": "edit_draft_campaign_api_v1_datasets_draft_candidate_library_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_edit_draft_campaign_api_v1_datasets_draft_candidate_library_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftCampaignWire"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Edit-Draft-Campaign",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
-    "/api/v1/datasets/draft/candidate-library/from-column": {
-      "post": {
-        "description": "Build a draft's candidate library from the distinct values of one of its own columns and return the updated draft.",
-        "operationId": "edit_draft_campaign_api_v1_datasets_draft_candidate_library_from_column_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/_BuildLibraryBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftCampaignWire"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Edit-Draft-Campaign",
-        "tags": [
-          "Datasets"
         ]
       }
     },
