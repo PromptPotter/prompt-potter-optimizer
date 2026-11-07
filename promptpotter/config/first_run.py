@@ -5,6 +5,7 @@ import sys
 
 from promptpotter.config.paths import env_file_path
 from promptpotter.config.settings import settings
+from promptpotter.infrastructure.store.io import write_text
 
 _PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY")
 
@@ -34,6 +35,6 @@ def ensure_api_key() -> None:
             file=sys.stderr,
         )
         return
-    env_path.write_text(f"OPENROUTER_API_KEY={key}\n", encoding="utf-8")
+    write_text(env_path, f"OPENROUTER_API_KEY={key}\n")
     os.environ["OPENROUTER_API_KEY"] = key
     print(f"Wrote {env_path}.", file=sys.stderr)

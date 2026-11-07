@@ -477,13 +477,19 @@ def append_line(path: Path, line: bytes) -> range:
     data = line + b"\n"
     name = _long_path(path)
     with _write_lock(path):
-        with open(name, "ab") as f:
+        with open_append(name) as f:
             st = os.fstat(f.fileno())
             if not st.st_size or _APPENDED.get(name) == (st.st_ino, st.st_size, st.st_mtime_ns):
                 return _landed(name, f, data)
         _cut_unterminated(name)
-        with open(name, "ab") as f:
+        with open_append(name) as f:
             return _landed(name, f, data)
+
+
+def open_append(path: Path | str) -> IO[bytes]:
+    """Created 0600, as the atomic writer's `mkstemp` is; `O_BINARY` keeps Windows from translating `\\n`."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+    return os.fdopen(os.open(path, flags, 0o600), "ab")
 
 
 def _landed(name: str, f: IO[bytes], data: bytes) -> range:

@@ -425,12 +425,21 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     knock("Bearer t0ken")
     # Three rows kept long before the cutoff; the fresh one is stamped now, after it.
     long_ago, cutoff = "2000-01-01T00:00:00Z", "2020-01-01T00:00:00Z"
-    for row, key in (
-        ({"path": "/"}, ""),
-        ({"state": "pending"}, "ada@x.com"),
-        ({"state": "confirmed"}, "ada@x.com"),
-    ):
-        records.keep("mixed", SiteRecord(at=long_ago, key=key, row=row))
+    umask = os.umask(0o022)
+    try:
+        for row, key in (
+            ({"path": "/"}, ""),
+            ({"state": "pending"}, "ada@x.com"),
+            ({"state": "confirmed"}, "ada@x.com"),
+        ):
+            records.keep("mixed", SiteRecord(at=long_ago, key=key, row=row))
+    finally:
+        os.umask(umask)
+    if sys.platform != "win32":
+        appended = list((tmp_path / "site_records").rglob("*.jsonl"))
+        assert appended, "the site record landed nowhere this test reads"
+        for path in appended:
+            assert path.stat().st_mode & 0o077 == 0, f"{path.name} was created readable by others"
     fresh = site_records.keep_site_record(
         "mixed", site_records.SiteRecordBody(row={"path": "/new"})
     )

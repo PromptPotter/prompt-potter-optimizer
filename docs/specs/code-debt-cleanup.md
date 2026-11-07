@@ -247,11 +247,12 @@ What the `banking77-n8n__7b4528` run's ledger shows behind the symptoms the oper
   refuses once as a `FileKind` through `read_file`, or is named a cache read. **Rides with:** M17.
   **Re-test:** `git grep -nE "read_json_optional\(|read_json_tolerant\(" -- promptpotter` names only
   surveys and caches.
-- **A file created by `open` or `write_text` takes the umask** — a run's stderr log in
-  `jobs/launcher/run_job.py` opens `jobs/logs/*.log` for append (0644 on a 022 box), and
-  `config/first_run.py` writes a secret `.env` with `write_text`. Action: both create private through
-  `store/io.py`'s one writer. **Rides with:** M17. **Re-test:** `git grep -nE "open\([^)]*\"ab\"|\.write_text\("
-  -- promptpotter/application/jobs promptpotter/config` names no file the box keeps secret.
+- **A job's log outlives its campaign**: `jobs/launcher/run_job.py::spawn_job` writes
+  `jobs/logs/{job_id}.log` and nothing deletes it, so `jobs/logs` grows without bound. Decision
+  (operator, 2026-11-07): a job's log is deleted with its campaign, on the channel that deletes the
+  campaign (`commands/workspace_edits.py` → `CampaignStore.delete_campaign`), with no separate
+  expiry. The log is keyed by job id, which the campaign tree does not name. **Re-test:** a deleted
+  campaign's job ids name no file under `jobs/logs`.
 - **One torn `grant.json` fails the install-spend survey** — `application/jobs/install_spend.py` catches
   `OSError` and `LedgerUnreadableError`, not the unreadable-file refusal `GrantStore.load` raises, while
   `application/account.py` and `application/datasets/startability.py` catch it. Action: a survey serves
@@ -1056,10 +1057,6 @@ fixtures.
   service; `channel:telegram` caught it at deploy. One file must serve both. Either the CLI reads
   `ENV_FILE`, which needs read access for the login user, or the services read the checkout file,
   which SELinux denies under `$HOME`. That choice is the operator's.
-- **A site-record file's mode is the writing process's umask**: `store/site_records.py::SiteRecordStore.keep`
-  appends through `store/io.py::append_jsonl`, which sets no mode. On the box the admin bot wrote
-  `app_visit_digests.jsonl` 0644 beside the API's 0600 tables. The store must create its files private
-  itself, whichever service writes first.
 - **A landing proves an install-shadowed manifest by its shape, not its reader**: `data_root.py`'s
   "optimizer manifest" and "check-in manifest" rows type the YAML (call keys included), but a knob or
   roster fault in an optimizer shadow, or a parse fault in the check-in (`optimizer_manifest.py::_parse`),
