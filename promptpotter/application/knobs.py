@@ -291,11 +291,14 @@ def check_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> list
     return [c for c in declared_couplings(selected) if c.predicate(config)]
 
 
+KnobSource = Literal["default", "campaign", "required", "manifest"]
+
+
 @dataclass(frozen=True)
 class KnobState:
     path: str
     value: Any
-    source: str
+    source: KnobSource
     estimands: tuple[Estimand, ...]
 
 
@@ -322,6 +325,7 @@ def resolve_knob_states(config: CampaignConfig, selected: SelectedOptimizer) -> 
     for path, decl in {**bench, **_node_decls(selected)}.items():
         value = _at(dumped, path)
         set_by_operator = _at(authored, path) is not _MISSING
+        source: KnobSource
         if path[: len(_NODES_PATH)] == _NODES_PATH:
             source = "campaign" if set_by_operator else "manifest"
         else:
